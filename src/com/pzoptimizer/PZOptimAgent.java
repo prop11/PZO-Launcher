@@ -12,7 +12,7 @@ public class PZOptimAgent {
 
         Thread watchdog = new Thread(() -> {
             try {
-                Thread.sleep(4000);
+                Thread.sleep(3000);
                 applyRuntimeTweaks();
             } catch (Exception ignored) {}
         });
@@ -27,6 +27,12 @@ public class PZOptimAgent {
     private static void applyRuntimeTweaks() {
         try {
             Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
+            try {
+                java.lang.reflect.Field skipsField = perfClass.getDeclaredField("manualFrameSkips");
+                skipsField.setAccessible(true);
+                skipsField.setInt(null, 1200);
+            } catch (Exception ignored) {}
+
             try {
                 java.lang.reflect.Field fboField = perfClass.getDeclaredField("fboRenderChunk");
                 fboField.setAccessible(true);

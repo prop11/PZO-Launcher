@@ -3,7 +3,6 @@ import sys
 import json
 import shutil
 import ctypes
-import subprocess
 import tkinter as tk
 from tkinter import messagebox, filedialog
 
@@ -42,12 +41,12 @@ def detect_pz_path():
             return p
     return paths[0]
 
-class Launcher(tk.Tk):
+class OptimizerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PZO Launcher")
-        self.geometry("740x590")
-        self.minsize(700, 560)
+        self.title("Project Zomboid - Config & Engine Optimizer")
+        self.geometry("740x560")
+        self.minsize(700, 520)
         self.configure(bg="#0f111a")
 
         self.total_ram = get_system_ram_gb()
@@ -60,7 +59,7 @@ class Launcher(tk.Tk):
         header = tk.Frame(self, bg="#161926", padx=20, pady=12)
         header.pack(fill="x")
         
-        tk.Label(header, text="PROJECT ZOMBOID OPTIMISED LAUNCHER", font=("Segoe UI", 13, "bold"), fg="#38bdf8", bg="#161926").pack(anchor="w")
+        tk.Label(header, text="PROJECT ZOMBOID CONFIG & ENGINE OPTIMIZER", font=("Segoe UI", 13, "bold"), fg="#38bdf8", bg="#161926").pack(anchor="w")
         tk.Label(header, text=f"Detected System: {self.total_ram} GB RAM | {os.cpu_count() or 8} Cores", font=("Segoe UI", 9), fg="#94a3b8", bg="#161926").pack(anchor="w")
 
         main = tk.Frame(self, bg="#0f111a", padx=16, pady=10)
@@ -98,27 +97,17 @@ class Launcher(tk.Tk):
         self.opt_agent = tk.BooleanVar(value=True)
         self.opt_g1gc = tk.BooleanVar(value=True)
         self.opt_pretouch = tk.BooleanVar(value=True)
-        self.opt_affinity = tk.BooleanVar(value=True)
-        self.opt_priority = tk.BooleanVar(value=True)
 
         tk.Checkbutton(card2, text="Inject PZOptimEngine Agent (Runtime Bytecode & Class Hooks)", variable=self.opt_agent, bg="#161926", fg="#f8fafc", selectcolor="#0b0d14", activebackground="#161926", activeforeground="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", pady=2)
         tk.Checkbutton(card2, text="Low-Latency G1GC Tuning (-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=45)", variable=self.opt_g1gc, bg="#161926", fg="#f8fafc", selectcolor="#0b0d14", activebackground="#161926", activeforeground="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", pady=2)
         tk.Checkbutton(card2, text="Heap Pre-allocation (-XX:+AlwaysPreTouch)", variable=self.opt_pretouch, bg="#161926", fg="#f8fafc", selectcolor="#0b0d14", activebackground="#161926", activeforeground="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", pady=2)
 
-        card3 = tk.Frame(main, bg="#161926", padx=14, pady=10, relief="flat")
-        card3.pack(fill="x", pady=5)
-        
-        tk.Label(card3, text="CPU Affinity & Scheduling", font=("Segoe UI", 10, "bold"), fg="#e2e8f0", bg="#161926").pack(anchor="w")
-        tk.Checkbutton(card3, text="Pin to Performance Cores / Primary CCD", variable=self.opt_affinity, bg="#161926", fg="#f8fafc", selectcolor="#0b0d14", activebackground="#161926", activeforeground="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", pady=2)
-        tk.Checkbutton(card3, text="Set Process Priority to High", variable=self.opt_priority, bg="#161926", fg="#f8fafc", selectcolor="#0b0d14", activebackground="#161926", activeforeground="#ffffff", font=("Segoe UI", 9)).pack(anchor="w", pady=2)
-
         btn_row = tk.Frame(main, bg="#0f111a")
-        btn_row.pack(fill="x", pady=10)
+        btn_row.pack(fill="x", pady=12)
 
-        tk.Button(btn_row, text="Launch Game", font=("Segoe UI", 10, "bold"), bg="#0284c7", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff", relief="flat", padx=16, pady=6, command=self.launch).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        tk.Button(btn_row, text="Apply Config", font=("Segoe UI", 9), bg="#242938", fg="#f8fafc", activebackground="#334155", activeforeground="#ffffff", relief="flat", padx=12, pady=6, command=self.save_config).pack(side="left", padx=3)
-        tk.Button(btn_row, text="Restore Default", font=("Segoe UI", 9), bg="#242938", fg="#f87171", activebackground="#334155", activeforeground="#f87171", relief="flat", padx=12, pady=6, command=self.restore).pack(side="left", padx=3)
-        tk.Button(btn_row, text="Clear Logs", font=("Segoe UI", 9), bg="#242938", fg="#fbbf24", activebackground="#334155", activeforeground="#fbbf24", relief="flat", padx=12, pady=6, command=self.clear_cache).pack(side="left", padx=(3, 0))
+        tk.Button(btn_row, text="Optimize Game", font=("Segoe UI", 10, "bold"), bg="#0284c7", fg="#ffffff", activebackground="#0369a1", activeforeground="#ffffff", relief="flat", padx=16, pady=8, command=self.optimize).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        tk.Button(btn_row, text="Restore Default", font=("Segoe UI", 9), bg="#242938", fg="#f87171", activebackground="#334155", activeforeground="#f87171", relief="flat", padx=12, pady=8, command=self.restore).pack(side="left", padx=3)
+        tk.Button(btn_row, text="Clear Logs", font=("Segoe UI", 9), bg="#242938", fg="#fbbf24", activebackground="#334155", activeforeground="#fbbf24", relief="flat", padx=12, pady=8, command=self.clear_cache).pack(side="left", padx=(3, 0))
 
     def on_ram_slider(self, val):
         v = int(val)
@@ -180,9 +169,9 @@ class Launcher(tk.Tk):
 
         return target
 
-    def save_config(self):
+    def optimize(self):
         if self.write_json():
-            messagebox.showinfo("Saved", "ProjectZomboid64.json configuration updated.")
+            messagebox.showinfo("Success", f"Project Zomboid optimized successfully!\n\n- Allocated RAM: {self.ram_slider.get()} GB\n- Low-Latency G1GC: Active\n- Engine Agent: {self.opt_agent.get()}\n\nYou can now launch the game normally through Steam.")
 
     def restore(self):
         target = self.path_entry.get()
@@ -191,7 +180,7 @@ class Launcher(tk.Tk):
 
         if os.path.exists(bak):
             shutil.copy2(bak, cfg_path)
-            messagebox.showinfo("Restored", "Default configuration restored.")
+            messagebox.showinfo("Restored", "Default configuration restored from backup.")
         else:
             default_data = {
                 "mainClass": "zombie/gameStates/MainScreenState",
@@ -228,34 +217,6 @@ class Launcher(tk.Tk):
                             pass
         messagebox.showinfo("Cleaned", f"Removed {count} cache and log files.")
 
-    def launch(self):
-        target = self.write_json()
-        if not target:
-            return
-
-        exe = os.path.join(target, "ProjectZomboid64.exe")
-        if not os.path.exists(exe):
-            messagebox.showerror("Error", f"Executable not found:\n{exe}")
-            return
-
-        flags = 0
-        if self.opt_priority.get():
-            flags |= 0x00000080
-
-        try:
-            proc = subprocess.Popen([exe], cwd=target, creationflags=flags)
-            if self.opt_affinity.get() and hasattr(os, "cpu_count"):
-                cores = os.cpu_count() or 8
-                mask = (1 << max(4, min(cores, 8))) - 1
-                try:
-                    import win32process, win32api
-                    handle = win32api.OpenProcess(win32process.PROCESS_ALL_ACCESS, False, proc.pid)
-                    win32process.SetProcessAffinityMask(handle, mask)
-                except Exception:
-                    pass
-        except Exception as e:
-            messagebox.showerror("Launch Error", str(e))
-
 if __name__ == "__main__":
-    app = Launcher()
+    app = OptimizerApp()
     app.mainloop()

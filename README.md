@@ -1,22 +1,24 @@
-# PZO Launcher
+# Project Zomboid Config & File Optimizer
 
-A lightweight launcher and engine optimizer for Project Zomboid (Build 42 & 41).
+A lightweight, standalone optimization utility and engine injector for Project Zomboid (Build 42 & 41).
 
 ## Features
-- Hardware-adaptive JVM memory heap allocation (`-Xmx` scaling)
+- Zero dependencies (Native Windows 64-bit executable)
+- Automatic hardware and RAM detection
+- Dedicated JVM heap memory scaling (`-Xmx` 4GB - 16GB)
 - Low-latency G1 Garbage Collection tuning
-- Memory pre-allocation (`-XX:+AlwaysPreTouch`)
-- CPU affinity management (Intel P-Core / AMD 3D V-Cache prioritization)
-- Windows high-priority process scheduling
-- Optional Java runtime agent injection (`PZOptimEngine.jar`)
+- Memory heap pre-allocation (`-XX:+AlwaysPreTouch`)
+- Java runtime agent injection (`PZOptimEngine.jar`)
 - One-click cache cleaner and configuration backup/restore
 
-## Requirements
-- Python 3.8+
-- Project Zomboid (Steam 64-bit)
+## Quick Start
+1. Download **`PZO_Optimizer.exe`** and the **`dist`** folder from Releases.
+2. Run `PZO_Optimizer.exe`.
+3. Select your desired RAM allocation and click **Optimize Game**.
+4. Launch Project Zomboid normally through Steam.
 
-## Usage
-Run `run.bat` or execute:
-```bash
-python launcher.py
+## Building from Source
+To compile `PZO_Optimizer.exe` using the Windows built-in C# compiler:
+```cmd
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+ /platform:x64 /out:PZO_Optimizer.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.dll Program.cs
 ```
