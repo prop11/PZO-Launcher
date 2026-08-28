@@ -1,8 +1,8 @@
 package com.pzoptimizer;
 
 import java.io.File;
-import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -20,17 +20,21 @@ import java.util.jar.Manifest;
  * Project Zomboid Build 42 - Embedded Java & ZombieBuddy Mod Loader.
  * Automatically discovers, classloads, and hooks 3rd-party Java Workshop mods
  * (ZombieBuddy mods, ByteBuddy transformers, and standalone engine plugins)
- * with zero-configuration required from the player.
+ * with dedicated success and crash/error logging to pzo_engine.log.
  */
 public class JavaModLoader {
     private static final Set<String> LOADED_MODS = new HashSet<>();
+    private static int successCount = 0;
+    private static int errorCount = 0;
 
     public static void loadMods(Instrumentation inst) {
+        PZOLogger.info("--------------------------------------------------------------------------------");
         PZOLogger.info("[JavaModLoader] Scanning for ZombieBuddy & Java Workshop mods...");
         List<File> candidateJars = findJavaModJars();
 
         if (candidateJars.isEmpty()) {
             PZOLogger.info("[JavaModLoader] No external Java Workshop mods detected.");
+            PZOLogger.info("--------------------------------------------------------------------------------");
             return;
         }
 
@@ -39,6 +43,9 @@ public class JavaModLoader {
         for (File jarFile : candidateJars) {
             loadSingleMod(jarFile, inst);
         }
+
+        PZOLogger.info(String.format("[JavaModLoader] Mod Loading Finished: %d loaded successfully, %d error(s).", successCount, errorCount));
+        PZOLogger.info("--------------------------------------------------------------------------------");
     }
 
     private static List<File> findJavaModJars() {
@@ -57,7 +64,6 @@ public class JavaModLoader {
         // 2. Steam Workshop content directory (../workshop/content/108600/)
         try {
             File currentDir = new File(".").getAbsoluteFile();
-            // Try relative path from ProjectZomboid directory to workshop
             File ws1 = new File(currentDir, "../../workshop/content/108600");
             if (ws1.exists() && ws1.isDirectory()) searchRoots.add(ws1);
 
@@ -72,7 +78,6 @@ public class JavaModLoader {
         File localJava = new File("java");
         if (localJava.exists() && localJava.isDirectory()) searchRoots.add(localJava);
 
-        // Search recursively for java/*.jar or *.jar in mod folders
         for (File root : searchRoots) {
             scanDirectoryForJars(root, result, 0, 5);
         }
@@ -90,13 +95,11 @@ public class JavaModLoader {
             if (f.isDirectory()) {
                 scanDirectoryForJars(f, result, depth + 1, maxDepth);
             } else if (f.isFile() && f.getName().toLowerCase().endsWith(".jar")) {
-                // Ignore self
                 if (f.getName().equalsIgnoreCase("PZOptimEngine.jar") ||
                     f.getName().equalsIgnoreCase("projectzomboid.jar")) {
                     continue;
                 }
 
-                // Check if inside a java folder or mod folder
                 String parentName = f.getParentFile() != null ? f.getParentFile().getName().toLowerCase() : "";
                 if (parentName.equals("java") || parentName.equals("mods") || parentName.equals("42") ||
                     f.getName().toLowerCase().contains("mod") || f.getName().toLowerCase().contains("zb")) {
@@ -119,15 +122,17 @@ public class JavaModLoader {
         if (LOADED_MODS.contains(canonicalPath)) return;
         LOADED_MODS.add(canonicalPath);
 
-        PZOLogger.info("[JavaModLoader] Loading Java mod: " + jarFile.getName() + " (" + jarFile.getPath() + ")");
+        long sizeKB = Math.max(1, jarFile.length() / 1024);
+        PZOLogger.info(String.format("[JavaModLoader] Inspecting Java mod: %s (%d KB) at %s", jarFile.getName(), sizeKB, jarFile.getPath()));
 
         try (JarFile jar = new JarFile(jarFile)) {
-            // 1. Add JAR to System ClassLoader search path if Instrumentation is active
+            // 1. Add JAR to System ClassLoader search path
             if (inst != null) {
                 try {
                     inst.appendToSystemClassLoaderSearch(jar);
+                    PZOLogger.info("[JavaModLoader] Appended " + jarFile.getName() + " to System ClassLoader");
                 } catch (Throwable t) {
-                    PZOLogger.warn("[JavaModLoader] Could not append to system classloader search: " + t.getMessage());
+                    PZOLogger.warn("[JavaModLoader] Notice: Could not append to system classloader search: " + t.getMessage());
                 }
             }
 
@@ -144,13 +149,13 @@ public class JavaModLoader {
                 }
             }
 
-            // 3. If manifest specifies class, execute its entrypoint
             boolean hooked = false;
             if (agentClass != null && !agentClass.trim().isEmpty()) {
+                PZOLogger.info(String.format("[JavaModLoader] Manifest specified entrypoint: %s", agentClass.trim()));
                 hooked = invokeEntrypoint(jarFile, agentClass.trim(), inst);
             }
 
-            // 4. If not hooked via manifest, scan class entries for premain / init entrypoints
+            // 3. If not hooked via manifest, scan class entries for candidate entrypoints
             if (!hooked) {
                 Enumeration<JarEntry> entries = jar.entries();
                 while (entries.hasMoreElements() && !hooked) {
@@ -170,13 +175,16 @@ public class JavaModLoader {
             }
 
             if (hooked) {
-                PZOLogger.success("[JavaModLoader] Successfully initialized Java mod: " + jarFile.getName());
+                successCount++;
+                PZOLogger.success(String.format("[JavaModLoader] [SUCCESS] Initialized and hooked Java mod: %s", jarFile.getName()));
             } else {
-                PZOLogger.info("[JavaModLoader] Added " + jarFile.getName() + " to classpath (No active agent hook required).");
+                successCount++;
+                PZOLogger.info(String.format("[JavaModLoader] [SUCCESS] Added %s to runtime classpath (Standalone library mode)", jarFile.getName()));
             }
 
         } catch (Throwable t) {
-            PZOLogger.warn(String.format("[JavaModLoader] Error loading %s (Non-fatal, continuing): %s", jarFile.getName(), t.getMessage()));
+            errorCount++;
+            PZOLogger.error(String.format("[JavaModLoader] [ERROR] Failed to load Java mod: %s", jarFile.getName()), t);
         }
     }
 
@@ -191,50 +199,58 @@ public class JavaModLoader {
                 clazz = Class.forName(className, true, ucl);
             }
 
-            // Try premain(String, Instrumentation)
+            // 1. Try premain(String, Instrumentation)
             if (inst != null) {
                 try {
                     Method m = clazz.getDeclaredMethod("premain", String.class, Instrumentation.class);
                     m.setAccessible(true);
                     m.invoke(null, "", inst);
+                    PZOLogger.info(String.format("[JavaModLoader] Invoked premain(String, Instrumentation) on %s", className));
                     return true;
                 } catch (NoSuchMethodException ignored) {}
 
-                // Try agentmain(String, Instrumentation)
+                // 2. Try agentmain(String, Instrumentation)
                 try {
                     Method m = clazz.getDeclaredMethod("agentmain", String.class, Instrumentation.class);
                     m.setAccessible(true);
                     m.invoke(null, "", inst);
+                    PZOLogger.info(String.format("[JavaModLoader] Invoked agentmain(String, Instrumentation) on %s", className));
                     return true;
                 } catch (NoSuchMethodException ignored) {}
 
-                // Try init(Instrumentation)
+                // 3. Try init(Instrumentation)
                 try {
                     Method m = clazz.getDeclaredMethod("init", Instrumentation.class);
                     m.setAccessible(true);
                     m.invoke(null, inst);
+                    PZOLogger.info(String.format("[JavaModLoader] Invoked init(Instrumentation) on %s", className));
                     return true;
                 } catch (NoSuchMethodException ignored) {}
             }
 
-            // Try init()
+            // 4. Try init()
             try {
                 Method m = clazz.getDeclaredMethod("init");
                 m.setAccessible(true);
                 m.invoke(null);
+                PZOLogger.info(String.format("[JavaModLoader] Invoked init() on %s", className));
                 return true;
             } catch (NoSuchMethodException ignored) {}
 
-            // Try load()
+            // 5. Try load()
             try {
                 Method m = clazz.getDeclaredMethod("load");
                 m.setAccessible(true);
                 m.invoke(null);
+                PZOLogger.info(String.format("[JavaModLoader] Invoked load() on %s", className));
                 return true;
             } catch (NoSuchMethodException ignored) {}
 
+        } catch (InvocationTargetException ite) {
+            Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
+            PZOLogger.error(String.format("[JavaModLoader] [ERROR] Exception thrown by entrypoint in %s (%s)", jarFile.getName(), className), cause);
         } catch (Throwable t) {
-            PZOLogger.warn(String.format("[JavaModLoader] Could not invoke entrypoint on %s: %s", className, t.getMessage()));
+            PZOLogger.warn(String.format("[JavaModLoader] Notice: Could not invoke entrypoint on %s (%s): %s", jarFile.getName(), className, t.getMessage()));
         }
         return false;
     }
