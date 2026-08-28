@@ -1,30 +1,42 @@
 package com.pzoptimizer;
 
+/**
+ * Thread-Local Vector & Coordinate Pool.
+ * Eliminates temporary 3D/2D vector allocations in high-frequency raycasting,
+ * horde spatial queries, and line-of-sight math.
+ */
 public class VectorPool {
-    private static final int POOL_SIZE = 64;
 
-    private static final ThreadLocal<PoolState> THREAD_POOL = ThreadLocal.withInitial(PoolState::new);
+    public static class Vec2 {
+        public float x;
+        public float y;
 
-    private static class PoolState {
-        final float[] x = new float[POOL_SIZE];
-        final float[] y = new float[POOL_SIZE];
-        int index = 0;
+        public Vec2 set(float x, float y) {
+            this.x = x;
+            this.y = y;
+            return this;
+        }
+
+        public float lengthSq() {
+            return x * x + y * y;
+        }
     }
 
-    public static int allocate(float px, float py) {
-        PoolState state = THREAD_POOL.get();
-        int idx = state.index;
-        state.x[idx] = px;
-        state.y[idx] = py;
-        state.index = (state.index + 1) % POOL_SIZE;
-        return idx;
-    }
+    private static final ThreadLocal<Vec2[]> POOL = ThreadLocal.withInitial(() -> {
+        Vec2[] array = new Vec2[32];
+        for (int i = 0; i < array.length; i++) {
+            array[i] = new Vec2();
+        }
+        return array;
+    });
 
-    public static float getX(int handle) {
-        return THREAD_POOL.get().x[handle];
-    }
+    private static final ThreadLocal<int[]> INDEX = ThreadLocal.withInitial(() -> new int[]{0});
 
-    public static float getY(int handle) {
-        return THREAD_POOL.get().y[handle];
+    public static Vec2 get(float x, float y) {
+        Vec2[] array = POOL.get();
+        int[] idx = INDEX.get();
+        int slot = idx[0];
+        idx[0] = (slot + 1) & 31;
+        return array[slot].set(x, y);
     }
 }

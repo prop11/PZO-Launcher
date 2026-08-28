@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.FileWriter;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
+import java.lang.reflect.Method;
 import java.util.List;
 
 public class TelemetryReporter {
@@ -40,15 +42,30 @@ public class TelemetryReporter {
             }
 
             long avgPause = gcCount > 0 ? (gcTimeMs / gcCount) : 0;
+            double cpuLoad = getProcessCpuLoad();
 
             String json = String.format(
-                "{\"max_mb\": %d, \"used_mb\": %d, \"free_mb\": %d, \"gc_count\": %d, \"gc_pause_avg_ms\": %d, \"threads\": %d}",
-                maxMem, usedMem, freeMem, gcCount, avgPause, Thread.activeCount()
+                "{\"max_mb\": %d, \"used_mb\": %d, \"free_mb\": %d, \"gc_count\": %d, \"gc_pause_avg_ms\": %d, \"threads\": %d, \"cpu_percent\": %.1f, \"intern_pool\": %d}",
+                maxMem, usedMem, freeMem, gcCount, avgPause, Thread.activeCount(), cpuLoad, ResourceInterner.getPoolSize()
             );
 
             FileWriter fw = new FileWriter(telemetryFile, false);
             fw.write(json);
             fw.close();
         } catch (Exception ignored) {}
+    }
+
+    private static double getProcessCpuLoad() {
+        try {
+            OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
+            Method m = os.getClass().getMethod("getProcessCpuLoad");
+            m.setAccessible(true);
+            Object val = m.invoke(os);
+            if (val instanceof Double) {
+                double d = (Double) val;
+                if (d >= 0.0) return d * 100.0;
+            }
+        } catch (Throwable ignored) {}
+        return 0.0;
     }
 }
