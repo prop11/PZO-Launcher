@@ -120,14 +120,9 @@ public class PZOEntrypoint {
         watchdog.start();
         PZOLogger.success("PZO-B42-Telemetry monitoring started");
 
-        // 9. Load external Java Workshop / ZombieBuddy mods (if not already loaded by -javaagent premain)
+        // 9. Load external Java Workshop / ZombieBuddy mods
         try {
-            Instrumentation inst = PZOptimAgent.getInstrumentation();
-            if (inst != null) {
-                PZOLogger.success("[PZO Engine] Bytecode Instrumentation Agent is active and transforming classes");
-            } else {
-                JavaModLoader.loadMods(null);
-            }
+            JavaModLoader.loadMods(PZOptimAgent.getInstrumentation());
         } catch (Throwable t) {
             PZOLogger.warn("[PZO] Non-fatal error during Java mod loading: " + t.getMessage());
         }
