@@ -1,0 +1,7 @@
+﻿Manifest-Version: 1.0
+Main-Class: com.pzoptimizer.PZOEntrypoint
+Premain-Class: com.pzoptimizer.PZOptimAgent
+Agent-Class: com.pzoptimizer.PZOptimAgent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+
