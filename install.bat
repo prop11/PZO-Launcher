@@ -49,6 +49,7 @@ $Json5OrLess = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -86,6 +87,7 @@ $Json6To12 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -123,6 +125,7 @@ $Json13To20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -160,6 +163,7 @@ $JsonAbove20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",

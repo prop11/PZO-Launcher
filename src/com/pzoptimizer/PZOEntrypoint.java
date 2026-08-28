@@ -1,6 +1,7 @@
 package com.pzoptimizer;
 
 import java.io.File;
+import java.lang.instrument.Instrumentation;
 
 import java.lang.reflect.Method;
 
@@ -119,9 +120,14 @@ public class PZOEntrypoint {
         watchdog.start();
         PZOLogger.success("PZO-B42-Telemetry monitoring started");
 
-        // 9. Load external Java Workshop / ZombieBuddy mods
+        // 9. Load external Java Workshop / ZombieBuddy mods (if not already loaded by -javaagent premain)
         try {
-            JavaModLoader.loadMods(PZOptimAgent.getInstrumentation());
+            Instrumentation inst = PZOptimAgent.getInstrumentation();
+            if (inst != null) {
+                PZOLogger.success("[PZO Engine] Bytecode Instrumentation Agent is active and transforming classes");
+            } else {
+                JavaModLoader.loadMods(null);
+            }
         } catch (Throwable t) {
             PZOLogger.warn("[PZO] Non-fatal error during Java mod loading: " + t.getMessage());
         }
