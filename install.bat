@@ -21,7 +21,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.4.4)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.4.5)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -359,7 +359,7 @@ if ($isZombieBuddyInstalled) {
     Write-Host "========================================================================" -ForegroundColor Yellow
     Write-Host "ZombieBuddy (.jar / .dll) and PZO Optimizer both manage the main Java engine"
     Write-Host "entrypoint and cannot run simultaneously.`n"
-    Write-Host "Good news: PZO v0.4.4+ natively runs all your ZombieBuddy Workshop mods" -ForegroundColor Cyan
+    Write-Host "Good news: PZO v0.4.5+ natively runs all your ZombieBuddy Workshop mods" -ForegroundColor Cyan
     Write-Host "automatically without needing ZombieBuddy.jar or zbNative.dll!`n" -ForegroundColor Cyan
     Write-Host "1) Uninstall ZombieBuddy & Continue Installation (Recommended)" -ForegroundColor Green
     Write-Host "2) Cancel Installation"
@@ -523,4 +523,5 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
 }
 
 Apply-PZOConfiguration
-Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
+Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
+
