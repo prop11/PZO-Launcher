@@ -21,6 +21,10 @@ A lightweight, zero-dependency standalone optimization utility and engine wrappe
 
 *Note: You only need to run the optimizer once. All settings persist across game launches.*
 
+## Compatibility
+- **Steam Workshop Mods**: 100% compatible with all standard Lua, vehicle, clothing, weapon, map, and audio mods.
+- **ZombieBuddy**: **NOT COMPATIBLE**. PZO Optimizer and ZombieBuddy both modify the engine entrypoint in ProjectZomboid64.json. Running both simultaneously will cause launcher conflicts. ZombieBuddy and all ZombieBuddy-dependent mods must be disabled before using PZO Optimizer.
+
 ## Workshop Mod Integration
 When combined with the **Project Zomboid Optimiser** Steam Workshop mod, running this optimizer unlocks the dedicated **[+] JVM Engine (Tab 7)** inside the in-game F10 Control Center:
 - Zero-Stutter Background GC Mode
