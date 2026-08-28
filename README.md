@@ -18,17 +18,11 @@ A lightweight, zero-dependency engine wrapper and configuration optimizer engine
 ## Quick Start
 
 ### Windows
-<<<<<<< Updated upstream
-1. Download **`PZO_Optimizer.exe`** from [Releases](https://github.com/prop11/PZO-Launcher/releases).
-2. Run `PZO_Optimizer.exe`.
-3. Select your desired RAM allocation (8GB recommended for 16GB+ systems) and click **Optimize Game**.
-=======
 1. Download and extract the latest **`PZO-Optimizer-Windows.zip`** from [Releases](https://github.com/prop11/PZO-Launcher/releases).
 2. Ensure Project Zomboid is closed.
 3. Double-click **`Install.bat`**.
    - The installer automatically detects your game directory and RAM, backs up your original settings, installs `PZOptimEngine.jar`, and applies the optimal profile.
    - *(If already installed, running the script presents quick options to **Update** or **Uninstall** and restore your stock configuration).*
->>>>>>> Stashed changes
 4. Launch Project Zomboid normally through Steam.
 
 ### macOS & Linux
@@ -43,9 +37,9 @@ A lightweight, zero-dependency engine wrapper and configuration optimizer engine
 ---
 
 ## Compatibility
-- **Project Zomboid**: Dedicated to **Build 42**.
+- **Project Zomboid**: Dedicated to **Build 42** (Java 17 64-bit).
 - **Steam Workshop Mods**: 100% compatible with all standard Lua, vehicle, clothing, weapon, map, and audio mods.
-- **ZombieBuddy**: **NOT COMPATIBLE**. PZO Optimizer and ZombieBuddy both modify the engine entrypoint in `ProjectZomboid64.json`. Running both simultaneously will cause launcher conflicts. ZombieBuddy and all ZombieBuddy-dependent mods must be disabled before using PZO Optimizer.
+- **ZombieBuddy & Java Mods**: **Fully Compatible from v0.4.1!** `PZOptimEngine.jar` includes an embedded Java Mod Loader that automatically discovers and hooks ZombieBuddy-dependent mods and ByteBuddy bytecode patches directly from your Workshop folders—**without needing ZombieBuddy to be installed**.
 
 ---
 
