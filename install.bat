@@ -221,10 +221,14 @@ if (Test-Path $InstalledJarPath) {
                 Write-Host "Removed: $JarFileName" -ForegroundColor Green
             }
 
-            # 2. Remove pzo_status.json from Zomboid/Lua
-            if (Test-Path $PzoStatusFile) {
-                Remove-Item -Path $PzoStatusFile -Force
-                Write-Host "Removed: $PzoStatusFile" -ForegroundColor Green
+            # 2. Clean up all PZO bridge files from Zomboid/Lua
+            $pzoFiles = @("pzo_status.json", "pzo_update.json", "pzo_telemetry.json", "pzo_engine.log")
+            foreach ($pf in $pzoFiles) {
+                $fullPf = [System.IO.Path]::Combine($ZomboidLuaDir, $pf)
+                if (Test-Path -LiteralPath $fullPf -ErrorAction SilentlyContinue) {
+                    Remove-Item -LiteralPath $fullPf -Force -ErrorAction SilentlyContinue
+                    Write-Host "Removed: $pf" -ForegroundColor Green
+                }
             }
 
             # 3. Restore latest JSON backup
