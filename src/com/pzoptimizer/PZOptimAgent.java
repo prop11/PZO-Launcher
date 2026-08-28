@@ -10,10 +10,11 @@ import java.security.ProtectionDomain;
 public class PZOptimAgent {
 
     public static void premain(String agentArgs, Instrumentation inst) {
-        System.out.println("[PZO] Build 42 Engine Optimization Agent Active");
+        PZOLogger.info("[PZO Agent] Build 42 Instrumentation Agent Active");
         inst.addTransformer(new EngineTransformer());
         HighPrecisionTimer.initialize();
         StreamBufferBooster.applyStreamTweaks();
+        PZOLogger.success("[PZO Agent] Engine transformer and native timers attached");
     }
 
     public static void agentmain(String agentArgs, Instrumentation inst) {

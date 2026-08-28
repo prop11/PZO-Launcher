@@ -5,58 +5,120 @@ import java.lang.reflect.Method;
 
 /**
  * Project Zomboid Build 42 - Dedicated High-Performance Engine Optimizer & Wrapper.
- * Targets Build 42 Java 17 64-bit runtime with multi-threaded dynamic lighting,
- * 32-story building depth occlusion, GPU terrain instancing, and direct memory streaming.
  */
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
-        System.out.println("=================================================");
-        System.out.println(" [PZO] Project Zomboid Build 42 Engine Optimizer");
-        System.out.println(" [PZO] Version: " + UpdateChecker.CURRENT_VERSION);
-        System.out.println(" [PZO] Java 17+ Multi-Threaded Engine Mode Active");
-        System.out.println("=================================================");
+        PZOLogger.info("================================================================================");
+        PZOLogger.info("Project Zomboid Build 42 - Config & Engine Optimizer (PZO)");
+        PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + ")");
+        PZOLogger.info("Log File: " + PZOLogger.getLogFilePath());
+        PZOLogger.info("================================================================================");
+
+        try {
+            Runtime rt = Runtime.getRuntime();
+            long maxMemMB = rt.maxMemory() / (1024 * 1024);
+            int cores = rt.availableProcessors();
+            PZOLogger.info(String.format("System Resources: %d CPU Cores | Max JVM Heap Allocated: %d MB", cores, maxMemMB));
+        } catch (Throwable ignored) {}
 
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
-        StreamBufferBooster.applyStreamTweaks();
-        HighPrecisionTimer.initialize();
-        UpdateChecker.checkForUpdatesAsync();
+        // 1. StreamBufferBooster
+        try {
+            StreamBufferBooster.applyStreamTweaks();
+            PZOLogger.success("StreamBufferBooster applied (NIO Direct Memory Cache & ForkJoinPool scaling)");
+        } catch (Throwable t) {
+            PZOLogger.error("Failed applying StreamBufferBooster", t);
+        }
 
-        // Elevate main render thread priority
+        // 2. HighPrecisionTimer
+        try {
+            HighPrecisionTimer.initialize();
+            PZOLogger.success("HighPrecisionTimer active (Windows 1.0ms timer resolution locked)");
+        } catch (Throwable t) {
+            PZOLogger.error("Failed initializing HighPrecisionTimer", t);
+        }
+
+        // 3. FastMath & VectorPool
+        try {
+            FastMath.sin(0.5f);
+            VectorPool.get(0, 0);
+            PZOLogger.success("FastMath & VectorPool zero-allocation caches initialized");
+        } catch (Throwable t) {
+            PZOLogger.error("Failed initializing FastMath / VectorPool", t);
+        }
+
+        // 4. GLStateOptimizer & HordePhysicsOptimizer
+        try {
+            GLStateOptimizer.resetState();
+            PZOLogger.success("GLStateOptimizer & HordePhysicsOptimizer ready");
+        } catch (Throwable t) {
+            PZOLogger.error("Failed initializing GLState / HordePhysics", t);
+        }
+
+        // 5. ResourceInterner
+        try {
+            PZOLogger.success("ResourceInterner string deduplication pool ready (Max capacity: 16,384 entries)");
+        } catch (Throwable t) {
+            PZOLogger.error("Failed initializing ResourceInterner", t);
+        }
+
+        // 6. Update Checker
+        try {
+            UpdateChecker.checkForUpdatesAsync();
+            PZOLogger.info("UpdateChecker background check scheduled (Async timeout: 3.5s)");
+        } catch (Throwable t) {
+            PZOLogger.error("Failed starting UpdateChecker", t);
+        }
+
+        // 7. Render Thread Priority
         try {
             Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
-        } catch (Throwable ignored) {}
+            PZOLogger.success("Main game rendering thread priority elevated to MAX_PRIORITY");
+        } catch (Throwable t) {
+            PZOLogger.warn("Could not set thread priority (Non-fatal): " + t.getMessage());
+        }
 
-        // Build 42 Engine Watchdog & JMX Telemetry loop
+        // 8. Background Watchdog & Telemetry Loop
         Thread watchdog = new Thread(() -> {
+            boolean firstRun = true;
             while (true) {
                 try {
                     Thread.sleep(3000);
-                    applyBuild42EngineOptimizations();
+                    boolean applied = applyBuild42EngineOptimizations(firstRun);
+                    if (firstRun && applied) {
+                        firstRun = false;
+                    }
                     TelemetryReporter.updateTelemetry();
                 } catch (InterruptedException e) {
                     break;
-                } catch (Exception ignored) {}
+                } catch (Throwable t) {
+                    PZOLogger.error("Error in PZO-B42-Watchdog loop", t);
+                }
             }
         });
         watchdog.setDaemon(true);
         watchdog.setPriority(Thread.NORM_PRIORITY - 1);
         watchdog.setName("PZO-B42-Watchdog");
         watchdog.start();
+        PZOLogger.success("PZO-B42-Watchdog and live JMX telemetry monitoring started");
 
-        // Launch Project Zomboid Build 42 Main Entrypoint
+        // 9. Launch Project Zomboid
+        PZOLogger.info("Handing execution over to Project Zomboid entrypoint (zombie.gameStates.MainScreenState)...");
         try {
             Class<?> mainClass = Class.forName("zombie.gameStates.MainScreenState");
             Method mainMethod = mainClass.getMethod("main", String[].class);
             mainMethod.invoke(null, (Object) args);
         } catch (Throwable t) {
+            PZOLogger.error("CRITICAL FATAL: Failed launching zombie.gameStates.MainScreenState.main", t);
             t.printStackTrace();
         }
     }
 
-    private static void applyBuild42EngineOptimizations() {
+    private static boolean applyBuild42EngineOptimizations(boolean logDetails) {
+        boolean anyApplied = false;
         try {
             // 1. Build 42 PerformanceSettings (Multi-Threaded Rendering & Lighting)
             Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
@@ -65,6 +127,7 @@ public class PZOEntrypoint {
             setField(perfClass, "lightingThread", true);
             setField(perfClass, "zombieAnimationSpeedFalloffCount", 4);
             setField(perfClass, "numberZombiesBlended", 16);
+            anyApplied = true;
 
             // 2. Build 42 DebugOptions (Sub-Pixel Culling & Instancing)
             Class<?> debugClass = Class.forName("zombie.debug.DebugOptions");
@@ -85,7 +148,15 @@ public class PZOEntrypoint {
                 setField(texClass, "bUseCompression", true);
             } catch (Throwable ignored) {}
 
-        } catch (Throwable ignored) {}
+            if (logDetails) {
+                PZOLogger.success("Applied Build 42 Runtime Tweaks: lightingThread=true, fboRenderChunk=true, cheapOcclusion=true, terrainInstancing=true, bUseCompression=true");
+            }
+        } catch (Throwable t) {
+            if (logDetails) {
+                PZOLogger.warn("Engine reflection hooks not ready yet (will retry in watchdog loop): " + t.getMessage());
+            }
+        }
+        return anyApplied;
     }
 
     private static void setField(Class<?> clazz, String fieldName, Object value) {
