@@ -1,6 +1,6 @@
 # Project Zomboid Config & Engine Optimizer
 
-A lightweight, zero-dependency standalone optimization utility and engine wrapper for Project Zomboid (Build 42 & 41) supporting **Windows, macOS, and Linux**.
+A lightweight, zero-dependency standalone optimization utility and engine wrapper for Project Zomboid (Build 42) supporting **Windows, macOS, and Linux**.
 
 ## Features
 - Zero dependencies (Native standalone Windows executable & macOS/Linux shell scripts)
