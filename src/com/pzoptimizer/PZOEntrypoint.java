@@ -106,6 +106,13 @@ public class PZOEntrypoint {
         watchdog.start();
         PZOLogger.success("PZO-B42-Watchdog and live JMX telemetry monitoring started");
 
+        // 9. Load external Java Workshop / ZombieBuddy mods
+        try {
+            JavaModLoader.loadMods(PZOptimAgent.getInstrumentation());
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZO] Non-fatal error during Java mod loading: " + t.getMessage());
+        }
+
         // 9. Launch Project Zomboid
         PZOLogger.info("Handing execution over to Project Zomboid entrypoint (zombie.gameStates.MainScreenState)...");
         try {
