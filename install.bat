@@ -186,6 +186,53 @@ if ($SourceJar) {
 }
 
 # ==========================================
+# 3.5 ZOMBIEBUDDY CONFLICT DETECTION & CLEANUP
+# ==========================================
+$zbJar = [System.IO.Path]::Combine($InstallPath, "ZombieBuddy.jar")
+$zbJarAlt = [System.IO.Path]::Combine($InstallPath, "zombiebuddy.jar")
+$zbDll = [System.IO.Path]::Combine($InstallPath, "zbNative.dll")
+$zbDll64 = [System.IO.Path]::Combine($InstallPath, "zbNative64.dll")
+$zbJson = [System.IO.Path]::Combine($InstallPath, "zombiebuddy.json")
+
+$hasZbInJson = $false
+if (Test-Path -LiteralPath $TargetFilePath) {
+    $rawJson = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
+    if ($rawJson -and ($rawJson -match "ZombieBuddy" -or $rawJson -match "zbNative")) {
+        $hasZbInJson = $true
+    }
+}
+
+$isZombieBuddyInstalled = (Test-Path -LiteralPath $zbJar) -or (Test-Path -LiteralPath $zbJarAlt) -or (Test-Path -LiteralPath $zbDll) -or (Test-Path -LiteralPath $zbDll64) -or (Test-Path -LiteralPath $zbJson) -or $hasZbInJson
+
+if ($isZombieBuddyInstalled) {
+    Write-Host "`n========================================================================" -ForegroundColor Yellow
+    Write-Host "[!] CONFLICT DETECTED: ZombieBuddy is currently installed" -ForegroundColor Yellow
+    Write-Host "========================================================================" -ForegroundColor Yellow
+    Write-Host "ZombieBuddy.jar and PZO Optimizer both manage the main Java engine"
+    Write-Host "entrypoint and cannot run simultaneously.`n"
+    Write-Host "Good news: PZO v0.4.1+ natively runs all your ZombieBuddy Workshop mods" -ForegroundColor Cyan
+    Write-Host "automatically without needing ZombieBuddy.jar or zbNative.dll!`n" -ForegroundColor Cyan
+    Write-Host "1) Uninstall ZombieBuddy & Continue Installation (Recommended)" -ForegroundColor Green
+    Write-Host "2) Cancel Installation"
+    
+    $zbChoice = Read-Host "`nEnter choice (1 or 2)"
+    if ($zbChoice -eq "1") {
+        Write-Host "`nUninstalling ZombieBuddy..." -ForegroundColor Cyan
+        $zbFiles = @($zbJar, $zbJarAlt, $zbDll, $zbDll64, $zbJson)
+        foreach ($f in $zbFiles) {
+            if (Test-Path -LiteralPath $f -ErrorAction SilentlyContinue) {
+                Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+                Write-Host "  Removed: $([System.IO.Path]::GetFileName($f))" -ForegroundColor Green
+            }
+        }
+        Write-Host "ZombieBuddy has been cleanly removed. Proceeding with PZO installation...`n" -ForegroundColor Green
+    } else {
+        Write-Host "`nInstallation cancelled to preserve existing ZombieBuddy setup." -ForegroundColor Yellow
+        return
+    }
+}
+
+# ==========================================
 # 4. EXISTING INSTALLATION CHECK (UPDATE / UNINSTALL)
 # ==========================================
 if (Test-Path $InstalledJarPath) {
