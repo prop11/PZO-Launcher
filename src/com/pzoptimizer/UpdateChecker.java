@@ -6,11 +6,14 @@ import java.io.FileWriter;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "0.3.0";
     private static final String GITHUB_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String RELEASE_URL = "https://github.com/prop11/PZO-Launcher/releases/latest";
+    private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)+)");
 
     public static void checkForUpdatesAsync() {
         Thread t = new Thread(() -> {
@@ -24,7 +27,7 @@ public class UpdateChecker {
         t.start();
     }
 
-    private static void check() {
+    public static void check() {
         try {
             URL url = new URL(GITHUB_API_URL);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -49,30 +52,45 @@ public class UpdateChecker {
             in.close();
 
             String json = response.toString();
-            String latestTag = extractTag(json);
-            if (latestTag == null || latestTag.isEmpty()) {
-                writeStatus(false, CURRENT_VERSION);
-                return;
+            String releaseName = extractJsonField(json, "name");
+            String tagName = extractJsonField(json, "tag_name");
+
+            String latestVersion = extractVersionNumber(releaseName);
+            if (latestVersion == null) {
+                latestVersion = extractVersionNumber(tagName);
+            }
+            if (latestVersion == null) {
+                latestVersion = (releaseName != null && !releaseName.isEmpty()) ? releaseName : tagName;
+            }
+            if (latestVersion == null || latestVersion.isEmpty()) {
+                latestVersion = CURRENT_VERSION;
             }
 
-            String cleanLatest = latestTag.replaceAll("(?i)^v", "").trim();
-            String cleanCurrent = CURRENT_VERSION.replaceAll("(?i)^v", "").trim();
-
-            boolean hasUpdate = isNewerVersion(cleanLatest, cleanCurrent);
-            writeStatus(hasUpdate, cleanLatest);
+            boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
+            writeStatus(hasUpdate, latestVersion);
         } catch (Exception e) {
             writeStatus(false, CURRENT_VERSION);
         }
     }
 
-    private static String extractTag(String json) {
-        int idx = json.indexOf("\"tag_name\":");
+    private static String extractJsonField(String json, String fieldName) {
+        String key = "\"" + fieldName + "\":";
+        int idx = json.indexOf(key);
         if (idx == -1) return null;
-        int start = json.indexOf("\"", idx + 11);
+        int start = json.indexOf("\"", idx + key.length());
         if (start == -1) return null;
         int end = json.indexOf("\"", start + 1);
         if (end == -1) return null;
         return json.substring(start + 1, end);
+    }
+
+    private static String extractVersionNumber(String text) {
+        if (text == null) return null;
+        Matcher m = VERSION_PATTERN.matcher(text);
+        if (m.find()) {
+            return m.group(1);
+        }
+        return null;
     }
 
     private static boolean isNewerVersion(String latest, String current) {
