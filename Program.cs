@@ -2,7 +2,9 @@ using System;
 using System.IO;
 using System.Text;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace PZOptimizer
@@ -45,7 +47,6 @@ namespace PZOptimizer
         private TextBox txtPath;
         private TrackBar tbRam;
         private Label lblRamVal;
-        private CheckBox chkAgent;
         private CheckBox chkG1GC;
         private CheckBox chkPretouch;
         private ulong totalRamGb = 16;
@@ -53,8 +54,8 @@ namespace PZOptimizer
         public MainForm()
         {
             this.Text = "Project Zomboid - Config & Engine Optimizer";
-            this.Size = new Size(720, 530);
-            this.MinimumSize = new Size(680, 480);
+            this.Size = new Size(720, 500);
+            this.MinimumSize = new Size(680, 450);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Color.FromArgb(15, 17, 26);
             this.ForeColor = Color.FromArgb(241, 245, 249);
@@ -84,10 +85,10 @@ namespace PZOptimizer
         {
             string[] paths = new string[]
             {
+                @"K:\SteamLibrary\steamapps\common\ProjectZomboid",
                 @"C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid",
                 @"D:\SteamLibrary\steamapps\common\ProjectZomboid",
                 @"E:\SteamLibrary\steamapps\common\ProjectZomboid",
-                @"K:\SteamLibrary\steamapps\common\ProjectZomboid",
                 @"C:\SteamLibrary\steamapps\common\ProjectZomboid"
             };
 
@@ -127,11 +128,6 @@ namespace PZOptimizer
 
             this.Controls.Add(header);
 
-            Panel main = new Panel();
-            main.Dock = DockStyle.Fill;
-            main.Padding = new Padding(16, 10, 16, 10);
-            main.AutoScroll = true;
-
             GroupBox grpPath = new GroupBox();
             grpPath.Text = "Project Zomboid Installation Directory";
             grpPath.ForeColor = Color.FromArgb(226, 232, 240);
@@ -170,10 +166,10 @@ namespace PZOptimizer
             this.Controls.Add(grpPath);
 
             GroupBox grpOpt = new GroupBox();
-            grpOpt.Text = "Memory & Engine Optimizations";
+            grpOpt.Text = "Memory & Engine JVM Optimizations";
             grpOpt.ForeColor = Color.FromArgb(226, 232, 240);
             grpOpt.Location = new Point(16, 165);
-            grpOpt.Size = new Size(670, 200);
+            grpOpt.Size = new Size(670, 165);
 
             int defRam = (totalRamGb >= 32) ? 12 : (totalRamGb >= 16 ? 8 : 4);
 
@@ -198,31 +194,24 @@ namespace PZOptimizer
             };
             grpOpt.Controls.Add(tbRam);
 
-            chkAgent = new CheckBox();
-            chkAgent.Text = "Inject PZOptimEngine Agent (Runtime Bytecode & Class Hooks)";
-            chkAgent.Checked = true;
-            chkAgent.Location = new Point(15, 95);
-            chkAgent.Size = new Size(600, 24);
-            grpOpt.Controls.Add(chkAgent);
-
             chkG1GC = new CheckBox();
             chkG1GC.Text = "Low-Latency G1GC Tuning (-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=45)";
             chkG1GC.Checked = true;
-            chkG1GC.Location = new Point(15, 125);
+            chkG1GC.Location = new Point(15, 95);
             chkG1GC.Size = new Size(600, 24);
             grpOpt.Controls.Add(chkG1GC);
 
             chkPretouch = new CheckBox();
-            chkPretouch.Text = "Heap Pre-allocation (-XX:+AlwaysPreTouch: Prevents memory allocation hitching)";
+            chkPretouch.Text = "Heap Pre-allocation (-XX:+AlwaysPreTouch: Eliminates mid-game memory allocation spikes)";
             chkPretouch.Checked = true;
-            chkPretouch.Location = new Point(15, 155);
+            chkPretouch.Location = new Point(15, 125);
             chkPretouch.Size = new Size(600, 24);
             grpOpt.Controls.Add(chkPretouch);
 
             this.Controls.Add(grpOpt);
 
             Panel actions = new Panel();
-            actions.Location = new Point(16, 380);
+            actions.Location = new Point(16, 345);
             actions.Size = new Size(670, 50);
 
             Button btnOptimize = new Button();
@@ -262,6 +251,42 @@ namespace PZOptimizer
             this.Controls.Add(actions);
         }
 
+        private void ExtractEmbeddedJar(string destinationPath)
+        {
+            try
+            {
+                using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("PZOptimEngine.jar"))
+                {
+                    if (stream != null)
+                    {
+                        using (FileStream fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write))
+                        {
+                            byte[] buffer = new byte[8192];
+                            int read;
+                            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                fileStream.Write(buffer, 0, read);
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+            catch {}
+
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string localJar = Path.Combine(baseDir, "dist", "PZOptimEngine.jar");
+                if (!File.Exists(localJar)) localJar = Path.Combine(baseDir, "PZOptimEngine.jar");
+                if (File.Exists(localJar))
+                {
+                    File.Copy(localJar, destinationPath, true);
+                }
+            }
+            catch {}
+        }
+
         private void ApplyOptimization()
         {
             string dir = txtPath.Text.Trim();
@@ -279,52 +304,65 @@ namespace PZOptimizer
                 File.Copy(jsonFile, bak);
             }
 
+            // Extract embedded PZOptimEngine.jar into Project Zomboid directory
+            ExtractEmbeddedJar(Path.Combine(dir, "PZOptimEngine.jar"));
+
             int ramMb = tbRam.Value * 1024;
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine("{");
-            sb.AppendLine("    \"mainClass\": \"zombie/gameStates/MainScreenState\",");
-            sb.AppendLine("    \"classpath\": [");
-            sb.AppendLine("        \".\",");
-            sb.AppendLine("        \"projectzomboid.jar\"");
-            sb.AppendLine("    ],");
-            sb.AppendLine("    \"vmArgs\": [");
-            sb.AppendLine("        \"-Djava.awt.headless=true\",");
-            sb.AppendLine("        \"--enable-native-access=ALL-UNNAMED\",");
-            sb.AppendLine("        \"--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED\",");
-            sb.AppendFormat("        \"-Xmx{0}m\",\n", ramMb);
-            sb.AppendLine("        \"-Dzomboid.steam=1\",");
-            sb.AppendLine("        \"-Dzomboid.znetlog=1\",");
-            sb.AppendLine("        \"-Djava.library.path=win64/;.\",");
-            sb.AppendLine("        \"-XX:-CreateCoredumpOnCrash\",");
-            sb.AppendLine("        \"-XX:-OmitStackTraceInFastThrow\"");
+            List<string> args = new List<string>();
+            args.Add("-Djava.awt.headless=true");
+            args.Add("--enable-native-access=ALL-UNNAMED");
+            args.Add("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED");
+            args.Add(string.Format("-Xmx{0}m", ramMb));
+            args.Add("-Dzomboid.steam=1");
+            args.Add("-Dzomboid.znetlog=1");
+            args.Add("-Djava.library.path=win64/;.");
+            args.Add("-XX:-CreateCoredumpOnCrash");
+            args.Add("-XX:-OmitStackTraceInFastThrow");
 
             if (chkG1GC.Checked)
             {
-                sb.AppendLine("        ,\"-XX:+UseG1GC\",");
-                sb.AppendLine("        \"-XX:InitiatingHeapOccupancyPercent=45\",");
-                sb.AppendLine("        \"-XX:G1ReservePercent=15\"");
+                args.Add("-XX:+UseG1GC");
+                args.Add("-XX:InitiatingHeapOccupancyPercent=45");
+                args.Add("-XX:G1ReservePercent=15");
             }
 
             if (chkPretouch.Checked)
             {
-                sb.AppendLine("        ,\"-XX:+AlwaysPreTouch\"");
+                args.Add("-XX:+AlwaysPreTouch");
             }
 
-            if (chkAgent.Checked)
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("{");
+            sb.AppendLine("    \"mainClass\": \"com/pzoptimizer/PZOEntrypoint\",");
+            sb.AppendLine("    \"classpath\": [");
+            sb.AppendLine("        \".\",");
+            sb.AppendLine("        \"PZOptimEngine.jar\",");
+            sb.AppendLine("        \"projectzomboid.jar\"");
+            sb.AppendLine("    ],");
+            sb.AppendLine("    \"vmArgs\": [");
+
+            for (int i = 0; i < args.Count; i++)
             {
-                string localJar = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dist", "PZOptimEngine.jar");
-                if (File.Exists(localJar))
-                {
-                    File.Copy(localJar, Path.Combine(dir, "PZOptimEngine.jar"), true);
-                }
-                sb.AppendLine("        ,\"-javaagent:PZOptimEngine.jar\"");
+                string comma = (i < args.Count - 1) ? "," : "";
+                sb.AppendLine(string.Format("        \"{0}\"{1}", args[i], comma));
             }
 
             sb.AppendLine("    ]");
             sb.AppendLine("}");
 
-            File.WriteAllText(jsonFile, sb.ToString(), Encoding.UTF8);
-            MessageBox.Show(string.Format("Project Zomboid optimized successfully!\n\nAllocated RAM: {0} GB\nLow-Latency G1GC: {1}\nEngine Agent: {2}\n\nYou can now launch the game normally through Steam.", tbRam.Value, chkG1GC.Checked, chkAgent.Checked), "Optimized", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            File.WriteAllText(jsonFile, sb.ToString(), new UTF8Encoding(false));
+
+            try
+            {
+                string userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Zomboid");
+                string luaDir = Path.Combine(userDir, "Lua");
+                if (!Directory.Exists(luaDir)) Directory.CreateDirectory(luaDir);
+                string statusJson = string.Format("{{\"optimized\": true, \"ram_gb\": {0}, \"g1gc\": {1}, \"pretouch\": {2}}}", tbRam.Value, chkG1GC.Checked.ToString().ToLower(), chkPretouch.Checked.ToString().ToLower());
+                File.WriteAllText(Path.Combine(luaDir, "pzo_status.json"), statusJson, new UTF8Encoding(false));
+            }
+            catch {}
+
+            MessageBox.Show(string.Format("Project Zomboid optimized successfully!\n\nAllocated RAM: {0} GB\nLow-Latency G1GC: {1}\nEngine Wrapper: Active\n\nYou can now launch the game normally through Steam.", tbRam.Value, chkG1GC.Checked), "Optimized", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void RestoreDefault()
@@ -336,14 +374,25 @@ namespace PZOptimizer
             if (File.Exists(bak))
             {
                 File.Copy(bak, jsonFile, true);
-                MessageBox.Show("Restored vanilla configuration from backup.", "Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
             {
                 string def = "{\n    \"mainClass\": \"zombie/gameStates/MainScreenState\",\n    \"classpath\": [\".\", \"projectzomboid.jar\"],\n    \"vmArgs\": [\n        \"-Djava.awt.headless=true\",\n        \"--enable-native-access=ALL-UNNAMED\",\n        \"--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED\",\n        \"-Xmx3072m\",\n        \"-Dzomboid.steam=1\",\n        \"-Dzomboid.znetlog=1\",\n        \"-Djava.library.path=win64/;.\",\n        \"-XX:-CreateCoredumpOnCrash\",\n        \"-XX:-OmitStackTraceInFastThrow\"\n    ]\n}";
-                File.WriteAllText(jsonFile, def, Encoding.UTF8);
-                MessageBox.Show("Wrote default vanilla 3GB configuration.", "Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                File.WriteAllText(jsonFile, def, new UTF8Encoding(false));
             }
+
+            try
+            {
+                string userDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Zomboid");
+                string statusFile = Path.Combine(userDir, "Lua", "pzo_status.json");
+                if (File.Exists(statusFile))
+                {
+                    File.Delete(statusFile);
+                }
+            }
+            catch {}
+
+            MessageBox.Show("Restored vanilla configuration from backup.", "Restored", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void ClearLogs()

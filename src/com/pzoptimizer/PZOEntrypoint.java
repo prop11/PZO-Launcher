@@ -1,36 +1,45 @@
 package com.pzoptimizer;
 
-import java.lang.instrument.ClassFileTransformer;
-import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.security.ProtectionDomain;
 
-public class PZOptimAgent {
+public class PZOEntrypoint {
 
-    public static void premain(String agentArgs, Instrumentation inst) {
-        System.out.println("[PZO] Engine Optimization Agent Active");
-        inst.addTransformer(new EngineTransformer());
+    public static void main(String[] args) {
+        System.out.println("=================================================");
+        System.out.println(" [PZO] Engine Optimization Wrapper Active");
+        System.out.println(" [PZO] FastMath, Audio Throttler & Async Preloader Ready");
+        System.out.println("=================================================");
+
+        System.setProperty("pzo.optimized", "true");
 
         Thread watchdog = new Thread(() -> {
-            try {
-                Thread.sleep(3000);
-                applyEngineOptimizations();
-            } catch (Exception ignored) {}
+            while (true) {
+                try {
+                    Thread.sleep(3000);
+                    applyEngineOptimizations();
+                    TelemetryReporter.updateTelemetry();
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Exception ignored) {}
+            }
         });
         watchdog.setDaemon(true);
         watchdog.setName("PZO-Engine-Watchdog");
         watchdog.start();
-    }
 
-    public static void agentmain(String agentArgs, Instrumentation inst) {
-        premain(agentArgs, inst);
+        try {
+            Class<?> mainClass = Class.forName("zombie.gameStates.MainScreenState");
+            Method mainMethod = mainClass.getMethod("main", String[].class);
+            mainMethod.invoke(null, (Object) args);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
     }
 
     private static void applyEngineOptimizations() {
         try {
             Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
-            
             setField(perfClass, "manualFrameSkips", 1200);
             setField(perfClass, "fboRenderChunk", true);
             setField(perfClass, "lightingThread", true);
@@ -69,13 +78,5 @@ public class PZOptimAgent {
                 setValueMethod.invoke(boolOption, value);
             }
         } catch (Exception ignored) {}
-    }
-
-    static class EngineTransformer implements ClassFileTransformer {
-        @Override
-        public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
-                                ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-            return null;
-        }
     }
 }
