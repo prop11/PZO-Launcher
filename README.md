@@ -16,9 +16,11 @@ A lightweight, zero-dependency standalone optimization utility and engine wrappe
 ## Quick Start
 
 ### Windows
-1. Download **`PZO_Optimizer.exe`** from [Releases](https://github.com/prop11/PZO-Launcher/releases).
-2. Run `PZO_Optimizer.exe`.
-3. Select your desired RAM allocation (8GB recommended for 16GB+ systems) and click **Optimize Game**.
+1. Download and extract the latest **`PZO-Optimizer-Windows.zip`** from [Releases](https://github.com/prop11/PZO-Launcher/releases).
+2. Ensure Project Zomboid is closed.
+3. Double-click **`Install.bat`**.
+   - The installer will auto-detect your game directory and system RAM, back up your original settings, install `PZOptimEngine.jar`, and apply the optimal heap profile automatically.
+   - *(If already installed, running the script presents quick options to **Update** or **Uninstall** and restore your stock configuration).*
 4. Launch Project Zomboid normally through Steam.
 
 ### macOS & Linux
