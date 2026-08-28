@@ -8,10 +8,12 @@ public class PZOEntrypoint {
     public static void main(String[] args) {
         System.out.println("=================================================");
         System.out.println(" [PZO] Engine Optimization Wrapper Active");
-        System.out.println(" [PZO] FastMath, Audio Throttler & Async Preloader Ready");
+        System.out.println(" [PZO] FastMath, VectorPool & UpdateChecker Ready");
         System.out.println("=================================================");
 
         System.setProperty("pzo.optimized", "true");
+        StreamBufferBooster.applyStreamTweaks();
+        UpdateChecker.checkForUpdatesAsync();
 
         Thread watchdog = new Thread(() -> {
             while (true) {
