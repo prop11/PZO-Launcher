@@ -1,10 +1,7 @@
 @echo off
-setlocal EnableDelayedExpansion
-title Project Zomboid Build 42 - Config & Engine Optimizer Installer
-
+setlocal
 set "PZO_INSTALLER_DIR=%~dp0"
-set "ScriptDir=%~dp0"
-if "%ScriptDir:~-1%"=="\" set "ScriptDir=%ScriptDir:~0,-1%"
+title Project Zomboid Build 42 - Config ^& Engine Optimizer Installer
 
 where powershell >nul 2>nul
 if %errorlevel% neq 0 (
@@ -14,10 +11,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:PZO_INSTALLER_DIR='%~dp0'; iex ((Get-Content -LiteralPath '%~f0') -join [Environment]::NewLine)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$f = Get-Content -LiteralPath '%~f0'; $start = 0; for ($i=0; $i -lt $f.Length; $i++) { if ($f[$i] -eq '# __START_POWERSHELL__') { $start = $i + 1; break } }; $ps = ($f[$start..($f.Length - 1)]) -join [Environment]::NewLine; [ScriptBlock]::Create($ps).Invoke()"
 exit /b %errorlevel%
 
-<#
+# __START_POWERSHELL__
 # ==============================================================================
 # Project Zomboid Build 42 - Config & Engine Optimizer (PZO)
 # Native PowerShell Engine Installer & Uninstaller
@@ -35,7 +32,13 @@ $BackupFolder   = "Installer_Backups"
 $ZomboidLuaDir  = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
 $PzoStatusFile  = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
 $ZomboidModsDir = [System.IO.Path]::Combine($HOME, "Zomboid\mods")
-if (-not (Test-Path -LiteralPath $ZomboidModsDir)) { New-Item -ItemType Directory -Path $ZomboidModsDir -Force | Out-Null }
+
+if (-not (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue)) {
+    New-Item -ItemType Directory -Path $ZomboidLuaDir -Force | Out-Null
+}
+if (-not (Test-Path -LiteralPath $ZomboidModsDir -ErrorAction SilentlyContinue)) {
+    New-Item -ItemType Directory -Path $ZomboidModsDir -Force | Out-Null
+}
 
 # ==========================================
 # JSON TEMPLATES (Defined upfront)
@@ -516,5 +519,4 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
 }
 
 Apply-PZOConfiguration
-Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
-#>
+Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
