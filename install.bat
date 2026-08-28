@@ -47,7 +47,7 @@ function Get-PZInstallPath {
     )
 
     foreach ($reg in $regKeys) {
-        if (Test-Path $reg) {
+        if (Test-Path $reg -ErrorAction SilentlyContinue) {
             $steamPath = (Get-ItemProperty -Path $reg -Name "SteamPath" -ErrorAction SilentlyContinue).SteamPath
             if (-not $steamPath) {
                 $steamPath = (Get-ItemProperty -Path $reg -Name "InstallPath" -ErrorAction SilentlyContinue).InstallPath
@@ -62,41 +62,45 @@ function Get-PZInstallPath {
         $candidateLibraries.Add((Join-Path $steamPath "steamapps"))
         
         $vdfPath = Join-Path $steamPath "steamapps\libraryfolders.vdf"
-        if (Test-Path $vdfPath) {
-            $vdfContent = Get-Content -Path $vdfPath
-            foreach ($line in $vdfContent) {
-                if ($line -match '"path"\s+"([^"]+)"') {
-                    $libPath = $matches[1] -replace '\\\\', '\'
-                    $appsFolder = Join-Path $libPath "steamapps"
-                    if (-not $candidateLibraries.Contains($appsFolder)) {
-                        $candidateLibraries.Add($appsFolder)
+        if (Test-Path -LiteralPath $vdfPath -ErrorAction SilentlyContinue) {
+            $vdfContent = Get-Content -LiteralPath $vdfPath -ErrorAction SilentlyContinue
+            if ($vdfContent) {
+                foreach ($line in $vdfContent) {
+                    if ($line -match '"path"\s+"([^"]+)"') {
+                        $libPath = $matches[1] -replace '\\\\', '\'
+                        $appsFolder = Join-Path $libPath "steamapps"
+                        if (-not $candidateLibraries.Contains($appsFolder)) {
+                            $candidateLibraries.Add($appsFolder)
+                        }
                     }
                 }
             }
         }
     }
 
-    $fallbackRoots = @(
-        "C:\Program Files (x86)\Steam\steamapps",
-        "C:\Program Files\Steam\steamapps",
-        "D:\SteamLibrary\steamapps",
-        "E:\SteamLibrary\steamapps",
-        "F:\SteamLibrary\steamapps",
-        "G:\SteamLibrary\steamapps"
-    )
-    foreach ($fb in $fallbackRoots) {
-        if (-not $candidateLibraries.Contains($fb)) { $candidateLibraries.Add($fb) }
+    # Add standard Steam library roots (A-Z)
+    $drives = [System.IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady } | ForEach-Object { $_.Name }
+    foreach ($drv in $drives) {
+        $candidateLibraries.Add((Join-Path $drv "SteamLibrary\steamapps"))
+        $candidateLibraries.Add((Join-Path $drv "Program Files (x86)\Steam\steamapps"))
+        $candidateLibraries.Add((Join-Path $drv "Program Files\Steam\steamapps"))
     }
 
     foreach ($lib in $candidateLibraries) {
-        $pzPath = Join-Path $lib "common\ProjectZomboid"
-        if (Test-Path (Join-Path $pzPath "ProjectZomboid64.exe")) {
-            return $pzPath
+        if (-not [string]::IsNullOrWhiteSpace($lib)) {
+            $driveRoot = [System.IO.Path]::GetPathRoot($lib)
+            if ($driveRoot -and (Test-Path -LiteralPath $driveRoot -ErrorAction SilentlyContinue)) {
+                $pzPath = Join-Path $lib "common\ProjectZomboid"
+                $exePath = Join-Path $pzPath "ProjectZomboid64.exe"
+                if (Test-Path -LiteralPath $exePath -ErrorAction SilentlyContinue) {
+                    return $pzPath
+                }
+            }
         }
     }
 
     $gogPath = "C:\GOG Games\Project Zomboid"
-    if (Test-Path (Join-Path $gogPath "ProjectZomboid64.exe")) {
+    if (Test-Path -LiteralPath (Join-Path $gogPath "ProjectZomboid64.exe") -ErrorAction SilentlyContinue) {
         return $gogPath
     }
 
@@ -128,6 +132,12 @@ $InstalledJarPath = Join-Path $InstallPath $JarFileName
 $TargetFilePath   = Join-Path $InstallPath $TargetFileName
 $BackupDir        = Join-Path $InstallPath $BackupFolder
 $SourceJar        = Join-Path $ScriptDir $JarFileName
+if (-not (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyContinue)) {
+    $altJar = Join-Path $ScriptDir "dist\$JarFileName"
+    if (Test-Path -LiteralPath $altJar -ErrorAction SilentlyContinue) {
+        $SourceJar = $altJar
+    }
+}
 
 # ==========================================
 # 4. EXISTING INSTALLATION CHECK (UPDATE / UNINSTALL)
@@ -168,8 +178,8 @@ if (Test-Path $InstalledJarPath) {
             }
 
             # 3. Restore latest JSON backup
-            if (Test-Path $BackupDir) {
-                $latestBackup = Get-ChildItem -Path $BackupDir -Filter "$($TargetFileName)_*.bak" | 
+            if (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue) {
+                $latestBackup = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | 
                                 Sort-Object LastWriteTime -Descending | 
                                 Select-Object -First 1
 
