@@ -245,18 +245,21 @@ if (Test-Path $InstalledJarPath) {
 
     switch ($choice) {
         "1" {
-            Write-Host "`nUpdating PZOptimEngine.jar to latest version..." -ForegroundColor Cyan
+            Write-Host "`nUpdating PZOptimEngine.jar and refreshing game configuration..." -ForegroundColor Cyan
             $updated = Download-PZOGitHubJar $InstalledJarPath
             if (-not $updated -and $SourceJar -and (Test-Path $SourceJar)) {
                 Copy-Item -Path $SourceJar -Destination $InstalledJarPath -Force
                 Write-Host "    [SUCCESS] Updated from local file: $JarFileName -> $InstalledJarPath" -ForegroundColor Green
                 $updated = $true
             }
-            if ($updated) {
-                Write-Host "`n[SUCCESS] Update complete! Project Zomboid is ready." -ForegroundColor Green
-            } else {
+            if (-not $updated) {
                 Write-Host "`n[ERROR] Could not download or find $JarFileName to update." -ForegroundColor Red
+                return
             }
+
+            # Refresh JSON config
+            Write-Host "`nRe-applying optimal configuration to ProjectZomboid64.json..." -ForegroundColor Cyan
+            Apply-PZOConfiguration
             return
         }
         "2" {
@@ -302,30 +305,75 @@ if (Test-Path $InstalledJarPath) {
     }
 }
 
+function Apply-PZOConfiguration {
+    # Detect RAM
+    $TotalRamBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+    $TotalRamGB    = [Math]::Round($TotalRamBytes / 1GB)
+    Write-Host "Detected System RAM: $TotalRamGB GB" -ForegroundColor Yellow
+
+    # Backup existing JSON
+    if (-not (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue)) {
+        New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
+    }
+
+    if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
+        $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        Copy-Item -LiteralPath $TargetFilePath -Destination "$BackupDir\$($TargetFileName)_$Timestamp.bak" -Force -ErrorAction SilentlyContinue
+        Write-Host "Backed up original $TargetFileName -> $BackupFolder" -ForegroundColor Gray
+    }
+
+    # Apply Profile Templates
+    $UseG1GC = $false
+    if ($TotalRamGB -le 5) {
+        Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m)" -ForegroundColor Green
+        Set-Content -LiteralPath $TargetFilePath -Value $Json5OrLess -Encoding UTF8
+    }
+    elseif ($TotalRamGB -ge 6 -and $TotalRamGB -le 12) {
+        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m)" -ForegroundColor Green
+        Set-Content -LiteralPath $TargetFilePath -Value $Json6To12 -Encoding UTF8
+    }
+    elseif ($TotalRamGB -ge 13 -and $TotalRamGB -le 20) {
+        Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 4096m - 8192m)" -ForegroundColor Green
+        Set-Content -LiteralPath $TargetFilePath -Value $Json13To20 -Encoding UTF8
+    }
+    else {
+        Write-Host "Applying profile: > 20 GB RAM (Heap: 16384m + G1GC Tuning)" -ForegroundColor Green
+        Set-Content -LiteralPath $TargetFilePath -Value $JsonAbove20 -Encoding UTF8
+        $UseG1GC = $true
+    }
+
+    # Verify JSON was written
+    if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
+        Write-Host "[SUCCESS] Updated $TargetFileName with PZO Entrypoint & RAM settings." -ForegroundColor Green
+    } else {
+        Write-Host "[ERROR] Failed writing to $TargetFilePath. Check folder write permissions." -ForegroundColor Red
+    }
+
+    # Write Status File
+    if (-not (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue)) {
+        New-Item -ItemType Directory -Path $ZomboidLuaDir -Force | Out-Null
+    }
+
+    $StatusPayload = [ordered]@{
+        optimized = $true
+        ram_gb    = [int]$TotalRamGB
+        g1gc      = $UseG1GC
+        pretouch  = $true
+    }
+
+    $StatusJson = $StatusPayload | ConvertTo-Json -Compress
+    Set-Content -LiteralPath $PzoStatusFile -Value $StatusJson -Encoding UTF8
+    Write-Host "Generated Lua bridge status: $PzoStatusFile" -ForegroundColor Green
+}
+
 # ==========================================
 # 5. FRESH INSTALLATION PATH
 # ==========================================
 Write-Host "`nStarting fresh installation..." -ForegroundColor Cyan
 
-# Detect RAM
-$TotalRamBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
-$TotalRamGB    = [Math]::Round($TotalRamBytes / 1GB)
-Write-Host "Detected System RAM: $TotalRamGB GB" -ForegroundColor Yellow
-
-# Backup existing JSON
-if (-not (Test-Path $BackupDir)) {
-    New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
-}
-
-if (Test-Path $TargetFilePath) {
-    $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    Copy-Item -Path $TargetFilePath -Destination "$BackupDir\$($TargetFileName)_$Timestamp.bak"
-    Write-Host "Backed up original $TargetFileName -> $BackupFolder" -ForegroundColor Gray
-}
-
 # Copy JAR
-if (Test-Path $SourceJar) {
-    Copy-Item -Path $SourceJar -Destination $InstallPath -Force
+if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyContinue)) {
+    Copy-Item -LiteralPath $SourceJar -Destination $InstalledJarPath -Force
     Write-Host "Installed: $JarFileName -> $InstallPath" -ForegroundColor Green
 } else {
     Write-Host "Error: '$JarFileName' was not found in the installer directory ($ScriptDir)." -ForegroundColor Red
@@ -473,44 +521,8 @@ $JsonAbove20 = @"
 "@
 
 # ==========================================
-# 7. WRITE CONFIGURATION (ProjectZomboid64.json)
+# 7. WRITE CONFIGURATION & BRIDGE
 # ==========================================
-$UseG1GC = $false
-
-if ($TotalRamGB -le 5) {
-    Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m)" -ForegroundColor Green
-    Set-Content -Path $TargetFilePath -Value $Json5OrLess
-}
-elseif ($TotalRamGB -ge 6 -and $TotalRamGB -le 12) {
-    Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m)" -ForegroundColor Green
-    Set-Content -Path $TargetFilePath -Value $Json6To12
-}
-elseif ($TotalRamGB -ge 13 -and $TotalRamGB -le 20) {
-    Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 4096m - 8192m)" -ForegroundColor Green
-    Set-Content -Path $TargetFilePath -Value $Json13To20
-}
-else {
-    Write-Host "Applying profile: > 20 GB RAM (Heap: 16384m + G1GC Tuning)" -ForegroundColor Green
-    Set-Content -Path $TargetFilePath -Value $JsonAbove20
-    $UseG1GC = $true
-}
-
-# ==========================================
-# 8. WRITE STATUS FILE (Zomboid/Lua/pzo_status.json)
-# ==========================================
-if (-not (Test-Path $ZomboidLuaDir)) {
-    New-Item -ItemType Directory -Path $ZomboidLuaDir -Force | Out-Null
-}
-
-$StatusPayload = [ordered]@{
-    optimized = $true
-    ram_gb    = [int]$TotalRamGB
-    g1gc      = $UseG1GC
-    pretouch  = $true
-}
-
-$StatusJson = $StatusPayload | ConvertTo-Json -Compress
-Set-Content -Path $PzoStatusFile -Value $StatusJson
-Write-Host "Generated Lua bridge status: $PzoStatusFile" -ForegroundColor Green
+Apply-PZOConfiguration
 
 Write-Host "`nInstallation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
