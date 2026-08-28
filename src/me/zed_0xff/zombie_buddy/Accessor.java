@@ -30,6 +30,10 @@ public class Accessor {
         }
     }
 
+    public static Class<?> findClass(String className) {
+        return findClass(new String[]{className});
+    }
+
     public static Class<?> findClass(String... classNames) {
         if (classNames == null) return null;
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
@@ -41,6 +45,10 @@ public class Accessor {
             } catch (Throwable ignored) {}
         }
         return null;
+    }
+
+    public static Field findField(Class<?> clazz, String fieldName) {
+        return findField(clazz, new String[]{fieldName});
     }
 
     public static Field findField(Class<?> clazz, String... fieldNames) {
@@ -60,8 +68,16 @@ public class Accessor {
         return null;
     }
 
+    public static Method findNoArgMethod(Class<?> clazz, String methodName) {
+        return findMethod(clazz, new String[]{methodName}, new Class<?>[0]);
+    }
+
     public static Method findNoArgMethod(Class<?> clazz, String... methodNames) {
         return findMethod(clazz, methodNames, new Class<?>[0]);
+    }
+
+    public static Method findMethod(Class<?> clazz, String methodName, Class<?>... paramTypes) {
+        return findMethod(clazz, new String[]{methodName}, paramTypes);
     }
 
     public static Method findMethod(Class<?> clazz, String[] methodNames, Class<?>... paramTypes) {
@@ -83,8 +99,32 @@ public class Accessor {
         return null;
     }
 
-    public static Method findMethod(Class<?> clazz, String methodName, Class<?>... paramTypes) {
-        return findMethod(clazz, new String[]{methodName}, paramTypes);
+    public static Object tryGet(Object target, String fieldName, Object defaultValue) {
+        if (target == null || fieldName == null) return defaultValue;
+        try {
+            Field f = findField(target.getClass(), fieldName);
+            if (f != null) {
+                Object val = f.get(target);
+                return val != null ? val : defaultValue;
+            }
+        } catch (Throwable ignored) {}
+        return defaultValue;
+    }
+
+    public static boolean trySet(Object target, String fieldName, Object value) {
+        if (target == null || fieldName == null) return false;
+        try {
+            Field f = findField(target.getClass(), fieldName);
+            if (f != null) {
+                f.set(target, value);
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    public static Object getFieldValue(Object target, String fieldName) {
+        return getFieldValue(target, new String[]{fieldName});
     }
 
     public static Object getFieldValue(Object target, String... fieldNames) {
@@ -106,6 +146,10 @@ public class Accessor {
                 f.set(target, value);
             } catch (Throwable ignored) {}
         }
+    }
+
+    public static Object getStaticFieldValue(Class<?> clazz, String fieldName) {
+        return getStaticFieldValue(clazz, new String[]{fieldName});
     }
 
     public static Object getStaticFieldValue(Class<?> clazz, String... fieldNames) {

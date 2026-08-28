@@ -34,6 +34,8 @@ $TargetFileName = "ProjectZomboid64.json"
 $BackupFolder   = "Installer_Backups"
 $ZomboidLuaDir  = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
 $PzoStatusFile  = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
+$ZomboidModsDir = [System.IO.Path]::Combine($HOME, "Zomboid\mods")
+if (-not (Test-Path -LiteralPath $ZomboidModsDir)) { New-Item -ItemType Directory -Path $ZomboidModsDir -Force | Out-Null }
 
 # ==========================================
 # JSON TEMPLATES (Defined upfront)
