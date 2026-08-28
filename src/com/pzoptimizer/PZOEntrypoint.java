@@ -25,10 +25,11 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
-        // 1. StreamBufferBooster
+        // 1. StreamBufferBooster & SaveGameStreamBooster
         try {
             StreamBufferBooster.applyStreamTweaks();
-            PZOLogger.success("StreamBufferBooster applied (NIO Direct Memory Cache & ForkJoinPool scaling)");
+            SaveGameStreamBooster.tuneSaveEngine();
+            PZOLogger.success("StreamBufferBooster & SaveGameStreamBooster active (128KB I/O chunks & NIO caches)");
         } catch (Throwable t) {
             PZOLogger.error("Failed applying StreamBufferBooster", t);
         }
@@ -115,6 +116,27 @@ public class PZOEntrypoint {
             PZOLogger.error("CRITICAL FATAL: Failed launching zombie.gameStates.MainScreenState.main", t);
             t.printStackTrace();
         }
+    }
+
+    public static void openBrowser(String url) {
+        if (url == null || url.trim().isEmpty()) return;
+        try {
+            if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
+                java.awt.Desktop.getDesktop().browse(new java.net.URI(url));
+                return;
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            String os = System.getProperty("os.name", "").toLowerCase();
+            if (os.contains("win")) {
+                Runtime.getRuntime().exec(new String[]{"rundll32", "url.dll,FileProtocolHandler", url});
+            } else if (os.contains("mac")) {
+                Runtime.getRuntime().exec(new String[]{"open", url});
+            } else {
+                Runtime.getRuntime().exec(new String[]{"xdg-open", url});
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static boolean applyBuild42EngineOptimizations(boolean logDetails) {
