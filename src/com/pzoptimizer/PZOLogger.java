@@ -55,6 +55,10 @@ public class PZOLogger {
         log("WARN", message, null);
     }
 
+    public static void error(String message) {
+        log("ERROR", message, null);
+    }
+
     public static void error(String message, Throwable t) {
         log("ERROR", message, t);
     }

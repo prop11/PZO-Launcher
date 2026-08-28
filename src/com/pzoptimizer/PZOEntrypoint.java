@@ -146,43 +146,26 @@ public class PZOEntrypoint {
         } catch (Throwable ignored) {}
     }
 
-    private static boolean applyBuild42EngineOptimizations(boolean logDetails) {
+        private static boolean applyBuild42EngineOptimizations(boolean logDetails) {
         boolean anyApplied = false;
         try {
-            // 1. Build 42 PerformanceSettings (Multi-Threaded Rendering & Lighting)
+            // Build 42 PerformanceSettings (Stable frame skips and texture compression)
             Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
             setField(perfClass, "manualFrameSkips", 1200);
             setField(perfClass, "fboRenderChunk", true);
-            setField(perfClass, "lightingThread", true);
-            setField(perfClass, "zombieAnimationSpeedFalloffCount", 4);
-            setField(perfClass, "numberZombiesBlended", 16);
             anyApplied = true;
 
-            // 2. Build 42 DebugOptions (Sub-Pixel Culling & Instancing)
-            Class<?> debugClass = Class.forName("zombie.debug.DebugOptions");
-            Field instField = debugClass.getDeclaredField("instance");
-            instField.setAccessible(true);
-            Object debugInst = instField.get(null);
-
-            if (debugInst != null) {
-                setDebugOption(debugInst, "threadModelSlotInit", true);
-                setDebugOption(debugInst, "cheapOcclusionCount", true);
-                setDebugOption(debugInst, "useNewVisibility", true);
-                setDebugOption(debugInst, "terrainInstancing", true);
-            }
-
-            // 3. Hardware Texture Compression in VRAM (OpenGL LWJGL 3.x)
             try {
                 Class<?> texClass = Class.forName("zombie.core.textures.Texture");
                 setField(texClass, "bUseCompression", true);
             } catch (Throwable ignored) {}
 
             if (logDetails) {
-                PZOLogger.success("Applied Build 42 Runtime Tweaks: lightingThread=true, fboRenderChunk=true, cheapOcclusion=true, terrainInstancing=true, bUseCompression=true");
+                PZOLogger.success("Applied Build 42 Runtime Tweaks: fboRenderChunk=true, bUseCompression=true");
             }
         } catch (Throwable t) {
             if (logDetails) {
-                PZOLogger.warn("Engine reflection hooks not ready yet (will retry in watchdog loop): " + t.getMessage());
+                PZOLogger.warn("Engine reflection hooks not ready yet: " + t.getMessage());
             }
         }
         return anyApplied;

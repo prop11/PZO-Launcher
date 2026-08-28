@@ -10,8 +10,10 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
@@ -20,7 +22,7 @@ import java.util.jar.Manifest;
 
 /**
  * Project Zomboid Build 42 - Embedded Java & ZombieBuddy Mod Loader.
- * Automatically discovers, classloads, and hooks 3rd-party Java Workshop mods
+ * Automatically discovers, deduplicates, classloads, and hooks 3rd-party Java Workshop mods
  * across all mounted Steam libraries and custom mod directories.
  */
 public class JavaModLoader {
@@ -39,14 +41,51 @@ public class JavaModLoader {
             return;
         }
 
-        PZOLogger.info(String.format("[JavaModLoader] Discovered %d candidate Java mod package(s).", candidateJars.size()));
+        // Deduplicate multi-version JARs per Workshop Mod folder (e.g. pick 42.20 over 41 / 42.12)
+        List<File> filteredJars = deduplicateModJars(candidateJars);
 
-        for (File jarFile : candidateJars) {
+        PZOLogger.info(String.format("[JavaModLoader] Discovered %d unique Java mod package(s).", filteredJars.size()));
+
+        for (File jarFile : filteredJars) {
             loadSingleMod(jarFile, inst);
         }
 
         PZOLogger.info(String.format("[JavaModLoader] Mod Loading Finished: %d loaded successfully, %d error(s).", successCount, errorCount));
         PZOLogger.info("--------------------------------------------------------------------------------");
+    }
+
+    private static List<File> deduplicateModJars(List<File> rawJars) {
+        Map<String, File> modMap = new HashMap<>();
+
+        for (File jar : rawJars) {
+            String path = jar.getAbsolutePath().replace('\\', '/');
+
+            // Extract Workshop Mod ID if inside /workshop/content/108600/<id>/
+            String modKey = jar.getName();
+            int wsIdx = path.indexOf("/108600/");
+            if (wsIdx != -1) {
+                int afterWs = wsIdx + 8;
+                int nextSlash = path.indexOf('/', afterWs);
+                if (nextSlash != -1) {
+                    modKey = path.substring(afterWs, nextSlash);
+                }
+            }
+
+            File existing = modMap.get(modKey);
+            if (existing == null) {
+                modMap.put(modKey, jar);
+            } else {
+                // If existing is B41 and new is B42, replace it
+                String existPath = existing.getAbsolutePath().replace('\\', '/');
+                if ((!existPath.contains("42") && path.contains("42")) ||
+                    (existPath.contains("42.1") && path.contains("42.2")) ||
+                    (jar.length() > existing.length())) {
+                    modMap.put(modKey, jar);
+                }
+            }
+        }
+
+        return new ArrayList<>(modMap.values());
     }
 
     private static List<File> findJavaModJars() {
@@ -95,7 +134,7 @@ public class JavaModLoader {
                             }
                         }
 
-                        // Also parse libraryfolders.vdf if present
+                        // Parse libraryfolders.vdf
                         File vdfFile = new File(root, "Program Files (x86)/Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
                         if (!vdfFile.exists()) {
                             vdfFile = new File(root, "Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
@@ -239,7 +278,6 @@ public class JavaModLoader {
                     }
                 }
 
-                // If still not hooked, try remaining top-level classes
                 if (!hooked) {
                     for (String className : candidateClasses) {
                         if (invokeEntrypoint(jarFile, className, inst)) {
