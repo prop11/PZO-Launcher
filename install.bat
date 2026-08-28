@@ -21,7 +21,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.4.3)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.4.4)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -41,7 +41,7 @@ if (-not (Test-Path -LiteralPath $ZomboidModsDir -ErrorAction SilentlyContinue))
 }
 
 # ==========================================
-# JSON TEMPLATES (Defined upfront)
+# JSON TEMPLATES (Defined upfront - No BOM, No JNI javaagent)
 # ==========================================
 $Json5OrLess = @"
 {
@@ -52,7 +52,6 @@ $Json5OrLess = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -90,7 +89,6 @@ $Json6To12 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -128,7 +126,6 @@ $Json13To20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -166,7 +163,6 @@ $JsonAbove20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-javaagent:PZOptimEngine.jar",
         "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -183,6 +179,11 @@ $JsonAbove20 = @"
     ]
 }
 "@
+
+function Write-JsonNoBOM($filePath, $content) {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($filePath, $content, $utf8NoBom)
+}
 
 function Download-PZOGitHubJar($targetFile) {
     $downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar"
@@ -358,7 +359,7 @@ if ($isZombieBuddyInstalled) {
     Write-Host "========================================================================" -ForegroundColor Yellow
     Write-Host "ZombieBuddy (.jar / .dll) and PZO Optimizer both manage the main Java engine"
     Write-Host "entrypoint and cannot run simultaneously.`n"
-    Write-Host "Good news: PZO v0.4.3+ natively runs all your ZombieBuddy Workshop mods" -ForegroundColor Cyan
+    Write-Host "Good news: PZO v0.4.4+ natively runs all your ZombieBuddy Workshop mods" -ForegroundColor Cyan
     Write-Host "automatically without needing ZombieBuddy.jar or zbNative.dll!`n" -ForegroundColor Cyan
     Write-Host "1) Uninstall ZombieBuddy & Continue Installation (Recommended)" -ForegroundColor Green
     Write-Host "2) Cancel Installation"
@@ -395,23 +396,26 @@ function Apply-PZOConfiguration {
     }
 
     $UseG1GC = $false
+    $chosenJson = ""
     if ($TotalRamGB -le 5) {
         Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m)" -ForegroundColor Green
-        Set-Content -LiteralPath $TargetFilePath -Value $Json5OrLess -Encoding UTF8
+        $chosenJson = $Json5OrLess
     }
     elseif ($TotalRamGB -ge 6 -and $TotalRamGB -le 12) {
         Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m)" -ForegroundColor Green
-        Set-Content -LiteralPath $TargetFilePath -Value $Json6To12 -Encoding UTF8
+        $chosenJson = $Json6To12
     }
     elseif ($TotalRamGB -ge 13 -and $TotalRamGB -le 20) {
         Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 4096m - 8192m)" -ForegroundColor Green
-        Set-Content -LiteralPath $TargetFilePath -Value $Json13To20 -Encoding UTF8
+        $chosenJson = $Json13To20
     }
     else {
         Write-Host "Applying profile: > 20 GB RAM (Heap: 16384m + G1GC Tuning)" -ForegroundColor Green
-        Set-Content -LiteralPath $TargetFilePath -Value $JsonAbove20 -Encoding UTF8
+        $chosenJson = $JsonAbove20
         $UseG1GC = $true
     }
+
+    Write-JsonNoBOM $TargetFilePath $chosenJson
 
     if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
         Write-Host "[SUCCESS] Updated $TargetFileName with PZO Entrypoint & RAM settings." -ForegroundColor Green
@@ -431,7 +435,7 @@ function Apply-PZOConfiguration {
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
-    Set-Content -LiteralPath $PzoStatusFile -Value $StatusJson -Encoding UTF8
+    Write-JsonNoBOM $PzoStatusFile $StatusJson
     Write-Host "Generated Lua bridge status: $PzoStatusFile" -ForegroundColor Green
 }
 
