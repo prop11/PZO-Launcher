@@ -347,6 +347,9 @@ else
 }
 EOF
     echo "[+] Updated ProjectZomboid64.json with Java 17 / B42 heap & entrypoint."
+    mkdir -p "$HOME/Zomboid/Lua"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.4.6\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 
 echo ""

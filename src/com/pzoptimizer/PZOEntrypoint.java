@@ -26,14 +26,15 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
-        // Ensure critical Zomboid user directories exist (Prevents B42 DebugFileWatcher NoSuchFileException crash)
+        // Ensure critical Zomboid user directories exist & write live pzo_status.json
         try {
             String userHome = System.getProperty("user.home");
             if (userHome != null) {
                 File zDir = new File(userHome, "Zomboid");
+                File luaDir = new File(zDir, "Lua");
                 File[] criticalDirs = new File[]{
                     new File(zDir, "mods"),
-                    new File(zDir, "Lua"),
+                    luaDir,
                     new File(zDir, "db"),
                     new File(zDir, "Server")
                 };
@@ -42,6 +43,15 @@ public class PZOEntrypoint {
                         cd.mkdirs();
                     }
                 }
+                
+                // Write live pzo_status.json so in-game Lua UI instantly recognizes active agent
+                File statusFile = new File(luaDir, "pzo_status.json");
+                long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
+                int ramGb = Math.max(2, (int) Math.round(maxMemMB / 1024.0));
+                String json = String.format("{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\"}",
+                    ramGb, UpdateChecker.CURRENT_VERSION);
+                java.nio.file.Files.writeString(statusFile.toPath(), json, java.nio.charset.StandardCharsets.UTF_8);
+                PZOLogger.info("Written live engine status bridge: " + statusFile.getAbsolutePath());
             }
         } catch (Throwable ignored) {}
 
