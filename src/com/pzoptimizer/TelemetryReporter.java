@@ -45,8 +45,8 @@ public class TelemetryReporter {
             double cpuLoad = getProcessCpuLoad();
 
             String json = String.format(
-                "{\"max_mb\": %d, \"used_mb\": %d, \"free_mb\": %d, \"gc_count\": %d, \"gc_pause_avg_ms\": %d, \"threads\": %d, \"cpu_percent\": %.1f, \"intern_pool\": %d}",
-                maxMem, usedMem, freeMem, gcCount, avgPause, Thread.activeCount(), cpuLoad, ResourceInterner.getPoolSize()
+                "{\"max_mb\": %d, \"used_mb\": %d, \"free_mb\": %d, \"gc_count\": %d, \"gc_pause_avg_ms\": %d, \"threads\": %d, \"cpu_percent\": %.1f, \"intern_pool\": %d, \"gl_skipped\": %d, \"matrix_skipped\": %d, \"uniforms_skipped\": %d}",
+                maxMem, usedMem, freeMem, gcCount, avgPause, Thread.activeCount(), cpuLoad, ResourceInterner.getPoolSize(), GLStateOptimizer.getGlCallsFiltered(), GLStateOptimizer.getMatricesSkipped(), GLStateOptimizer.getUniformsSkipped()
             );
 
             FileWriter fw = new FileWriter(telemetryFile, false);

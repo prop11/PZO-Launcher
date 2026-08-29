@@ -129,11 +129,27 @@ public class PZOEntrypoint {
         watchdog.start();
         PZOLogger.success("PZO-B42-Telemetry monitoring started");
 
-        // 9. Discover and load standalone Java mods (coexists with ZombieBuddy)
+        // 9. Discover and check ZombieBuddy / standalone Java mods
         try {
-            JavaModLoader.loadMods(null);
+            boolean zbDetected = false;
+            File currentDir = new File(".").getAbsoluteFile();
+            File zbJar = new File(currentDir, "ZombieBuddy.jar");
+            File zbDll1 = new File(currentDir, "win64/zbNative.dll");
+            File zbDll2 = new File(currentDir, "zbNative.dll");
+            File zbSo = new File(currentDir, "zbNative.so");
+            File zbDylib = new File(currentDir, "zbNative.dylib");
+
+            if (zbJar.exists() || zbDll1.exists() || zbDll2.exists() || zbSo.exists() || zbDylib.exists()) {
+                zbDetected = true;
+            }
+
+            if (zbDetected) {
+                PZOLogger.success("[PZO Coexistence] ZombieBuddy framework detected and running in tandem with PZO Optimizer!");
+            } else {
+                PZOLogger.info("[PZO Engine] Running in Standalone Optimization Mode");
+            }
         } catch (Throwable t) {
-            PZOLogger.warn("[PZO] Non-fatal notice on Java mod loader: " + t.getMessage());
+            PZOLogger.warn("[PZO] Non-fatal notice on coexistence check: " + t.getMessage());
         }
 
         // 10. Launch Project Zomboid Main Entrypoint

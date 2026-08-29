@@ -1,10 +1,17 @@
 package com.pzoptimizer;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  * Project Zomboid Build 42 - Advanced OpenGL & Shader State Optimizer.
  * Eliminates thousands of redundant GPU uniform, matrix, texture, alpha, and depth calls per frame.
  */
 public class GLStateOptimizer {
+    // Live Optimization Telemetry Counters
+    public static final AtomicLong glCallsFiltered = new AtomicLong(0);
+    public static final AtomicLong matricesSkipped = new AtomicLong(0);
+    public static final AtomicLong uniformsSkipped = new AtomicLong(0);
+
     // 1. Texture & Color Caches
     private static int currentTexture = -1;
     private static float currentR = -1f, currentG = -1f, currentB = -1f, currentA = -1f;
@@ -31,6 +38,7 @@ public class GLStateOptimizer {
 
     public static boolean shouldBindTexture(int textureId) {
         if (textureId == currentTexture) {
+            glCallsFiltered.incrementAndGet();
             return false;
         }
         currentTexture = textureId;
@@ -39,6 +47,7 @@ public class GLStateOptimizer {
 
     public static boolean shouldSetColor(float r, float g, float b, float a) {
         if (r == currentR && g == currentG && b == currentB && a == currentA) {
+            glCallsFiltered.incrementAndGet();
             return false;
         }
         currentR = r;
@@ -50,6 +59,7 @@ public class GLStateOptimizer {
 
     public static boolean shouldSetBlendFunc(int src, int dst) {
         if (src == currentSrcBlend && dst == currentDstBlend) {
+            glCallsFiltered.incrementAndGet();
             return false;
         }
         currentSrcBlend = src;
@@ -59,6 +69,7 @@ public class GLStateOptimizer {
 
     public static boolean shouldSetAlphaFunc(int func, float ref) {
         if (func == lastAlphaFunc && ref == lastAlphaRef) {
+            glCallsFiltered.incrementAndGet();
             return false;
         }
         lastAlphaFunc = func;
@@ -68,6 +79,7 @@ public class GLStateOptimizer {
 
     public static boolean shouldSetDepthFunc(int func) {
         if (func == lastDepthFunc) {
+            glCallsFiltered.incrementAndGet();
             return false;
         }
         lastDepthFunc = func;
@@ -77,6 +89,7 @@ public class GLStateOptimizer {
     public static boolean shouldSetDepthMask(boolean mask) {
         int m = mask ? 1 : 0;
         if (m == lastDepthMask) {
+            glCallsFiltered.incrementAndGet();
             return false;
         }
         lastDepthMask = m;
@@ -85,6 +98,7 @@ public class GLStateOptimizer {
 
     public static boolean shouldUpdateChunkDepth(float depth) {
         if (depth == cachedChunkDepth) {
+            uniformsSkipped.incrementAndGet();
             return false;
         }
         cachedChunkDepth = depth;
@@ -114,6 +128,7 @@ public class GLStateOptimizer {
             last[4] == newMatrix[4] && last[5] == newMatrix[5] && last[6] == newMatrix[6] && last[7] == newMatrix[7] &&
             last[8] == newMatrix[8] && last[9] == newMatrix[9] && last[10] == newMatrix[10] && last[11] == newMatrix[11] &&
             last[12] == newMatrix[12] && last[13] == newMatrix[13] && last[14] == newMatrix[14] && last[15] == newMatrix[15]) {
+            matricesSkipped.incrementAndGet();
             return false; // Matrix matches cached state, skip redundant GPU upload
         }
 
@@ -135,4 +150,8 @@ public class GLStateOptimizer {
         lastDepthMask = -1;
         cachedChunkDepth = Float.NaN;
     }
+
+    public static long getGlCallsFiltered() { return glCallsFiltered.get(); }
+    public static long getMatricesSkipped() { return matricesSkipped.get(); }
+    public static long getUniformsSkipped() { return uniformsSkipped.get(); }
 }
