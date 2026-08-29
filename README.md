@@ -43,7 +43,7 @@ A lightweight, high-performance engine wrapper and configuration optimizer engin
 
 - **Project Zomboid**: Build 42 (Java 17 64-bit).
 - **Steam Workshop Mods**: 100% compatible with all standard Lua, vehicle, clothing, weapon, map, and audio mods.
-- **ZombieBuddy Coexistence (v0.4.6+)**: Fully compatible with **ZombieBuddy** (`zbNative`). PZO automatically detects and preserves `"-agentlib:zbNative"` in `ProjectZomboid64.json` without modifying or removing ZombieBuddy files. You can run ZombieBuddy's bytecode modding alongside PZO's hardware, timer, GC, and direct I/O optimizations seamlessly.
+- **ZombieBuddy Coexistence (v0.5.0+)**: Fully compatible with **ZombieBuddy** (`zbNative`). PZO automatically detects and preserves `"-agentlib:zbNative"` in `ProjectZomboid64.json` without modifying or removing ZombieBuddy files. You can run ZombieBuddy's bytecode modding alongside PZO's hardware, timer, GC, and direct I/O optimizations seamlessly.
 
 ---
 

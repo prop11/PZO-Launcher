@@ -10,6 +10,10 @@ import java.lang.reflect.Method;
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
+        // Ensure AWT/Swing is allowed for Pre-Menu dialogs
+        try {
+            System.setProperty("java.awt.headless", "false");
+        } catch (Throwable ignored) {}
         PZOLogger.info("================================================================================");
         PZOLogger.info("Project Zomboid Build 42 - Config & Engine Optimizer (PZO)");
         PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + ")");
@@ -102,12 +106,15 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on ResourceInterner: " + t.getMessage());
         }
 
-        // 6. Update Checker
+        // 6. Pre-Menu Update Check & Interactive Prompt
         try {
-            UpdateChecker.checkForUpdatesAsync();
-            PZOLogger.info("UpdateChecker background check scheduled (Async timeout: 3.5s)");
+            UpdateChecker.UpdateResult ur = UpdateChecker.checkForUpdatesSync(1800);
+            if (ur != null && ur.hasUpdate) {
+                PZOLogger.info("New update detected (v" + ur.latestVersion + "). Opening Pre-Menu update prompt...");
+                UpdateDialog.promptIfUpdateAvailable(ur.latestVersion, ur.downloadUrl);
+            }
         } catch (Throwable t) {
-            PZOLogger.warn("Non-fatal notice on UpdateChecker: " + t.getMessage());
+            PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
 
         // 7. Render Thread Priority
