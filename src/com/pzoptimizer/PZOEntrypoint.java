@@ -55,7 +55,13 @@ public class PZOEntrypoint {
             }
         } catch (Throwable ignored) {}
 
-        // 1. StreamBufferBooster & SaveGameStreamBooster (128KB chunk buffers & page-aligned direct NIO)
+        // 1. Core Memory & Hardware Optimization Modules
+        DirectMemoryTuner.initialize();
+        ThreadPoolTuner.initialize();
+        DriverOptimizer.initialize();
+        AssetCachePrewarmer.startPrewarmingAsync();
+
+        // 2. StreamBufferBooster & SaveGameStreamBooster (128KB chunk buffers & page-aligned direct NIO)
         try {
             StreamBufferBooster.applyStreamTweaks();
             SaveGameStreamBooster.tuneSaveEngine();
