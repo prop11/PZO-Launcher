@@ -77,9 +77,10 @@ echo "[+] Detected $TOTAL_RAM GB System RAM -> Allocating $ALLOC_RAM GB (-Xmx${R
 clean_lua_bridge_files() {
     LUA_DIR="$HOME/Zomboid/Lua"
     if [ -d "$LUA_DIR" ]; then
-        rm -f "$LUA_DIR/pzo_status.json" "$LUA_DIR/pzo_update.json" "$LUA_DIR/pzo_telemetry.json" "$LUA_DIR/pzo_engine.log"
-        echo "[+] Purged PZO bridge files from ~/Zomboid/Lua/"
+        rm -f "$LUA_DIR"/pzo_* "$LUA_DIR/pzo_status.json" "$LUA_DIR/pzo_update.json" "$LUA_DIR/pzo_telemetry.json" "$LUA_DIR/pzo_engine.log"
+        echo "[+] Purged all PZO bridge and telemetry files from ~/Zomboid/Lua/"
     fi
+    rm -f "$HOME/Zomboid"/pzo_*
 }
 
 # ==============================================================================
