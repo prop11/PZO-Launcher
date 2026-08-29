@@ -1,12 +1,11 @@
 package com.pzoptimizer;
 
 import java.io.File;
-import java.lang.instrument.Instrumentation;
-
 import java.lang.reflect.Method;
 
 /**
  * Project Zomboid Build 42 - Dedicated High-Performance Engine Optimizer & Wrapper.
+ * Fully compatible with vanilla Project Zomboid and ZombieBuddy modding framework.
  */
 public class PZOEntrypoint {
 
@@ -120,11 +119,11 @@ public class PZOEntrypoint {
         watchdog.start();
         PZOLogger.success("PZO-B42-Telemetry monitoring started");
 
-        // 9. Load external Java Workshop / ZombieBuddy mods
+        // 9. Discover and load standalone Java mods (coexists with ZombieBuddy)
         try {
-            JavaModLoader.loadMods(PZOptimAgent.getInstrumentation());
+            JavaModLoader.loadMods(null);
         } catch (Throwable t) {
-            PZOLogger.warn("[PZO] Non-fatal error during Java mod loading: " + t.getMessage());
+            PZOLogger.warn("[PZO] Non-fatal notice on Java mod loader: " + t.getMessage());
         }
 
         // 10. Launch Project Zomboid Main Entrypoint
