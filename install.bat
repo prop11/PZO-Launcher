@@ -440,12 +440,25 @@ if (Test-Path $InstalledJarPath) {
                 Write-Host "Removed: $JarFileName" -ForegroundColor Green
             }
 
-            $pzoFiles = @("pzo_status.json", "pzo_update.json", "pzo_telemetry.json", "pzo_engine.log")
-            foreach ($pf in $pzoFiles) {
-                $fullPf = [System.IO.Path]::Combine($ZomboidLuaDir, $pf)
-                if (Test-Path -LiteralPath $fullPf -ErrorAction SilentlyContinue) {
-                    Remove-Item -LiteralPath $fullPf -Force -ErrorAction SilentlyContinue
-                    Write-Host "Removed: $pf" -ForegroundColor Green
+            # Purge all pzo_* bridge, telemetry, log and status files from ~/Zomboid/Lua/
+            if (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue) {
+                Get-ChildItem -LiteralPath $ZomboidLuaDir -Filter "pzo_*" -File -ErrorAction SilentlyContinue | ForEach-Object {
+                    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+                    Write-Host "Removed: $($_.Name)" -ForegroundColor Green
+                }
+            }
+            # Clean up any leftover pzo files in root Zomboid or game directories
+            $extraPzoPaths = @(
+                [System.IO.Path]::Combine($HOME, "Zomboid\pzo_status.json"),
+                [System.IO.Path]::Combine($HOME, "Zomboid\pzo_telemetry.json"),
+                [System.IO.Path]::Combine($InstallPath, "pzo_engine.log"),
+                [System.IO.Path]::Combine($InstallPath, "pzo_telemetry.json"),
+                [System.IO.Path]::Combine($InstallPath, "pzo_status.json")
+            )
+            foreach ($ep in $extraPzoPaths) {
+                if (Test-Path -LiteralPath $ep -ErrorAction SilentlyContinue) {
+                    Remove-Item -LiteralPath $ep -Force -ErrorAction SilentlyContinue
+                    Write-Host "Removed: $([System.IO.Path]::GetFileName($ep))" -ForegroundColor Green
                 }
             }
 
