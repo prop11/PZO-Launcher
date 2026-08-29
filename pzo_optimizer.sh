@@ -171,16 +171,7 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "ZombieBuddy.jar and PZO Optimizer both manage the main Java entrypoint."
         echo "PZO v0.4.5+ automatically runs your ZombieBuddy Workshop mods natively!"
         echo ""
-        echo "1) Uninstall ZombieBuddy & Continue Installation (Recommended)"
-        echo "2) Cancel Installation"
-        read -p "Enter choice (1 or 2): " ZB_CHOICE
-        if [ "$ZB_CHOICE" = "1" ]; then
-            rm -f "$APP_BUNDLE/Contents/Java/ZombieBuddy.jar" "$APP_BUNDLE/Contents/Java/zombiebuddy.jar" "$APP_BUNDLE/Contents/MacOS/zbNative.dylib" "$APP_BUNDLE/Contents/MacOS/libzbNative.dylib" "$APP_BUNDLE/Contents/Java/zbNative.dylib" "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/ZombieBuddy.jar" "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/zbNative.dylib"
-            echo "[+] Removed ZombieBuddy. Proceeding with PZO installation..."
-        else
-            echo "[-] Installation cancelled to preserve existing ZombieBuddy setup."
-            exit 0
-        fi
+        echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
 
     # 5. Install PZOptimEngine.jar to Contents/Java/
@@ -319,16 +310,7 @@ else
         echo "ZombieBuddy and PZO Optimizer both manage the main Java entrypoint."
         echo "PZO v0.4.5+ automatically runs your ZombieBuddy mods natively!"
         echo ""
-        echo "1) Uninstall ZombieBuddy & Continue (Recommended)"
-        echo "2) Cancel Installation"
-        read -p "Enter choice (1 or 2): " ZB_CHOICE
-        if [ "$ZB_CHOICE" = "1" ]; then
-            rm -f "$PZ_DIR/ZombieBuddy.jar" "$PZ_DIR/zombiebuddy.jar" "$PZ_DIR/zb.jar" "$PZ_DIR/zbNative.dll" "$PZ_DIR/zbNative64.dll" "$PZ_DIR/zbNative.so" "$PZ_DIR/libzbNative.so" "$PZ_DIR/linux64/zbNative.so" "$PZ_DIR/linux64/libzbNative.so" "$PZ_DIR/zombiebuddy.json"
-            echo "[+] Removed ZombieBuddy. Proceeding with PZO..."
-        else
-            echo "[-] Installation cancelled."
-            exit 0
-        fi
+        echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
 
     # Copy JAR

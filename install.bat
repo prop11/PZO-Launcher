@@ -41,7 +41,7 @@ if (-not (Test-Path -LiteralPath $ZomboidModsDir -ErrorAction SilentlyContinue))
 }
 
 # ==========================================
-# JSON TEMPLATES (Defined upfront - No BOM, No JNI javaagent)
+# JSON TEMPLATES (Defined upfront - No BOM)
 # ==========================================
 $Json5OrLess = @"
 {
@@ -319,65 +319,22 @@ if ($SourceJar) {
 }
 
 # ==========================================
-# ZOMBIEBUDDY CONFLICT DETECTION & CLEANUP
+# ZOMBIEBUDDY COEXISTENCE & PRESERVATION
 # ==========================================
-$zbCandidates = @(
-    [System.IO.Path]::Combine($InstallPath, "ZombieBuddy.jar"),
-    [System.IO.Path]::Combine($InstallPath, "zombiebuddy.jar"),
-    [System.IO.Path]::Combine($InstallPath, "zb.jar"),
-    [System.IO.Path]::Combine($InstallPath, "zbNative.dll"),
-    [System.IO.Path]::Combine($InstallPath, "zbNative64.dll"),
-    [System.IO.Path]::Combine($InstallPath, "ZombieBuddy.dll"),
-    [System.IO.Path]::Combine($InstallPath, "ZombieBuddy64.dll"),
-    [System.IO.Path]::Combine($InstallPath, "zombiebuddy.json"),
-    [System.IO.Path]::Combine($InstallPath, "win64\zbNative.dll"),
-    [System.IO.Path]::Combine($InstallPath, "win64\zbNative64.dll"),
-    [System.IO.Path]::Combine($InstallPath, "win64\ZombieBuddy.dll"),
-    [System.IO.Path]::Combine($InstallPath, "natives\zbNative.dll"),
-    [System.IO.Path]::Combine($InstallPath, "natives\zbNative64.dll")
-)
-
+$zbNativeDll = [System.IO.Path]::Combine($InstallPath, "zbNative.dll")
+$zbNativeWin64 = [System.IO.Path]::Combine($InstallPath, "win64\zbNative.dll")
 $hasZbInJson = $false
+
 if (Test-Path -LiteralPath $TargetFilePath) {
     $rawJson = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
-    if ($rawJson -and ($rawJson -match "ZombieBuddy" -or $rawJson -match "zbNative")) {
+    if ($rawJson -and ($rawJson -match "zbNative" -or $rawJson -match "ZombieBuddy")) {
         $hasZbInJson = $true
     }
 }
 
-$isZombieBuddyInstalled = $hasZbInJson
-foreach ($zbc in $zbCandidates) {
-    if (Test-Path -LiteralPath $zbc -ErrorAction SilentlyContinue) {
-        $isZombieBuddyInstalled = $true
-        break
-    }
-}
-
-if ($isZombieBuddyInstalled) {
-    Write-Host "`n========================================================================" -ForegroundColor Yellow
-    Write-Host "[!] CONFLICT DETECTED: ZombieBuddy is currently installed" -ForegroundColor Yellow
-    Write-Host "========================================================================" -ForegroundColor Yellow
-    Write-Host "ZombieBuddy (.jar / .dll) and PZO Optimizer both manage the main Java engine"
-    Write-Host "entrypoint and cannot run simultaneously.`n"
-    Write-Host "Good news: PZO v0.4.5+ natively runs all your ZombieBuddy Workshop mods" -ForegroundColor Cyan
-    Write-Host "automatically without needing ZombieBuddy.jar or zbNative.dll!`n" -ForegroundColor Cyan
-    Write-Host "1) Uninstall ZombieBuddy & Continue Installation (Recommended)" -ForegroundColor Green
-    Write-Host "2) Cancel Installation"
-    
-    $zbChoice = Read-Host "`nEnter choice (1 or 2)"
-    if ($zbChoice -eq "1") {
-        Write-Host "`nUninstalling ZombieBuddy files & native .dlls..." -ForegroundColor Cyan
-        foreach ($f in $zbCandidates) {
-            if (Test-Path -LiteralPath $f -ErrorAction SilentlyContinue) {
-                Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-                Write-Host "  Removed: $([System.IO.Path]::GetFileName($f))" -ForegroundColor Green
-            }
-        }
-        Write-Host "ZombieBuddy has been cleanly removed. Proceeding with PZO installation...`n" -ForegroundColor Green
-    } else {
-        Write-Host "`nInstallation cancelled to preserve existing ZombieBuddy setup." -ForegroundColor Yellow
-        return
-    }
+$isZombieBuddyActive = $hasZbInJson -or (Test-Path -LiteralPath $zbNativeDll) -or (Test-Path -LiteralPath $zbNativeWin64)
+if ($isZombieBuddyActive) {
+    Write-Host "`n[+] ZombieBuddy detected! Coexistence mode enabled (preserving -agentlib:zbNative)." -ForegroundColor Green
 }
 
 function Apply-PZOConfiguration {
@@ -415,6 +372,11 @@ function Apply-PZOConfiguration {
         $UseG1GC = $true
     }
 
+    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in vmArgs
+    if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
+        $chosenJson = $chosenJson.Replace('"vmArgs": [', '"vmArgs": [' + "`n        " + '"-agentlib:zbNative",')
+    }
+
     Write-JsonNoBOM $TargetFilePath $chosenJson
 
     if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
@@ -432,6 +394,7 @@ function Apply-PZOConfiguration {
         ram_gb    = [int]$TotalRamGB
         g1gc      = $UseG1GC
         pretouch  = $true
+        zombiebuddy = $isZombieBuddyActive
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
@@ -523,5 +486,4 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
 }
 
 Apply-PZOConfiguration
-Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
-
+Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
