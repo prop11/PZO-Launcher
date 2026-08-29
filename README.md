@@ -1,67 +1,58 @@
-# Project Zomboid Build 42 - Config & Engine Optimizer (PZO)
+# 🚀 Project Zomboid Dedicated Server Optimizer (PZO Server Engine)
 
-A lightweight, high-performance engine wrapper and configuration optimizer engineered specifically for **Project Zomboid Build 42** supporting **Windows, macOS, and Linux / Steam Deck**.
-
----
-
-## Key Features & Optimizations
-
-- **128KB Direct NIO Memory & Stream Booster**: High-throughput direct chunk stream buffers that eliminate driving auto-save micro-freezes and road streaming hitches.
-- **Windows High-Precision Timer (1.0ms)**: Locks OS multimedia timer resolution to 1.0ms, eliminating frame pacing micro-stutter.
-- **Pre-Boot Directory Guard**: Automatically verifies and creates required user directories (`mods/`, `Lua/`, `db/`, `Server/`) to prevent B42 `DebugFileWatcher` crashes.
-- **Dedicated JVM Heap Scaling (`-Xmx` 4GB - 16GB)**: Automatically profiles system RAM and provisions hardware-tailored memory heaps.
-- **Tuned Low-Latency G1 / ZGC Garbage Collection**: Advanced GC tuning (`-XX:+AlwaysPreTouch`, `-XX:InitiatingHeapOccupancyPercent=45`, `-XX:G1ReservePercent=15`) to eliminate stop-the-world collection pauses.
-- **Zero-Allocation Math & Vector Pooling**: Fast precomputed trigonometry tables and reusable vector caches that reduce GC churn.
-- **OpenGL State Cache & Horde Physics Optimization**: Deduplicates GPU draw state transitions and optimizes distant cluster physics.
-- **String & Asset Deduplication Interning**: 16,384-entry string intern pool lowering memory overhead.
-- **Real-Time JMX Telemetry Bridge**: Background monitoring bridge communicating directly with the in-game F10 Control Center.
+**PZO Server Engine (`PZOServerEngine.jar`)** is a dedicated server optimization suite designed specifically for **3rd-Party Hosted Servers & Dedicated Server Nodes** (G-Portal, Nitrado, GTXGaming, Indifferent Broccoli, BisectHosting, Pterodactyl panels, Hetzner, OVH, Docker).
 
 ---
 
-## Quick Start
+## ⚡ Server Performance Features
 
-### Windows
-1. Download and extract the latest **`PZO-Optimizer-Windows.zip`** from [Releases](https://github.com/prop11/PZO-Launcher/releases).
-2. Ensure Project Zomboid is closed.
-3. Double-click **`Install.bat`**.
-   - The installer automatically detects your game directory and RAM, backs up your original settings, installs `PZOptimEngine.jar`, and applies the optimal profile.
-   - *(If already installed, running the script presents quick options to **Update** or **Uninstall** and restore stock settings).*
-4. Launch Project Zomboid normally through Steam.
+1. **🌐 Zero-Rubberband Networking (`ServerNetworkTuner`)**:
+   - Pools off-heap direct NIO memory buffers for 10–64+ concurrent players.
+   - Allocates 4096 high-capacity UDP datagram sockets to eliminate ping spikes and desync during gunfire, driving, and horde combat.
 
-### macOS & Linux / Steam Deck
-1. Download **`PZO_Optimizer_macOS_Linux.zip`** from [Releases](https://github.com/prop11/PZO-Launcher/releases) or the repository root.
-2. Run the optimization script:
-   - **Linux / Steam Deck**: Run `chmod +x pzo_optimizer.sh && ./pzo_optimizer.sh` in Konsole / Terminal.
-   - **macOS**: Double-click `pzo_optimizer.command` or run `bash pzo_optimizer.sh` in Terminal.
-3. Launch Project Zomboid normally through Steam.
+2. **🧟 Multi-Core Zombie Pathfinding (`ServerHordeSimEngine`)**:
+   - Dynamically scales server-side pathfinding and migration across all host CPU cores (up to 32/64 threads).
+   - Hibernates distant zombie AI simulations when no players are in range.
 
-*Note: You only need to run the installer once. All settings persist across game launches and game updates.*
+3. **💾 Zero-Lag World Save Booster (`ServerChunkStreamBooster`)**:
+   - 256KB asynchronous disk write buffering for SQLite `.db` tables (`players.db`, `vehicles.db`) and `map_*.bin` chunk saves.
+   - Eliminates the periodic *"Server Saving World... Lag Spike"* that freezes active players.
 
----
+4. **📊 Live Server Telemetry Bridge (`ServerTelemetryBridge`)**:
+   - Streams live JSON metrics to `pzo_server_telemetry.json` (Real Server TPS, Heap MB, GC Pause ms, Thread counts) every 5 seconds. Perfect for Discord bot integrations and server monitoring dashboards.
 
-## Compatibility
-
-- **Project Zomboid**: Build 42 (Java 17 64-bit).
-- **Steam Workshop Mods**: 100% compatible with all standard Lua, vehicle, clothing, weapon, map, and audio mods.
-- **ZombieBuddy Coexistence (v0.5.0+)**: Fully compatible with **ZombieBuddy** (`zbNative`). PZO automatically detects and preserves `"-agentlib:zbNative"` in `ProjectZomboid64.json` without modifying or removing ZombieBuddy files. You can run ZombieBuddy's bytecode modding alongside PZO's hardware, timer, GC, and direct I/O optimizations seamlessly.
+5. **🤝 ZombieBuddy Server Coexistence**:
+   - 100% compatible with `ZombieBuddy.jar` and all Workshop server mods.
 
 ---
 
-## Workshop Mod Integration
+## 📦 2-Step 3rd-Party Host Installation (FTP / Web Panel)
 
-When combined with the **Project Zomboid Optimiser** Steam Workshop mod, running this optimizer unlocks the dedicated **[+] JVM Engine (Tab 7)** inside the in-game F10 Control Center:
-- Zero-Stutter Background GC Mode
-- Deep RAM Chunk Cache (Zero Disk I/O Lag)
-- Asynchronous 3D Model Compilation
-- Distant Horde Spatial Hibernation
-- Live JVM Heap, Pause Time & CPU Telemetry Monitoring
+### Step 1: Upload `PZOServerEngine.jar`
+Using your hosting panel's **File Manager** or **SFTP/FTP client** (FileZilla / WinSCP):
+1. Upload **`PZOServerEngine.jar`** into your server's root directory (the same folder containing `ProjectZomboid64.json` / `StartServer64.bat` / `projectzomboid.jar`).
+
+### Step 2: Configure `ProjectZomboid64.json`
+Open `ProjectZomboid64.json` in your File Manager:
+1. Change `"mainClass"` to:
+   ```json
+   "mainClass": "com/pzoptimizer/server/PZOServerEntrypoint",
+   ```
+2. Add `"PZOServerEngine.jar"` to the top of your `"classpath"` array:
+   ```json
+   "classpath": [
+       "PZOServerEngine.jar",
+       ...
+   ]
+   ```
+3. Save the file and restart your server from your host web panel!
 
 ---
 
-## Building from Source
+## ⚙️ Recommended Host Startup Parameters (Pterodactyl / Custom Command Line)
 
-### Compile Java 17 Engine Wrapper
-```cmd
-javac --release 17 -d bin src\com\pzoptimizer\*.java
-jar -cfm dist\PZOptimEngine.jar src\META-INF\MANIFEST.MF -C bin .
+If your host allows editing custom JVM arguments in the panel Startup tab:
+```text
+-Xms4096m -Xmx16384m -XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=45 -XX:G1ReservePercent=15 -XX:+AlwaysPreTouch -Djava.awt.headless=true -Dzomboid.server=1 --enable-native-access=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
 ```
+*(Adjust `-Xmx16384m` to your server's allocated RAM, e.g. `-Xmx32768m` for 32GB).*
