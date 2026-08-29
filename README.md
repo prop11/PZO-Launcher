@@ -39,7 +39,7 @@ A lightweight, zero-dependency engine wrapper and configuration optimizer engine
 ## Compatibility
 - **Project Zomboid**: Dedicated to **Build 42** (Java 17 64-bit).
 - **Steam Workshop Mods**: 100% compatible with all standard Lua, vehicle, clothing, weapon, map, and audio mods.
-- **ZombieBuddy-Dependent Mods**: **Fully Supported from v0.4.5!** `PZOptimEngine.jar` features a built-in Java Mod Loader that automatically discovers, classloads, and hooks mods created for ZombieBuddy directly from your Workshop folders.
+- **ZombieBuddy-Dependent Mods**: **Fully Supported from v0.4.6!** `PZOptimEngine.jar` features a built-in Java Mod Loader that automatically discovers, classloads, and hooks mods created for ZombieBuddy directly from your Workshop folders.
   - *Note on `ZombieBuddy.jar`:* The **`ZombieBuddy.jar` launcher/tool itself is still incompatible** because both tools compete for the primary JVM entrypoint in `ProjectZomboid64.json`. You do **not** need (and should not install) `ZombieBuddy.jar`—PZO natively runs your ZombieBuddy-dependent Workshop mods for you.
 
 ---
