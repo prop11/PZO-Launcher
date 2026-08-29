@@ -22,7 +22,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.4.6)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.5.0)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -62,7 +62,6 @@ $Json5OrLess = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms2048m",
@@ -99,7 +98,6 @@ $Json6To12 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms3072m",
@@ -136,7 +134,6 @@ $Json13To20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -173,7 +170,6 @@ $JsonAbove20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-Djava.awt.headless=true",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xmx16384m",
@@ -415,7 +411,7 @@ function Apply-PZOConfiguration {
         g1gc        = $UseG1GC
         pretouch    = $true
         zombiebuddy = $isZombieBuddyActive
-        version     = "0.4.6"
+        version     = "0.5.0"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
