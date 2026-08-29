@@ -12,6 +12,7 @@ if %errorlevel% neq 0 (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$f = Get-Content -LiteralPath '%~f0'; $start = 0; for ($i=0; $i -lt $f.Length; $i++) { if ($f[$i] -eq '# __START_POWERSHELL__') { $start = $i + 1; break } }; $ps = ($f[$start..($f.Length - 1)]) -join [Environment]::NewLine; [ScriptBlock]::Create($ps).Invoke()"
+pause
 exit /b %errorlevel%
 
 # __START_POWERSHELL__
@@ -32,6 +33,15 @@ $BackupFolder   = "Installer_Backups"
 $ZomboidLuaDir  = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
 $PzoStatusFile  = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
 $ZomboidModsDir = [System.IO.Path]::Combine($HOME, "Zomboid\mods")
+
+# Guard against game running
+$runningPZ = Get-Process -Name "ProjectZomboid64", "ProjectZomboid32" -ErrorAction SilentlyContinue
+if ($runningPZ) {
+    Write-Host "`n[!] Warning: Project Zomboid is currently running." -ForegroundColor Yellow
+    Write-Host "    Please close Project Zomboid to prevent file permission locks." -ForegroundColor Yellow
+    Write-Host "    Press Enter once the game is closed to continue..." -ForegroundColor Gray
+    Read-Host
+}
 
 if (-not (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue)) {
     New-Item -ItemType Directory -Path $ZomboidLuaDir -Force | Out-Null
@@ -311,7 +321,7 @@ foreach ($cp in $candidateJarPaths) {
 if ($SourceJar) {
     Write-Host "Using local engine package: $SourceJar" -ForegroundColor Gray
 } else {
-    Write-Host "`n[Notice] '$JarFileName' not found locally next to Install.bat." -ForegroundColor Yellow
+    Write-Host "`n[Notice] '$JarFileName' not found locally next to install.bat." -ForegroundColor Yellow
     $downloadTarget = [System.IO.Path]::Combine($ScriptDir, $JarFileName)
     if (Download-PZOGitHubJar $downloadTarget) {
         $SourceJar = $downloadTarget
@@ -338,8 +348,18 @@ if ($isZombieBuddyActive) {
 }
 
 function Apply-PZOConfiguration {
-    $TotalRamBytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
-    $TotalRamGB    = [Math]::Round($TotalRamBytes / 1GB)
+    $TotalRamBytes = 0
+    try {
+        $TotalRamBytes = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory
+    } catch {
+        try {
+            $TotalRamBytes = (Get-WmiObject Win32_ComputerSystem).TotalPhysicalMemory
+        } catch {
+            $TotalRamBytes = 16GB
+        }
+    }
+    $TotalRamGB = [Math]::Round($TotalRamBytes / 1GB)
+    if ($TotalRamGB -lt 4) { $TotalRamGB = 8 }
     Write-Host "Detected System RAM: $TotalRamGB GB" -ForegroundColor Yellow
 
     if (-not (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue)) {
@@ -390,11 +410,12 @@ function Apply-PZOConfiguration {
     }
 
     $StatusPayload = [ordered]@{
-        optimized = $true
-        ram_gb    = [int]$TotalRamGB
-        g1gc      = $UseG1GC
-        pretouch  = $true
+        optimized   = $true
+        ram_gb      = [int]$TotalRamGB
+        g1gc        = $UseG1GC
+        pretouch    = $true
         zombiebuddy = $isZombieBuddyActive
+        version     = "0.4.6"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
@@ -407,11 +428,12 @@ function Apply-PZOConfiguration {
 # ==========================================
 if (Test-Path $InstalledJarPath) {
     Write-Host "`n[!] PZOptimEngine is already installed." -ForegroundColor Yellow
-    Write-Host "1) Update    - Overwrite PZOptimEngine.jar with the new version & refresh config"
+    Write-Host "1) Update    - Overwrite PZOptimEngine.jar with the new version & refresh config [Default]"
     Write-Host "2) Uninstall - Remove the mod and restore original settings"
     Write-Host "3) Cancel"
     
-    $choice = Read-Host "`nEnter choice (1, 2, or 3)"
+    $choice = Read-Host "`nEnter choice (1, 2, or 3, Default: 1)"
+    if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "1" }
 
     switch ($choice) {
         "1" {
@@ -500,4 +522,3 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
 
 Apply-PZOConfiguration
 Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
-
