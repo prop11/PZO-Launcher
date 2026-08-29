@@ -6,24 +6,33 @@ import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 
 public class TelemetryReporter {
-    private static File telemetryFile = null;
+    private static final List<File> telemetryFiles = new ArrayList<>();
 
     static {
         try {
             String userHome = System.getProperty("user.home");
-            File luaDir = new File(userHome, "Zomboid" + File.separator + "Lua");
-            if (!luaDir.exists()) {
-                luaDir.mkdirs();
+            String[] possibleZDirs = new String[]{
+                userHome + File.separator + "Zomboid",
+                userHome + File.separator + "Documents" + File.separator + "Zomboid",
+                userHome + File.separator + "OneDrive" + File.separator + "Documents" + File.separator + "Zomboid"
+            };
+
+            for (String zPath : possibleZDirs) {
+                try {
+                    File luaDir = new File(zPath, "Lua");
+                    if (!luaDir.exists()) luaDir.mkdirs();
+                    telemetryFiles.add(new File(luaDir, "pzo_telemetry.json"));
+                } catch (Throwable ignored) {}
             }
-            telemetryFile = new File(luaDir, "pzo_telemetry.json");
         } catch (Exception ignored) {}
     }
 
     public static void updateTelemetry() {
-        if (telemetryFile == null) return;
+        if (telemetryFiles.isEmpty()) return;
         try {
             Runtime rt = Runtime.getRuntime();
             long maxMem = rt.maxMemory() / (1024 * 1024);
@@ -46,12 +55,15 @@ public class TelemetryReporter {
 
             String json = String.format(
                 "{\"max_mb\": %d, \"used_mb\": %d, \"free_mb\": %d, \"gc_count\": %d, \"gc_pause_avg_ms\": %d, \"threads\": %d, \"cpu_percent\": %.1f, \"intern_pool\": %d, \"gl_skipped\": %d, \"matrix_skipped\": %d, \"uniforms_skipped\": %d}",
-                maxMem, usedMem, freeMem, gcCount, avgPause, Thread.activeCount(), cpuLoad, ResourceInterner.getPoolSize(), GLStateOptimizer.getGlCallsFiltered(), GLStateOptimizer.getMatricesSkipped(), GLStateOptimizer.getUniformsSkipped()
+                maxMem, usedMem, freeMem, gcCount, avgPause, Thread.activeCount(), cpuLoad, ResourceInterner.getPoolSize(),
+                GLStateOptimizer.getGlCallsFiltered(), GLStateOptimizer.getMatricesSkipped(), GLStateOptimizer.getUniformsSkipped()
             );
 
-            FileWriter fw = new FileWriter(telemetryFile, false);
-            fw.write(json);
-            fw.close();
+            for (File tf : telemetryFiles) {
+                try (FileWriter fw = new FileWriter(tf, false)) {
+                    fw.write(json);
+                } catch (Throwable ignored) {}
+            }
         } catch (Exception ignored) {}
     }
 
