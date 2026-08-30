@@ -424,6 +424,7 @@ if not isinstance(existing_args, list):
     existing_args = []
 
 filtered_args = []
+has_lib_path = False
 for arg in existing_args:
     if (not arg.startswith("-Xmx") and 
         not arg.startswith("-Xms") and 
@@ -432,7 +433,16 @@ for arg in existing_args:
         not arg.startswith("-XX:InitiatingHeapOccupancyPercent") and
         not arg.startswith("-XX:G1ReservePercent") and
         not arg.startswith("-XX:+PerfDisableSharedMem")):
+        
+        # Automatically sanitize Windows library path if running on Linux
+        if arg.startswith("-Djava.library.path="):
+            if "win64" in arg:
+                arg = "-Djava.library.path=linux64/:natives/:."
+            has_lib_path = True
         filtered_args.append(arg)
+
+if not has_lib_path:
+    filtered_args.append("-Djava.library.path=linux64/:natives/:.")
 
 pzo_args = [
     f"-Xmx{ram_mb}m",

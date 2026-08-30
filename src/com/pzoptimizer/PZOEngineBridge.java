@@ -1,5 +1,6 @@
 package com.pzoptimizer;
 
+import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -44,7 +45,103 @@ public class PZOEngineBridge {
     public static void purgeRAM() {
         try {
             System.gc();
+            PZOLogger.info("[PZO Bridge] Triggered JVM RAM Purge (System.gc)");
         } catch (Throwable ignored) {}
+    }
+
+    public static File getZomboidDir() {
+        try {
+            String prop = System.getProperty("zomboid.cachedir");
+            if (prop != null && !prop.trim().isEmpty()) {
+                File f = new File(prop.trim());
+                if (f.exists()) return f;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            String home = System.getProperty("user.home");
+            if (home != null) {
+                File f = new File(home, "Zomboid");
+                if (f.exists()) return f;
+            }
+        } catch (Throwable ignored) {}
+        return new File("Zomboid");
+    }
+
+    public static void openLogsFolder() {
+        try {
+            File zDir = getZomboidDir();
+            if (zDir != null && zDir.exists()) {
+                if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.OPEN)) {
+                    java.awt.Desktop.getDesktop().open(zDir);
+                    return;
+                }
+                String os = System.getProperty("os.name", "").toLowerCase();
+                if (os.contains("win")) {
+                    Runtime.getRuntime().exec(new String[]{"explorer.exe", zDir.getAbsolutePath()});
+                } else if (os.contains("mac")) {
+                    Runtime.getRuntime().exec(new String[]{"open", zDir.getAbsolutePath()});
+                } else {
+                    Runtime.getRuntime().exec(new String[]{"xdg-open", zDir.getAbsolutePath()});
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static String getDiagnosticsReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("### Project Zomboid Optimiser - Bug & Crash Diagnostics\n");
+        sb.append("- **PZO Engine Version**: ").append(UpdateChecker.CURRENT_VERSION).append("\n");
+        sb.append("- **Java Runtime**: ").append(System.getProperty("java.version", "Unknown")).append(" (").append(System.getProperty("os.name", "Unknown")).append(" ").append(System.getProperty("os.arch", "")).append(")\n");
+        sb.append("- **Allocated JVM Heap**: ").append(Runtime.getRuntime().maxMemory() / (1024 * 1024)).append(" MB (Used: ").append((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024)).append(" MB)\n");
+        sb.append("- **CPU Logical Cores**: ").append(Runtime.getRuntime().availableProcessors()).append("\n\n");
+
+        File zDir = getZomboidDir();
+        if (zDir != null && zDir.exists()) {
+            File pzoLog = new File(zDir, "Lua/pzo_engine.log");
+            if (pzoLog.exists()) {
+                sb.append("#### `pzo_engine.log`\n```text\n");
+                sb.append(readLastLines(pzoLog, 25));
+                sb.append("\n```\n\n");
+            }
+            File consoleTxt = new File(zDir, "console.txt");
+            if (consoleTxt.exists()) {
+                sb.append("#### `console.txt` (Recent Log Tail & Errors)\n```text\n");
+                sb.append(readLastLines(consoleTxt, 50));
+                sb.append("\n```\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    public static void copyDiagnosticsToClipboard() {
+        try {
+            String report = getDiagnosticsReport();
+            java.awt.datatransfer.StringSelection sel = new java.awt.datatransfer.StringSelection(report);
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(sel, sel);
+            PZOLogger.info("[PZO Bridge] Copied system diagnostics and log tails to OS clipboard");
+        } catch (Throwable ignored) {}
+    }
+
+    private static String readLastLines(File file, int maxLines) {
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
+            long fileLen = raf.length();
+            long pos = Math.max(0, fileLen - 16384);
+            raf.seek(pos);
+            byte[] bytes = new byte[(int) (fileLen - pos)];
+            raf.readFully(bytes);
+            String text = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            String[] lines = text.split("\r?\n");
+            if (lines.length <= maxLines) {
+                return text.trim();
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = lines.length - maxLines; i < lines.length; i++) {
+                sb.append(lines[i]).append("\n");
+            }
+            return sb.toString().trim();
+        } catch (Throwable t) {
+            return "[Log read notice: " + t.getMessage() + "]";
+        }
     }
 
     /**
@@ -210,6 +307,48 @@ public class PZOEngineBridge {
                                             }
                                         );
                                         tableRawset.invoke(pzoTable, "getGlCallsFiltered", getGlFilteredFunc);
+
+                                        // openLogsFolder
+                                        Object openLogsFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    openLogsFolder();
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "openLogsFolder", openLogsFunc);
+
+                                        // copyDiagnosticsToClipboard
+                                        Object copyDiagFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    copyDiagnosticsToClipboard();
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "copyDiagnosticsToClipboard", copyDiagFunc);
+
+                                        // getDiagnosticsReport
+                                        Object getDiagReportFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], getDiagnosticsReport());
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getDiagnosticsReport", getDiagReportFunc);
 
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] JavaFunction proxy warning: " + t.getMessage());
