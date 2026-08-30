@@ -181,6 +181,36 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "purgeRAM", purgeRamFunc);
 
+                                        // getHeapUsedMB
+                                        Object getHeapUsedFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    long usedMB = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024);
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(usedMB));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getHeapUsedMB", getHeapUsedFunc);
+
+                                        // getGlCallsFiltered
+                                        Object getGlFilteredFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    long totalSkipped = GLStateOptimizer.getGlCallsFiltered() + GLStateOptimizer.getUniformsSkipped();
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(totalSkipped));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getGlCallsFiltered", getGlFilteredFunc);
+
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] JavaFunction proxy warning: " + t.getMessage());
                                     }
