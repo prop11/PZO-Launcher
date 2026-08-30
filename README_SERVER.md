@@ -42,17 +42,24 @@ Open `ProjectZomboid64.json` in your File Manager:
    ```json
    "classpath": [
        "PZOServerEngine.jar",
-       ...
-   ]
+       "projectzomboid.jar"
+   ],
    ```
-3. Save the file and restart your server from your host web panel!
+3. Set your `-Xmx` in `vmArgs` to match your server host plan's allocated RAM (e.g. `-Xmx6144m` for 6GB, `-Xmx8192m` for 8GB, `-Xmx16384m` for 16GB).
+4. Save the file and restart your server from your host web panel!
 
 ---
 
-## ⚙️ Recommended Host Startup Parameters (Pterodactyl / Custom Command Line)
+## ⚙️ Recommended Host RAM & Startup Parameters
 
-If your host allows editing custom JVM arguments in the panel Startup tab:
+Adjust `-Xmx` to match your server plan's allocated RAM:
+* **4GB Server Plan**: `-Xms1536m -Xmx3584m`
+* **6GB Server Plan**: `-Xms2048m -Xmx5120m`
+* **8GB Server Plan**: `-Xms2048m -Xmx7168m`
+* **16GB Server Plan**: `-Xms4096m -Xmx14336m`
+* **32GB+ Dedicated Node**: `-Xms8192m -Xmx28672m`
+
+**Recommended JVM Arguments**:
 ```text
--Xms4096m -Xmx16384m -XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=45 -XX:G1ReservePercent=15 -XX:+AlwaysPreTouch -Djava.awt.headless=true -Dzomboid.server=1 --enable-native-access=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
+-XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=45 -XX:G1ReservePercent=15 -Djava.awt.headless=true -Dzomboid.server=1 --enable-native-access=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
 ```
-*(Adjust `-Xmx16384m` to your server's allocated RAM, e.g. `-Xmx32768m` for 32GB).*
