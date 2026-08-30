@@ -1,6 +1,6 @@
 # 🚀 Project Zomboid Optimizer (PZO Launcher & Server Engine Suite)
 
-A high-performance Java engine optimizer, configuration booster, and dedicated server suite engineered for **Project Zomboid (Build 42 & Build 41)** across **Windows, macOS, Linux / Steam Deck, and Dedicated Server Hosts**.
+A high-performance Java engine optimizer, configuration booster, and dedicated server suite engineered for **Project Zomboid (Build 42)** across **Windows, macOS, Linux / Steam Deck, and Dedicated Server Hosts**.
 
 ---
 
