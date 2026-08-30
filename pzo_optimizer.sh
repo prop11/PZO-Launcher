@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.5.3)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.6.0)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -170,7 +170,7 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy.jar and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.5.3+ automatically runs your ZombieBuddy Workshop mods natively!"
+        echo "PZO v0.6.0+ automatically runs your ZombieBuddy Workshop mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
@@ -375,7 +375,7 @@ else
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.5.3+ automatically runs your ZombieBuddy mods natively!"
+        echo "PZO v0.6.0+ automatically runs your ZombieBuddy mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
@@ -389,34 +389,73 @@ else
         echo "[+] Backed up original JSON config -> ${JSON_FILE}.bak"
     fi
 
-    cat <<EOF > "$JSON_FILE"
-{
-    "mainClass": "com/pzoptimizer/PZOEntrypoint",
-    "classpath": [
-        ".",
-        "PZOptimEngine.jar",
-        "projectzomboid.jar"
-    ],
-    "vmArgs": [
-        "-Djava.awt.headless=true",
-        "-Dzomboid.steam=1",
-        "-Dzomboid.znetlog=1",
-        "-Djava.library.path=linux64/;.::natives/",
-        "-Xmx${RAM_MB}m",
-        "-XX:+UseG1GC",
-        "-XX:+PerfDisableSharedMem",
-        "-XX:InitiatingHeapOccupancyPercent=45",
-        "-XX:G1ReservePercent=15",
-        "-XX:+AlwaysPreTouch",
-        "-XX:+UnlockExperimentalVMOptions",
-        "--enable-native-access=ALL-UNNAMED",
-        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
-    ]
-}
+    # Safely update JSON while preserving existing classpath and libraries using Python
+    python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB"
+import sys, json, os
+
+json_file = sys.argv[1]
+alloc_ram = sys.argv[2]
+ram_mb = sys.argv[3]
+
+data = {}
+if os.path.exists(json_file):
+    try:
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+
+# Set optimized main entrypoint
+data["mainClass"] = "com/pzoptimizer/PZOEntrypoint"
+
+# Preserve existing classpath and ensure PZOptimEngine.jar is present
+cp = data.get("classpath", [])
+if not isinstance(cp, list):
+    cp = []
+if "PZOptimEngine.jar" not in cp:
+    cp.insert(0, "PZOptimEngine.jar")
+if "." not in cp:
+    cp.insert(0, ".")
+data["classpath"] = cp
+
+# Filter and update vmArgs
+existing_args = data.get("vmArgs", [])
+if not isinstance(existing_args, list):
+    existing_args = []
+
+filtered_args = []
+for arg in existing_args:
+    if (not arg.startswith("-Xmx") and 
+        not arg.startswith("-Xms") and 
+        not arg.startswith("-XX:+UseG1GC") and 
+        not arg.startswith("-XX:+AlwaysPreTouch") and
+        not arg.startswith("-XX:InitiatingHeapOccupancyPercent") and
+        not arg.startswith("-XX:G1ReservePercent") and
+        not arg.startswith("-XX:+PerfDisableSharedMem")):
+        filtered_args.append(arg)
+
+pzo_args = [
+    f"-Xmx{ram_mb}m",
+    "-XX:+UseG1GC",
+    "-XX:+PerfDisableSharedMem",
+    "-XX:InitiatingHeapOccupancyPercent=45",
+    "-XX:G1ReservePercent=15",
+    "-XX:+AlwaysPreTouch",
+    "-XX:+UnlockExperimentalVMOptions",
+    "--enable-native-access=ALL-UNNAMED",
+    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+]
+
+data["vmArgs"] = filtered_args + pzo_args
+
+with open(json_file, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=4)
+
+print("[+] Successfully updated ProjectZomboid64.json preserving all game libraries.")
 EOF
-    echo "[+] Updated ProjectZomboid64.json with Java 17 / B42 heap & entrypoint."
+    echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.4.6\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.6.0\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 
