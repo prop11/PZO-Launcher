@@ -71,6 +71,7 @@ $Json5OrLess = @"
         "-Djava.library.path=win64/;.",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
+        "-XX:+PerfDisableSharedMem",
         "-XX:+UseNUMA",
         "-XX:+AlwaysPreTouch"
     ],
@@ -107,6 +108,7 @@ $Json6To12 = @"
         "-Djava.library.path=win64/;.",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
+        "-XX:+PerfDisableSharedMem",
         "-XX:+UseNUMA",
         "-XX:+AlwaysPreTouch"
     ],
@@ -143,6 +145,7 @@ $Json13To20 = @"
         "-Djava.library.path=win64/;.",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
+        "-XX:+PerfDisableSharedMem",
         "-XX:+UseNUMA",
         "-XX:+AlwaysPreTouch"
     ],
@@ -178,7 +181,9 @@ $JsonAbove20 = @"
         "-Djava.library.path=win64/;.",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
+        "-XX:+PerfDisableSharedMem",
         "-XX:+UseG1GC",
+        "-XX:+PerfDisableSharedMem",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
         "-XX:+AlwaysPreTouch"

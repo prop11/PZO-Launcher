@@ -233,6 +233,7 @@ for cp_key in ["JVMClassPath", "ClassPath"]:
 jvm_args = [
     "-Xmx${RAM_MB}m",
     "-XX:+UseG1GC",
+        "-XX:+PerfDisableSharedMem",
     "-XX:InitiatingHeapOccupancyPercent=45",
     "-XX:G1ReservePercent=15",
     "-XX:+AlwaysPreTouch",
@@ -272,6 +273,7 @@ if "JVMOptions" in pl and isinstance(pl["JVMOptions"], dict):
 jvm_args = [
     "-Xmx${RAM_MB}m",
     "-XX:+UseG1GC",
+        "-XX:+PerfDisableSharedMem",
     "-XX:InitiatingHeapOccupancyPercent=45",
     "-XX:G1ReservePercent=15",
     "-XX:+AlwaysPreTouch",
@@ -402,6 +404,7 @@ else
         "-Djava.library.path=linux64/;.::natives/",
         "-Xmx${RAM_MB}m",
         "-XX:+UseG1GC",
+        "-XX:+PerfDisableSharedMem",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
         "-XX:+AlwaysPreTouch",

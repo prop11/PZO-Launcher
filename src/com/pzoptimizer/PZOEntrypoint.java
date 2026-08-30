@@ -46,6 +46,8 @@ public class PZOEntrypoint {
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");
+        LogRotationGuard.checkAndRotateLogs();
+        NettyBufferPooler.apply();
         DirectMemoryTuner.initialize();
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
