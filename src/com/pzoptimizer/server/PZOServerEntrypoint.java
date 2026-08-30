@@ -9,7 +9,7 @@ import java.lang.reflect.Method;
  * before handing execution over to zombie.network.GameServer.
  */
 public class PZOServerEntrypoint {
-    public static final String SERVER_VERSION = "0.6.1";
+    public static final String SERVER_VERSION = "0.7.0";
 
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
@@ -28,6 +28,10 @@ public class PZOServerEntrypoint {
         int cores = Runtime.getRuntime().availableProcessors();
         long maxHeapMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
         PZOServerLogger.info("Host Server Resources: " + cores + " CPU Cores | Max JVM Heap: " + maxHeapMB + " MB");
+
+        // 1.5. HotSpot JIT & Engine Architecture Tuner
+        com.pzoptimizer.HotSpotJITCompilerTuner.tuneRuntimeProperties();
+        com.pzoptimizer.EngineFeaturesTuner.initializeEngineFeatures();
 
         // 2. Initialize Server Network Buffer Pooler
         com.pzoptimizer.PZOEngineBridge.initialize();
