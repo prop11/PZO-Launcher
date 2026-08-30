@@ -18,6 +18,7 @@ public class PZOptimAgent {
             inst.addTransformer(new EngineTransformer(), true);
         } catch (Throwable ignored) {}
 
+        PZOEngineBridge.initialize();
         HighPrecisionTimer.initialize();
         StreamBufferBooster.applyStreamTweaks();
         SaveGameStreamBooster.tuneSaveEngine();

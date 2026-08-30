@@ -30,36 +30,19 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
-        // Ensure critical Zomboid user directories exist & write live pzo_status.json
+        // Ensure critical Zomboid user directories exist & write live pzo_status.json across all discovered drives & paths
         try {
-            String userHome = System.getProperty("user.home");
-            if (userHome != null) {
-                File zDir = new File(userHome, "Zomboid");
-                File luaDir = new File(zDir, "Lua");
-                File[] criticalDirs = new File[]{
-                    new File(zDir, "mods"),
-                    luaDir,
-                    new File(zDir, "db"),
-                    new File(zDir, "Server")
-                };
-                for (File cd : criticalDirs) {
-                    if (!cd.exists()) {
-                        cd.mkdirs();
-                    }
-                }
-                
-                // Write live pzo_status.json so in-game Lua UI instantly recognizes active agent
-                File statusFile = new File(luaDir, "pzo_status.json");
-                long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
-                int ramGb = Math.max(2, (int) Math.round(maxMemMB / 1024.0));
-                String json = String.format("{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\"}",
-                    ramGb, UpdateChecker.CURRENT_VERSION);
-                java.nio.file.Files.writeString(statusFile.toPath(), json, java.nio.charset.StandardCharsets.UTF_8);
-                PZOLogger.info("Written live engine status bridge: " + statusFile.getAbsolutePath());
-            }
+            TelemetryReporter.refreshDiscoveredDirectories(args);
+            long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
+            int ramGb = Math.max(2, (int) Math.round(maxMemMB / 1024.0));
+            String json = String.format("{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\"}",
+                ramGb, UpdateChecker.CURRENT_VERSION);
+            TelemetryReporter.writeStatusFile(json);
+            PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB)");
         } catch (Throwable ignored) {}
 
         // 1. Core Memory & Hardware Optimization Modules
+        PZOEngineBridge.initialize();
         DirectMemoryTuner.initialize();
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
