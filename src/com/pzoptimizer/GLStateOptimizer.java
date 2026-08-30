@@ -27,7 +27,16 @@ public class GLStateOptimizer {
     private static int chunkDepthLoc = -2;
     private static float cachedChunkDepth = Float.NaN;
 
-    // 4. Skinned 3D Model Matrix Uniform Cache (1024-entry shader table)
+    // 4. General Shader Uniform State Caching (256-entry uniform table)
+    private static final int UNIFORM_TABLE_SIZE = 256;
+    private static final float[] cachedUniform1f = new float[UNIFORM_TABLE_SIZE];
+    private static final int[] cachedUniform1i = new int[UNIFORM_TABLE_SIZE];
+    private static final float[][] cachedUniform4f = new float[UNIFORM_TABLE_SIZE][4];
+    private static final boolean[] uniform1fValid = new boolean[UNIFORM_TABLE_SIZE];
+    private static final boolean[] uniform1iValid = new boolean[UNIFORM_TABLE_SIZE];
+    private static final boolean[] uniform4fValid = new boolean[UNIFORM_TABLE_SIZE];
+
+    // 5. Skinned 3D Model Matrix Uniform Cache (1024-entry shader table)
     public static class ShaderMatrixState {
         public int uniformLoc = -2;
         public float[] lastMatrix = new float[16];
@@ -105,6 +114,40 @@ public class GLStateOptimizer {
         return true;
     }
 
+    public static boolean shouldSetUniform1f(int location, float val) {
+        if (location < 0 || location >= UNIFORM_TABLE_SIZE) return true;
+        if (uniform1fValid[location] && cachedUniform1f[location] == val) {
+            uniformsSkipped.incrementAndGet();
+            return false;
+        }
+        cachedUniform1f[location] = val;
+        uniform1fValid[location] = true;
+        return true;
+    }
+
+    public static boolean shouldSetUniform1i(int location, int val) {
+        if (location < 0 || location >= UNIFORM_TABLE_SIZE) return true;
+        if (uniform1iValid[location] && cachedUniform1i[location] == val) {
+            uniformsSkipped.incrementAndGet();
+            return false;
+        }
+        cachedUniform1i[location] = val;
+        uniform1iValid[location] = true;
+        return true;
+    }
+
+    public static boolean shouldSetUniform4f(int location, float x, float y, float z, float w) {
+        if (location < 0 || location >= UNIFORM_TABLE_SIZE) return true;
+        float[] c = cachedUniform4f[location];
+        if (uniform4fValid[location] && c[0] == x && c[1] == y && c[2] == z && c[3] == w) {
+            uniformsSkipped.incrementAndGet();
+            return false;
+        }
+        c[0] = x; c[1] = y; c[2] = z; c[3] = w;
+        uniform4fValid[location] = true;
+        return true;
+    }
+
     public static boolean shouldUpdateMatrix(int shaderId, float[] newMatrix) {
         if (shaderId < 0 || shaderId >= shaderCache.length || newMatrix == null || newMatrix.length < 16) {
             return true;
@@ -149,6 +192,11 @@ public class GLStateOptimizer {
         lastDepthFunc = -1;
         lastDepthMask = -1;
         cachedChunkDepth = Float.NaN;
+        for (int i = 0; i < UNIFORM_TABLE_SIZE; i++) {
+            uniform1fValid[i] = false;
+            uniform1iValid[i] = false;
+            uniform4fValid[i] = false;
+        }
     }
 
     public static long getGlCallsFiltered() { return glCallsFiltered.get(); }
