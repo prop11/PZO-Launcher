@@ -20,6 +20,7 @@
         "-Xms2048m",
         "-Xmx8192m",
         "-XX:+UseG1GC",
+        "-XX:+PerfDisableSharedMem",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
         "-Djava.awt.headless=true",
