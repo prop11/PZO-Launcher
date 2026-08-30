@@ -30,6 +30,7 @@ public class PZOServerEntrypoint {
         PZOServerLogger.info("Host Server Resources: " + cores + " CPU Cores | Max JVM Heap: " + maxHeapMB + " MB");
 
         // 2. Initialize Server Network Buffer Pooler
+        com.pzoptimizer.PZOEngineBridge.initialize();
         ServerNetworkTuner.apply();
 
         // 3. Initialize Multi-Threaded Zombie Simulation

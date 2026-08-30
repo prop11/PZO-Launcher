@@ -14,26 +14,101 @@ import java.util.List;
  * Streams real-time TPS, memory metrics, GC pause latencies, and thread states for server admins and Discord bots.
  */
 public class ServerTelemetryBridge {
-    private static final List<File> telemetryFiles = new ArrayList<>();
+    private static final java.util.Set<File> telemetryFiles = java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
 
     static {
-        try {
-            String userHome = System.getProperty("user.home");
-            String[] possibleZDirs = new String[]{
-                userHome + File.separator + "Zomboid",
-                userHome + File.separator + "Documents" + File.separator + "Zomboid",
-                userHome + File.separator + "OneDrive" + File.separator + "Documents" + File.separator + "Zomboid",
-                "." + File.separator + "Zomboid",
-                "."
-            };
+        refreshDiscoveredDirectories(null);
+    }
 
-            for (String zPath : possibleZDirs) {
+    public static void refreshDiscoveredDirectories(String[] cliArgs) {
+        try {
+            if (cliArgs != null) {
+                for (int i = 0; i < cliArgs.length; i++) {
+                    String arg = cliArgs[i];
+                    if (arg != null) {
+                        if (arg.startsWith("-cachedir=")) {
+                            registerZomboidDir(new File(arg.substring("-cachedir=".length()).trim()));
+                        } else if (arg.equalsIgnoreCase("-cachedir") && i + 1 < cliArgs.length) {
+                            registerZomboidDir(new File(cliArgs[i + 1].trim()));
+                        }
+                    }
+                }
+            }
+
+            String propCache = System.getProperty("zomboid.cachedir");
+            if (propCache != null && !propCache.trim().isEmpty()) {
+                registerZomboidDir(new File(propCache.trim()));
+            }
+
+            String envCache = System.getenv("ZOMBOID_CACHEDIR");
+            if (envCache != null && !envCache.trim().isEmpty()) {
+                registerZomboidDir(new File(envCache.trim()));
+            }
+
+            String userHome = System.getProperty("user.home");
+            if (userHome != null) {
+                registerZomboidDir(new File(userHome, "Zomboid"));
+                registerZomboidDir(new File(userHome, "Documents" + File.separator + "Zomboid"));
+                registerZomboidDir(new File(userHome, "OneDrive" + File.separator + "Documents" + File.separator + "Zomboid"));
+            }
+
+            String userProfile = System.getenv("USERPROFILE");
+            if (userProfile != null && !userProfile.equalsIgnoreCase(userHome)) {
+                registerZomboidDir(new File(userProfile, "Zomboid"));
+                registerZomboidDir(new File(userProfile, "Documents" + File.separator + "Zomboid"));
+            }
+
+            registerZomboidDir(new File("Zomboid"));
+            registerZomboidDir(new File("."));
+
+            try {
+                File[] roots = File.listRoots();
+                if (roots != null) {
+                    for (File r : roots) {
+                        if (r != null && r.exists()) {
+                            File zRoot = new File(r, "Zomboid");
+                            if (zRoot.exists()) registerZomboidDir(zRoot);
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            queryZomboidFileSystem();
+        } catch (Throwable ignored) {}
+    }
+
+    private static void queryZomboidFileSystem() {
+        try {
+            Class<?> zfsClass = Class.forName("zombie.ZomboidFileSystem");
+            Object instance = zfsClass.getField("instance").get(null);
+            if (instance != null) {
                 try {
-                    File luaDir = new File(zPath, "Lua");
-                    if (!luaDir.exists()) luaDir.mkdirs();
-                    telemetryFiles.add(new File(luaDir, "pzo_server_telemetry.json"));
+                    Method getLuaDir = zfsClass.getMethod("getLuaDir");
+                    Object luaDir = getLuaDir.invoke(instance);
+                    if (luaDir instanceof String) {
+                        File ld = new File((String) luaDir);
+                        if (!ld.exists()) ld.mkdirs();
+                        telemetryFiles.add(new File(ld, "pzo_server_telemetry.json"));
+                    }
+                } catch (Throwable ignored) {}
+
+                try {
+                    Method getCacheDir = zfsClass.getMethod("getCacheDir");
+                    Object cacheDir = getCacheDir.invoke(instance);
+                    if (cacheDir instanceof String) {
+                        registerZomboidDir(new File((String) cacheDir));
+                    }
                 } catch (Throwable ignored) {}
             }
+        } catch (Throwable ignored) {}
+    }
+
+    public static void registerZomboidDir(File zDir) {
+        if (zDir == null) return;
+        try {
+            File luaDir = new File(zDir, "Lua");
+            if (!luaDir.exists()) luaDir.mkdirs();
+            telemetryFiles.add(new File(luaDir, "pzo_server_telemetry.json"));
         } catch (Throwable ignored) {}
     }
 
