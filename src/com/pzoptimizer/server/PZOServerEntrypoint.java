@@ -32,6 +32,7 @@ public class PZOServerEntrypoint {
         // 1.5. HotSpot JIT & Engine Architecture Tuner
         com.pzoptimizer.HotSpotJITCompilerTuner.tuneRuntimeProperties();
         com.pzoptimizer.EngineFeaturesTuner.initializeEngineFeatures();
+        com.pzoptimizer.WorldStreamerBooster.startDaemon();
 
         // 2. Initialize Server Network Buffer Pooler
         com.pzoptimizer.PZOEngineBridge.initialize();

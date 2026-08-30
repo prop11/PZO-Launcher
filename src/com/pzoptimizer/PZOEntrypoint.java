@@ -47,6 +47,7 @@ public class PZOEntrypoint {
         // 1. Core Memory & Hardware Optimization Modules
         PZOEngineBridge.initialize();
         EngineFeaturesTuner.initializeEngineFeatures();
+        WorldStreamerBooster.startDaemon();
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");
