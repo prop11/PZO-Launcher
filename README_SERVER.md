@@ -1,6 +1,6 @@
 # 🚀 Project Zomboid Dedicated Server Optimizer (PZO Server Engine)
 
-**PZO Server Engine (`PZOServerEngine.jar`)** is a dedicated server optimization suite designed specifically for **3rd-Party Hosted Servers & Dedicated Server Nodes** (G-Portal, Nitrado, GTXGaming, Indifferent Broccoli, BisectHosting, Pterodactyl panels, Hetzner, OVH, Docker).
+**PZO Server Engine (`PZOServerEngine.jar`)** is a dedicated server optimization suite designed specifically for **3rd-Party Hosted Servers & Dedicated Server Nodes** (Indifferent Broccoli, G-Portal, Nitrado, GTXGaming, BisectHosting, Pterodactyl panels, Hetzner, OVH, Docker).
 
 ---
 
@@ -26,14 +26,14 @@
 
 ---
 
-## 📦 2-Step 3rd-Party Host Installation (FTP / Web Panel)
+## 📦 3rd-Party Host Installation (FTP / Web Panel)
 
 ### Step 1: Upload `PZOServerEngine.jar`
 Using your hosting panel's **File Manager** or **SFTP/FTP client** (FileZilla / WinSCP):
-1. Upload **`PZOServerEngine.jar`** into your server's root directory (the same folder containing `ProjectZomboid64.json` / `StartServer64.bat` / `projectzomboid.jar`).
+1. Upload **`PZOServerEngine.jar`** into your server's root directory (`/project-zomboid/` or the folder containing `ProjectZomboid64.json`).
 
 ### Step 2: Configure `ProjectZomboid64.json`
-Open `ProjectZomboid64.json` in your File Manager:
+Open `ProjectZomboid64.json` in your host's File Manager:
 1. Change `"mainClass"` to:
    ```json
    "mainClass": "com/pzoptimizer/server/PZOServerEntrypoint",
@@ -42,15 +42,40 @@ Open `ProjectZomboid64.json` in your File Manager:
    ```json
    "classpath": [
        "PZOServerEngine.jar",
-       "projectzomboid.jar"
+       "java/.",
+       "java/projectzomboid.jar"
    ],
    ```
-3. Set your `-Xmx` in `vmArgs` to match your server host plan's allocated RAM (e.g. `-Xmx6144m` for 6GB, `-Xmx8192m` for 8GB, `-Xmx16384m` for 16GB).
+3. Ensure your `vmArgs` include:
+   ```json
+   "-Djava.awt.headless=true",
+   "-Dzomboid.server=1",
+   "-Dzomboid.steam=1",
+   "-Djava.library.path=linux64/:natives/:."
+   ```
 4. Save the file and restart your server from your host web panel!
 
 ---
 
-## ⚙️ Recommended Host RAM & Startup Parameters
+## 🐧 Linux / Docker / Indifferent Broccoli / Pterodactyl Note
+
+If you see:
+```text
+[S_API] SteamAPI_Init(): Failed to load module '/home/steam/.steam/sdk64/steamclient.so'
+Fatal Error: Steam must be running to play this game (SteamAPI_Init() failed)
+```
+This is a standard SteamCMD Linux requirement. SteamCMD downloads `steamclient.so` to the game's `linux64/` directory, but the Linux C++ launcher searches for it in `~/.steam/sdk64/`.
+
+**To resolve on Linux / SteamCMD**:
+In your server terminal or startup command, run:
+```bash
+mkdir -p ~/.steam/sdk64 && cp -f /project-zomboid/linux64/steamclient.so ~/.steam/sdk64/
+```
+*(Or relative to game folder: `mkdir -p ~/.steam/sdk64 && cp -f linux64/steamclient.so ~/.steam/sdk64/`)*
+
+---
+
+## ⚙️ Recommended Host RAM Sizing
 
 Adjust `-Xmx` to match your server plan's allocated RAM:
 * **4GB Server Plan**: `-Xms1536m -Xmx3584m`
@@ -58,8 +83,3 @@ Adjust `-Xmx` to match your server plan's allocated RAM:
 * **8GB Server Plan**: `-Xms2048m -Xmx7168m`
 * **16GB Server Plan**: `-Xms4096m -Xmx14336m`
 * **32GB+ Dedicated Node**: `-Xms8192m -Xmx28672m`
-
-**Recommended JVM Arguments**:
-```text
--XX:+UseG1GC -XX:InitiatingHeapOccupancyPercent=45 -XX:G1ReservePercent=15 -Djava.awt.headless=true -Dzomboid.server=1 --enable-native-access=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
-```
