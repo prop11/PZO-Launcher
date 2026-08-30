@@ -56,7 +56,7 @@ public class UpdateDialog {
                 "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);" +
                 "$f.ForeColor=[Drawing.Color]::White;" +
                 "$t=New-Object Windows.Forms.Label;" +
-                "$t.Text='⚡ Project Zomboid Optimiser Update Available';" +
+                "$t.Text='[!] Project Zomboid Optimiser Update Available';" +
                 "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
                 "$t.ForeColor=[Drawing.Color]::FromArgb(80,220,100);" +
                 "$t.Location=New-Object Drawing.Point(20,15);$t.Size=New-Object Drawing.Size(430,25);$f.Controls.Add($t);" +
@@ -100,7 +100,7 @@ public class UpdateDialog {
     private static String showMacDialog(String latestVersion) {
         try {
             String script = String.format(
-                "set r to button returned of (display dialog \"⚡ A newer release of Project Zomboid Optimiser is ready.\\n\\nInstalled Version: v%s\\nLatest Available: v%s\" " +
+                "set r to button returned of (display dialog \"[!] A newer release of Project Zomboid Optimiser is ready.\\n\\nInstalled Version: v%s\\nLatest Available: v%s\" " +
                 "with title \"PZO Engine - Update Available\" buttons {\"Don't Remind Me\", \"Skip\", \"Update Now\"} default button \"Update Now\" with icon note)\n" +
                 "return r",
                 UpdateChecker.CURRENT_VERSION, latestVersion
@@ -123,7 +123,7 @@ public class UpdateDialog {
         try {
             Process p = new ProcessBuilder("zenity", "--question",
                 "--title=PZO Engine - Update Available",
-                "--text=⚡ A newer release of Project Zomboid Optimiser is ready.\n\nInstalled Version: v" + UpdateChecker.CURRENT_VERSION + "\nLatest Available: v" + latestVersion + "\n\nWould you like to update now?",
+                "--text=[!] A newer release of Project Zomboid Optimiser is ready.\n\nInstalled Version: v" + UpdateChecker.CURRENT_VERSION + "\nLatest Available: v" + latestVersion + "\n\nWould you like to update now?",
                 "--ok-label=Update Now", "--cancel-label=Skip / Launch Game",
                 "--extra-button=Don't Remind Me").start();
             
@@ -141,7 +141,7 @@ public class UpdateDialog {
         try {
             Process p = new ProcessBuilder("kdialog",
                 "--title", "PZO Engine - Update Available",
-                "--yesno", "⚡ A newer release of Project Zomboid Optimiser is ready.\n\nInstalled Version: v" + UpdateChecker.CURRENT_VERSION + "\nLatest Available: v" + latestVersion + "\n\nWould you like to update now?",
+                "--yesno", "[!] A newer release of Project Zomboid Optimiser is ready.\n\nInstalled Version: v" + UpdateChecker.CURRENT_VERSION + "\nLatest Available: v" + latestVersion + "\n\nWould you like to update now?",
                 "--yes-label", "Update Now", "--no-label", "Skip / Launch Game").start();
             if (p.waitFor() == 0) return "UPDATE";
             return "SKIP";
