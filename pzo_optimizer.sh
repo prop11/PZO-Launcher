@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.6.0)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.6.1)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -170,7 +170,7 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy.jar and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.6.0+ automatically runs your ZombieBuddy Workshop mods natively!"
+        echo "PZO v0.6.1+ automatically runs your ZombieBuddy Workshop mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
@@ -375,7 +375,7 @@ else
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.6.0+ automatically runs your ZombieBuddy mods natively!"
+        echo "PZO v0.6.1+ automatically runs your ZombieBuddy mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
@@ -455,7 +455,7 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.6.0\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.6.1\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 
