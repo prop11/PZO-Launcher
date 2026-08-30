@@ -17,12 +17,11 @@
         "java/uncommons-maths-1.2.3.jar"
     ],
     "vmArgs": [
-        "-Xms4096m",
-        "-Xmx16384m",
+        "-Xms2048m",
+        "-Xmx8192m",
         "-XX:+UseG1GC",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
-        "-XX:+AlwaysPreTouch",
         "-Djava.awt.headless=true",
         "-Dzomboid.server=1",
         "--enable-native-access=ALL-UNNAMED",
