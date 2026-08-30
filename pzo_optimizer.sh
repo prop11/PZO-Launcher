@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.5.0)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.5.3)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -170,7 +170,7 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy.jar and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.5.0+ automatically runs your ZombieBuddy Workshop mods natively!"
+        echo "PZO v0.5.3+ automatically runs your ZombieBuddy Workshop mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
@@ -373,7 +373,7 @@ else
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.5.0+ automatically runs your ZombieBuddy mods natively!"
+        echo "PZO v0.5.3+ automatically runs your ZombieBuddy mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
