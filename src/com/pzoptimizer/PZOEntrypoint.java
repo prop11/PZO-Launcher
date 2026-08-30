@@ -62,13 +62,7 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on StreamBufferBooster: " + t.getMessage());
         }
 
-        // 2. HighPrecisionTimer (1.0ms timer locking)
-        try {
-            HighPrecisionTimer.initialize();
-            PZOLogger.success("HighPrecisionTimer active (Windows 1.0ms timer resolution locked)");
-        } catch (Throwable t) {
-            PZOLogger.warn("Non-fatal notice on HighPrecisionTimer: " + t.getMessage());
-        }
+
 
         // 3. FastMath & VectorPool zero-allocation caches
         try {
