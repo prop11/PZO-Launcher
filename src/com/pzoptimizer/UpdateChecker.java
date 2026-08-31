@@ -6,9 +6,16 @@ import java.io.FileWriter;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * PZO Multi-Channel Update Checker.
+ * Supports strict channel isolation between Stable (releases/latest) and Beta/Unstable (releases list).
+ * 100% pure Java with zero external dependencies.
+ */
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "0.8.0";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
@@ -19,16 +26,20 @@ public class UpdateChecker {
     public static class UpdateResult {
         public boolean hasUpdate = false;
         public String latestVersion = CURRENT_VERSION;
+        public String tagName = "";
         public String downloadUrl = DEFAULT_JAR_DOWNLOAD_URL;
         public boolean isBeta = false;
+        public String channel = "Stable";
     }
 
     public static UpdateResult checkForUpdatesSync(int timeoutMs) {
         UpdateResult res = new UpdateResult();
         boolean betaOptIn = PZOConfig.isBetaOptIn();
         res.isBeta = betaOptIn;
+        res.channel = betaOptIn ? "Beta / Unstable" : "Stable";
 
         try {
+            // Beta opt-in queries the full releases list; Stable queries /releases/latest
             String apiUrl = betaOptIn ? GITHUB_ALL_RELEASES_API_URL : GITHUB_LATEST_API_URL;
             URL url = new URL(apiUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -40,7 +51,7 @@ public class UpdateChecker {
 
             int code = conn.getResponseCode();
             if (code != 200) {
-                writeStatus(false, CURRENT_VERSION);
+                writeStatus(false, CURRENT_VERSION, res.channel);
                 return res;
             }
 
@@ -53,31 +64,57 @@ public class UpdateChecker {
             in.close();
 
             String json = response.toString().trim();
-            String releaseName = null;
-            String tagName = null;
-            String downloadUrl = DEFAULT_JAR_DOWNLOAD_URL;
+            String selectedReleaseJson = null;
 
-            if (betaOptIn && json.startsWith("[")) {
-                // Parse releases array: look for releases tagged with unstable / beta or the newest pre-release
-                int firstObjEnd = json.indexOf("},");
-                String firstReleaseJson = firstObjEnd != -1 ? json.substring(0, firstObjEnd + 1) : json;
+            if (json.startsWith("[")) {
+                // Parse array of releases
+                List<String> releases = splitJsonArrayObjects(json);
+                for (String relJson : releases) {
+                    boolean isDraft = extractJsonBooleanField(relJson, "draft");
+                    if (isDraft) continue;
 
-                // Scan through releases to find unstable/beta release or top release
-                releaseName = extractJsonField(firstReleaseJson, "name");
-                tagName = extractJsonField(firstReleaseJson, "tag_name");
-                
-                String jarAssetUrl = extractDownloadUrlForAsset(firstReleaseJson, "PZOptimEngine.jar");
-                if (jarAssetUrl != null) {
-                    downloadUrl = jarAssetUrl;
+                    boolean isPrerelease = extractJsonBooleanField(relJson, "prerelease");
+                    String tag = extractJsonField(relJson, "tag_name");
+                    String name = extractJsonField(relJson, "name");
+                    boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
+
+                    if (!betaOptIn) {
+                        // NORMAL (STABLE) USER: Strictly reject all prereleases and unstable/beta tagged builds
+                        if (isPrerelease || hasUnstableTag) {
+                            continue;
+                        }
+                        selectedReleaseJson = relJson;
+                        break;
+                    } else {
+                        // BETA USER: Accept prereleases, unstable tags, or top release
+                        selectedReleaseJson = relJson;
+                        break;
+                    }
                 }
-            } else {
-                releaseName = extractJsonField(json, "name");
-                tagName = extractJsonField(json, "tag_name");
-                String jarAssetUrl = extractDownloadUrlForAsset(json, "PZOptimEngine.jar");
-                if (jarAssetUrl != null) {
-                    downloadUrl = jarAssetUrl;
+            } else if (json.startsWith("{")) {
+                // Single release object (e.g. from /releases/latest)
+                boolean isPrerelease = extractJsonBooleanField(json, "prerelease");
+                String tag = extractJsonField(json, "tag_name");
+                String name = extractJsonField(json, "name");
+                boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
+
+                // Safety guard: If normal user somehow received an unstable release, reject it
+                if (!betaOptIn && (isPrerelease || hasUnstableTag)) {
+                    writeStatus(false, CURRENT_VERSION, res.channel);
+                    return res;
                 }
+
+                selectedReleaseJson = json;
             }
+
+            if (selectedReleaseJson == null) {
+                writeStatus(false, CURRENT_VERSION, res.channel);
+                return res;
+            }
+
+            String releaseName = extractJsonField(selectedReleaseJson, "name");
+            String tagName = extractJsonField(selectedReleaseJson, "tag_name");
+            String jarAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, "PZOptimEngine.jar");
 
             String latestVersion = extractVersionNumber(releaseName);
             if (latestVersion == null) {
@@ -91,16 +128,70 @@ public class UpdateChecker {
             }
 
             boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
-            writeStatus(hasUpdate, latestVersion);
+            String downloadUrl = (jarAssetUrl != null && !jarAssetUrl.isEmpty()) ? jarAssetUrl : DEFAULT_JAR_DOWNLOAD_URL;
+
+            writeStatus(hasUpdate, latestVersion, res.channel);
 
             res.hasUpdate = hasUpdate;
             res.latestVersion = latestVersion;
+            res.tagName = tagName != null ? tagName : "";
             res.downloadUrl = downloadUrl;
             return res;
         } catch (Exception e) {
-            writeStatus(false, CURRENT_VERSION);
+            writeStatus(false, CURRENT_VERSION, res.channel);
             return res;
         }
+    }
+
+    /**
+     * Identifies tags or release titles denoting unstable/beta/preview builds.
+     */
+    public static boolean isUnstableIdentifier(String text) {
+        if (text == null || text.isEmpty()) return false;
+        String lower = text.toLowerCase();
+        return lower.contains("unstable") || lower.contains("beta") || lower.contains("alpha")
+            || lower.contains("rc") || lower.contains("nightly") || lower.contains("dev") || lower.contains("preview");
+    }
+
+    private static List<String> splitJsonArrayObjects(String jsonArray) {
+        List<String> list = new ArrayList<>();
+        int depth = 0;
+        int start = -1;
+        boolean inQuote = false;
+
+        for (int i = 0; i < jsonArray.length(); i++) {
+            char c = jsonArray.charAt(i);
+            if (c == '\"' && (i == 0 || jsonArray.charAt(i - 1) != '\\')) {
+                inQuote = !inQuote;
+            } else if (!inQuote) {
+                if (c == '{') {
+                    if (depth == 0) start = i;
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0 && start != -1) {
+                        list.add(jsonArray.substring(start, i + 1));
+                        start = -1;
+                    }
+                }
+            }
+        }
+        return list;
+    }
+
+    private static boolean extractJsonBooleanField(String json, String fieldName) {
+        String key = "\"" + fieldName + "\":";
+        int idx = json.indexOf(key);
+        if (idx == -1) {
+            key = "\"" + fieldName + "\": ";
+            idx = json.indexOf(key);
+        }
+        if (idx == -1) return false;
+        int start = idx + key.length();
+        while (start < json.length() && Character.isWhitespace(json.charAt(start))) {
+            start++;
+        }
+        return json.startsWith("true", start);
     }
 
     private static String extractDownloadUrlForAsset(String json, String assetName) {
@@ -162,7 +253,7 @@ public class UpdateChecker {
         }
     }
 
-    private static void writeStatus(boolean hasUpdate, String latestVer) {
+    private static void writeStatus(boolean hasUpdate, String latestVer, String channel) {
         try {
             String userHome = System.getProperty("user.home");
             if (userHome == null) return;
@@ -170,8 +261,8 @@ public class UpdateChecker {
             if (!luaDir.exists()) luaDir.mkdirs();
 
             File updateFile = new File(luaDir, "pzo_update.json");
-            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"beta_channel\": %b}",
-                hasUpdate, CURRENT_VERSION, latestVer, PZOConfig.isBetaOptIn());
+            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"channel\": \"%s\", \"beta_opt_in\": %b}",
+                hasUpdate, CURRENT_VERSION, latestVer, channel, PZOConfig.isBetaOptIn());
 
             try (FileWriter fw = new FileWriter(updateFile, false)) {
                 fw.write(json);
