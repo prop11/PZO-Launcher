@@ -465,13 +465,13 @@ public class PZOEngineBridge {
                                             Field threadField = lmClass.getField("thread");
                                             Object thread = threadField.get(null);
                                             if (caller != null && thread != null) {
-                                                Method pcallMethod = caller.getClass().getMethod("pcall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Class.forName("se.krka.kahlua.vm.LuaClosure"));
-                                                pcallMethod.invoke(caller, thread, closure);
-                                                PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua");
+                                                Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
+                                                protCall.invoke(caller, thread, closure, new Object[0]);
+                                                PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
                                             }
                                         }
                                     } catch (Throwable t) {
-                                        PZOLogger.info("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
+                                        PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
                                     }
                                 }
                             }
