@@ -29,6 +29,9 @@ public class PZOServerEntrypoint {
         long maxHeapMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
         PZOServerLogger.info("Host Server Resources: " + cores + " CPU Cores | Max JVM Heap: " + maxHeapMB + " MB");
 
+        // 1.2. Automatic Linux Dedicated Server Steam Native Sanitizer
+        LinuxSteamServerSanitizer.sanitize();
+
         // 1.5. HotSpot JIT & Engine Architecture Tuner
         com.pzoptimizer.HotSpotJITCompilerTuner.tuneRuntimeProperties();
         com.pzoptimizer.EngineFeaturesTuner.initializeEngineFeatures();
