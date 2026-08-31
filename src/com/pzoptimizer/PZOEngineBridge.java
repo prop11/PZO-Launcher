@@ -479,6 +479,12 @@ public class PZOEngineBridge {
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
                                         Object closure = loadstringMethod.invoke(null, luaCode, "PZOBetaUI", env);
                                         if (closure != null) {
+                                            try {
+                                                Field protoField = closure.getClass().getField("prototype");
+                                                Object rootProto = protoField.get(closure);
+                                                sanitizePrototype(rootProto, "media/lua/client/OptionScreens/MainScreen.lua");
+                                            } catch (Throwable ignored) {}
+
                                             Field callerField = lmClass.getField("caller");
                                             Object caller = callerField.get(null);
                                             Field threadField = lmClass.getField("thread");
@@ -489,6 +495,8 @@ public class PZOEngineBridge {
                                                 PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
                                             }
                                         }
+
+                                        startLuaEventGovernor();
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
                                     }
@@ -521,4 +529,78 @@ public class PZOEngineBridge {
         bridgeHookThread.setName("PZO-Kahlua-Bridge-Hook");
         bridgeHookThread.start();
     }
+
+    private static void sanitizePrototype(Object protoObj, String defaultFilename) {
+        if (protoObj == null) return;
+        try {
+            Class<?> protoClass = protoObj.getClass();
+            Field fnField = protoClass.getField("filename");
+            Object fnVal = fnField.get(protoObj);
+            if (fnVal == null) {
+                fnField.set(protoObj, defaultFilename != null ? defaultFilename : "media/lua/shared/event_callback.lua");
+            }
+            Field nameField = protoClass.getField("name");
+            Object nameVal = nameField.get(protoObj);
+            if (nameVal == null) {
+                nameField.set(protoObj, "dynamic_callback");
+            }
+            Field fileField = protoClass.getField("file");
+            Object fileVal = fileField.get(protoObj);
+            if (fileVal == null) {
+                fileField.set(protoObj, defaultFilename != null ? defaultFilename : "media/lua/shared/event_callback.lua");
+            }
+            Field protosField = protoClass.getField("prototypes");
+            Object[] subProtos = (Object[]) protosField.get(protoObj);
+            if (subProtos != null) {
+                for (Object sub : subProtos) {
+                    sanitizePrototype(sub, defaultFilename);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void startLuaEventGovernor() {
+        Thread govThread = new Thread(() -> {
+            while (true) {
+                try {
+                    Class<?> lemClass = Class.forName("zombie.Lua.LuaEventManager");
+                    Field evListField = lemClass.getField("EventList");
+                    java.util.ArrayList<?> evList = (java.util.ArrayList<?>) evListField.get(null);
+                    if (evList != null) {
+                        for (int i = 0; i < evList.size(); i++) {
+                            Object ev = evList.get(i);
+                            if (ev != null) {
+                                Field cbField = ev.getClass().getField("callbacks");
+                                java.util.ArrayList<?> cbList = (java.util.ArrayList<?>) cbField.get(ev);
+                                if (cbList != null) {
+                                    for (int j = 0; j < cbList.size(); j++) {
+                                        Object cb = cbList.get(j);
+                                        if (cb != null) {
+                                            try {
+                                                Field pField = cb.getClass().getField("prototype");
+                                                Object p = pField.get(cb);
+                                                if (p != null) {
+                                                    sanitizePrototype(p, "media/lua/shared/event_callback.lua");
+                                                }
+                                            } catch (Throwable ignored) {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {}
+
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException ie) {
+                    break;
+                }
+            }
+        }, "PZO-LuaEventRerouteGovernor");
+        govThread.setDaemon(true);
+        govThread.setPriority(Thread.MIN_PRIORITY);
+        govThread.start();
+    }
 }
+
