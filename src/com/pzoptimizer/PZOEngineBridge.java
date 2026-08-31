@@ -38,6 +38,14 @@ public class PZOEngineBridge {
         return true;
     }
 
+    public static boolean isBetaOptIn() {
+        return PZOConfig.isBetaOptIn();
+    }
+
+    public static void setBetaOptIn(boolean optIn) {
+        PZOConfig.setBetaOptIn(optIn);
+    }
+
     public static void openBrowser(String url) {
         PZOEntrypoint.openBrowser(url);
     }
@@ -350,12 +358,140 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getDiagnosticsReport", getDiagReportFunc);
 
+                                        // isBetaOptIn
+                                        Object isBetaFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(PZOConfig.isBetaOptIn()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isBetaOptIn", isBetaFunc);
+
+                                        // setBetaOptIn
+                                        Object setBetaFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    Object callFrame = mArgs[0];
+                                                    Object boolArg = getArg.invoke(callFrame, 0);
+                                                    if (boolArg instanceof Boolean) {
+                                                        PZOConfig.setBetaOptIn((Boolean) boolArg);
+                                                    } else if (boolArg instanceof Number) {
+                                                        PZOConfig.setBetaOptIn(((Number) boolArg).intValue() != 0);
+                                                    }
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "setBetaOptIn", setBetaFunc);
+
+                                        // checkForUpdates
+                                        Object checkUpdateFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    UpdateChecker.UpdateResult res = UpdateChecker.checkForUpdatesSync(4000);
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(res.hasUpdate));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "checkForUpdates", checkUpdateFunc);
+
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] JavaFunction proxy warning: " + t.getMessage());
                                     }
 
                                     rawset.invoke(env, "PZOEngine", pzoTable);
                                     rawset.invoke(env, "PZOEngineBridge", pzoTable);
+
+                                    // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
+                                    try {
+                                        String luaCode =
+                                            "local function addPZOBetaToggle()\n" +
+                                            "    if not MainScreen or not MainScreen.instance then return end\n" +
+                                            "    if MainScreen.instance.pzoBetaButton then return end\n" +
+                                            "    local isOptedIn = false\n" +
+                                            "    if PZOEngine and PZOEngine.isBetaOptIn then\n" +
+                                            "        isOptedIn = PZOEngine.isBetaOptIn()\n" +
+                                            "    end\n" +
+                                            "    local titleText = isOptedIn and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
+                                            "    local btnW = 220\n" +
+                                            "    local btnH = 26\n" +
+                                            "    local btnX = 25\n" +
+                                            "    local btnY = (MainScreen.instance.height or getCore():getScreenHeight()) - btnH - 18\n" +
+                                            "    local btn = ISButton:new(btnX, btnY, btnW, btnH, titleText, MainScreen.instance, function(target, button)\n" +
+                                            "        local curState = false\n" +
+                                            "        if PZOEngine and PZOEngine.isBetaOptIn then\n" +
+                                            "            curState = PZOEngine.isBetaOptIn()\n" +
+                                            "        end\n" +
+                                            "        local newState = not curState\n" +
+                                            "        if PZOEngine and PZOEngine.setBetaOptIn then\n" +
+                                            "            PZOEngine.setBetaOptIn(newState)\n" +
+                                            "        end\n" +
+                                            "        button.title = newState and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
+                                            "        button.borderColor = newState and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
+                                            "        button.textColor = newState and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "    end)\n" +
+                                            "    btn:initialise()\n" +
+                                            "    btn:instantiate()\n" +
+                                            "    btn.backgroundColor = {r=0.08, g=0.10, b=0.15, a=0.90}\n" +
+                                            "    btn.borderColor = isOptedIn and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
+                                            "    btn.textColor = isOptedIn and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "    btn:setAnchorLeft(true)\n" +
+                                            "    btn:setAnchorRight(false)\n" +
+                                            "    btn:setAnchorTop(false)\n" +
+                                            "    btn:setAnchorBottom(true)\n" +
+                                            "    btn:setVisible(true)\n" +
+                                            "    MainScreen.instance:addChild(btn)\n" +
+                                            "    MainScreen.instance.pzoBetaButton = btn\n" +
+                                            "end\n" +
+                                            "Events.OnMainMenuEnter.Add(function()\n" +
+                                            "    addPZOBetaToggle()\n" +
+                                            "    if MainScreen and not MainScreen.pzoHooked then\n" +
+                                            "        MainScreen.pzoHooked = true\n" +
+                                            "        local old_prerender = MainScreen.prerender\n" +
+                                            "        MainScreen.prerender = function(self)\n" +
+                                            "            old_prerender(self)\n" +
+                                            "            if not self.pzoBetaButton then\n" +
+                                            "                addPZOBetaToggle()\n" +
+                                            "            end\n" +
+                                            "        end\n" +
+                                            "    end\n" +
+                                            "end)\n" +
+                                            "Events.OnResolutionChange.Add(function()\n" +
+                                            "    if MainScreen and MainScreen.instance and MainScreen.instance.pzoBetaButton then\n" +
+                                            "        local btn = MainScreen.instance.pzoBetaButton\n" +
+                                            "        btn:setY((MainScreen.instance.height or getCore():getScreenHeight()) - btn.height - 18)\n" +
+                                            "    end\n" +
+                                            "end)\n";
+
+                                        Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
+                                        Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
+                                        Object closure = loadstringMethod.invoke(null, luaCode, "PZOBetaUI", env);
+                                        if (closure != null) {
+                                            Field callerField = lmClass.getField("caller");
+                                            Object caller = callerField.get(null);
+                                            Field threadField = lmClass.getField("thread");
+                                            Object thread = threadField.get(null);
+                                            if (caller != null && thread != null) {
+                                                Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
+                                                protCall.invoke(caller, thread, closure, new Object[0]);
+                                                PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
+                                            }
+                                        }
+                                    } catch (Throwable t) {
+                                        PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
+                                    }
                                 }
                             }
                         } catch (Throwable t) {
