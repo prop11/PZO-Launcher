@@ -26,52 +26,52 @@
 
 ---
 
-## 📦 3rd-Party Host Installation (FTP / Web Panel)
+## 📦 3rd-Party Host Installation (Indifferent Broccoli / G-Portal / Pterodactyl / Docker)
 
 ### Step 1: Upload `PZOServerEngine.jar`
 Using your hosting panel's **File Manager** or **SFTP/FTP client** (FileZilla / WinSCP):
 1. Upload **`PZOServerEngine.jar`** into your server's root directory (`/project-zomboid/` or the folder containing `ProjectZomboid64.json`).
 
-### Step 2: Configure `ProjectZomboid64.json`
+### Step 2: Add `-javaagent` to `ProjectZomboid64.json`
 Open `ProjectZomboid64.json` in your host's File Manager:
-1. Change `"mainClass"` to:
-   ```json
-   "mainClass": "com/pzoptimizer/server/PZOServerEntrypoint",
-   ```
-2. Add `"PZOServerEngine.jar"` to the top of your `"classpath"` array:
-   ```json
-   "classpath": [
-       "PZOServerEngine.jar",
-       "java/.",
-       "java/projectzomboid.jar"
-   ],
-   ```
-3. Ensure your `vmArgs` include:
-   ```json
-   "-Djava.awt.headless=true",
-   "-Dzomboid.server=1",
-   "-Dzomboid.steam=1",
-   "-Djava.library.path=linux64/:natives/:."
-   ```
-4. Save the file and restart your server from your host web panel!
+1. Keep `"mainClass": "zombie/network/GameServer"` untouched.
+2. Add `"-javaagent:PZOServerEngine.jar"` to the top of your `"vmArgs"` array.
+
+#### Example `ProjectZomboid64.json`:
+```json
+{
+  "mainClass": "zombie/network/GameServer",
+  "classpath": [
+    "java/.",
+    "java/projectzomboid.jar"
+  ],
+  "vmArgs": [
+    "-javaagent:PZOServerEngine.jar",
+    "-Djava.awt.headless=true",
+    "-Xmx6G",
+    "-Dzomboid.server=1",
+    "-Dzomboid.steam=1",
+    "-Dzomboid.znetlog=1",
+    "-Djava.library.path=linux64/",
+    "-Djava.security.egd=file:/dev/urandom",
+    "-XX:+UseZGC",
+    "-XX:-OmitStackTraceInFastThrow",
+    "-XX:+UseCompactObjectHeaders",
+    "-XX:+UseStringDeduplication",
+    "-XX:+PerfDisableSharedMem",
+    "-XX:+DisableExplicitGC",
+    "-XX:+ExitOnOutOfMemoryError"
+  ]
+}
+```
+3. Save the file and restart your server from your host web panel!
 
 ---
 
-## 🐧 Linux / Docker / Indifferent Broccoli / Pterodactyl Note
+## 💡 Why `-javaagent` is Recommended for Linux Server Hosts
+The native Linux launcher binary (`pzexe` / `ProjectZomboid64`) specifically checks if `"mainClass"` matches `"zombie/network/GameServer"`. If `mainClass` is modified, `pzexe` misidentifies the process as a desktop client and triggers a failing `SteamAPI_Init()` check. 
 
-If you see:
-```text
-[S_API] SteamAPI_Init(): Failed to load module '/home/steam/.steam/sdk64/steamclient.so'
-Fatal Error: Steam must be running to play this game (SteamAPI_Init() failed)
-```
-This is a standard SteamCMD Linux requirement. SteamCMD downloads `steamclient.so` to the game's `linux64/` directory, but the Linux C++ launcher searches for it in `~/.steam/sdk64/`.
-
-**To resolve on Linux / SteamCMD**:
-In your server terminal or startup command, run:
-```bash
-mkdir -p ~/.steam/sdk64 && cp -f /project-zomboid/linux64/steamclient.so ~/.steam/sdk64/
-```
-*(Or relative to game folder: `mkdir -p ~/.steam/sdk64 && cp -f linux64/steamclient.so ~/.steam/sdk64/`)*
+Using `-javaagent:PZOServerEngine.jar` keeps `mainClass` stock while automatically hooking all PZO server optimization pipelines before `GameServer` boots.
 
 ---
 
