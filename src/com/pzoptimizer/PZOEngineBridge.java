@@ -254,6 +254,20 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getVersion", getVersionFunc);
 
+                                        // getTelemetryText
+                                        Object getTelemetryFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], PZOTelemetryHUD.getFormattedHUDText());
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getTelemetryText", getTelemetryFunc);
+
                                         // openBrowser
                                         Object openBrowserFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
