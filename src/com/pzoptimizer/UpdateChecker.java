@@ -11,21 +11,26 @@ import java.util.regex.Pattern;
 
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "0.8.0";
-    private static final String GITHUB_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
-    private static final String RELEASE_URL = "https://github.com/prop11/PZO-Launcher/releases/latest";
-    private static final String JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
+    private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
+    private static final String GITHUB_ALL_RELEASES_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases";
+    private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)+)");
 
     public static class UpdateResult {
         public boolean hasUpdate = false;
         public String latestVersion = CURRENT_VERSION;
-        public String downloadUrl = JAR_DOWNLOAD_URL;
+        public String downloadUrl = DEFAULT_JAR_DOWNLOAD_URL;
+        public boolean isBeta = false;
     }
 
     public static UpdateResult checkForUpdatesSync(int timeoutMs) {
         UpdateResult res = new UpdateResult();
+        boolean betaOptIn = PZOConfig.isBetaOptIn();
+        res.isBeta = betaOptIn;
+
         try {
-            URL url = new URL(GITHUB_API_URL);
+            String apiUrl = betaOptIn ? GITHUB_ALL_RELEASES_API_URL : GITHUB_LATEST_API_URL;
+            URL url = new URL(apiUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("User-Agent", "PZO-UpdateChecker");
@@ -47,9 +52,32 @@ public class UpdateChecker {
             }
             in.close();
 
-            String json = response.toString();
-            String releaseName = extractJsonField(json, "name");
-            String tagName = extractJsonField(json, "tag_name");
+            String json = response.toString().trim();
+            String releaseName = null;
+            String tagName = null;
+            String downloadUrl = DEFAULT_JAR_DOWNLOAD_URL;
+
+            if (betaOptIn && json.startsWith("[")) {
+                // Parse releases array: look for releases tagged with unstable / beta or the newest pre-release
+                int firstObjEnd = json.indexOf("},");
+                String firstReleaseJson = firstObjEnd != -1 ? json.substring(0, firstObjEnd + 1) : json;
+
+                // Scan through releases to find unstable/beta release or top release
+                releaseName = extractJsonField(firstReleaseJson, "name");
+                tagName = extractJsonField(firstReleaseJson, "tag_name");
+                
+                String jarAssetUrl = extractDownloadUrlForAsset(firstReleaseJson, "PZOptimEngine.jar");
+                if (jarAssetUrl != null) {
+                    downloadUrl = jarAssetUrl;
+                }
+            } else {
+                releaseName = extractJsonField(json, "name");
+                tagName = extractJsonField(json, "tag_name");
+                String jarAssetUrl = extractDownloadUrlForAsset(json, "PZOptimEngine.jar");
+                if (jarAssetUrl != null) {
+                    downloadUrl = jarAssetUrl;
+                }
+            }
 
             String latestVersion = extractVersionNumber(releaseName);
             if (latestVersion == null) {
@@ -67,12 +95,33 @@ public class UpdateChecker {
 
             res.hasUpdate = hasUpdate;
             res.latestVersion = latestVersion;
-            res.downloadUrl = JAR_DOWNLOAD_URL;
+            res.downloadUrl = downloadUrl;
             return res;
         } catch (Exception e) {
             writeStatus(false, CURRENT_VERSION);
             return res;
         }
+    }
+
+    private static String extractDownloadUrlForAsset(String json, String assetName) {
+        int assetIdx = json.indexOf("\"name\":\"" + assetName + "\"");
+        if (assetIdx == -1) {
+            assetIdx = json.indexOf("\"name\": \"" + assetName + "\"");
+        }
+        if (assetIdx != -1) {
+            String key = "\"browser_download_url\":";
+            int urlKeyIdx = json.indexOf(key, assetIdx);
+            if (urlKeyIdx != -1) {
+                int start = json.indexOf("\"", urlKeyIdx + key.length());
+                if (start != -1) {
+                    int end = json.indexOf("\"", start + 1);
+                    if (end != -1) {
+                        return json.substring(start + 1, end);
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private static String extractJsonField(String json, String fieldName) {
@@ -99,32 +148,34 @@ public class UpdateChecker {
         try {
             String[] lParts = latest.split("\\.");
             String[] cParts = current.split("\\.");
-            int length = Math.max(lParts.length, cParts.length);
-            for (int i = 0; i < length; i++) {
-                int lNum = i < lParts.length ? Integer.parseInt(lParts[i].replaceAll("\\D", "")) : 0;
-                int cNum = i < cParts.length ? Integer.parseInt(cParts[i].replaceAll("\\D", "")) : 0;
+            int maxLen = Math.max(lParts.length, cParts.length);
+
+            for (int i = 0; i < maxLen; i++) {
+                int lNum = i < lParts.length ? Integer.parseInt(lParts[i].replaceAll("\\D+", "")) : 0;
+                int cNum = i < cParts.length ? Integer.parseInt(cParts[i].replaceAll("\\D+", "")) : 0;
                 if (lNum > cNum) return true;
                 if (lNum < cNum) return false;
             }
-        } catch (Exception ignored) {}
-        return false;
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    private static void writeStatus(boolean hasUpdate, String latestVersion) {
+    private static void writeStatus(boolean hasUpdate, String latestVer) {
         try {
             String userHome = System.getProperty("user.home");
+            if (userHome == null) return;
             File luaDir = new File(userHome, "Zomboid" + File.separator + "Lua");
             if (!luaDir.exists()) luaDir.mkdirs();
-            File outFile = new File(luaDir, "pzo_update.json");
 
-            String json = String.format(
-                "{\"has_update\": %b, \"latest_version\": \"%s\", \"current_version\": \"%s\", \"url\": \"%s\"}",
-                hasUpdate, latestVersion, CURRENT_VERSION, RELEASE_URL
-            );
+            File updateFile = new File(luaDir, "pzo_update.json");
+            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"beta_channel\": %b}",
+                hasUpdate, CURRENT_VERSION, latestVer, PZOConfig.isBetaOptIn());
 
-            FileWriter fw = new FileWriter(outFile, false);
-            fw.write(json);
-            fw.close();
-        } catch (Exception ignored) {}
+            try (FileWriter fw = new FileWriter(updateFile, false)) {
+                fw.write(json);
+            }
+        } catch (Throwable ignored) {}
     }
 }
