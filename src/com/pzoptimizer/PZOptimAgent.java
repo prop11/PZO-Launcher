@@ -30,6 +30,10 @@ public class PZOptimAgent {
         GenerationalHeapCleaner.startGovernor();
         AsyncEntityDistanceCache.initialize();
         CorpseAudioGovernor.applyCorpseAudioLimits();
+        EngineGLStateGovernor.initialize();
+        EngineFramePacer.initialize();
+        NativeDirectMemoryPool.initialize();
+        FastBitwiseChunkIndexer.initialize();
         
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
