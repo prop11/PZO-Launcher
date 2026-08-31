@@ -417,8 +417,9 @@ public class PZOEngineBridge {
                                     // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
                                     try {
                                         String luaCode =
-                                            "local function addPZOBetaToggle(self)\n" +
-                                            "    if not self or self.pzoBetaButton then return end\n" +
+                                            "local function addPZOBetaToggle()\n" +
+                                            "    if not MainScreen or not MainScreen.instance then return end\n" +
+                                            "    if MainScreen.instance.pzoBetaButton then return end\n" +
                                             "    local isOptedIn = false\n" +
                                             "    if PZOEngine and PZOEngine.isBetaOptIn then\n" +
                                             "        isOptedIn = PZOEngine.isBetaOptIn()\n" +
@@ -427,8 +428,8 @@ public class PZOEngineBridge {
                                             "    local btnW = 220\n" +
                                             "    local btnH = 26\n" +
                                             "    local btnX = 25\n" +
-                                            "    local btnY = (self.height or getCore():getScreenHeight()) - btnH - 18\n" +
-                                            "    local btn = ISButton:new(btnX, btnY, btnW, btnH, titleText, self, function(target, button)\n" +
+                                            "    local btnY = (MainScreen.instance.height or getCore():getScreenHeight()) - btnH - 18\n" +
+                                            "    local btn = ISButton:new(btnX, btnY, btnW, btnH, titleText, MainScreen.instance, function(target, button)\n" +
                                             "        local curState = false\n" +
                                             "        if PZOEngine and PZOEngine.isBetaOptIn then\n" +
                                             "            curState = PZOEngine.isBetaOptIn()\n" +
@@ -451,21 +452,28 @@ public class PZOEngineBridge {
                                             "    btn:setAnchorTop(false)\n" +
                                             "    btn:setAnchorBottom(true)\n" +
                                             "    btn:setVisible(true)\n" +
-                                            "    self:addChild(btn)\n" +
-                                            "    self.pzoBetaButton = btn\n" +
+                                            "    MainScreen.instance:addChild(btn)\n" +
+                                            "    MainScreen.instance.pzoBetaButton = btn\n" +
                                             "end\n" +
-                                            "if MainScreen then\n" +
-                                            "    local old_prerender = MainScreen.prerender\n" +
-                                            "    MainScreen.prerender = function(self)\n" +
-                                            "        old_prerender(self)\n" +
-                                            "        if not self.pzoBetaButton then\n" +
-                                            "            addPZOBetaToggle(self)\n" +
+                                            "Events.OnMainMenuEnter.Add(function()\n" +
+                                            "    addPZOBetaToggle()\n" +
+                                            "    if MainScreen and not MainScreen.pzoHooked then\n" +
+                                            "        MainScreen.pzoHooked = true\n" +
+                                            "        local old_prerender = MainScreen.prerender\n" +
+                                            "        MainScreen.prerender = function(self)\n" +
+                                            "            old_prerender(self)\n" +
+                                            "            if not self.pzoBetaButton then\n" +
+                                            "                addPZOBetaToggle()\n" +
+                                            "            end\n" +
                                             "        end\n" +
                                             "    end\n" +
-                                            "    if MainScreen.instance then\n" +
-                                            "        addPZOBetaToggle(MainScreen.instance)\n" +
+                                            "end)\n" +
+                                            "Events.OnResolutionChange.Add(function()\n" +
+                                            "    if MainScreen and MainScreen.instance and MainScreen.instance.pzoBetaButton then\n" +
+                                            "        local btn = MainScreen.instance.pzoBetaButton\n" +
+                                            "        btn:setY((MainScreen.instance.height or getCore():getScreenHeight()) - btn.height - 18)\n" +
                                             "    end\n" +
-                                            "end\n";
+                                            "end)\n";
 
                                         Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
