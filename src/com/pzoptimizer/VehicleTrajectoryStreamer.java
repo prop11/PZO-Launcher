@@ -82,18 +82,15 @@ public final class VehicleTrajectoryStreamer {
                     float dirX = ((Number) getDirXMethod.invoke(player)).floatValue();
                     float dirY = ((Number) getDirYMethod.invoke(player)).floatValue();
 
-                    // Pre-warm chunks 1 to 4 steps ahead along forward velocity vector
-                    int currentChunkX = (int) (px / 80.0f); // 10 tiles per chunk * 8
-                    int currentChunkY = (int) (py / 80.0f);
+                    // Build 42 Chunks are 8x8 squares: wx = (int)(px / 8.0f), wy = (int)(py / 8.0f)
+                    float lookaheadTiles = Math.min(120.0f, Math.abs(speed) * 1.5f);
 
-                    float lookaheadTiles = Math.min(60.0f, Math.abs(speed) * 0.8f);
+                    for (int step = 1; step <= 5; step++) {
+                        float targetX = px + (dirX * lookaheadTiles * (step / 5.0f));
+                        float targetY = py + (dirY * lookaheadTiles * (step / 5.0f));
 
-                    for (int step = 1; step <= 3; step++) {
-                        float targetX = px + (dirX * lookaheadTiles * (step / 3.0f));
-                        float targetY = py + (dirY * lookaheadTiles * (step / 3.0f));
-
-                        int targetChunkX = (int) (targetX / 80.0f);
-                        int targetChunkY = (int) (targetY / 80.0f);
+                        int targetChunkX = (int) (targetX / 8.0f);
+                        int targetChunkY = (int) (targetY / 8.0f);
 
                         prewarmChunkInOSCache(targetChunkX, targetChunkY);
                     }
@@ -125,24 +122,29 @@ public final class VehicleTrajectoryStreamer {
         } catch (Throwable ignored) {}
     }
 
-    private static void prewarmChunkInOSCache(int cx, int cy) {
-        String key = cx + "_" + cy;
+    private static void prewarmChunkInOSCache(int wx, int wy) {
+        String key = wx + "_" + wy;
         if (PREWARMED_KEYS.contains(key)) {
             return;
         }
         PREWARMED_KEYS.add(key);
 
         try {
-            // Check active save world directory
-            Class<?> coreClass = Class.forName("zombie.core.Core");
-            Method getSaveWorldMethod = coreClass.getMethod("getMyDocumentFolder");
-            String saveDir = (String) getSaveWorldMethod.invoke(null);
+            // Check active save world via ZomboidFileSystem
+            Class<?> zfsClass = Class.forName("zombie.ZomboidFileSystem");
+            Field instField = zfsClass.getField("instance");
+            Object zfsInstance = instField.get(null);
             
-            if (saveDir == null || saveDir.isEmpty()) return;
+            File chunkFile = null;
+            if (zfsInstance != null) {
+                try {
+                    Method getFileMethod = zfsClass.getMethod("getFileInCurrentSave", String.class);
+                    // Build 42 format: wx/wy.bin
+                    chunkFile = (File) getFileMethod.invoke(zfsInstance, wx + File.separator + wy + ".bin");
+                } catch (Throwable ignored) {}
+            }
 
-            // Attempt to pre-warm the chunk binary file into OS page cache
-            File chunkFile = new File(saveDir, "map_" + cx + "_" + cy + ".bin");
-            if (chunkFile.exists() && chunkFile.canRead()) {
+            if (chunkFile != null && chunkFile.exists() && chunkFile.canRead()) {
                 try (FileInputStream fis = new FileInputStream(chunkFile);
                      FileChannel ch = fis.getChannel()) {
                     PREWARM_BUFFER.clear();
