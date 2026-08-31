@@ -417,35 +417,37 @@ public class PZOEngineBridge {
                                     // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
                                     try {
                                         String luaCode =
-                                            "local function initPZOBetaUI()\n" +
-                                            "    Events.OnMainMenuEnter.Add(function(mainMenu)\n" +
-                                            "        if not mainMenu or mainMenu.pzoBetaTickBox then return end\n" +
-                                            "        local tickBoxW = 280\n" +
-                                            "        local tickBoxH = 26\n" +
-                                            "        local x = 20\n" +
-                                            "        local y = getCore():getScreenHeight() - 45\n" +
-                                            "        local tickBox = ISTickBox:new(x, y, tickBoxW, tickBoxH, \"\", nil, function(target, index, selected)\n" +
-                                            "            if PZOEngine and PZOEngine.setBetaOptIn then\n" +
-                                            "                PZOEngine.setBetaOptIn(selected)\n" +
-                                            "            end\n" +
-                                            "        end)\n" +
-                                            "        tickBox:initialise()\n" +
-                                            "        tickBox:instantiate()\n" +
-                                            "        tickBox:setAnchorLeft(true)\n" +
-                                            "        tickBox:setAnchorRight(false)\n" +
-                                            "        tickBox:setAnchorTop(false)\n" +
-                                            "        tickBox:setAnchorBottom(true)\n" +
-                                            "        tickBox:addOption(\"Opt in to PZO Beta (Unstable) Builds\")\n" +
-                                            "        local isOptedIn = false\n" +
-                                            "        if PZOEngine and PZOEngine.isBetaOptIn then\n" +
-                                            "            isOptedIn = PZOEngine.isBetaOptIn()\n" +
+                                            "local function addPZOBetaTickBox()\n" +
+                                            "    if not MainScreen or not MainScreen.instance then return end\n" +
+                                            "    if MainScreen.instance.pzoBetaTickBox then return end\n" +
+                                            "    local fontH = (getTextManager and getTextManager().getFontHeight and getTextManager():getFontHeight(UIFont.Small)) or 14\n" +
+                                            "    local tickH = fontH + 8\n" +
+                                            "    local tickW = 280\n" +
+                                            "    local x = 50\n" +
+                                            "    local y = getCore():getScreenHeight() - tickH - 35\n" +
+                                            "    local tickBox = ISTickBox:new(x, y, tickW, tickH, \"\", MainScreen.instance, function(target, index, selected)\n" +
+                                            "        if PZOEngine and PZOEngine.setBetaOptIn then\n" +
+                                            "            PZOEngine.setBetaOptIn(selected)\n" +
                                             "        end\n" +
-                                            "        tickBox:setSelected(1, isOptedIn)\n" +
-                                            "        mainMenu:addChild(tickBox)\n" +
-                                            "        mainMenu.pzoBetaTickBox = tickBox\n" +
                                             "    end)\n" +
+                                            "    tickBox:initialise()\n" +
+                                            "    tickBox:instantiate()\n" +
+                                            "    tickBox:setAnchorLeft(true)\n" +
+                                            "    tickBox:setAnchorRight(false)\n" +
+                                            "    tickBox:setAnchorTop(false)\n" +
+                                            "    tickBox:setAnchorBottom(true)\n" +
+                                            "    tickBox:addOption(\"Opt in to PZO Beta (Unstable) Builds\")\n" +
+                                            "    local isOptedIn = false\n" +
+                                            "    if PZOEngine and PZOEngine.isBetaOptIn then\n" +
+                                            "        isOptedIn = PZOEngine.isBetaOptIn()\n" +
+                                            "    end\n" +
+                                            "    tickBox:setSelected(1, isOptedIn)\n" +
+                                            "    MainScreen.instance:addChild(tickBox)\n" +
+                                            "    MainScreen.instance.pzoBetaTickBox = tickBox\n" +
                                             "end\n" +
-                                            "initPZOBetaUI()\n";
+                                            "Events.OnMainMenuEnter.Add(addPZOBetaTickBox)\n" +
+                                            "Events.OnResolutionChange.Add(addPZOBetaTickBox)\n" +
+                                            "if MainScreen and MainScreen.instance then addPZOBetaTickBox() end\n";
 
                                         Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
