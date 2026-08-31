@@ -33,6 +33,10 @@ public class PZOServerEntrypoint {
         com.pzoptimizer.HotSpotJITCompilerTuner.tuneRuntimeProperties();
         com.pzoptimizer.EngineFeaturesTuner.initializeEngineFeatures();
         com.pzoptimizer.WorldStreamerBooster.startDaemon();
+        com.pzoptimizer.PZOFastMath.initialize();
+        com.pzoptimizer.GenerationalHeapCleaner.startGovernor();
+        com.pzoptimizer.AsyncEntityDistanceCache.initialize();
+        com.pzoptimizer.CorpseAudioGovernor.applyCorpseAudioLimits();
 
         // 2. Initialize Server Network Buffer Pooler
         com.pzoptimizer.PZOEngineBridge.initialize();

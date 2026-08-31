@@ -48,6 +48,10 @@ public class PZOEntrypoint {
         PZOEngineBridge.initialize();
         EngineFeaturesTuner.initializeEngineFeatures();
         WorldStreamerBooster.startDaemon();
+        PZOFastMath.initialize();
+        GenerationalHeapCleaner.startGovernor();
+        AsyncEntityDistanceCache.initialize();
+        CorpseAudioGovernor.applyCorpseAudioLimits();
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");

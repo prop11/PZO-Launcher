@@ -18,10 +18,19 @@ public class PZOptimAgent {
             inst.addTransformer(new EngineTransformer(), true);
         } catch (Throwable ignored) {}
 
+        // Early-boot runtime properties & core memory tuning
+        HotSpotJITCompilerTuner.tuneRuntimeProperties();
         PZOEngineBridge.initialize();
         HighPrecisionTimer.initialize();
         StreamBufferBooster.applyStreamTweaks();
         SaveGameStreamBooster.tuneSaveEngine();
+        EngineFeaturesTuner.initializeEngineFeatures();
+        WorldStreamerBooster.startDaemon();
+        PZOFastMath.initialize();
+        GenerationalHeapCleaner.startGovernor();
+        AsyncEntityDistanceCache.initialize();
+        CorpseAudioGovernor.applyCorpseAudioLimits();
+        
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
         // Automatically load and hook any ZombieBuddy / Java Workshop mods with full Instrumentation
