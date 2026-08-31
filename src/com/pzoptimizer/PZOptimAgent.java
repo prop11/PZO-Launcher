@@ -34,6 +34,7 @@ public class PZOptimAgent {
         EngineFramePacer.initialize();
         NativeDirectMemoryPool.initialize();
         FastBitwiseChunkIndexer.initialize();
+        DirectBufferAllocatorGovernor.initialize();
         
         // Dedicated Server optimizations if running in headless / server environment
         try {
