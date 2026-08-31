@@ -200,7 +200,6 @@ with open(plist_path, "rb") as f:
 
 # Use dot notation for macOS Java launcher compatibility
 target_class_dot = "com.pzoptimizer.PZOEntrypoint"
-target_class_slash = "com/pzoptimizer/PZOEntrypoint"
 
 # Update Main Class across all known macOS launcher schema keys
 for key in ["JVMMainClassName", "MainClass", "JVMEntrypoint"]:
@@ -231,9 +230,10 @@ for cp_key in ["JVMClassPath", "ClassPath"]:
                 pl[cp_key] = "\$JAVAROOT/PZOptimEngine.jar:" + pl[cp_key]
 
 jvm_args = [
+    "-javaagent:\$JAVAROOT/PZOptimEngine.jar",
     "-Xmx${RAM_MB}m",
     "-XX:+UseG1GC",
-        "-XX:+PerfDisableSharedMem",
+    "-XX:+PerfDisableSharedMem",
     "-XX:InitiatingHeapOccupancyPercent=45",
     "-XX:G1ReservePercent=15",
     "-XX:+AlwaysPreTouch",
@@ -244,59 +244,18 @@ jvm_args = [
 
 if "JVMOptions" in pl:
     if isinstance(pl["JVMOptions"], list):
-        filtered = [arg for arg in pl["JVMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-XX:+UseG1GC") and not arg.startswith("-XX:+AlwaysPreTouch") and not arg.startswith("-Djava.awt.headless")]
+        filtered = [arg for arg in pl["JVMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-XX:+UseG1GC") and not arg.startswith("-XX:+AlwaysPreTouch") and not arg.startswith("-Djava.awt.headless") and not arg.startswith("-javaagent:")]
         pl["JVMOptions"] = filtered + jvm_args
     elif isinstance(pl["JVMOptions"], dict):
         pl["JVMOptions"]["Properties"] = pl["JVMOptions"].get("Properties", {})
 if "VMOptions" in pl:
     if isinstance(pl["VMOptions"], list):
-        filtered = [arg for arg in pl["VMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-Djava.awt.headless")]
+        filtered = [arg for arg in pl["VMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-Djava.awt.headless") and not arg.startswith("-javaagent:")]
         pl["VMOptions"] = filtered + jvm_args
 
 with open(plist_path, "wb") as f:
     plistlib.dump(pl, f)
-print("[+] Successfully updated Info.plist with ClassPath, Java 17 / B42 heap & entrypoint.")
-EOF
-import plistlib, os
-
-plist_path = "$PLIST"
-with open(plist_path, "rb") as f:
-    pl = plistlib.load(f)
-
-target_class = "com/pzoptimizer/PZOEntrypoint"
-if "MainClass" in pl:
-    pl["MainClass"] = target_class
-if "JVMOptions" in pl and isinstance(pl["JVMOptions"], dict):
-    if "MainClass" in pl["JVMOptions"]:
-        pl["JVMOptions"]["MainClass"] = target_class
-
-jvm_args = [
-    "-Xmx${RAM_MB}m",
-    "-XX:+UseG1GC",
-        "-XX:+PerfDisableSharedMem",
-    "-XX:InitiatingHeapOccupancyPercent=45",
-    "-XX:G1ReservePercent=15",
-    "-XX:+AlwaysPreTouch",
-    "-Djava.awt.headless=true",
-    "--enable-native-access=ALL-UNNAMED",
-    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-    "-Dzomboid.steam=1"
-]
-
-if "JVMOptions" in pl:
-    if isinstance(pl["JVMOptions"], list):
-        filtered = [arg for arg in pl["JVMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-XX:+UseG1GC") and not arg.startswith("-XX:+AlwaysPreTouch")]
-        pl["JVMOptions"] = filtered + jvm_args
-    elif isinstance(pl["JVMOptions"], dict):
-        pl["JVMOptions"]["Properties"] = pl["JVMOptions"].get("Properties", {})
-if "VMOptions" in pl:
-    if isinstance(pl["VMOptions"], list):
-        filtered = [arg for arg in pl["VMOptions"] if not arg.startswith("-Xmx")]
-        pl["VMOptions"] = filtered + jvm_args
-
-with open(plist_path, "wb") as f:
-    plistlib.dump(pl, f)
-print("[+] Successfully updated Info.plist with Java 17 / B42 heap & entrypoint.")
+print("[+] Successfully updated Info.plist with ClassPath, Java Agent, Java 17 / B42 heap & entrypoint.")
 EOF
 
 # ==============================================================================
