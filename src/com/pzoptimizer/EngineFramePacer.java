@@ -27,6 +27,9 @@ public final class EngineFramePacer {
     }
 
     public static void paceFrame(long frameStartNanos) {
+        // Record frame time in telemetry diagnostic probe
+        FrameDropDiagnosticEngine.onFrameTick();
+
         if (!enabled) return;
 
         long targetEnd = frameStartNanos + targetFrameTimeNanos;
