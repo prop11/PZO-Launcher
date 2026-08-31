@@ -10,7 +10,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "0.7.0";
+    public static final String CURRENT_VERSION = "0.7.1";
     private static final String GITHUB_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String RELEASE_URL = "https://github.com/prop11/PZO-Launcher/releases/latest";
     private static final String JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
