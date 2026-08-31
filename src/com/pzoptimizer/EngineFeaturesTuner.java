@@ -5,30 +5,40 @@ import java.lang.reflect.Method;
 
 /**
  * Project Zomboid Engine Features & Architecture Tuner.
- * Automatically unlocks multi-threaded pathfinding, native navigation, 13x13 chunk streaming,
- * and shared skeletal animation bone caches.
+ * Automatically unlocks multi-threaded pathfinding, asynchronous lighting, multi-threaded audio,
+ * 13x13 chunk streaming, and shared skeletal animation bone caches.
  */
 public class EngineFeaturesTuner {
 
     public static void initializeEngineFeatures() {
         try {
-            // 1. DebugOptions Tuning (Build 42)
+            // 1. DebugOptions Multi-Threading & Engine Subsystems (Build 42)
             try {
                 Class<?> debugOptionsClass = Class.forName("zombie.debug.DebugOptions");
                 Field instanceField = debugOptionsClass.getField("instance");
                 Object debugOptionsInstance = instanceField.get(null);
 
                 if (debugOptionsInstance != null) {
-                    // A. Unlock Multi-Threaded Pathfinding [Threading.Pathfinding = true]
+                    // A. Unlock Multi-Threaded Pathfinding & Navigation
                     setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Chunk Map Grid Optimization: Lock to 13x13 (169 chunks) instead of 19x19 (361 chunks)
+                    // B. Unlock Asynchronous Multi-Threaded Engine Pipelines
+                    setOptionValue(debugOptionsInstance, "threadLighting", true);
+                    setOptionValue(debugOptionsInstance, "threadAmbient", true);
+                    setOptionValue(debugOptionsInstance, "threadSound", true);
+                    setOptionValue(debugOptionsInstance, "threadGridStacks", true);
+                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
+                    setOptionValue(debugOptionsInstance, "threadAnimation", true);
+                    setOptionValue(debugOptionsInstance, "threadWorld", true);
+                    setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
+
+                    // C. Chunk Map Grid Optimization: Lock to 13x13 (169 chunks) instead of 19x19 (361 chunks)
                     // Cuts chunk disk streaming & decompression workload by 53%, eliminating driving hitches!
                     setOptionValue(debugOptionsInstance, "worldChunkMap13x13", true);
 
-                    // C. Shared Skeletal Bone Matrices for Zombie Hordes
+                    // D. Shared Skeletal Bone Matrices for Zombie Hordes
                     try {
                         Field animGroupField = debugOptionsClass.getField("animation");
                         Object animGroup = animGroupField.get(debugOptionsInstance);
@@ -42,7 +52,7 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // D. 3D Model Texture Size Limiter
+                    // E. 3D Model Texture Size Limiter
                     try {
                         Field modelGroupField = debugOptionsClass.getField("model");
                         Object modelGroup = modelGroupField.get(debugOptionsInstance);
@@ -55,7 +65,7 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Pathfinding, 13x13 Chunk Streamer, & Shared Skeles Active");
+                    PZOLogger.success("EngineFeaturesTuner: All 8 Multi-Threaded Engine Subsystems & 13x13 Streamer Active");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
