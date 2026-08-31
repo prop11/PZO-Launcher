@@ -12,14 +12,28 @@ public class PZOptimAgent {
 
     public static void premain(String agentArgs, Instrumentation inst) {
         instrumentationInstance = inst;
-        PZOLogger.info("[PZO Agent] Build 42 Instrumentation Agent Active");
-        inst.addTransformer(new EngineTransformer());
+        PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
+        
+        try {
+            inst.addTransformer(new EngineTransformer(), true);
+        } catch (Throwable ignored) {}
+
+        // Early-boot runtime properties & core memory tuning
+        HotSpotJITCompilerTuner.tuneRuntimeProperties();
+        PZOEngineBridge.initialize();
         HighPrecisionTimer.initialize();
         StreamBufferBooster.applyStreamTweaks();
         SaveGameStreamBooster.tuneSaveEngine();
-        PZOLogger.success("[PZO Agent] Engine transformer and native timers attached");
+        EngineFeaturesTuner.initializeEngineFeatures();
+        WorldStreamerBooster.startDaemon();
+        PZOFastMath.initialize();
+        GenerationalHeapCleaner.startGovernor();
+        AsyncEntityDistanceCache.initialize();
+        CorpseAudioGovernor.applyCorpseAudioLimits();
+        
+        PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
-        // Automatically load and hook any ZombieBuddy / Java Workshop mods
+        // Automatically load and hook any ZombieBuddy / Java Workshop mods with full Instrumentation
         try {
             JavaModLoader.loadMods(inst);
         } catch (Throwable t) {
@@ -38,7 +52,7 @@ public class PZOptimAgent {
     static class EngineTransformer implements ClassFileTransformer {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
-                                ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+                                 ProtectionDomain protectionDomain, byte[] classfileBuffer) {
             return null;
         }
     }

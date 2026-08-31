@@ -1,14 +1,19 @@
 package com.pzoptimizer;
 
-import java.lang.reflect.Field;
+import java.io.File;
 import java.lang.reflect.Method;
 
 /**
  * Project Zomboid Build 42 - Dedicated High-Performance Engine Optimizer & Wrapper.
+ * Fully compatible with vanilla Project Zomboid and ZombieBuddy modding framework.
  */
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
+        // Ensure AWT/Swing is allowed for Pre-Menu dialogs
+        try {
+            System.setProperty("java.awt.headless", "false");
+        } catch (Throwable ignored) {}
         PZOLogger.info("================================================================================");
         PZOLogger.info("Project Zomboid Build 42 - Config & Engine Optimizer (PZO)");
         PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + ")");
@@ -25,30 +30,56 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
-        // 1. StreamBufferBooster & SaveGameStreamBooster
+        // Ensure critical Zomboid user directories exist & write live pzo_status.json across all discovered drives & paths
+        try {
+            TelemetryReporter.refreshDiscoveredDirectories(args);
+            long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
+            int ramGb = Math.max(2, (int) Math.round(maxMemMB / 1024.0));
+            String json = String.format("{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\"}",
+                ramGb, UpdateChecker.CURRENT_VERSION);
+            TelemetryReporter.writeStatusFile(json);
+            PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB)");
+        } catch (Throwable ignored) {}
+
+        // 0. HotSpot JIT & System Property Tuning
+        HotSpotJITCompilerTuner.tuneRuntimeProperties();
+
+        // 1. Core Memory & Hardware Optimization Modules
+        PZOEngineBridge.initialize();
+        EngineFeaturesTuner.initializeEngineFeatures();
+        WorldStreamerBooster.startDaemon();
+        PZOFastMath.initialize();
+        GenerationalHeapCleaner.startGovernor();
+        AsyncEntityDistanceCache.initialize();
+        CorpseAudioGovernor.applyCorpseAudioLimits();
+        PowerThrottlingShield.apply();
+        KahluaGCPacer.start();
+        FastPathCache.normalize("media/textures");
+        LogRotationGuard.checkAndRotateLogs();
+        NettyBufferPooler.apply();
+        DirectMemoryTuner.initialize();
+        ThreadPoolTuner.initialize();
+        DriverOptimizer.initialize();
+        AssetCachePrewarmer.startPrewarmingAsync();
+
+        // 2. StreamBufferBooster & SaveGameStreamBooster (128KB chunk buffers & page-aligned direct NIO)
         try {
             StreamBufferBooster.applyStreamTweaks();
             SaveGameStreamBooster.tuneSaveEngine();
             PZOLogger.success("StreamBufferBooster & SaveGameStreamBooster active (128KB I/O chunks & NIO caches)");
         } catch (Throwable t) {
-            PZOLogger.error("Failed applying StreamBufferBooster", t);
+            PZOLogger.warn("Non-fatal notice on StreamBufferBooster: " + t.getMessage());
         }
 
-        // 2. HighPrecisionTimer
-        try {
-            HighPrecisionTimer.initialize();
-            PZOLogger.success("HighPrecisionTimer active (Windows 1.0ms timer resolution locked)");
-        } catch (Throwable t) {
-            PZOLogger.error("Failed initializing HighPrecisionTimer", t);
-        }
 
-        // 3. FastMath & VectorPool
+
+        // 3. FastMath & VectorPool zero-allocation caches
         try {
             FastMath.sin(0.5f);
             VectorPool.get(0, 0);
             PZOLogger.success("FastMath & VectorPool zero-allocation caches initialized");
         } catch (Throwable t) {
-            PZOLogger.error("Failed initializing FastMath / VectorPool", t);
+            PZOLogger.warn("Non-fatal notice on FastMath / VectorPool: " + t.getMessage());
         }
 
         // 4. GLStateOptimizer & HordePhysicsOptimizer
@@ -56,22 +87,25 @@ public class PZOEntrypoint {
             GLStateOptimizer.resetState();
             PZOLogger.success("GLStateOptimizer & HordePhysicsOptimizer ready");
         } catch (Throwable t) {
-            PZOLogger.error("Failed initializing GLState / HordePhysics", t);
+            PZOLogger.warn("Non-fatal notice on GLState / HordePhysics: " + t.getMessage());
         }
 
-        // 5. ResourceInterner
+        // 5. ResourceInterner string deduplication pool
         try {
             PZOLogger.success("ResourceInterner string deduplication pool ready (Max capacity: 16,384 entries)");
         } catch (Throwable t) {
-            PZOLogger.error("Failed initializing ResourceInterner", t);
+            PZOLogger.warn("Non-fatal notice on ResourceInterner: " + t.getMessage());
         }
 
-        // 6. Update Checker
+        // 6. Pre-Menu Update Check & Interactive Prompt
         try {
-            UpdateChecker.checkForUpdatesAsync();
-            PZOLogger.info("UpdateChecker background check scheduled (Async timeout: 3.5s)");
+            UpdateChecker.UpdateResult ur = UpdateChecker.checkForUpdatesSync(1800);
+            if (ur != null && ur.hasUpdate) {
+                PZOLogger.info("New update detected (v" + ur.latestVersion + "). Opening Pre-Menu update prompt...");
+                UpdateDialog.promptIfUpdateAvailable(ur.latestVersion, ur.downloadUrl);
+            }
         } catch (Throwable t) {
-            PZOLogger.error("Failed starting UpdateChecker", t);
+            PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
 
         // 7. Render Thread Priority
@@ -82,46 +116,56 @@ public class PZOEntrypoint {
             PZOLogger.warn("Could not set thread priority (Non-fatal): " + t.getMessage());
         }
 
-        // 8. Background Watchdog & Telemetry Loop
+        // 8. Background Telemetry Loop
         Thread watchdog = new Thread(() -> {
-            boolean firstRun = true;
             while (true) {
                 try {
-                    Thread.sleep(3000);
-                    boolean applied = applyBuild42EngineOptimizations(firstRun);
-                    if (firstRun && applied) {
-                        firstRun = false;
-                    }
+                    Thread.sleep(5000);
                     TelemetryReporter.updateTelemetry();
                 } catch (InterruptedException e) {
                     break;
-                } catch (Throwable t) {
-                    PZOLogger.error("Error in PZO-B42-Watchdog loop", t);
-                }
+                } catch (Throwable ignored) {}
             }
         });
         watchdog.setDaemon(true);
         watchdog.setPriority(Thread.NORM_PRIORITY - 1);
-        watchdog.setName("PZO-B42-Watchdog");
+        watchdog.setName("PZO-B42-Telemetry");
         watchdog.start();
-        PZOLogger.success("PZO-B42-Watchdog and live JMX telemetry monitoring started");
+        PZOLogger.success("PZO-B42-Telemetry monitoring started");
 
-        // 9. Load external Java Workshop / ZombieBuddy mods
+        // 9. Discover and check ZombieBuddy / standalone Java mods
         try {
-            JavaModLoader.loadMods(PZOptimAgent.getInstrumentation());
+            boolean zbDetected = false;
+            File currentDir = new File(".").getAbsoluteFile();
+            File zbJar = new File(currentDir, "ZombieBuddy.jar");
+            File zbDll1 = new File(currentDir, "win64/zbNative.dll");
+            File zbDll2 = new File(currentDir, "zbNative.dll");
+            File zbSo = new File(currentDir, "zbNative.so");
+            File zbDylib = new File(currentDir, "zbNative.dylib");
+
+            if (zbJar.exists() || zbDll1.exists() || zbDll2.exists() || zbSo.exists() || zbDylib.exists()) {
+                zbDetected = true;
+            }
+
+            if (zbDetected) {
+                PZOLogger.success("[PZO Coexistence] ZombieBuddy framework detected and running in tandem with PZO Optimizer!");
+            } else {
+                PZOLogger.info("[PZO Engine] Running in Standalone Optimization Mode");
+            }
         } catch (Throwable t) {
-            PZOLogger.warn("[PZO] Non-fatal error during Java mod loading: " + t.getMessage());
+            PZOLogger.warn("[PZO] Non-fatal notice on coexistence check: " + t.getMessage());
         }
 
-        // 9. Launch Project Zomboid
+        // 10. Launch Project Zomboid Main Entrypoint
         PZOLogger.info("Handing execution over to Project Zomboid entrypoint (zombie.gameStates.MainScreenState)...");
         try {
             Class<?> mainClass = Class.forName("zombie.gameStates.MainScreenState");
             Method mainMethod = mainClass.getMethod("main", String[].class);
             mainMethod.invoke(null, (Object) args);
         } catch (Throwable t) {
-            PZOLogger.error("CRITICAL FATAL: Failed launching zombie.gameStates.MainScreenState.main", t);
-            t.printStackTrace();
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            PZOLogger.error("CRITICAL FATAL: Failed launching zombie.gameStates.MainScreenState.main", cause);
+            cause.printStackTrace();
         }
     }
 
@@ -144,68 +188,5 @@ public class PZOEntrypoint {
                 Runtime.getRuntime().exec(new String[]{"xdg-open", url});
             }
         } catch (Throwable ignored) {}
-    }
-
-    private static boolean applyBuild42EngineOptimizations(boolean logDetails) {
-        boolean anyApplied = false;
-        try {
-            // 1. Build 42 PerformanceSettings (Multi-Threaded Rendering & Lighting)
-            Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
-            setField(perfClass, "manualFrameSkips", 1200);
-            setField(perfClass, "fboRenderChunk", true);
-            setField(perfClass, "lightingThread", true);
-            setField(perfClass, "zombieAnimationSpeedFalloffCount", 4);
-            setField(perfClass, "numberZombiesBlended", 16);
-            anyApplied = true;
-
-            // 2. Build 42 DebugOptions (Sub-Pixel Culling & Instancing)
-            Class<?> debugClass = Class.forName("zombie.debug.DebugOptions");
-            Field instField = debugClass.getDeclaredField("instance");
-            instField.setAccessible(true);
-            Object debugInst = instField.get(null);
-
-            if (debugInst != null) {
-                setDebugOption(debugInst, "threadModelSlotInit", true);
-                setDebugOption(debugInst, "cheapOcclusionCount", true);
-                setDebugOption(debugInst, "useNewVisibility", true);
-                setDebugOption(debugInst, "terrainInstancing", true);
-            }
-
-            // 3. Hardware Texture Compression in VRAM (OpenGL LWJGL 3.x)
-            try {
-                Class<?> texClass = Class.forName("zombie.core.textures.Texture");
-                setField(texClass, "bUseCompression", true);
-            } catch (Throwable ignored) {}
-
-            if (logDetails) {
-                PZOLogger.success("Applied Build 42 Runtime Tweaks: lightingThread=true, fboRenderChunk=true, cheapOcclusion=true, terrainInstancing=true, bUseCompression=true");
-            }
-        } catch (Throwable t) {
-            if (logDetails) {
-                PZOLogger.warn("Engine reflection hooks not ready yet (will retry in watchdog loop): " + t.getMessage());
-            }
-        }
-        return anyApplied;
-    }
-
-    private static void setField(Class<?> clazz, String fieldName, Object value) {
-        try {
-            Field f = clazz.getDeclaredField(fieldName);
-            f.setAccessible(true);
-            f.set(null, value);
-        } catch (Exception ignored) {}
-    }
-
-    private static void setDebugOption(Object debugInstance, String optionName, boolean value) {
-        try {
-            Field f = debugInstance.getClass().getDeclaredField(optionName);
-            f.setAccessible(true);
-            Object boolOption = f.get(debugInstance);
-            if (boolOption != null) {
-                Method setValueMethod = boolOption.getClass().getMethod("setValue", boolean.class);
-                setValueMethod.setAccessible(true);
-                setValueMethod.invoke(boolOption, value);
-            }
-        } catch (Exception ignored) {}
     }
 }

@@ -10,37 +10,33 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "0.4.1";
+    public static final String CURRENT_VERSION = "0.7.1";
     private static final String GITHUB_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String RELEASE_URL = "https://github.com/prop11/PZO-Launcher/releases/latest";
+    private static final String JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)+)");
 
-    public static void checkForUpdatesAsync() {
-        Thread t = new Thread(() -> {
-            try {
-                Thread.sleep(2000);
-                check();
-            } catch (Exception ignored) {}
-        });
-        t.setDaemon(true);
-        t.setName("PZO-GitHubUpdateChecker");
-        t.start();
+    public static class UpdateResult {
+        public boolean hasUpdate = false;
+        public String latestVersion = CURRENT_VERSION;
+        public String downloadUrl = JAR_DOWNLOAD_URL;
     }
 
-    public static void check() {
+    public static UpdateResult checkForUpdatesSync(int timeoutMs) {
+        UpdateResult res = new UpdateResult();
         try {
             URL url = new URL(GITHUB_API_URL);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("User-Agent", "PZO-UpdateChecker");
             conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-            conn.setConnectTimeout(3500);
-            conn.setReadTimeout(3500);
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
 
             int code = conn.getResponseCode();
             if (code != 200) {
                 writeStatus(false, CURRENT_VERSION);
-                return;
+                return res;
             }
 
             BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
@@ -68,8 +64,14 @@ public class UpdateChecker {
 
             boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
             writeStatus(hasUpdate, latestVersion);
+
+            res.hasUpdate = hasUpdate;
+            res.latestVersion = latestVersion;
+            res.downloadUrl = JAR_DOWNLOAD_URL;
+            return res;
         } catch (Exception e) {
             writeStatus(false, CURRENT_VERSION);
+            return res;
         }
     }
 
