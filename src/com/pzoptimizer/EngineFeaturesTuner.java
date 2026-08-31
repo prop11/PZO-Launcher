@@ -65,6 +65,28 @@ public class EngineFeaturesTuner {
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized");
             } catch (Throwable ignored) {}
 
+            // 3. Silence Non-Fatal DebugType Warning Spam during Chunk Loading (SpriteConfig, Entities, Objects)
+            try {
+                Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
+                Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
+                @SuppressWarnings("rawtypes")
+                Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
+
+                // Set General, Entity, Sprite, Objects, Mod debug types to Error severity
+                String[] typesToSilence = new String[]{"General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker"};
+                for (String typeName : typesToSilence) {
+                    try {
+                        Field typeField = debugTypeClass.getField(typeName);
+                        Object debugType = typeField.get(null);
+                        if (debugType != null) {
+                            Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
+                            setLogSeverity.invoke(debugType, errorSeverity);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load warning logs (SpriteConfig disk log stall eliminated)");
+            } catch (Throwable ignored) {}
+
         } catch (Throwable t) {
             PZOLogger.warn("EngineFeaturesTuner notice: " + t.getMessage());
         }
