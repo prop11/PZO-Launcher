@@ -62,7 +62,21 @@ public class EngineFeaturesTuner {
                     auto3DField.setBoolean(null, true);
                 } catch (Throwable ignored) {}
 
+                try {
+                    Field lightFpsField = perfClass.getField("lightingFps");
+                    lightFpsField.setInt(null, 30); // 30 FPS smooth lighting updates (eliminates 15 FPS lighting jitter)
+                } catch (Throwable ignored) {}
+
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized");
+            } catch (Throwable ignored) {}
+
+            // 3. Convert IsoChunkMap.bSettingChunk (Fair Lock -> High-Speed Non-Fair Lock)
+            try {
+                Class<?> chunkMapClass = Class.forName("zombie.iso.IsoChunkMap");
+                Field lockField = chunkMapClass.getField("bSettingChunk");
+                lockField.setAccessible(true);
+                lockField.set(null, new java.util.concurrent.locks.ReentrantLock(false));
+                PZOLogger.success("EngineFeaturesTuner: Converted IsoChunkMap fair lock to High-Speed Non-Fair Lock");
             } catch (Throwable ignored) {}
 
             // 3. Silence Non-Fatal DebugType Warning Spam during Chunk Loading (SpriteConfig, Entities, Objects)
