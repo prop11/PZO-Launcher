@@ -47,6 +47,7 @@ public class PZOServerEntrypoint {
         // 2. Initialize Server Network Buffer Pooler
         com.pzoptimizer.PZOEngineBridge.initialize();
         ServerNetworkTuner.apply();
+        PZOServerNetGovernor.initialize();
 
         // 3. Initialize Multi-Threaded Zombie Simulation
         ServerHordeSimEngine.apply();

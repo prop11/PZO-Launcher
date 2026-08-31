@@ -58,6 +58,10 @@ public class PZOEntrypoint {
         FastBitwiseChunkIndexer.initialize();
         DirectBufferAllocatorGovernor.initialize();
         FrameDropDiagnosticEngine.initialize();
+        FMODOcclusionGovernor.initialize();
+        HordeAnimationLODGovernor.initialize();
+        VerticalChunkStreamer.initialize();
+        DynamicLightingCuller.initialize();
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");
