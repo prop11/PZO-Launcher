@@ -183,7 +183,7 @@ $JsonAbove20 = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UseG1GC",
-        "-XX:+PerfDisableSharedMem",
+        "-XX:G1HeapRegionSize=32m",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
         "-XX:+AlwaysPreTouch"
