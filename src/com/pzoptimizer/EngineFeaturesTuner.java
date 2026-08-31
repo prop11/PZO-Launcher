@@ -24,33 +24,7 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Unlock Asynchronous Multi-Threaded Engine Pipelines (100% verified thread-safe)
-                    setOptionValue(debugOptionsInstance, "threadLighting", true);
-                    setOptionValue(debugOptionsInstance, "threadAmbient", true);
-                    setOptionValue(debugOptionsInstance, "threadSound", true);
-                    setOptionValue(debugOptionsInstance, "threadGridStacks", true);
-                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
-                    setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
-
-                    // C. Chunk Map Grid Optimization: Lock to 13x13 (169 chunks) instead of 19x19 (361 chunks)
-                    // Cuts chunk disk streaming & decompression workload by 53%, eliminating driving hitches!
-                    setOptionValue(debugOptionsInstance, "worldChunkMap13x13", true);
-
-                    // D. Shared Skeletal Bone Matrices for Zombie Hordes
-                    try {
-                        Field animGroupField = debugOptionsClass.getField("animation");
-                        Object animGroup = animGroupField.get(debugOptionsInstance);
-                        if (animGroup != null) {
-                            Field sharedSkelesField = animGroup.getClass().getField("sharedSkeles");
-                            Object sharedSkeles = sharedSkelesField.get(animGroup);
-                            if (sharedSkeles != null) {
-                                setOptionValue(sharedSkeles, "enabled", true);
-                                setOptionValue(sharedSkeles, "allowLerping", true);
-                            }
-                        }
-                    } catch (Throwable ignored) {}
-
-                    // E. 3D Model Texture Size Limiter
+                    // B. Model Texture Size Limiter
                     try {
                         Field modelGroupField = debugOptionsClass.getField("model");
                         Object modelGroup = modelGroupField.get(debugOptionsInstance);
@@ -63,7 +37,7 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    PZOLogger.success("EngineFeaturesTuner: Rock-Solid Multi-Threaded Subsystems & 13x13 Streamer Active");
+                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Pathfinding & Engine Subsystems Optimized");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());

@@ -112,13 +112,10 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
 
-        // 7. Render Thread Priority
+        // 7. Balanced Game & Streaming Thread Priority
         try {
-            Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
-            PZOLogger.success("Main game rendering thread priority elevated to MAX_PRIORITY");
-        } catch (Throwable t) {
-            PZOLogger.warn("Could not set thread priority (Non-fatal): " + t.getMessage());
-        }
+            Thread.currentThread().setPriority(Thread.NORM_PRIORITY);
+        } catch (Throwable ignored) {}
 
         // 8. Background Telemetry Loop
         Thread watchdog = new Thread(() -> {

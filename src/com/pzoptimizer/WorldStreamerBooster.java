@@ -10,9 +10,11 @@ import java.lang.reflect.Field;
 public class WorldStreamerBooster {
 
     public static void startDaemon() {
+        // Start predictive vehicle trajectory streaming daemon
+        VehicleTrajectoryStreamer.start();
+
         Thread monitor = new Thread(() -> {
-            boolean streamerBoosted = false;
-            for (int i = 0; i < 60; i++) {
+            while (true) {
                 try {
                     // 1. Boost WorldStreamer.instance.worldStreamer thread
                     Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
@@ -21,10 +23,8 @@ public class WorldStreamerBooster {
                     if (wsInstance != null) {
                         Field threadField = wsClass.getField("worldStreamer");
                         Thread wsThread = (Thread) threadField.get(wsInstance);
-                        if (wsThread != null && wsThread.isAlive()) {
-                            wsThread.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 3)); // Priority 8
-                            streamerBoosted = true;
-                            PZOLogger.success("WorldStreamerBooster: Elevated 'World Streamer' thread priority to " + wsThread.getPriority());
+                        if (wsThread != null && wsThread.isAlive() && wsThread.getPriority() < Thread.NORM_PRIORITY + 2) {
+                            wsThread.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2)); // Priority 7
                         }
                     }
 
@@ -41,22 +41,21 @@ public class WorldStreamerBooster {
                             String name = th.getName();
                             if (name != null) {
                                 if (name.contains("World Streamer") || name.contains("WorldReuser")) {
-                                    th.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 3));
+                                    if (th.getPriority() < Thread.NORM_PRIORITY + 2) {
+                                        th.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2));
+                                    }
                                 } else if (name.contains("Lighting") || name.contains("LightingThread")) {
-                                    th.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2));
+                                    if (th.getPriority() < Thread.NORM_PRIORITY + 1) {
+                                        th.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 1));
+                                    }
                                 }
                             }
                         }
                     }
 
-                    if (streamerBoosted) {
-                        // After boosting once, sleep in longer intervals (every 10 seconds)
-                        Thread.sleep(10000);
-                    } else {
-                        Thread.sleep(1000);
-                    }
+                    Thread.sleep(5000);
                 } catch (Throwable ignored) {
-                    try { Thread.sleep(2000); } catch (Throwable ignored2) {}
+                    try { Thread.sleep(3000); } catch (Throwable ignored2) {}
                 }
             }
         });

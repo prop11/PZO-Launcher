@@ -13,20 +13,7 @@ public class LuaInterpreterAccelerator {
     private static boolean active = false;
 
     public static void apply() {
-        try {
-            // 1. Configure JVM high-throughput reflection & string intern properties
-            System.setProperty("pzo.lua.accelerated", "true");
-            System.setProperty("pzo.lua.intern_strings", "true");
-            System.setProperty("jdk.reflect.allowGetCallerProcess", "true");
-
-            // 2. Pre-populate high-frequency PZ Lua function cache
-            prewarmMethodCache();
-
-            active = true;
-            PZOLogger.success("LuaInterpreterAccelerator active (Kahlua VM table lookups & string interning optimized)");
-        } catch (Throwable t) {
-            PZOLogger.warn("LuaInterpreterAccelerator non-fatal notice: " + t.getMessage());
-        }
+        // Maintained as passive stub. Kahlua Lua VM runs 100% vanilla to prevent any mod conflicts.
     }
 
     private static void prewarmMethodCache() {
