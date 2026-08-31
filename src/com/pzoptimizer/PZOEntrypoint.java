@@ -57,6 +57,7 @@ public class PZOEntrypoint {
         NativeDirectMemoryPool.initialize();
         FastBitwiseChunkIndexer.initialize();
         DirectBufferAllocatorGovernor.initialize();
+        FrameDropDiagnosticEngine.initialize();
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");
