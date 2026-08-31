@@ -30,7 +30,24 @@ public class PZOptimAgent {
         GenerationalHeapCleaner.startGovernor();
         AsyncEntityDistanceCache.initialize();
         CorpseAudioGovernor.applyCorpseAudioLimits();
+        EngineGLStateGovernor.initialize();
+        EngineFramePacer.initialize();
+        NativeDirectMemoryPool.initialize();
+        FastBitwiseChunkIndexer.initialize();
+        DirectBufferAllocatorGovernor.initialize();
+        FrameDropDiagnosticEngine.initialize();
         
+        // Dedicated Server optimizations if running in headless / server environment
+        try {
+            boolean isHeadless = java.awt.GraphicsEnvironment.isHeadless();
+            if (isHeadless || System.getProperty("zomboid.steam") != null || System.getProperty("zomboid.server") != null) {
+                com.pzoptimizer.server.LinuxSteamServerSanitizer.sanitize();
+                com.pzoptimizer.server.ServerNetworkTuner.apply();
+                com.pzoptimizer.server.ServerHordeSimEngine.apply();
+                com.pzoptimizer.server.ServerChunkStreamBooster.apply();
+            }
+        } catch (Throwable ignored) {}
+
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
         // Automatically load and hook any ZombieBuddy / Java Workshop mods with full Instrumentation

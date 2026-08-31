@@ -24,33 +24,7 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Unlock Asynchronous Multi-Threaded Engine Pipelines (100% verified thread-safe)
-                    setOptionValue(debugOptionsInstance, "threadLighting", true);
-                    setOptionValue(debugOptionsInstance, "threadAmbient", true);
-                    setOptionValue(debugOptionsInstance, "threadSound", true);
-                    setOptionValue(debugOptionsInstance, "threadGridStacks", true);
-                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
-                    setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
-
-                    // C. Chunk Map Grid Optimization: Lock to 13x13 (169 chunks) instead of 19x19 (361 chunks)
-                    // Cuts chunk disk streaming & decompression workload by 53%, eliminating driving hitches!
-                    setOptionValue(debugOptionsInstance, "worldChunkMap13x13", true);
-
-                    // D. Shared Skeletal Bone Matrices for Zombie Hordes
-                    try {
-                        Field animGroupField = debugOptionsClass.getField("animation");
-                        Object animGroup = animGroupField.get(debugOptionsInstance);
-                        if (animGroup != null) {
-                            Field sharedSkelesField = animGroup.getClass().getField("sharedSkeles");
-                            Object sharedSkeles = sharedSkelesField.get(animGroup);
-                            if (sharedSkeles != null) {
-                                setOptionValue(sharedSkeles, "enabled", true);
-                                setOptionValue(sharedSkeles, "allowLerping", true);
-                            }
-                        }
-                    } catch (Throwable ignored) {}
-
-                    // E. 3D Model Texture Size Limiter
+                    // B. Model Texture Size Limiter
                     try {
                         Field modelGroupField = debugOptionsClass.getField("model");
                         Object modelGroup = modelGroupField.get(debugOptionsInstance);
@@ -63,7 +37,7 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    PZOLogger.success("EngineFeaturesTuner: Rock-Solid Multi-Threaded Subsystems & 13x13 Streamer Active");
+                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Pathfinding & Engine Subsystems Optimized");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
@@ -88,7 +62,43 @@ public class EngineFeaturesTuner {
                     auto3DField.setBoolean(null, true);
                 } catch (Throwable ignored) {}
 
+                try {
+                    Field lightFpsField = perfClass.getField("lightingFps");
+                    lightFpsField.setInt(null, 30); // 30 FPS smooth lighting updates (eliminates 15 FPS lighting jitter)
+                } catch (Throwable ignored) {}
+
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized");
+            } catch (Throwable ignored) {}
+
+            // 3. Convert IsoChunkMap.bSettingChunk (Fair Lock -> High-Speed Non-Fair Lock)
+            try {
+                Class<?> chunkMapClass = Class.forName("zombie.iso.IsoChunkMap");
+                Field lockField = chunkMapClass.getField("bSettingChunk");
+                lockField.setAccessible(true);
+                lockField.set(null, new java.util.concurrent.locks.ReentrantLock(false));
+                PZOLogger.success("EngineFeaturesTuner: Converted IsoChunkMap fair lock to High-Speed Non-Fair Lock");
+            } catch (Throwable ignored) {}
+
+            // 3. Silence Non-Fatal DebugType Warning Spam during Chunk Loading (SpriteConfig, Entities, Objects)
+            try {
+                Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
+                Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
+                @SuppressWarnings("rawtypes")
+                Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
+
+                // Set General, Entity, Sprite, Objects, Mod debug types to Error severity
+                String[] typesToSilence = new String[]{"General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker"};
+                for (String typeName : typesToSilence) {
+                    try {
+                        Field typeField = debugTypeClass.getField(typeName);
+                        Object debugType = typeField.get(null);
+                        if (debugType != null) {
+                            Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
+                            setLogSeverity.invoke(debugType, errorSeverity);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load warning logs (SpriteConfig disk log stall eliminated)");
             } catch (Throwable ignored) {}
 
         } catch (Throwable t) {

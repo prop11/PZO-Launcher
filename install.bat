@@ -22,7 +22,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.7.1)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.8.0)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -183,7 +183,7 @@ $JsonAbove20 = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UseG1GC",
-        "-XX:+PerfDisableSharedMem",
+        "-XX:G1HeapRegionSize=32m",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
         "-XX:+AlwaysPreTouch"
@@ -416,7 +416,7 @@ function Apply-PZOConfiguration {
         g1gc        = $UseG1GC
         pretouch    = $true
         zombiebuddy = $isZombieBuddyActive
-        version     = "0.7.1"
+        version     = "0.8.0"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
