@@ -422,10 +422,10 @@ public class PZOEngineBridge {
                                             "    if MainScreen.instance.pzoBetaTickBox then return end\n" +
                                             "    local fontH = (getTextManager and getTextManager().getFontHeight and getTextManager():getFontHeight(UIFont.Small)) or 14\n" +
                                             "    local tickH = fontH + 8\n" +
-                                            "    local tickW = 280\n" +
-                                            "    local x = 50\n" +
-                                            "    local y = getCore():getScreenHeight() - tickH - 35\n" +
-                                            "    local tickBox = ISTickBox:new(x, y, tickW, tickH, \"\", MainScreen.instance, function(target, index, selected)\n" +
+                                            "    local tickW = 320\n" +
+                                            "    local x = 40\n" +
+                                            "    local y = (MainScreen.instance.height or getCore():getScreenHeight()) - tickH - 30\n" +
+                                            "    local tickBox = ISTickBox:new(x, y, tickW, tickH, 'PZOBetaTickBox', MainScreen.instance, function(target, index, selected)\n" +
                                             "        if PZOEngine and PZOEngine.setBetaOptIn then\n" +
                                             "            PZOEngine.setBetaOptIn(selected)\n" +
                                             "        end\n" +
@@ -436,18 +436,25 @@ public class PZOEngineBridge {
                                             "    tickBox:setAnchorRight(false)\n" +
                                             "    tickBox:setAnchorTop(false)\n" +
                                             "    tickBox:setAnchorBottom(true)\n" +
-                                            "    tickBox:addOption(\"Opt in to PZO Beta (Unstable) Builds\")\n" +
+                                            "    tickBox:addOption('Opt in to PZO Beta (Unstable) Builds')\n" +
                                             "    local isOptedIn = false\n" +
                                             "    if PZOEngine and PZOEngine.isBetaOptIn then\n" +
                                             "        isOptedIn = PZOEngine.isBetaOptIn()\n" +
                                             "    end\n" +
                                             "    tickBox:setSelected(1, isOptedIn)\n" +
+                                            "    tickBox:setVisible(true)\n" +
                                             "    MainScreen.instance:addChild(tickBox)\n" +
                                             "    MainScreen.instance.pzoBetaTickBox = tickBox\n" +
                                             "end\n" +
                                             "Events.OnMainMenuEnter.Add(addPZOBetaTickBox)\n" +
                                             "Events.OnResolutionChange.Add(addPZOBetaTickBox)\n" +
-                                            "if MainScreen and MainScreen.instance then addPZOBetaTickBox() end\n";
+                                            "local function pzoOnTickCheck()\n" +
+                                            "    if MainScreen and MainScreen.instance then\n" +
+                                            "        addPZOBetaTickBox()\n" +
+                                            "        Events.OnTick.Remove(pzoOnTickCheck)\n" +
+                                            "    end\n" +
+                                            "end\n" +
+                                            "Events.OnTick.Add(pzoOnTickCheck)\n";
 
                                         Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
