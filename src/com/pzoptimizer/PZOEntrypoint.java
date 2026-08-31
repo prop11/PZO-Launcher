@@ -52,6 +52,10 @@ public class PZOEntrypoint {
         GenerationalHeapCleaner.startGovernor();
         AsyncEntityDistanceCache.initialize();
         CorpseAudioGovernor.applyCorpseAudioLimits();
+        EngineGLStateGovernor.initialize();
+        EngineFramePacer.initialize();
+        NativeDirectMemoryPool.initialize();
+        FastBitwiseChunkIndexer.initialize();
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");

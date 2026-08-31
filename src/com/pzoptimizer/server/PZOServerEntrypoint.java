@@ -9,7 +9,7 @@ import java.lang.reflect.Method;
  * before handing execution over to zombie.network.GameServer.
  */
 public class PZOServerEntrypoint {
-    public static final String SERVER_VERSION = "0.7.1";
+    public static final String SERVER_VERSION = "0.8.0";
 
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
@@ -40,6 +40,10 @@ public class PZOServerEntrypoint {
         com.pzoptimizer.GenerationalHeapCleaner.startGovernor();
         com.pzoptimizer.AsyncEntityDistanceCache.initialize();
         com.pzoptimizer.CorpseAudioGovernor.applyCorpseAudioLimits();
+        com.pzoptimizer.EngineGLStateGovernor.initialize();
+        com.pzoptimizer.EngineFramePacer.initialize();
+        com.pzoptimizer.NativeDirectMemoryPool.initialize();
+        com.pzoptimizer.FastBitwiseChunkIndexer.initialize();
 
         // 2. Initialize Server Network Buffer Pooler
         com.pzoptimizer.PZOEngineBridge.initialize();
