@@ -1,2 +1,8 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Enforce Unix LF line endings for shell scripts and Unix executables
+*.sh text eol=lf
+*.command text eol=lf
+*.py text eol=lf
+
+# Keep Windows CRLF for batch files
+*.bat text eol=crlf
+*.cmd text eol=crlf
