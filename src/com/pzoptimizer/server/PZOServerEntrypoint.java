@@ -17,7 +17,6 @@ public class PZOServerEntrypoint {
         // 1. Enforce headless execution for dedicated servers
         try {
             System.setProperty("java.awt.headless", "true");
-            System.setProperty("zomboid.server", "1");
         } catch (Throwable ignored) {}
 
         PZOServerLogger.info("================================================================================");
