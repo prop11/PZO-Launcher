@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.7.1)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.8.0)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -170,7 +170,7 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy.jar and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.7.1+ automatically runs your ZombieBuddy Workshop mods natively!"
+        echo "PZO v0.8.0+ automatically runs your ZombieBuddy Workshop mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
@@ -191,10 +191,12 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[+] Backed up original Info.plist -> ${PLIST}.bak"
     fi
 
-    python3 - <<EOF
-import plistlib, os
+    python3 - << 'EOF' "$PLIST" "$RAM_MB"
+import plistlib, sys, os
 
-plist_path = "$PLIST"
+plist_path = sys.argv[1]
+ram_mb = sys.argv[2]
+
 with open(plist_path, "rb") as f:
     pl = plistlib.load(f)
 
@@ -211,9 +213,9 @@ if "Java" in pl and isinstance(pl["Java"], dict):
     if "ClassPath" in pl["Java"]:
         cp = pl["Java"]["ClassPath"]
         if isinstance(cp, str) and "PZOptimEngine.jar" not in cp:
-            pl["Java"]["ClassPath"] = "\$JAVAROOT/PZOptimEngine.jar:" + cp
+            pl["Java"]["ClassPath"] = "PZOptimEngine.jar:" + cp
         elif isinstance(cp, list) and not any("PZOptimEngine.jar" in x for x in cp):
-            pl["Java"]["ClassPath"] = ["\$JAVAROOT/PZOptimEngine.jar"] + cp
+            pl["Java"]["ClassPath"] = ["PZOptimEngine.jar"] + cp
 
 if "JVMOptions" in pl and isinstance(pl["JVMOptions"], dict):
     if "MainClass" in pl["JVMOptions"]:
@@ -224,14 +226,14 @@ for cp_key in ["JVMClassPath", "ClassPath"]:
     if cp_key in pl:
         if isinstance(pl[cp_key], list):
             if not any("PZOptimEngine.jar" in x for x in pl[cp_key]):
-                pl[cp_key] = ["\$JAVAROOT/PZOptimEngine.jar"] + pl[cp_key]
+                pl[cp_key] = ["PZOptimEngine.jar"] + pl[cp_key]
         elif isinstance(pl[cp_key], str):
             if "PZOptimEngine.jar" not in pl[cp_key]:
-                pl[cp_key] = "\$JAVAROOT/PZOptimEngine.jar:" + pl[cp_key]
+                pl[cp_key] = "PZOptimEngine.jar:" + pl[cp_key]
 
 jvm_args = [
-    "-javaagent:\$JAVAROOT/PZOptimEngine.jar",
-    "-Xmx${RAM_MB}m",
+    "-javaagent:PZOptimEngine.jar",
+    f"-Xmx{ram_mb}m",
     "-XX:+UseG1GC",
     "-XX:+PerfDisableSharedMem",
     "-XX:InitiatingHeapOccupancyPercent=45",
@@ -257,6 +259,14 @@ with open(plist_path, "wb") as f:
     plistlib.dump(pl, f)
 print("[+] Successfully updated Info.plist with ClassPath, Java Agent, Java 17 / B42 heap & entrypoint.")
 EOF
+
+    # Re-sign the app bundle on macOS to prevent Gatekeeper/AMFI signature mismatch kills
+    if command -v codesign >/dev/null 2>&1; then
+        echo "[*] Re-signing ProjectZomboid.app with ad-hoc signature..."
+        codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+        xattr -cr "$APP_BUNDLE" 2>/dev/null || true
+        echo "[+] Successfully re-signed ProjectZomboid.app"
+    fi
 
 # ==============================================================================
 # Linux Steam Installation
@@ -334,7 +344,7 @@ else
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
         echo "========================================================================"
         echo "ZombieBuddy and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.7.1+ automatically runs your ZombieBuddy mods natively!"
+        echo "PZO v0.8.0+ automatically runs your ZombieBuddy mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi

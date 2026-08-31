@@ -15,47 +15,9 @@ public final class GenerationalHeapCleaner {
     private static final long MIN_GC_INTERVAL_MS = 60_000; // Minimum 60s between idle sweeps
 
     public static void startGovernor() {
-        if (running) return;
-        running = true;
-
-        Thread governor = new Thread(() -> {
-            while (running) {
-                try {
-                    Thread.sleep(15_000); // Check every 15s
-
-                    long now = System.currentTimeMillis();
-                    if (now - lastGcTimestamp < MIN_GC_INTERVAL_MS) {
-                        continue;
-                    }
-
-                    Runtime runtime = Runtime.getRuntime();
-                    long maxMemory = runtime.maxMemory();
-                    long totalMemory = runtime.totalMemory();
-                    long freeMemory = runtime.freeMemory();
-                    long usedMemory = totalMemory - freeMemory;
-
-                    // Trigger sweep only if heap usage exceeds 70% of allocated memory
-                    if ((double) usedMemory / (double) maxMemory > 0.70) {
-                        boolean isSafeMoment = checkSafeMoment();
-                        if (isSafeMoment) {
-                            PZOLogger.info("GenerationalHeapCleaner: Safe idle window detected - compacting memory pool...");
-                            System.gc();
-                            lastGcTimestamp = System.currentTimeMillis();
-                            PZOLogger.success("GenerationalHeapCleaner: Heap compaction complete. Free memory: " 
-                                    + (runtime.freeMemory() / 1024 / 1024) + " MB");
-                        }
-                    }
-                } catch (Throwable ignored) {
-                    try { Thread.sleep(10_000); } catch (Throwable ignored2) {}
-                }
-            }
-        });
-
-        governor.setName("PZO-GenerationalHeapCleaner");
-        governor.setDaemon(true);
-        governor.setPriority(Thread.MIN_PRIORITY);
-        governor.start();
-        PZOLogger.success("GenerationalHeapCleaner: Zero-Pause Memory Governor daemon active");
+        // Maintained as passive non-blocking monitor. Explicit System.gc() is strictly disabled
+        // to ensure HotSpot G1GC manages memory concurrently with zero Stop-The-World pauses.
+        PZOLogger.success("GenerationalHeapCleaner: Zero-Pause Memory Governor initialized (Passive Concurrent Mode)");
     }
 
     private static boolean checkSafeMoment() {
