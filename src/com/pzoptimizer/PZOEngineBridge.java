@@ -417,44 +417,55 @@ public class PZOEngineBridge {
                                     // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
                                     try {
                                         String luaCode =
-                                            "local function addPZOBetaTickBox()\n" +
-                                            "    if not MainScreen or not MainScreen.instance then return end\n" +
-                                            "    if MainScreen.instance.pzoBetaTickBox then return end\n" +
-                                            "    local fontH = (getTextManager and getTextManager().getFontHeight and getTextManager():getFontHeight(UIFont.Small)) or 14\n" +
-                                            "    local tickH = fontH + 8\n" +
-                                            "    local tickW = 320\n" +
-                                            "    local x = 40\n" +
-                                            "    local y = (MainScreen.instance.height or getCore():getScreenHeight()) - tickH - 30\n" +
-                                            "    local tickBox = ISTickBox:new(x, y, tickW, tickH, 'PZOBetaTickBox', MainScreen.instance, function(target, index, selected)\n" +
-                                            "        if PZOEngine and PZOEngine.setBetaOptIn then\n" +
-                                            "            PZOEngine.setBetaOptIn(selected)\n" +
-                                            "        end\n" +
-                                            "    end)\n" +
-                                            "    tickBox:initialise()\n" +
-                                            "    tickBox:instantiate()\n" +
-                                            "    tickBox:setAnchorLeft(true)\n" +
-                                            "    tickBox:setAnchorRight(false)\n" +
-                                            "    tickBox:setAnchorTop(false)\n" +
-                                            "    tickBox:setAnchorBottom(true)\n" +
-                                            "    tickBox:addOption('Opt in to PZO Beta (Unstable) Builds')\n" +
+                                            "local function addPZOBetaToggle(self)\n" +
+                                            "    if not self or self.pzoBetaButton then return end\n" +
                                             "    local isOptedIn = false\n" +
                                             "    if PZOEngine and PZOEngine.isBetaOptIn then\n" +
                                             "        isOptedIn = PZOEngine.isBetaOptIn()\n" +
                                             "    end\n" +
-                                            "    tickBox:setSelected(1, isOptedIn)\n" +
-                                            "    tickBox:setVisible(true)\n" +
-                                            "    MainScreen.instance:addChild(tickBox)\n" +
-                                            "    MainScreen.instance.pzoBetaTickBox = tickBox\n" +
+                                            "    local titleText = isOptedIn and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
+                                            "    local btnW = 220\n" +
+                                            "    local btnH = 26\n" +
+                                            "    local btnX = 25\n" +
+                                            "    local btnY = (self.height or getCore():getScreenHeight()) - btnH - 18\n" +
+                                            "    local btn = ISButton:new(btnX, btnY, btnW, btnH, titleText, self, function(target, button)\n" +
+                                            "        local curState = false\n" +
+                                            "        if PZOEngine and PZOEngine.isBetaOptIn then\n" +
+                                            "            curState = PZOEngine.isBetaOptIn()\n" +
+                                            "        end\n" +
+                                            "        local newState = not curState\n" +
+                                            "        if PZOEngine and PZOEngine.setBetaOptIn then\n" +
+                                            "            PZOEngine.setBetaOptIn(newState)\n" +
+                                            "        end\n" +
+                                            "        button.title = newState and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
+                                            "        button.borderColor = newState and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
+                                            "        button.textColor = newState and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "    end)\n" +
+                                            "    btn:initialise()\n" +
+                                            "    btn:instantiate()\n" +
+                                            "    btn.backgroundColor = {r=0.08, g=0.10, b=0.15, a=0.90}\n" +
+                                            "    btn.borderColor = isOptedIn and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
+                                            "    btn.textColor = isOptedIn and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "    btn:setAnchorLeft(true)\n" +
+                                            "    btn:setAnchorRight(false)\n" +
+                                            "    btn:setAnchorTop(false)\n" +
+                                            "    btn:setAnchorBottom(true)\n" +
+                                            "    btn:setVisible(true)\n" +
+                                            "    self:addChild(btn)\n" +
+                                            "    self.pzoBetaButton = btn\n" +
                                             "end\n" +
-                                            "Events.OnMainMenuEnter.Add(addPZOBetaTickBox)\n" +
-                                            "Events.OnResolutionChange.Add(addPZOBetaTickBox)\n" +
-                                            "local function pzoOnTickCheck()\n" +
-                                            "    if MainScreen and MainScreen.instance then\n" +
-                                            "        addPZOBetaTickBox()\n" +
-                                            "        Events.OnTick.Remove(pzoOnTickCheck)\n" +
+                                            "if MainScreen then\n" +
+                                            "    local old_prerender = MainScreen.prerender\n" +
+                                            "    MainScreen.prerender = function(self)\n" +
+                                            "        old_prerender(self)\n" +
+                                            "        if not self.pzoBetaButton then\n" +
+                                            "            addPZOBetaToggle(self)\n" +
+                                            "        end\n" +
                                             "    end\n" +
-                                            "end\n" +
-                                            "Events.OnTick.Add(pzoOnTickCheck)\n";
+                                            "    if MainScreen.instance then\n" +
+                                            "        addPZOBetaToggle(MainScreen.instance)\n" +
+                                            "    end\n" +
+                                            "end\n";
 
                                         Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
