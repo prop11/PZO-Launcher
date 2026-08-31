@@ -249,28 +249,10 @@ public class UpdateDialog {
     }
 
     private static boolean isVersionIgnored(String version) {
-        try {
-            File cfg = getConfigFile();
-            if (cfg.exists()) {
-                String content = Files.readString(cfg.toPath());
-                return content.contains("\"ignored_version\":\"" + version + "\"");
-            }
-        } catch (Throwable ignored) {}
-        return false;
+        return PZOConfig.isVersionIgnored(version);
     }
 
     private static void setIgnoredVersion(String version) {
-        try {
-            File cfg = getConfigFile();
-            String json = String.format("{\"ignored_version\":\"%s\"}", version);
-            Files.writeString(cfg.toPath(), json);
-        } catch (Throwable ignored) {}
-    }
-
-    private static File getConfigFile() {
-        String userHome = System.getProperty("user.home");
-        File luaDir = new File(userHome, "Zomboid" + File.separator + "Lua");
-        if (!luaDir.exists()) luaDir.mkdirs();
-        return new File(luaDir, CONFIG_FILE);
+        PZOConfig.setIgnoredVersion(version);
     }
 }
