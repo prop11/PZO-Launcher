@@ -34,6 +34,10 @@ public class PZOEngineBridge {
         return UpdateChecker.CURRENT_VERSION;
     }
 
+    public static String getChannel() {
+        return PZOConfig.isBetaOptIn() ? "Unstable / Beta" : "Stable";
+    }
+
     public static boolean isG1GC() {
         return true;
     }
@@ -385,6 +389,20 @@ public class PZOEngineBridge {
                                             }
                                         );
                                         tableRawset.invoke(pzoTable, "isBetaOptIn", isBetaFunc);
+
+                                        // getChannel
+                                        Object getChannelFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], getChannel());
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getChannel", getChannelFunc);
 
                                         // setBetaOptIn
                                         Object setBetaFunc = Proxy.newProxyInstance(

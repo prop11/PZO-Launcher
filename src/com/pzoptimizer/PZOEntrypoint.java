@@ -62,6 +62,8 @@ public class PZOEntrypoint {
         HordeAnimationLODGovernor.initialize();
         VerticalChunkStreamer.initialize();
         DynamicLightingCuller.initialize();
+        ChunkIngestionPacer.initialize();
+        PredictiveChunkStreamer.initialize();
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");

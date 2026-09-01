@@ -36,6 +36,8 @@ public class PZOptimAgent {
         FastBitwiseChunkIndexer.initialize();
         DirectBufferAllocatorGovernor.initialize();
         FrameDropDiagnosticEngine.initialize();
+        ChunkIngestionPacer.initialize();
+        PredictiveChunkStreamer.initialize();
         
         // Dedicated Server optimizations if running in headless / server environment
         try {
