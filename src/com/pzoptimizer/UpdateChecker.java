@@ -67,8 +67,11 @@ public class UpdateChecker {
             String selectedReleaseJson = null;
 
             if (json.startsWith("[")) {
-                // Parse array of releases
+                // Parse array of releases and find the highest available version matching channel
                 List<String> releases = splitJsonArrayObjects(json);
+                String bestRelJson = null;
+                String bestVersion = null;
+
                 for (String relJson : releases) {
                     boolean isDraft = extractJsonBooleanField(relJson, "draft");
                     if (isDraft) continue;
@@ -83,14 +86,20 @@ public class UpdateChecker {
                         if (isPrerelease || hasUnstableTag) {
                             continue;
                         }
-                        selectedReleaseJson = relJson;
-                        break;
-                    } else {
-                        // BETA USER: Accept prereleases, unstable tags, or top release
-                        selectedReleaseJson = relJson;
-                        break;
+                    }
+
+                    String candVer = extractVersionNumber(name);
+                    if (candVer == null) {
+                        candVer = extractVersionNumber(tag);
+                    }
+                    if (candVer == null) continue;
+
+                    if (bestVersion == null || isNewerVersion(candVer, bestVersion)) {
+                        bestVersion = candVer;
+                        bestRelJson = relJson;
                     }
                 }
+                selectedReleaseJson = bestRelJson;
             } else if (json.startsWith("{")) {
                 // Single release object (e.g. from /releases/latest)
                 boolean isPrerelease = extractJsonBooleanField(json, "prerelease");
@@ -127,18 +136,25 @@ public class UpdateChecker {
                 latestVersion = CURRENT_VERSION;
             }
 
+            String displayVersion = latestVersion;
+            if ((tagName != null && isUnstableIdentifier(tagName)) || (releaseName != null && isUnstableIdentifier(releaseName))) {
+                if (!displayVersion.toLowerCase().contains("unstable")) {
+                    displayVersion = displayVersion + "-unstable";
+                }
+            }
+
             boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
             String downloadUrl = (jarAssetUrl != null && !jarAssetUrl.isEmpty()) ? jarAssetUrl : DEFAULT_JAR_DOWNLOAD_URL;
 
-            writeStatus(hasUpdate, latestVersion, res.channel);
+            writeStatus(hasUpdate, displayVersion, res.channel, downloadUrl);
 
             res.hasUpdate = hasUpdate;
-            res.latestVersion = latestVersion;
+            res.latestVersion = displayVersion;
             res.tagName = tagName != null ? tagName : "";
             res.downloadUrl = downloadUrl;
             return res;
         } catch (Exception e) {
-            writeStatus(false, CURRENT_VERSION, res.channel);
+            writeStatus(false, CURRENT_VERSION, res.channel, DEFAULT_JAR_DOWNLOAD_URL);
             return res;
         }
     }
@@ -235,7 +251,7 @@ public class UpdateChecker {
         return null;
     }
 
-    private static boolean isNewerVersion(String latest, String current) {
+    public static boolean isNewerVersion(String latest, String current) {
         try {
             String[] lParts = latest.split("\\.");
             String[] cParts = current.split("\\.");
@@ -254,6 +270,10 @@ public class UpdateChecker {
     }
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel) {
+        writeStatus(hasUpdate, latestVer, channel, DEFAULT_JAR_DOWNLOAD_URL);
+    }
+
+    private static void writeStatus(boolean hasUpdate, String latestVer, String channel, String downloadUrl) {
         try {
             String userHome = System.getProperty("user.home");
             if (userHome == null) return;
@@ -261,8 +281,8 @@ public class UpdateChecker {
             if (!luaDir.exists()) luaDir.mkdirs();
 
             File updateFile = new File(luaDir, "pzo_update.json");
-            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"channel\": \"%s\", \"beta_opt_in\": %b}",
-                hasUpdate, CURRENT_VERSION, latestVer, channel, PZOConfig.isBetaOptIn());
+            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"url\": \"%s\", \"channel\": \"%s\", \"beta_opt_in\": %b}",
+                hasUpdate, CURRENT_VERSION, latestVer, downloadUrl != null ? downloadUrl : DEFAULT_JAR_DOWNLOAD_URL, channel, PZOConfig.isBetaOptIn());
 
             try (FileWriter fw = new FileWriter(updateFile, false)) {
                 fw.write(json);
