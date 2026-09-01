@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.8.2)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.8.2-unstable)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
