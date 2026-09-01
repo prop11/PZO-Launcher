@@ -445,9 +445,17 @@ public class PZOEngineBridge {
                                             new Class<?>[]{javaFuncClass},
                                             (proxy, m, mArgs) -> {
                                                 if ("call".equals(m.getName())) {
-                                                    UpdateChecker.UpdateResult res = UpdateChecker.checkForUpdatesSync(4000);
-                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(res.hasUpdate));
-                                                    return 1;
+                                                    Thread checkThread = new Thread(() -> {
+                                                        try {
+                                                            UpdateChecker.UpdateResult res = UpdateChecker.checkForUpdatesSync(4000);
+                                                            if (res != null && res.hasUpdate) {
+                                                                UpdateDialog.promptIfUpdateAvailable(res.latestVersion, res.downloadUrl);
+                                                            }
+                                                        } catch (Throwable ignored) {}
+                                                    }, "PZO-AsyncUpdatePrompt");
+                                                    checkThread.setDaemon(true);
+                                                    checkThread.start();
+                                                    return 0;
                                                 }
                                                 return null;
                                             }
@@ -488,6 +496,9 @@ public class PZOEngineBridge {
                                             "        button.title = newState and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
                                             "        button.borderColor = newState and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
                                             "        button.textColor = newState and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "        if newState and PZOEngine and PZOEngine.checkForUpdates then\n" +
+                                            "            PZOEngine.checkForUpdates()\n" +
+                                            "        end\n" +
                                             "    end)\n" +
                                             "    btn:initialise()\n" +
                                             "    btn:instantiate()\n" +
