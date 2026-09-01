@@ -173,6 +173,7 @@ public class TelemetryReporter {
                     try (FileWriter fw = new FileWriter(tf, false)) {
                         fw.write(json);
                     }
+                    EnhancedRenderTelemetry.flushToDisk(luaDir);
                 } catch (Throwable ignored) {}
             }
         } catch (Exception ignored) {}

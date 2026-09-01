@@ -38,6 +38,9 @@ public class PZOptimAgent {
         FrameDropDiagnosticEngine.initialize();
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
+        if (UnstableChannelGuard.isUnstableBuild()) {
+            PZOLogger.success("[PZO Agent] Unstable Render Acceleration & Telemetry Matrix Armed");
+        }
         
         // Dedicated Server optimizations if running in headless / server environment
         try {
