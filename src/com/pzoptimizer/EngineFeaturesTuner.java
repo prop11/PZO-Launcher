@@ -70,13 +70,9 @@ public class EngineFeaturesTuner {
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized");
             } catch (Throwable ignored) {}
 
-            // 3. Convert IsoChunkMap.bSettingChunk (Fair Lock -> High-Speed Non-Fair Lock)
+            // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)
             try {
-                Class<?> chunkMapClass = Class.forName("zombie.iso.IsoChunkMap");
-                Field lockField = chunkMapClass.getField("bSettingChunk");
-                lockField.setAccessible(true);
-                lockField.set(null, new java.util.concurrent.locks.ReentrantLock(false));
-                PZOLogger.success("EngineFeaturesTuner: Converted IsoChunkMap fair lock to High-Speed Non-Fair Lock");
+                ChunkCrashShield.enforceChunkGridSanity();
             } catch (Throwable ignored) {}
 
             // 3. Silence Non-Fatal DebugType Warning Spam during Chunk Loading (SpriteConfig, Entities, Objects)

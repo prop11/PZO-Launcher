@@ -16,6 +16,9 @@ public class WorldStreamerBooster {
         Thread monitor = new Thread(() -> {
             while (true) {
                 try {
+                    // 0. Enforce IsoChunkMap parity and array capacity
+                    ChunkCrashShield.enforceChunkGridSanity();
+
                     // 1. Boost WorldStreamer.instance.worldStreamer thread
                     Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
                     Field instField = wsClass.getField("instance");
