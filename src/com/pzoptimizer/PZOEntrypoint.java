@@ -64,6 +64,10 @@ public class PZOEntrypoint {
         DynamicLightingCuller.initialize();
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
+        if (UnstableChannelGuard.isUnstableBuild()) {
+            PZOLogger.success("[PZO Unstable Engine] RenderFrustumCuller, ZOcclusionCuller & ModelSkinningGovernor Armed");
+            PZOLogger.success("[PZO Unstable Engine] EnhancedRenderTelemetry Active");
+        }
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
         FastPathCache.normalize("media/textures");

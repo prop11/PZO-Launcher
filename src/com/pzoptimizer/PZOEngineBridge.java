@@ -106,6 +106,7 @@ public class PZOEngineBridge {
         sb.append("- **Java Runtime**: ").append(System.getProperty("java.version", "Unknown")).append(" (").append(System.getProperty("os.name", "Unknown")).append(" ").append(System.getProperty("os.arch", "")).append(")\n");
         sb.append("- **Allocated JVM Heap**: ").append(Runtime.getRuntime().maxMemory() / (1024 * 1024)).append(" MB (Used: ").append((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024)).append(" MB)\n");
         sb.append("- **CPU Logical Cores**: ").append(Runtime.getRuntime().availableProcessors()).append("\n\n");
+        sb.append(EnhancedRenderTelemetry.getTelemetryReport()).append("\n");
 
         File zDir = getZomboidDir();
         if (zDir != null && zDir.exists()) {
@@ -403,6 +404,20 @@ public class PZOEngineBridge {
                                             }
                                         );
                                         tableRawset.invoke(pzoTable, "getChannel", getChannelFunc);
+
+                                        // getRenderTelemetry (Unstable channel live metrics)
+                                        Object getRenderTelemetryFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], EnhancedRenderTelemetry.toJson());
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getRenderTelemetry", getRenderTelemetryFunc);
 
                                         // setBetaOptIn
                                         Object setBetaFunc = Proxy.newProxyInstance(
