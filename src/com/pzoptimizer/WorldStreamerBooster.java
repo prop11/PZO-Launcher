@@ -18,6 +18,7 @@ public class WorldStreamerBooster {
                 try {
                     // 0. Enforce IsoChunkMap parity and array capacity
                     ChunkCrashShield.enforceChunkGridSanity();
+                    ChunkIngestionPacer.installPacer();
 
                     // 1. Boost WorldStreamer.instance.worldStreamer thread
                     Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
