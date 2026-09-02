@@ -88,11 +88,11 @@ public final class RainAndWeatherOptimizer {
             if (core != null) {
                 Method getPerfPuddlesMethod = coreClass.getMethod("getPerfPuddles");
                 int currentPuddles = (int) getPerfPuddlesMethod.invoke(core);
-                if (currentPuddles == 0) {
-                    // Option 0 is All Levels (scans 32 vertical levels). Level 1 is Ground Floor Only.
+                if (currentPuddles < 2) {
+                    // Option 0 is All Levels, 1 is Ground with Ruts (8 neighbor scans/square). Level 2 is Ground Only (neighbor lookups skipped).
                     Method setPerfPuddlesMethod = coreClass.getMethod("setPerfPuddles", int.class);
-                    setPerfPuddlesMethod.invoke(core, 1);
-                    PZOLogger.success("[RainAndWeatherOptimizer] Puddle scanning restricted to Ground Floor (Z=0, 31 upper levels skipped)");
+                    setPerfPuddlesMethod.invoke(core, 2);
+                    PZOLogger.success("[RainAndWeatherOptimizer] Puddle scanning set to Ground Only (Z=0, 8-neighbor lookups bypassed)");
                 }
             }
         } catch (Throwable t) {
