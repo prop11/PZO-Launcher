@@ -9,7 +9,7 @@ import java.lang.reflect.Method;
  * before handing execution over to zombie.network.GameServer.
  */
 public class PZOServerEntrypoint {
-    public static final String SERVER_VERSION = "0.8.2";
+    public static final String SERVER_VERSION = "0.8.3-unstable.1";
 
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
