@@ -31,7 +31,9 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "threadSound", false);
                     setOptionValue(debugOptionsInstance, "threadWorld", false);
                     setOptionValue(debugOptionsInstance, "threadGridStacks", false);
-                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", false);
+                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
+                    setOptionValue(debugOptionsInstance, "delayObjectRender", true);
+                    setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
 
                     // C. Model Texture Size Limiter
                     try {
@@ -76,10 +78,10 @@ public class EngineFeaturesTuner {
 
                 try {
                     Field lightFpsField = perfClass.getField("lightingFps");
-                    lightFpsField.setInt(null, 60); // 60 FPS lighting updates (eliminates 15 FPS lighting jitter)
+                    lightFpsField.setInt(null, 30); // 30 FPS lighting updates (eliminates lighting recalculation CPU spikes)
                 } catch (Throwable ignored) {}
 
-                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (60 FPS Lighting Sync)");
+                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (30 FPS Lighting Sync)");
             } catch (Throwable ignored) {}
 
             // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)
@@ -139,7 +141,9 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.Sound=false\n");
                 sb.append("Threading.World=false\n");
                 sb.append("Threading.RecalculateGridStacks=false\n");
-                sb.append("Threading.ModelSlotInit=false\n");
+                sb.append("Threading.ModelSlotInit=true\n");
+                sb.append("Rendering.DelayObjects=true\n");
+                sb.append("FBORenderLevels.CheapOcclusionCount=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
@@ -151,13 +155,6 @@ public class EngineFeaturesTuner {
 
     public static void reapplyRuntimeTuning() {
         try {
-            Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
-            Field lightFpsField = perfClass.getField("lightingFps");
-            int curFps = lightFpsField.getInt(null);
-            if (curFps < 60) {
-                lightFpsField.setInt(null, 60);
-            }
-
             Class<?> debugOptionsClass = Class.forName("zombie.debug.DebugOptions");
             Object debugOptionsInstance = debugOptionsClass.getField("instance").get(null);
             if (debugOptionsInstance != null) {
@@ -168,6 +165,9 @@ public class EngineFeaturesTuner {
                 setOptionValue(debugOptionsInstance, "threadWorld", false);
                 setOptionValue(debugOptionsInstance, "threadGridStacks", false);
                 setOptionValue(debugOptionsInstance, "threadPathfinding", false);
+                setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
+                setOptionValue(debugOptionsInstance, "delayObjectRender", true);
+                setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
             }
         } catch (Throwable ignored) {}
     }

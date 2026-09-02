@@ -19,6 +19,7 @@ public class WorldStreamerBooster {
                     // 0. Enforce IsoChunkMap parity and array capacity
                     ChunkCrashShield.enforceChunkGridSanity();
                     ChunkIngestionPacer.installPacer();
+                    VehicleTravelOptimizer.checkAndMaintain();
                     EngineFeaturesTuner.reapplyRuntimeTuning();
 
                     // 1. Boost WorldStreamer.instance.worldStreamer thread & prevent 140ms sleeps

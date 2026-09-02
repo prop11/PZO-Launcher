@@ -527,6 +527,126 @@ public class PZOEngineBridge {
 
                                     rawset.invoke(env, "PZOEngine", pzoTable);
                                     rawset.invoke(env, "PZOEngineBridge", pzoTable);
+
+                                    // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
+                                    try {
+                                        String luaCode =
+                                            "local function addPZOBetaToggle()\n" +
+                                            "    if not MainScreen or not MainScreen.instance then return end\n" +
+                                            "    if MainScreen.instance.inGame then return end\n" +
+                                            "    if MainScreen.instance.pzoBetaButton then return end\n" +
+                                            "    local isOptedIn = false\n" +
+                                            "    if PZOEngine and PZOEngine.isBetaOptIn then\n" +
+                                            "        isOptedIn = PZOEngine.isBetaOptIn()\n" +
+                                            "    end\n" +
+                                            "    local titleText = isOptedIn and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
+                                            "    local btnW = 220\n" +
+                                            "    local btnH = 26\n" +
+                                            "    local btnX = 25\n" +
+                                            "    local btnY = (MainScreen.instance.height or getCore():getScreenHeight()) - btnH - 18\n" +
+                                            "    local btn = ISButton:new(btnX, btnY, btnW, btnH, titleText, MainScreen.instance, function(target, button)\n" +
+                                            "        local curState = false\n" +
+                                            "        if PZOEngine and PZOEngine.isBetaOptIn then\n" +
+                                            "            curState = PZOEngine.isBetaOptIn()\n" +
+                                            "        end\n" +
+                                            "        local newState = not curState\n" +
+                                            "        if PZOEngine and PZOEngine.setBetaOptIn then\n" +
+                                            "            PZOEngine.setBetaOptIn(newState)\n" +
+                                            "        end\n" +
+                                            "        button.title = newState and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
+                                            "        button.borderColor = newState and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
+                                            "        button.textColor = newState and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "        if newState and PZOEngine and PZOEngine.checkForUpdates then\n" +
+                                            "            PZOEngine.checkForUpdates()\n" +
+                                            "        end\n" +
+                                            "    end)\n" +
+                                            "    btn:initialise()\n" +
+                                            "    btn:instantiate()\n" +
+                                            "    btn.backgroundColor = {r=0.08, g=0.10, b=0.15, a=0.90}\n" +
+                                            "    btn.borderColor = isOptedIn and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
+                                            "    btn.textColor = isOptedIn and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                            "    btn:setAnchorLeft(true)\n" +
+                                            "    btn:setAnchorRight(false)\n" +
+                                            "    btn:setAnchorTop(false)\n" +
+                                            "    btn:setAnchorBottom(true)\n" +
+                                            "    btn:setVisible(false)\n" +
+                                            "    MainScreen.instance:addChild(btn)\n" +
+                                            "    MainScreen.instance.pzoBetaButton = btn\n" +
+                                            "end\n" +
+                                            "local function isMainMenuOnly(ms)\n" +
+                                            "    if not ms or ms.inGame then return false end\n" +
+                                            "    if not ms.bottomPanel or not ms.bottomPanel:getIsVisible() then return false end\n" +
+                                            "    if ms.mainOptions and ms.mainOptions:getIsVisible() then return false end\n" +
+                                            "    if ms.soloScreen and ms.soloScreen:getIsVisible() then return false end\n" +
+                                            "    if ms.loadScreen and ms.loadScreen:getIsVisible() then return false end\n" +
+                                            "    if ms.modSelect and ms.modSelect:getIsVisible() then return false end\n" +
+                                            "    if ms.multiplayer and ms.multiplayer:getIsVisible() then return false end\n" +
+                                            "    if ms.onlineCoopScreen and ms.onlineCoopScreen:getIsVisible() then return false end\n" +
+                                            "    if ms.workshopSubmit and ms.workshopSubmit:getIsVisible() then return false end\n" +
+                                            "    if ms.creditsScreen and ms.creditsScreen:getIsVisible() then return false end\n" +
+                                            "    if ms.charCreationMain and ms.charCreationMain:getIsVisible() then return false end\n" +
+                                            "    return true\n" +
+                                            "end\n" +
+                                            "Events.OnMainMenuEnter.Add(function()\n" +
+                                            "    addPZOBetaToggle()\n" +
+                                            "    if MainScreen and not MainScreen.pzoHooked then\n" +
+                                            "        MainScreen.pzoHooked = true\n" +
+                                            "        local old_prerender = MainScreen.prerender\n" +
+                                            "        MainScreen.prerender = function(self)\n" +
+                                            "            old_prerender(self)\n" +
+                                            "            if not self.inGame and not self.pzoBetaButton then\n" +
+                                            "                addPZOBetaToggle()\n" +
+                                            "            end\n" +
+                                            "            if self.pzoBetaButton then\n" +
+                                            "                local shouldShow = isMainMenuOnly(self)\n" +
+                                            "                if self.pzoBetaButton:getIsVisible() ~= shouldShow then\n" +
+                                            "                    self.pzoBetaButton:setVisible(shouldShow)\n" +
+                                            "                end\n" +
+                                            "            end\n" +
+                                            "        end\n" +
+                                            "        if MainScreen.setBottomPanelVisible then\n" +
+                                            "            local old_setBottom = MainScreen.setBottomPanelVisible\n" +
+                                            "            MainScreen.setBottomPanelVisible = function(panelSelf, visible)\n" +
+                                            "                old_setBottom(panelSelf, visible)\n" +
+                                            "                if panelSelf.parent and panelSelf.parent.pzoBetaButton then\n" +
+                                            "                    panelSelf.parent.pzoBetaButton:setVisible(visible and isMainMenuOnly(panelSelf.parent))\n" +
+                                            "                end\n" +
+                                            "            end\n" +
+                                            "        end\n" +
+                                            "    end\n" +
+                                            "end)\n" +
+                                            "Events.OnResolutionChange.Add(function()\n" +
+                                            "    if MainScreen and MainScreen.instance and MainScreen.instance.pzoBetaButton then\n" +
+                                            "        local btn = MainScreen.instance.pzoBetaButton\n" +
+                                            "        btn:setY((MainScreen.instance.height or getCore():getScreenHeight()) - btn.height - 18)\n" +
+                                            "    end\n" +
+                                            "end)\n";
+
+                                        Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
+                                        Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
+                                        Object closure = loadstringMethod.invoke(null, luaCode, "PZOBetaUI", env);
+                                        if (closure != null) {
+                                            try {
+                                                Field protoField = closure.getClass().getField("prototype");
+                                                Object rootProto = protoField.get(closure);
+                                                sanitizePrototype(rootProto, "media/lua/client/OptionScreens/MainScreen.lua");
+                                            } catch (Throwable ignored) {}
+
+                                            Field callerField = lmClass.getField("caller");
+                                            Object caller = callerField.get(null);
+                                            Field threadField = lmClass.getField("thread");
+                                            Object thread = threadField.get(null);
+                                            if (caller != null && thread != null) {
+                                                Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
+                                                protCall.invoke(caller, thread, closure, new Object[0]);
+                                                PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
+                                            }
+                                        }
+
+                                        startLuaEventGovernor();
+                                    } catch (Throwable t) {
+                                        PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
+                                    }
                                 }
                             }
                         } catch (Throwable t) {

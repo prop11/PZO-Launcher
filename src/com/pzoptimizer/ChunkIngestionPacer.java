@@ -144,16 +144,6 @@ public final class ChunkIngestionPacer {
                 return super.poll();
             }
 
-            // If queue is backing up (> 4 chunks waiting), drain immediately to prevent road stutter
-            if (super.size() > 4) {
-                return super.poll();
-            }
-
-            // While driving, bypass throttle so vehicle never outruns world chunk stitching
-            if (isPlayerDriving()) {
-                return super.poll();
-            }
-
             long now = System.nanoTime();
 
             // Detect new frame boundary via exact engine frame count
@@ -188,17 +178,30 @@ public final class ChunkIngestionPacer {
                     chunksThisFrame = 0;
                 }
             } else {
-                // Fallback: gap > 2.0 ms indicates a new frame step even at 165-240 FPS
-                if (now - lastPollTimestamp > 2_000_000L) {
+                // Fallback: gap > 1.5 ms indicates a new frame step
+                if (now - lastPollTimestamp > 1_500_000L) {
                     frameStartTime = now;
                     chunksThisFrame = 0;
                 }
             }
             lastPollTimestamp = now;
 
-            // Enforce frame budget: Maximum 3 chunks per frame or 3.5ms total elapsed integration time
-            if (chunksThisFrame >= MAX_CHUNKS_PER_FRAME || (now - frameStartTime) >= FRAME_BUDGET_NANOS) {
-                // Return null to cleanly end the while-loop in IsoChunkMap.processAllLoadGridSquare()
+            // Calibrated dynamic pacing budgets:
+            // At 60 FPS (16.6ms frame budget):
+            // - Driving: Allow up to 2 chunks per frame or 7.0ms elapsed integration time (120 chunks/sec; 100mph car crosses ~5.6 chunks/sec)
+            // - Walking: Allow up to 1 chunk per frame or 3.5ms elapsed integration time
+            // - Heavy Backlog (> 8 chunks): Allow up to 3 chunks per frame or 9.5ms elapsed time to drain smoothly without freezing
+            boolean driving = isPlayerDriving();
+            int maxChunks = driving ? 2 : 1;
+            long budgetNanos = driving ? 7_000_000L : 3_500_000L;
+
+            if (super.size() > 8) {
+                maxChunks = 3;
+                budgetNanos = 9_500_000L;
+            }
+
+            if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
+                // Return null to end while-loop for this frame; remaining chunks are smoothly integrated 16ms later
                 return null;
             }
 
