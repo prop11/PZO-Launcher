@@ -23,9 +23,18 @@ public final class ChunkIngestionPacer {
     private static volatile boolean active = false;
     private static volatile boolean pacerInstalled = false;
 
-    // Time budget in nanoseconds (2.5 milliseconds = 2,500,000 ns)
-    public static final long FRAME_BUDGET_NANOS = 2_500_000L;
-    public static final int MAX_CHUNKS_PER_FRAME = 2;
+    // Time budget in nanoseconds (3.5 milliseconds = 3,500,000 ns for high-refresh 165Hz)
+    public static final long FRAME_BUDGET_NANOS = 3_500_000L;
+    public static final int MAX_CHUNKS_PER_FRAME = 3;
+    private static volatile int maxCachedChunks = 1000;
+
+    public static void setMaxCachedChunks(int max) {
+        maxCachedChunks = Math.max(100, max);
+    }
+
+    public static int getMaxCachedChunks() {
+        return maxCachedChunks;
+    }
 
     public static void initialize() {
         if (active) return;
@@ -63,7 +72,7 @@ public final class ChunkIngestionPacer {
                 PacedConcurrentQueue pacedQ = new PacedConcurrentQueue(typedQ);
                 innerQField.set(cappedQueue, pacedQ);
                 pacerInstalled = true;
-                PZOLogger.success("ChunkIngestionPacer: Active (2.5ms Frame-Budgeted Chunk Integration Governor Armed)");
+                PZOLogger.success("ChunkIngestionPacer: Active (Frame-Budgeted Chunk Integration Governor Armed)");
                 return true;
             }
         } catch (Throwable t) {
@@ -82,9 +91,12 @@ public final class ChunkIngestionPacer {
     public static final class PacedConcurrentQueue extends ConcurrentLinkedQueue<Object> {
         private static final long serialVersionUID = 42L;
 
+        private static volatile long lastFrameCount = -1;
         private static volatile long frameStartTime = 0;
         private static volatile int chunksThisFrame = 0;
         private static volatile long lastPollTimestamp = 0;
+        private static volatile Field frameCountField = null;
+        private static volatile boolean frameCountFieldResolved = false;
 
         public PacedConcurrentQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
@@ -108,14 +120,48 @@ public final class ChunkIngestionPacer {
 
             long now = System.nanoTime();
 
-            // Detect new frame boundary (gap > 4.5 milliseconds indicates new render step)
-            if (now - lastPollTimestamp > 4_500_000L) {
-                frameStartTime = now;
-                chunksThisFrame = 0;
+            // Detect new frame boundary via exact engine frame count
+            long currentFrame = -1;
+            if (!frameCountFieldResolved) {
+                try {
+                    Class<?> isoCamera = Class.forName("zombie.iso.IsoCamera");
+                    Field frameStateField = isoCamera.getField("frameState");
+                    Object frameState = frameStateField.get(null);
+                    if (frameState != null) {
+                        frameCountField = frameState.getClass().getField("frameCount");
+                        frameCountFieldResolved = true;
+                    }
+                } catch (Throwable ignored) {
+                    frameCountFieldResolved = true;
+                }
+            }
+
+            if (frameCountField != null) {
+                try {
+                    Class<?> isoCamera = Class.forName("zombie.iso.IsoCamera");
+                    Object frameState = isoCamera.getField("frameState").get(null);
+                    if (frameState != null) {
+                        currentFrame = frameCountField.getLong(frameState);
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            if (currentFrame != -1) {
+                if (currentFrame != lastFrameCount) {
+                    lastFrameCount = currentFrame;
+                    frameStartTime = now;
+                    chunksThisFrame = 0;
+                }
+            } else {
+                // Fallback: gap > 2.0 ms indicates a new frame step even at 165-240 FPS
+                if (now - lastPollTimestamp > 2_000_000L) {
+                    frameStartTime = now;
+                    chunksThisFrame = 0;
+                }
             }
             lastPollTimestamp = now;
 
-            // Enforce frame budget: Maximum 2 chunks per frame or 2.5ms total elapsed integration time
+            // Enforce frame budget: Maximum 3 chunks per frame or 3.5ms total elapsed integration time
             if (chunksThisFrame >= MAX_CHUNKS_PER_FRAME || (now - frameStartTime) >= FRAME_BUDGET_NANOS) {
                 // Return null to cleanly end the while-loop in IsoChunkMap.processAllLoadGridSquare()
                 return null;
