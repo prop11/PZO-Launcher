@@ -34,6 +34,7 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
                     setOptionValue(debugOptionsInstance, "delayObjectRender", true);
                     setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
+                    setOptionValue(debugOptionsInstance, "lightingSplitUpdate", true);
 
                     // C. Model Texture Size Limiter
                     try {
@@ -144,6 +145,7 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Rendering.DelayObjects=true\n");
                 sb.append("FBORenderLevels.CheapOcclusionCount=true\n");
+                sb.append("Lighting.SplitUpdate=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
@@ -168,6 +170,7 @@ public class EngineFeaturesTuner {
                 setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
                 setOptionValue(debugOptionsInstance, "delayObjectRender", true);
                 setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
+                setOptionValue(debugOptionsInstance, "lightingSplitUpdate", true);
             }
         } catch (Throwable ignored) {}
     }

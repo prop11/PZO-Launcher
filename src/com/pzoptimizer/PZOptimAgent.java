@@ -25,6 +25,8 @@ public class PZOptimAgent {
         StreamBufferBooster.applyStreamTweaks();
         SaveGameStreamBooster.tuneSaveEngine();
         EngineFeaturesTuner.initializeEngineFeatures();
+        VehicleTravelOptimizer.initialize();
+        RainAndWeatherOptimizer.initialize();
         WorldStreamerBooster.startDaemon();
         PZOFastMath.initialize();
         GenerationalHeapCleaner.startGovernor();
