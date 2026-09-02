@@ -175,7 +175,6 @@ $JsonAbove20 = @"
     "vmArgs": [
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        "-Xms8192m",
         "-Xmx16384m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -183,21 +182,9 @@ $JsonAbove20 = @"
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
-        "-XX:+UseNUMA",
+        "-XX:+UseZGC",
         "-XX:+AlwaysPreTouch"
-    ],
-    "windows": {
-        "6.1": {
-            "vmArgs": [
-                "-XX:+UseG1GC"
-            ]
-        },
-        "10.0.17134": {
-            "vmArgs": [
-                "-XX:+UseZGC"
-            ]
-        }
-    }
+    ]
 }
 "@
 
@@ -398,7 +385,7 @@ function Apply-PZOConfiguration {
         $chosenJson = $Json13To20
     }
     else {
-        Write-Host "Applying profile: > 20 GB RAM (Heap: 8192m - 16384m)" -ForegroundColor Green
+        Write-Host "Applying profile: > 20 GB RAM (Heap: 16384m + G1GC Tuning)" -ForegroundColor Green
         $chosenJson = $JsonAbove20
         $UseG1GC = $true
     }
