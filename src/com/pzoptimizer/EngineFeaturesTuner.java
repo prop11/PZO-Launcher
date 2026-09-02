@@ -19,12 +19,21 @@ public class EngineFeaturesTuner {
                 Object debugOptionsInstance = instanceField.get(null);
 
                 if (debugOptionsInstance != null) {
-                    // A. Unlock Multi-Threaded Pathfinding & Navigation (100% thread-safe)
-                    setOptionValue(debugOptionsInstance, "threadPathfinding", true);
+                    // A. Native Code Pathfinding & Navigation (100% thread-safe)
+                    setOptionValue(debugOptionsInstance, "threadPathfinding", false);
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Model Texture Size Limiter
+                    // B. Enforce Thread Safety (B42 experimental threading crashes single-threaded Kahlua VM)
+                    setOptionValue(debugOptionsInstance, "threadAnimation", false);
+                    setOptionValue(debugOptionsInstance, "threadLighting", false);
+                    setOptionValue(debugOptionsInstance, "threadAmbient", false);
+                    setOptionValue(debugOptionsInstance, "threadSound", false);
+                    setOptionValue(debugOptionsInstance, "threadWorld", false);
+                    setOptionValue(debugOptionsInstance, "threadGridStacks", false);
+                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", false);
+
+                    // C. Model Texture Size Limiter
                     try {
                         Field modelGroupField = debugOptionsClass.getField("model");
                         Object modelGroup = modelGroupField.get(debugOptionsInstance);
@@ -37,7 +46,10 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Pathfinding & Engine Subsystems Optimized");
+                    // D. Persist thread-safe options to debug-options.ini
+                    persistDebugOptionsFile();
+
+                    PZOLogger.success("EngineFeaturesTuner: Thread Safety Enforced (Preventing Kahlua VM Stack Crashes)");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
@@ -64,10 +76,10 @@ public class EngineFeaturesTuner {
 
                 try {
                     Field lightFpsField = perfClass.getField("lightingFps");
-                    lightFpsField.setInt(null, 30); // 30 FPS smooth lighting updates (eliminates 15 FPS lighting jitter)
+                    lightFpsField.setInt(null, 60); // 60 FPS lighting updates (eliminates 15 FPS lighting jitter)
                 } catch (Throwable ignored) {}
 
-                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized");
+                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (60 FPS Lighting Sync)");
             } catch (Throwable ignored) {}
 
             // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)
@@ -109,6 +121,53 @@ public class EngineFeaturesTuner {
             if (opt != null) {
                 Method setValueMethod = opt.getClass().getMethod("setValue", boolean.class);
                 setValueMethod.invoke(opt, value);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static void persistDebugOptionsFile() {
+        try {
+            java.io.File zDir = PZOEngineBridge.getZomboidDir();
+            if (zDir != null && zDir.exists()) {
+                java.io.File debugOptFile = new java.io.File(zDir, "debug-options.ini");
+                StringBuilder sb = new StringBuilder();
+                sb.append("VERSION=1\n");
+                sb.append("Threading.Pathfinding=false\n");
+                sb.append("Threading.Animation=false\n");
+                sb.append("Threading.Lighting=false\n");
+                sb.append("Threading.Ambient=false\n");
+                sb.append("Threading.Sound=false\n");
+                sb.append("Threading.World=false\n");
+                sb.append("Threading.RecalculateGridStacks=false\n");
+                sb.append("Threading.ModelSlotInit=false\n");
+                sb.append("Pathfind.UseNativeCode=true\n");
+                sb.append("Pathfind.SmoothPlayerPath=true\n");
+                try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
+                    fw.write(sb.toString());
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static void reapplyRuntimeTuning() {
+        try {
+            Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
+            Field lightFpsField = perfClass.getField("lightingFps");
+            int curFps = lightFpsField.getInt(null);
+            if (curFps < 60) {
+                lightFpsField.setInt(null, 60);
+            }
+
+            Class<?> debugOptionsClass = Class.forName("zombie.debug.DebugOptions");
+            Object debugOptionsInstance = debugOptionsClass.getField("instance").get(null);
+            if (debugOptionsInstance != null) {
+                setOptionValue(debugOptionsInstance, "threadAnimation", false);
+                setOptionValue(debugOptionsInstance, "threadLighting", false);
+                setOptionValue(debugOptionsInstance, "threadAmbient", false);
+                setOptionValue(debugOptionsInstance, "threadSound", false);
+                setOptionValue(debugOptionsInstance, "threadWorld", false);
+                setOptionValue(debugOptionsInstance, "threadGridStacks", false);
+                setOptionValue(debugOptionsInstance, "threadPathfinding", false);
             }
         } catch (Throwable ignored) {}
     }
