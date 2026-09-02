@@ -175,6 +175,7 @@ $JsonAbove20 = @"
     "vmArgs": [
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "-Xms8192m",
         "-Xmx16384m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -385,7 +386,7 @@ function Apply-PZOConfiguration {
         $chosenJson = $Json13To20
     }
     else {
-        Write-Host "Applying profile: > 20 GB RAM (Heap: 16384m + G1GC Tuning)" -ForegroundColor Green
+        Write-Host "Applying profile: > 20 GB RAM (Heap: 8192m - 16384m)" -ForegroundColor Green
         $chosenJson = $JsonAbove20
         $UseG1GC = $true
     }
