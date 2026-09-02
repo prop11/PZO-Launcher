@@ -182,10 +182,7 @@ $JsonAbove20 = @"
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
-        "-XX:+UseG1GC",
-        "-XX:G1HeapRegionSize=32m",
-        "-XX:InitiatingHeapOccupancyPercent=45",
-        "-XX:G1ReservePercent=15",
+        "-XX:+UseZGC",
         "-XX:+AlwaysPreTouch"
     ]
 }

@@ -7,6 +7,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * Eliminates thousands of redundant GPU uniform, matrix, texture, alpha, and depth calls per frame.
  */
 public class GLStateOptimizer {
+    public static volatile boolean enabled = true;
+
+    public static void setEnabled(boolean value) {
+        enabled = value;
+    }
+
     // Live Optimization Telemetry Counters
     public static final AtomicLong glCallsFiltered = new AtomicLong(0);
     public static final AtomicLong matricesSkipped = new AtomicLong(0);
@@ -46,6 +52,7 @@ public class GLStateOptimizer {
     private static final ShaderMatrixState[] shaderCache = new ShaderMatrixState[1024];
 
     public static boolean shouldBindTexture(int textureId) {
+        if (!enabled) return true;
         if (textureId == currentTexture) {
             glCallsFiltered.incrementAndGet();
             return false;
@@ -55,6 +62,7 @@ public class GLStateOptimizer {
     }
 
     public static boolean shouldSetColor(float r, float g, float b, float a) {
+        if (!enabled) return true;
         if (r == currentR && g == currentG && b == currentB && a == currentA) {
             glCallsFiltered.incrementAndGet();
             return false;
@@ -67,6 +75,7 @@ public class GLStateOptimizer {
     }
 
     public static boolean shouldSetBlendFunc(int src, int dst) {
+        if (!enabled) return true;
         if (src == currentSrcBlend && dst == currentDstBlend) {
             glCallsFiltered.incrementAndGet();
             return false;
@@ -77,6 +86,7 @@ public class GLStateOptimizer {
     }
 
     public static boolean shouldSetAlphaFunc(int func, float ref) {
+        if (!enabled) return true;
         if (func == lastAlphaFunc && ref == lastAlphaRef) {
             glCallsFiltered.incrementAndGet();
             return false;
@@ -87,6 +97,7 @@ public class GLStateOptimizer {
     }
 
     public static boolean shouldSetDepthFunc(int func) {
+        if (!enabled) return true;
         if (func == lastDepthFunc) {
             glCallsFiltered.incrementAndGet();
             return false;
@@ -96,6 +107,7 @@ public class GLStateOptimizer {
     }
 
     public static boolean shouldSetDepthMask(boolean mask) {
+        if (!enabled) return true;
         int m = mask ? 1 : 0;
         if (m == lastDepthMask) {
             glCallsFiltered.incrementAndGet();
@@ -106,6 +118,7 @@ public class GLStateOptimizer {
     }
 
     public static boolean shouldUpdateChunkDepth(float depth) {
+        if (!enabled) return true;
         if (depth == cachedChunkDepth) {
             uniformsSkipped.incrementAndGet();
             return false;
