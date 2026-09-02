@@ -1,6 +1,7 @@
 package com.pzoptimizer;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
@@ -98,11 +99,36 @@ public final class ChunkIngestionPacer {
         private static volatile Field frameCountField = null;
         private static volatile boolean frameCountFieldResolved = false;
 
+        private static volatile Class<?> cachedIsoCamera = null;
+        private static volatile Field cachedFrameStateField = null;
+        private static volatile long lastDrivingCheckTime = 0;
+        private static volatile boolean playerIsDriving = false;
+
         public PacedConcurrentQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
             if (existing != null && !existing.isEmpty()) {
                 this.addAll(existing);
             }
+        }
+
+        private static boolean isPlayerDriving() {
+            long now = System.currentTimeMillis();
+            if (now - lastDrivingCheckTime < 250L) {
+                return playerIsDriving;
+            }
+            lastDrivingCheckTime = now;
+            try {
+                Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
+                Method getInstMethod = playerClass.getMethod("getInstance");
+                Object player = getInstMethod.invoke(null);
+                if (player != null) {
+                    Method getVehicleMethod = player.getClass().getMethod("getVehicle");
+                    playerIsDriving = (getVehicleMethod.invoke(player) != null);
+                    return playerIsDriving;
+                }
+            } catch (Throwable ignored) {}
+            playerIsDriving = false;
+            return false;
         }
 
         @Override
@@ -118,15 +144,25 @@ public final class ChunkIngestionPacer {
                 return super.poll();
             }
 
+            // If queue is backing up (> 4 chunks waiting), drain immediately to prevent road stutter
+            if (super.size() > 4) {
+                return super.poll();
+            }
+
+            // While driving, bypass throttle so vehicle never outruns world chunk stitching
+            if (isPlayerDriving()) {
+                return super.poll();
+            }
+
             long now = System.nanoTime();
 
             // Detect new frame boundary via exact engine frame count
             long currentFrame = -1;
             if (!frameCountFieldResolved) {
                 try {
-                    Class<?> isoCamera = Class.forName("zombie.iso.IsoCamera");
-                    Field frameStateField = isoCamera.getField("frameState");
-                    Object frameState = frameStateField.get(null);
+                    cachedIsoCamera = Class.forName("zombie.iso.IsoCamera");
+                    cachedFrameStateField = cachedIsoCamera.getField("frameState");
+                    Object frameState = cachedFrameStateField.get(null);
                     if (frameState != null) {
                         frameCountField = frameState.getClass().getField("frameCount");
                         frameCountFieldResolved = true;
@@ -136,10 +172,9 @@ public final class ChunkIngestionPacer {
                 }
             }
 
-            if (frameCountField != null) {
+            if (frameCountField != null && cachedFrameStateField != null) {
                 try {
-                    Class<?> isoCamera = Class.forName("zombie.iso.IsoCamera");
-                    Object frameState = isoCamera.getField("frameState").get(null);
+                    Object frameState = cachedFrameStateField.get(null);
                     if (frameState != null) {
                         currentFrame = frameCountField.getLong(frameState);
                     }

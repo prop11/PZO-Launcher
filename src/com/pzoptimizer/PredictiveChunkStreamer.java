@@ -156,6 +156,45 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
+    private static volatile Method getFilenameMethod = null;
+    private static volatile Object cmfInstance = null;
+    private static volatile boolean cmfResolved = false;
+
+    private static File resolveChunkFile(int wx, int wy) {
+        if (!cmfResolved) {
+            try {
+                Class<?> cmfClass = Class.forName("zombie.iso.ChunkMapFilenames");
+                Field instField = cmfClass.getField("instance");
+                cmfInstance = instField.get(null);
+                if (cmfInstance != null) {
+                    getFilenameMethod = cmfClass.getMethod("getFilename", int.class, int.class);
+                }
+            } catch (Throwable ignored) {}
+            cmfResolved = true;
+        }
+
+        if (cmfInstance != null && getFilenameMethod != null) {
+            try {
+                File f = (File) getFilenameMethod.invoke(cmfInstance, wx, wy);
+                if (f != null && f.exists()) return f;
+            } catch (Throwable ignored) {}
+        }
+
+        try {
+            Class<?> zfsClass = Class.forName("zombie.ZomboidFileSystem");
+            Object zfs = zfsClass.getField("instance").get(null);
+            if (zfs != null) {
+                Method m = zfsClass.getMethod("getFileInCurrentSave", String.class);
+                File f = (File) m.invoke(zfs, wx + File.separator + wy + ".bin");
+                if (f != null && f.exists()) return f;
+                File f2 = (File) m.invoke(zfs, "map_" + wx + "_" + wy + ".bin");
+                if (f2 != null && f2.exists()) return f2;
+            }
+        } catch (Throwable ignored) {}
+
+        return null;
+    }
+
     private static void prewarmChunkInOSCache(int wx, int wy) {
         long key = FastChunkKey.pack(wx, wy);
         if (PREWARMED_KEYS.contains(key)) {
@@ -164,32 +203,7 @@ public final class PredictiveChunkStreamer {
         PREWARMED_KEYS.add(key);
 
         try {
-            Class<?> zfsClass = Class.forName("zombie.ZomboidFileSystem");
-            Field instField = zfsClass.getField("instance");
-            Object zfsInstance = instField.get(null);
-
-            File chunkFile = null;
-            if (zfsInstance != null) {
-                try {
-                    Method getFileMethod = zfsClass.getMethod("getFileInCurrentSave", String.class);
-                    // Build 42 format: wx/wy.bin
-                    chunkFile = (File) getFileMethod.invoke(zfsInstance, wx + File.separator + wy + ".bin");
-                } catch (Throwable ignored) {}
-            }
-
-            if (chunkFile == null || !chunkFile.exists()) {
-                // Fallback to legacy Build 41 naming (map_X_Y.bin)
-                Class<?> coreClass = Class.forName("zombie.core.Core");
-                Method getSaveWorldMethod = coreClass.getMethod("getMyDocumentFolder");
-                String saveDir = (String) getSaveWorldMethod.invoke(null);
-                if (saveDir != null && !saveDir.isEmpty()) {
-                    File legacyFile = new File(saveDir, "map_" + wx + "_" + wy + ".bin");
-                    if (legacyFile.exists()) {
-                        chunkFile = legacyFile;
-                    }
-                }
-            }
-
+            File chunkFile = resolveChunkFile(wx, wy);
             if (chunkFile != null && chunkFile.exists() && chunkFile.canRead()) {
                 try (FileInputStream fis = new FileInputStream(chunkFile);
                      FileChannel ch = fis.getChannel()) {
