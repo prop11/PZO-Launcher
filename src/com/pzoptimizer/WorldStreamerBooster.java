@@ -20,6 +20,7 @@ public class WorldStreamerBooster {
                     ChunkCrashShield.enforceChunkGridSanity();
                     ChunkIngestionPacer.installPacer();
                     VehicleTravelOptimizer.checkAndMaintain();
+                    RainAndWeatherOptimizer.checkAndMaintain();
                     EngineFeaturesTuner.reapplyRuntimeTuning();
 
                     // 1. Boost WorldStreamer.instance.worldStreamer thread & prevent 140ms sleeps

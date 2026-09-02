@@ -48,6 +48,7 @@ public class PZOEntrypoint {
         PZOEngineBridge.initialize();
         EngineFeaturesTuner.initializeEngineFeatures();
         VehicleTravelOptimizer.initialize();
+        RainAndWeatherOptimizer.initialize();
         WorldStreamerBooster.startDaemon();
         PZOFastMath.initialize();
         GenerationalHeapCleaner.startGovernor();
