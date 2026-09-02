@@ -103,24 +103,79 @@ public final class PredictiveChunkStreamer {
             // Dynamic WorldStreamer Priority Boost during driving
             boostWorldStreamerPriority(8);
 
-            Class<?> playerClass = player.getClass();
-            Method getDirXMethod = playerClass.getMethod("getForwardDirectionX");
-            Method getDirYMethod = playerClass.getMethod("getForwardDirectionY");
-            float dirX = ((Number) getDirXMethod.invoke(player)).floatValue();
-            float dirY = ((Number) getDirYMethod.invoke(player)).floatValue();
+            float dirX = 0.0f;
+            float dirY = 0.0f;
 
-            // Lookahead distance scaled to vehicle velocity
-            float lookaheadTiles = Math.min(140.0f, Math.abs(speed) * 1.6f);
+            // 1. Try JNI linear velocity vector first (pure physical trajectory, handles drifts and turns)
+            try {
+                Field velField = vehicle.getClass().getField("jniLinearVelocity");
+                Object velObj = velField.get(vehicle);
+                if (velObj instanceof org.joml.Vector3f vel) {
+                    float lenSq = vel.x * vel.x + vel.z * vel.z;
+                    if (lenSq > 0.001f) {
+                        float invLen = (float) (1.0 / Math.sqrt(lenSq));
+                        dirX = vel.x * invLen;
+                        dirY = vel.z * invLen;
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            // 2. Fallback to vehicle forward vector with speed sign (handles reverses)
+            if (dirX == 0.0f && dirY == 0.0f) {
+                try {
+                    Method getForwardVectorMethod = vehicle.getClass().getMethod("getForwardVector", org.joml.Vector3f.class);
+                    org.joml.Vector3f fwd = (org.joml.Vector3f) getForwardVectorMethod.invoke(vehicle, new org.joml.Vector3f());
+                    if (fwd != null) {
+                        float lenSq = fwd.x * fwd.x + fwd.z * fwd.z;
+                        if (lenSq > 0.001f) {
+                            float invLen = (float) (1.0 / Math.sqrt(lenSq));
+                            float sign = speed < 0.0f ? -1.0f : 1.0f;
+                            dirX = (fwd.x * invLen) * sign;
+                            dirY = (fwd.z * invLen) * sign;
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            // 3. Fallback to player facing direction
+            if (dirX == 0.0f && dirY == 0.0f) {
+                try {
+                    Class<?> playerClass = player.getClass();
+                    Method getDirXMethod = playerClass.getMethod("getForwardDirectionX");
+                    Method getDirYMethod = playerClass.getMethod("getForwardDirectionY");
+                    dirX = ((Number) getDirXMethod.invoke(player)).floatValue();
+                    dirY = ((Number) getDirYMethod.invoke(player)).floatValue();
+                } catch (Throwable ignored) {}
+            }
+
+            if (dirX == 0.0f && dirY == 0.0f) return;
+
+            // Lateral normal vector (-dirY, dirX) to cover road curvature and lane turns
+            float normX = -dirY;
+            float normY = dirX;
+
+            // Lookahead distance scaled to vehicle velocity (up to 160 tiles = 20 chunks ahead)
+            float lookaheadTiles = Math.min(160.0f, Math.abs(speed) * 1.8f);
 
             for (int step = 1; step <= 5; step++) {
-                float targetX = px + (dirX * lookaheadTiles * (step / 5.0f));
-                float targetY = py + (dirY * lookaheadTiles * (step / 5.0f));
+                float progress = (float) step / 5.0f;
+                float targetX = px + (dirX * lookaheadTiles * progress);
+                float targetY = py + (dirY * lookaheadTiles * progress);
 
                 int targetChunkX = (int) (targetX / 8.0f);
                 int targetChunkY = (int) (targetY / 8.0f);
 
+                // Pre-warm center trajectory chunk
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);
+
+                // Pre-warm lateral cone (1 chunk left and right) for smooth turns and highway curves
+                int lateralChunkX = (int) Math.signum(normX);
+                int lateralChunkY = (int) Math.signum(normY);
+                if (lateralChunkX != 0 || lateralChunkY != 0) {
+                    prewarmChunkInOSCache(targetChunkX + lateralChunkX, targetChunkY + lateralChunkY);
+                    prewarmChunkInOSCache(targetChunkX - lateralChunkX, targetChunkY - lateralChunkY);
+                }
             }
         } catch (Throwable ignored) {}
     }
