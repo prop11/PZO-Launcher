@@ -18,16 +18,20 @@ public class WorldStreamerBooster {
                 try {
                     // 0. Enforce IsoChunkMap parity and array capacity
                     ChunkCrashShield.enforceChunkGridSanity();
+                    ChunkIngestionPacer.installPacer();
+                    EngineFeaturesTuner.reapplyRuntimeTuning();
 
-                    // 1. Boost WorldStreamer.instance.worldStreamer thread
+                    // 1. Boost WorldStreamer.instance.worldStreamer thread & prevent 140ms sleeps
                     Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
                     Field instField = wsClass.getField("instance");
                     Object wsInstance = instField.get(null);
                     if (wsInstance != null) {
                         Field threadField = wsClass.getField("worldStreamer");
                         Thread wsThread = (Thread) threadField.get(wsInstance);
-                        if (wsThread != null && wsThread.isAlive() && wsThread.getPriority() < Thread.NORM_PRIORITY + 2) {
-                            wsThread.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2)); // Priority 7
+                        if (wsThread != null && wsThread.isAlive()) {
+                            if (wsThread.getPriority() < Thread.NORM_PRIORITY + 2) {
+                                wsThread.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2)); // Priority 7
+                            }
                         }
                     }
 
@@ -56,9 +60,9 @@ public class WorldStreamerBooster {
                         }
                     }
 
-                    Thread.sleep(5000);
+                    Thread.sleep(1000);
                 } catch (Throwable ignored) {
-                    try { Thread.sleep(3000); } catch (Throwable ignored2) {}
+                    try { Thread.sleep(1500); } catch (Throwable ignored2) {}
                 }
             }
         });

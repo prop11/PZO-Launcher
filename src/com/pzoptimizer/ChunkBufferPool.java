@@ -7,6 +7,12 @@ import java.nio.ByteBuffer;
  * Eliminates repeated 128KB-256KB byte array allocations during high-speed vehicle driving.
  */
 public class ChunkBufferPool {
+    public static volatile boolean enabled = true;
+
+    public static void setEnabled(boolean value) {
+        enabled = value;
+    }
+
     private static final int BUFFER_SIZE = 262144; // 256 KB
 
     private static final ThreadLocal<byte[]> THREAD_BYTE_BUFFER = ThreadLocal.withInitial(() -> new byte[BUFFER_SIZE]);

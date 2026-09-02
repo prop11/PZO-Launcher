@@ -38,7 +38,30 @@ public final class PZOConfig {
 
     public static boolean isBetaOptIn() {
         load();
-        return betaOptIn;
+        if (betaOptIn) return true;
+
+        try {
+            Class<?> coreClass = Class.forName("zombie.core.Core");
+            java.lang.reflect.Method getInst = coreClass.getMethod("getInstance");
+            Object core = getInst.invoke(null);
+            if (core != null) {
+                java.lang.reflect.Method getVer = coreClass.getMethod("getVersionNumber");
+                Object verObj = getVer.invoke(core);
+                if (verObj != null) {
+                    String verStr = verObj.toString().toLowerCase();
+                    if (verStr.contains("unstable") || verStr.contains("beta")) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        String steamBranch = System.getProperty("zomboid.steam");
+        if (steamBranch != null && (steamBranch.toLowerCase().contains("unstable") || steamBranch.toLowerCase().contains("beta"))) {
+            return true;
+        }
+
+        return false;
     }
 
     public static void setBetaOptIn(boolean optIn) {
