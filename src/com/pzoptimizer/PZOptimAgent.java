@@ -22,6 +22,7 @@ public class PZOptimAgent {
         HotSpotJITCompilerTuner.tuneRuntimeProperties();
         PZOEngineBridge.initialize();
         HighPrecisionTimer.initialize();
+        FileSystemWhitelistShield.initialize();
         StreamBufferBooster.applyStreamTweaks();
         SaveGameStreamBooster.tuneSaveEngine();
         EngineFeaturesTuner.initializeEngineFeatures();
