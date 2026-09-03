@@ -32,7 +32,6 @@ import java.lang.reflect.Method;
 public final class RainAndWeatherOptimizer {
 
     private static volatile boolean initialized = false;
-    private static volatile boolean wasDriving = false;
 
     public static synchronized void initialize() {
         if (initialized) return;
@@ -40,18 +39,13 @@ public final class RainAndWeatherOptimizer {
 
         applyLightingSplitUpdate();
         applyPuddlesElevationCap();
+        ensureWeatherMaskingRestored();
         PZOLogger.success("[RainAndWeatherOptimizer] Rain & Weather Driving Governor initialized");
     }
 
     public static void checkAndMaintain() {
         if (!initialized) {
             initialize();
-        }
-
-        boolean driving = VehicleTravelOptimizer.isPlayerDriving();
-        if (driving != wasDriving) {
-            wasDriving = driving;
-            setWeatherMaskingState(!driving);
         }
     }
 
@@ -101,14 +95,13 @@ public final class RainAndWeatherOptimizer {
     }
 
     /**
-     * Dynamically controls WeatherFxMask.maskingEnabled.
-     * When driving, masks are disabled to prevent 4 full-screen FBO passes & rasterize.scanTriangle.
+     * Ensures WeatherFxMask.maskingEnabled is unconditionally active (prevents raw gray box indoors).
      */
-    private static void setWeatherMaskingState(boolean enabled) {
+    private static void ensureWeatherMaskingRestored() {
         try {
             Class<?> maskClass = Class.forName("zombie.iso.weather.fx.WeatherFxMask");
             Field maskingField = maskClass.getField("maskingEnabled");
-            maskingField.setBoolean(null, enabled);
+            maskingField.setBoolean(null, true);
         } catch (Throwable ignored) {}
     }
 }
