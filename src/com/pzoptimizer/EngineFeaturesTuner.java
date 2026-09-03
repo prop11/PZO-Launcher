@@ -31,10 +31,7 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "threadSound", false);
                     setOptionValue(debugOptionsInstance, "threadWorld", false);
                     setOptionValue(debugOptionsInstance, "threadGridStacks", false);
-                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
-                    setOptionValue(debugOptionsInstance, "delayObjectRender", true);
-                    setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
-                    setOptionValue(debugOptionsInstance, "lightingSplitUpdate", true);
+                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", false);
 
                     // C. Model Texture Size Limiter
                     try {
@@ -142,10 +139,7 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.Sound=false\n");
                 sb.append("Threading.World=false\n");
                 sb.append("Threading.RecalculateGridStacks=false\n");
-                sb.append("Threading.ModelSlotInit=true\n");
-                sb.append("Rendering.DelayObjects=true\n");
-                sb.append("FBORenderLevels.CheapOcclusionCount=true\n");
-                sb.append("Lighting.SplitUpdate=true\n");
+                sb.append("Threading.ModelSlotInit=false\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
@@ -167,10 +161,6 @@ public class EngineFeaturesTuner {
                 setOptionValue(debugOptionsInstance, "threadWorld", false);
                 setOptionValue(debugOptionsInstance, "threadGridStacks", false);
                 setOptionValue(debugOptionsInstance, "threadPathfinding", false);
-                setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
-                setOptionValue(debugOptionsInstance, "delayObjectRender", true);
-                setOptionValue(debugOptionsInstance, "cheapOcclusionCount", true);
-                setOptionValue(debugOptionsInstance, "lightingSplitUpdate", true);
             }
         } catch (Throwable ignored) {}
     }
