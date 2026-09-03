@@ -5,5 +5,5 @@ Agent-Class: com.pzoptimizer.PZOptimAgent
 Can-Redefine-Classes: true
 Can-Retransform-Classes: true
 Implementation-Title: Project Zomboid Optimiser Engine
-Implementation-Version: 0.8.3.2-unstable
+Implementation-Version: 0.8.3.3-unstable
 
