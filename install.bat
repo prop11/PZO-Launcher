@@ -22,7 +22,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.8.3.2-unstable)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.8.3.3-unstable)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -414,7 +414,7 @@ function Apply-PZOConfiguration {
         g1gc        = $UseG1GC
         pretouch    = $true
         zombiebuddy = $isZombieBuddyActive
-        version     = "0.8.3.2-unstable"
+        version     = "0.8.3.3-unstable"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress

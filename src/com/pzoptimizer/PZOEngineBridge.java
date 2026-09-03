@@ -22,6 +22,21 @@ public class PZOEngineBridge {
         return true;
     }
 
+    public static boolean isWindowActive() {
+        try {
+            Class<?> displayCls = Class.forName("org.lwjglx.opengl.Display");
+            Method isActiveMethod = displayCls.getMethod("isActive");
+            return (boolean) isActiveMethod.invoke(null);
+        } catch (Throwable t1) {
+            try {
+                Class<?> displayCls = Class.forName("org.lwjgl.opengl.Display");
+                Method isActiveMethod = displayCls.getMethod("isActive");
+                return (boolean) isActiveMethod.invoke(null);
+            } catch (Throwable ignored) {}
+        }
+        return true;
+    }
+
     public static int getOptimizedRAM() {
         if (cachedRamGb <= 0) {
             long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
@@ -250,6 +265,20 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isEnginePresent", isPresentFunc);
                                         tableRawset.invoke(pzoTable, "isActive", isPresentFunc);
+
+                                        // isWindowActive
+                                        Object isWindowActiveFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(isWindowActive()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isWindowActive", isWindowActiveFunc);
 
                                         // getOptimizedRAM
                                         Object getRamFunc = Proxy.newProxyInstance(
