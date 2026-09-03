@@ -7,9 +7,12 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
+import sun.misc.Unsafe;
 
 /**
  * Project Zomboid Build 42 - FileSystem Whitelist & Secondary-Drive Protection Shield.
@@ -17,39 +20,46 @@ import java.util.Set;
  * In Build 42, ZomboidFileSystem.validatePrefix(path) enforces an internal whitelist
  * of allowed base directories (allowedPrefixes). When Steam Workshop mods are installed
  * on a secondary drive (e.g. K:\SteamLibrary, D:\SteamLibrary), the vanilla engine can
- * fail to register these paths in time, causing validatePrefix to throw IllegalArgumentException.
+ * fail to register these paths in time, or wipe them during ResetMods(), causing
+ * validatePrefix to throw IllegalArgumentException and failing animation/model loading.
  * 
- * When textures, animations, or models from these mods are loaded, the exception causes
- * Texture.getSharedTexture to return null, triggering game-killing NullPointerExceptions
- * during world and weather loading (e.g. RainParticle / WeatherParticle).
- * 
- * This shield automatically discovers all mounted drives and Steam Workshop libraries,
- * injects them into ZomboidFileSystem.instance.modFolders, and maintains allowedPrefixes
- * so that all 3rd-party mods load seamlessly without crashes.
+ * This shield intercepts allowedPrefixes via a permanent wrapped Supplier and runs
+ * an active background watchdog to guarantee that all mounted drives and workshop
+ * libraries are 100% permanently whitelisted.
  */
 public final class FileSystemWhitelistShield {
 
     private static volatile boolean initialized = false;
     private static volatile boolean applied = false;
     private static final Set<String> discoveredRoots = new HashSet<>();
+    private static volatile Unsafe unsafeInstance = null;
+
+    private static void obtainUnsafe() {
+        if (unsafeInstance != null) return;
+        try {
+            Field theUnsafeField = Unsafe.class.getDeclaredField("theUnsafe");
+            theUnsafeField.setAccessible(true);
+            unsafeInstance = (Unsafe) theUnsafeField.get(null);
+        } catch (Throwable t) {
+            PZOLogger.warn("[FileSystemWhitelistShield] Unsafe unavailable: " + t.getMessage());
+        }
+    }
 
     public static synchronized void initialize() {
         if (initialized) return;
         initialized = true;
-
+        obtainUnsafe();
         collectAllSearchRoots();
 
-        // Start background daemon to hook ZomboidFileSystem as soon as it is instantiated
+        // Continuous lifecycle daemon: maintains whitelist throughout game boot, main menu, and save loading
         Thread daemon = new Thread(() -> {
-            for (int i = 0; i < 600; i++) { // Poll up to 60 seconds
-                if (tryApplyShield()) {
-                    break;
-                }
+            while (true) {
                 try {
-                    Thread.sleep(100);
+                    tryApplyShield();
+                    Thread.sleep(1000);
                 } catch (InterruptedException ignored) {
                     break;
-                }
+                } catch (Throwable ignored) {}
             }
         }, "PZO-FileSystem-Whitelist-Shield");
         daemon.setDaemon(true);
@@ -63,9 +73,12 @@ public final class FileSystemWhitelistShield {
             if (roots != null) {
                 for (File root : roots) {
                     if (root.exists()) {
-                        discoveredRoots.add(normalize(root.getAbsolutePath()));
+                        addRootPath(root);
 
                         String[] commonPaths = new String[]{
+                            "SteamLibrary",
+                            "SteamLibrary/steamapps",
+                            "SteamLibrary/steamapps/workshop",
                             "SteamLibrary/steamapps/workshop/content/108600",
                             "Program Files (x86)/Steam/steamapps/workshop/content/108600",
                             "Program Files/Steam/steamapps/workshop/content/108600",
@@ -76,8 +89,8 @@ public final class FileSystemWhitelistShield {
 
                         for (String cp : commonPaths) {
                             File f = new File(root, cp.replace('/', File.separatorChar));
-                            if (f.exists() && f.isDirectory()) {
-                                discoveredRoots.add(normalize(f.getAbsolutePath()));
+                            if (f.exists()) {
+                                addRootPath(f);
                             }
                         }
 
@@ -99,9 +112,34 @@ public final class FileSystemWhitelistShield {
             String userHome = System.getProperty("user.home");
             File zomboidDir = new File(userHome, "Zomboid");
             if (zomboidDir.exists()) {
-                discoveredRoots.add(normalize(zomboidDir.getAbsolutePath()));
+                addRootPath(zomboidDir);
             }
         } catch (Throwable ignored) {}
+
+        // 3. Current working directory / execution directory roots
+        try {
+            File cwd = new File(".").getAbsoluteFile();
+            addRootPath(cwd);
+            File parent = cwd.getParentFile();
+            while (parent != null) {
+                addRootPath(parent);
+                File ws = new File(parent, "workshop/content/108600".replace('/', File.separatorChar));
+                if (ws.exists()) {
+                    addRootPath(ws);
+                }
+                parent = parent.getParentFile();
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void addRootPath(File f) {
+        if (f == null) return;
+        try {
+            discoveredRoots.add(normalize(f.getAbsolutePath()));
+            discoveredRoots.add(normalize(f.getCanonicalPath()));
+        } catch (Throwable ignored) {
+            discoveredRoots.add(f.getAbsolutePath());
+        }
     }
 
     private static void parseVdf(File vdfFile) {
@@ -113,11 +151,14 @@ public final class FileSystemWhitelistShield {
                     String[] parts = line.split("\"");
                     if (parts.length >= 4) {
                         String libPath = parts[3].replace("\\\\", File.separator);
-                        File wsDir = new File(libPath, "steamapps/workshop/content/108600".replace('/', File.separatorChar));
-                        if (wsDir.exists() && wsDir.isDirectory()) {
-                            discoveredRoots.add(normalize(wsDir.getAbsolutePath()));
+                        File libDir = new File(libPath);
+                        if (libDir.exists()) {
+                            addRootPath(libDir);
+                            File wsDir = new File(libDir, "steamapps/workshop/content/108600".replace('/', File.separatorChar));
+                            if (wsDir.exists()) {
+                                addRootPath(wsDir);
+                            }
                         }
-                        discoveredRoots.add(normalize(libPath));
                     }
                 }
             }
@@ -141,7 +182,15 @@ public final class FileSystemWhitelistShield {
                 return false;
             }
 
-            // Force getAllModFolders to populate modFolders if null
+            // 1. Hook the ResettableLazyValue supplier permanently so resets NEVER drop discovered roots
+            Field allowedField = fsClass.getDeclaredField("allowedPrefixes");
+            allowedField.setAccessible(true);
+            Object lazy = allowedField.get(fsInstance);
+            if (lazy != null) {
+                hookLazySupplier(lazy);
+            }
+
+            // 2. Populate and maintain modFolders
             try {
                 Method getAllModFoldersMethod = fsClass.getMethod("getAllModFolders", List.class);
                 getAllModFoldersMethod.invoke(fsInstance, new ArrayList<>());
@@ -161,20 +210,16 @@ public final class FileSystemWhitelistShield {
                     }
                 }
 
-                // Reset allowedPrefixes lazy value so it recomputes with all roots included
-                try {
-                    Field allowedField = fsClass.getDeclaredField("allowedPrefixes");
-                    allowedField.setAccessible(true);
-                    Object lazy = allowedField.get(fsInstance);
-                    if (lazy != null) {
+                if (added > 0 && lazy != null) {
+                    try {
                         Method resetMethod = lazy.getClass().getMethod("reset");
                         resetMethod.invoke(lazy);
-                    }
-                } catch (Throwable ignored) {}
+                    } catch (Throwable ignored) {}
+                }
 
                 if (!applied) {
                     applied = true;
-                    PZOLogger.success(String.format("[FileSystemWhitelistShield] Successfully injected %d drive/workshop roots into ZomboidFileSystem whitelist (Secondary drive crash protected)", added));
+                    PZOLogger.success(String.format("[FileSystemWhitelistShield] Successfully injected %d drive/workshop roots into ZomboidFileSystem whitelist (Secondary drive crash protected)", discoveredRoots.size()));
                 }
                 return true;
             }
@@ -184,9 +229,76 @@ public final class FileSystemWhitelistShield {
         return false;
     }
 
+    private static void hookLazySupplier(Object lazyObj) {
+        obtainUnsafe();
+        if (unsafeInstance == null) return;
+
+        try {
+            Field supplierField = null;
+            Class<?> cur = lazyObj.getClass();
+            while (cur != null && cur != Object.class) {
+                try {
+                    supplierField = cur.getDeclaredField("supplier");
+                    break;
+                } catch (NoSuchFieldException e) {
+                    cur = cur.getSuperclass();
+                }
+            }
+
+            if (supplierField != null) {
+                long offset = unsafeInstance.objectFieldOffset(supplierField);
+                @SuppressWarnings("unchecked")
+                Supplier<List<Path>> currentSupplier = (Supplier<List<Path>>) unsafeInstance.getObject(lazyObj, offset);
+                if (!(currentSupplier instanceof PZOShieldSupplier)) {
+                    PZOShieldSupplier shieldSupplier = new PZOShieldSupplier(currentSupplier, discoveredRoots);
+                    unsafeInstance.putObject(lazyObj, offset, shieldSupplier);
+                    try {
+                        Method resetMethod = lazyObj.getClass().getMethod("reset");
+                        resetMethod.invoke(lazyObj);
+                    } catch (Throwable ignored) {}
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
     /**
-     * Periodic watchdog call during game loading to maintain whitelist integrity.
+     * Unbreakable supplier wrapper: always ensures discovered secondary drive roots are included.
      */
+    private static final class PZOShieldSupplier implements Supplier<List<Path>> {
+        private final Supplier<List<Path>> delegate;
+        private final Set<String> roots;
+
+        PZOShieldSupplier(Supplier<List<Path>> delegate, Set<String> roots) {
+            this.delegate = delegate;
+            this.roots = roots;
+        }
+
+        @Override
+        public List<Path> get() {
+            List<Path> base = null;
+            if (delegate != null) {
+                try {
+                    base = delegate.get();
+                } catch (Throwable ignored) {}
+            }
+            List<Path> list = new ArrayList<>(base != null ? base : Collections.emptyList());
+            for (String r : roots) {
+                try {
+                    File rf = new File(r);
+                    Path rp = rf.toPath();
+                    if (!list.contains(rp)) {
+                        list.add(rp);
+                    }
+                    Path canP = rf.getCanonicalFile().toPath();
+                    if (!list.contains(canP)) {
+                        list.add(canP);
+                    }
+                } catch (Throwable ignored) {}
+            }
+            return Collections.unmodifiableList(list);
+        }
+    }
+
     public static void checkAndMaintain() {
         tryApplyShield();
     }
