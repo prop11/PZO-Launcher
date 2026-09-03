@@ -44,14 +44,13 @@ public final class WeatherParticleDrawer extends TextureDraw.GenericDrawer {
         }
 
         boolean bDefaultShaderActive = DefaultShader.isActive;
+        int currentProgram = GL11.glGetInteger(35725);
         int lastTextureID = Texture.lastTextureID;
-        VBORenderer vbor = VBORenderer.getInstance();
 
-        // Avoid GL_ALPHA_TEST state leaks without glPushAttrib
-        boolean alphaTestWasEnabled = GL11.glIsEnabled(3008);
-        if (alphaTestWasEnabled) {
-            GL11.glDisable(3008);
-        }
+        GL11.glPushAttrib(1048575);
+        GL11.glPushClientAttrib(-1);
+        GL11.glDisable(3008);
+        VBORenderer vbor = VBORenderer.getInstance();
 
         for (int i = 0; i < this.particlesByTexture.length; i++) {
             TIntArrayList positions = this.particlesByTexture[i];
@@ -109,14 +108,14 @@ public final class WeatherParticleDrawer extends TextureDraw.GenericDrawer {
 
         vbor.flush();
 
-        // Restore minimal GL state cleanly without GPU stalls
-        if (alphaTestWasEnabled) {
-            GL11.glEnable(3008);
-        }
+        GL11.glPopAttrib();
+        GL11.glPopClientAttrib();
+        GL20.glUseProgram(currentProgram);
 
-        GL20.glUseProgram(0);
-        if (lastTextureID != 0 && SceneShaderStore.defaultShader != null) {
-            SceneShaderStore.defaultShader.setTextureActive(true);
+        if (currentProgram == SceneShaderStore.defaultShaderId) {
+            if (lastTextureID != 0 && SceneShaderStore.defaultShader != null) {
+                SceneShaderStore.defaultShader.setTextureActive(true);
+            }
         }
 
         DefaultShader.isActive = bDefaultShaderActive;
