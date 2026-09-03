@@ -666,9 +666,25 @@ public class PZOEngineBridge {
                                             Field threadField = lmClass.getField("thread");
                                             Object thread = threadField.get(null);
                                             if (caller != null && thread != null) {
-                                                Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
-                                                protCall.invoke(caller, thread, closure, new Object[0]);
-                                                PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
+                                                Field debugOwnerField = null;
+                                                Thread prevOwner = null;
+                                                try {
+                                                    debugOwnerField = thread.getClass().getField("debugOwnerThread");
+                                                    prevOwner = (Thread) debugOwnerField.get(thread);
+                                                    debugOwnerField.set(thread, Thread.currentThread());
+                                                } catch (Throwable ignored) {}
+
+                                                try {
+                                                    Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
+                                                    protCall.invoke(caller, thread, closure, new Object[0]);
+                                                    PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
+                                                } finally {
+                                                    if (debugOwnerField != null && prevOwner != null) {
+                                                        try {
+                                                            debugOwnerField.set(thread, prevOwner);
+                                                        } catch (Throwable ignored) {}
+                                                    }
+                                                }
                                             }
                                         }
 
