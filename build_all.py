@@ -71,7 +71,7 @@ Agent-Class: com.pzoptimizer.PZOptimAgent
 Can-Redefine-Classes: true
 Can-Retransform-Classes: true
 Implementation-Title: Project Zomboid Optimiser Engine
-Implementation-Version: 0.8.4-native
+Implementation-Version: 0.8.5-unstable
 Created-By: 26.0.2.1 (Oracle Corporation)
 
 ''')
@@ -85,7 +85,7 @@ Agent-Class: com.pzoptimizer.PZOptimAgent
 Can-Redefine-Classes: true
 Can-Retransform-Classes: true
 Implementation-Title: Project Zomboid Optimiser Server Engine
-Implementation-Version: 0.8.4-native
+Implementation-Version: 0.8.5-unstable
 Created-By: 26.0.2.1 (Oracle Corporation)
 
 ''')
