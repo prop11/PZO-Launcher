@@ -119,8 +119,12 @@ Created-By: 26.0.2.1 (Oracle Corporation)
     print("================================================================================")
     smoke_test_code = """
 import com.pzoptimizer.PZONative;
+import com.pzoptimizer.NativeInflater;
+import java.io.ByteArrayOutputStream;
+import java.util.zip.Deflater;
+
 public class TestNative {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         System.out.println("PZONative.isLoaded() = " + PZONative.isLoaded());
         System.out.println("Timer Resolution (100ns) = " + PZONative.getTimerResolution100ns());
         System.out.println("Physical Cores = " + PZONative.getPhysicalCores());
@@ -128,6 +132,38 @@ public class TestNative {
         System.out.println("Logical Processors = " + PZONative.getLogicalProcessors());
         System.out.printf("P-Core Mask = 0x%X\\n", PZONative.getPerformanceCoreMask());
         System.out.println("AVX2 Supported = " + PZONative.isAVX2Supported());
+
+        // Test Phase 2 Decompression
+        String testData = "Project Zomboid Build 42 High-Speed Chunk Streaming Payload Acceleration Test 1234567890";
+        byte[] raw = testData.getBytes("UTF-8");
+        Deflater deflater = new Deflater();
+        deflater.setInput(raw);
+        deflater.finish();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        byte[] buf = new byte[256];
+        while (!deflater.finished()) {
+            int count = deflater.deflate(buf);
+            baos.write(buf, 0, count);
+        }
+        byte[] compressed = baos.toByteArray();
+        System.out.println("Compressed payload: " + compressed.length + " bytes (raw: " + raw.length + " bytes)");
+
+        // 1. Direct PZONative decompress
+        byte[] uncompressed = new byte[512];
+        int nativeLen = PZONative.decompress(compressed, 0, compressed.length, uncompressed, 0, uncompressed.length);
+        System.out.println("PZONative.decompress decompressed bytes: " + nativeLen);
+        String decompStr = new String(uncompressed, 0, nativeLen, "UTF-8");
+        boolean ok = decompStr.equals(testData);
+        System.out.println("Decompression Content Parity: " + (ok ? "MATCH [PASS]" : "MISMATCH [FAIL]"));
+
+        // 2. NativeInflater drop-in
+        NativeInflater ni = new NativeInflater();
+        ni.setInput(compressed, 0, compressed.length);
+        byte[] niOut = new byte[512];
+        int niLen = ni.inflate(niOut, 0, niOut.length);
+        String niStr = new String(niOut, 0, niLen, "UTF-8");
+        boolean niOk = niStr.equals(testData);
+        System.out.println("NativeInflater Parity: " + (niOk ? "MATCH [PASS]" : "MISMATCH [FAIL]"));
     }
 }
 """

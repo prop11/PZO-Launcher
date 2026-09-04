@@ -1,6 +1,7 @@
 package com.pzoptimizer;
 
 import java.io.File;
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 
 /**
@@ -148,6 +149,55 @@ public class PZONative {
     }
 
     // ========================================================================
+    // Phase 2: High-Speed SIMD Decompression & Win32 Chunk Stream Acceleration
+    // ========================================================================
+
+    public static int decompress(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff, int dstCap) {
+        if (!isLoaded() || src == null || dst == null || srcLen <= 0 || dstCap <= 0) return -1;
+        try {
+            return decompressBytes(src, srcOff, srcLen, dst, dstOff, dstCap);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    public static int decompress(ByteBuffer src, int srcPos, int srcLen, ByteBuffer dst, int dstPos, int dstCap) {
+        if (!isLoaded() || src == null || dst == null || !src.isDirect() || !dst.isDirect() || srcLen <= 0 || dstCap <= 0) return -1;
+        try {
+            return decompressDirect(src, srcPos, srcLen, dst, dstPos, dstCap);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    public static int readChunkFile(String path, byte[] dst, int maxCap) {
+        if (!isLoaded() || path == null || dst == null || maxCap <= 0) return -1;
+        try {
+            return readChunkFileNative(path, dst, maxCap);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    public static boolean prewarmFile(String path) {
+        if (!isLoaded() || path == null) return false;
+        try {
+            return prewarmFileNative(path);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static int prewarmFiles(String[] paths) {
+        if (!isLoaded() || paths == null || paths.length == 0) return 0;
+        try {
+            return prewarmFilesNative(paths);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    // ========================================================================
     // Native JNI Declarations (Implemented in pzo_native.c)
     // ========================================================================
     private static native boolean initNative();
@@ -165,4 +215,9 @@ public class PZONative {
     private static native int batchCalculateDistancesAVX2(
         FloatBuffer directCoords, int count, float originX, float originY, FloatBuffer directOutDist
     );
+    private static native int decompressBytes(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff, int dstCap);
+    private static native int decompressDirect(ByteBuffer src, int srcPos, int srcLen, ByteBuffer dst, int dstPos, int dstCap);
+    private static native int readChunkFileNative(String filePath, byte[] dstArray, int maxCap);
+    private static native boolean prewarmFileNative(String filePath);
+    private static native int prewarmFilesNative(String[] filePaths);
 }

@@ -260,10 +260,14 @@ public final class PredictiveChunkStreamer {
         try {
             File chunkFile = resolveChunkFile(wx, wy);
             if (chunkFile != null && chunkFile.exists() && chunkFile.canRead()) {
-                try (FileInputStream fis = new FileInputStream(chunkFile);
-                     FileChannel ch = fis.getChannel()) {
-                    PREWARM_BUFFER.clear();
-                    ch.read(PREWARM_BUFFER); // Reads chunk binary header into OS page cache
+                if (PZONative.isLoaded()) {
+                    PZONative.prewarmFile(chunkFile.getAbsolutePath());
+                } else {
+                    try (FileInputStream fis = new FileInputStream(chunkFile);
+                         FileChannel ch = fis.getChannel()) {
+                        PREWARM_BUFFER.clear();
+                        ch.read(PREWARM_BUFFER); // Reads chunk binary header into OS page cache
+                    }
                 }
             }
         } catch (Throwable ignored) {}
