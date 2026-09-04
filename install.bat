@@ -27,12 +27,13 @@ Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cya
 Write-Host "=================================================================" -ForegroundColor Cyan
 
 $ScriptDir = if ($env:PZO_INSTALLER_DIR) { $env:PZO_INSTALLER_DIR.TrimEnd('\') } else { $PWD.Path }
-$JarFileName    = "PZOptimEngine.jar"
-$TargetFileName = "ProjectZomboid64.json"
-$BackupFolder   = "Installer_Backups"
-$ZomboidLuaDir  = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
-$PzoStatusFile  = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
-$ZomboidModsDir = [System.IO.Path]::Combine($HOME, "Zomboid\mods")
+$JarFileName       = "PZOptimEngine.jar"
+$NativeDllName     = "pzo_native64.dll"
+$TargetFileName    = "ProjectZomboid64.json"
+$BackupFolder      = "Installer_Backups"
+$ZomboidLuaDir     = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
+$PzoStatusFile     = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
+$ZomboidModsDir    = [System.IO.Path]::Combine($HOME, "Zomboid\mods")
 
 # Guard against game running
 $runningPZ = Get-Process -Name "ProjectZomboid64", "ProjectZomboid32" -ErrorAction SilentlyContinue
@@ -295,6 +296,7 @@ if (-not $InstallPath) {
 Write-Host "Project Zomboid directory: $InstallPath" -ForegroundColor Green
 
 $InstalledJarPath = [System.IO.Path]::Combine($InstallPath, $JarFileName)
+$InstalledDllPath = [System.IO.Path]::Combine($InstallPath, $NativeDllName)
 $TargetFilePath   = [System.IO.Path]::Combine($InstallPath, $TargetFileName)
 $BackupDir        = [System.IO.Path]::Combine($InstallPath, $BackupFolder)
 
@@ -325,6 +327,30 @@ if ($SourceJar) {
     if (Download-PZOGitHubJar $downloadTarget) {
         $SourceJar = $downloadTarget
     }
+}
+
+# Locate Source Native DLL (pzo_native64.dll)
+$candidateDllPaths = [System.Collections.Generic.List[string]]::new()
+if ($ScriptDir) {
+    $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, $NativeDllName))
+    $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, "dist\$NativeDllName"))
+    $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, "native\$NativeDllName"))
+}
+if ($PWD -and $PWD.Path) {
+    $candidateDllPaths.Add([System.IO.Path]::Combine($PWD.Path, $NativeDllName))
+    $candidateDllPaths.Add([System.IO.Path]::Combine($PWD.Path, "dist\$NativeDllName"))
+    $candidateDllPaths.Add([System.IO.Path]::Combine($PWD.Path, "native\$NativeDllName"))
+}
+
+$SourceDll = $null
+foreach ($dp in $candidateDllPaths) {
+    if ($dp -and (Test-Path -LiteralPath $dp -ErrorAction SilentlyContinue)) {
+        $SourceDll = $dp
+        break
+    }
+}
+if ($SourceDll) {
+    Write-Host "Using local native governor: $SourceDll" -ForegroundColor Gray
 }
 
 # ==========================================
@@ -448,6 +474,11 @@ if (Test-Path $InstalledJarPath) {
                 return
             }
 
+            if ($SourceDll -and (Test-Path -LiteralPath $SourceDll)) {
+                Copy-Item -LiteralPath $SourceDll -Destination $InstalledDllPath -Force
+                Write-Host "    [SUCCESS] Updated Native Governor: $NativeDllName -> $InstalledDllPath" -ForegroundColor Green
+            }
+
             Write-Host "`nRe-applying optimal configuration to ProjectZomboid64.json..." -ForegroundColor Cyan
             Apply-PZOConfiguration
             Write-Host "`n[SUCCESS] Update complete! Project Zomboid is ready." -ForegroundColor Green
@@ -459,6 +490,11 @@ if (Test-Path $InstalledJarPath) {
             if (Test-Path $InstalledJarPath) {
                 Remove-Item -Path $InstalledJarPath -Force
                 Write-Host "Removed: $JarFileName" -ForegroundColor Green
+            }
+
+            if (Test-Path $InstalledDllPath) {
+                Remove-Item -Path $InstalledDllPath -Force
+                Write-Host "Removed: $NativeDllName" -ForegroundColor Green
             }
 
             # Purge all pzo_* bridge, telemetry, log and status files from ~/Zomboid/Lua/
@@ -517,6 +553,11 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
 } else {
     Write-Host "Error: '$JarFileName' was not found in the installer directory ($ScriptDir)." -ForegroundColor Red
     return
+}
+
+if ($SourceDll -and (Test-Path -LiteralPath $SourceDll -ErrorAction SilentlyContinue)) {
+    Copy-Item -LiteralPath $SourceDll -Destination $InstalledDllPath -Force
+    Write-Host "Installed Native Governor: $NativeDllName -> $InstallPath" -ForegroundColor Green
 }
 
 Apply-PZOConfiguration
