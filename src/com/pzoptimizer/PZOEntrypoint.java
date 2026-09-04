@@ -62,6 +62,9 @@ public class PZOEntrypoint {
         RainAndWeatherOptimizer.initialize();
         WorldStreamerBooster.startDaemon();
         PZOFastMath.initialize();
+        ZombieMathVectorizer.apply();
+        SpatialBufferPool.initialize();
+        HordeSpatialCuller.initialize();
         GenerationalHeapCleaner.startGovernor();
         AsyncEntityDistanceCache.initialize();
         CorpseAudioGovernor.applyCorpseAudioLimits();
@@ -78,6 +81,7 @@ public class PZOEntrypoint {
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
         if (UnstableChannelGuard.isUnstableBuild()) {
+            PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD AVX2 Batch Horde Spatial Culler & Skeletal LOD Armed");
             PZOLogger.success("[PZO Unstable Engine] RenderFrustumCuller, ZOcclusionCuller & ModelSkinningGovernor Armed");
             PZOLogger.success("[PZO Unstable Engine] EnhancedRenderTelemetry Active");
         }

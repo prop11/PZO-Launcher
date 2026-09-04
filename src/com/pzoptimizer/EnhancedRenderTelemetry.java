@@ -8,9 +8,10 @@ import java.util.Locale;
  * PZO Enhanced Rendering Telemetry & Performance Gain Monitor.
  * 
  * Tracks real-time metrics and estimated hardware resource savings across:
+ * - Phase 3 SIMD AVX2 Batch Horde Spatial Culler (HordeSpatialCuller)
+ * - 3D Dynamic Skeletal Bone Skinning Governor (HordeAnimationLODGovernor & ModelSkinningGovernor)
  * - 2D Screen-space Draw Call Culling (RenderFrustumCuller)
  * - 32-Level Subterranean Level Occlusion (ZOcclusionCuller)
- * - 3D Off-Screen Skeletal Skinning Elimination (ModelSkinningGovernor)
  * - OpenGL JNI Driver State Filter (GLStateOptimizer)
  * 
  * Only active in Unstable / Beta channel builds.
@@ -20,10 +21,14 @@ public final class EnhancedRenderTelemetry {
 
     public static class MetricsSnapshot {
         public boolean isUnstableActive;
+        public boolean avx2SpatialActive;
         public long drawsCulled;
         public long subterraneanTilesCulled;
         public long boneTransformsSaved;
         public long glCallsFiltered;
+        public int hordeZombiesTracked;
+        public int hordeCulledOffscreen;
+        public int hordeHibernating;
         public double estimatedCpuMsSaved;
         public double estimatedGpuMsSaved;
         public double estimatedFpsGainPercent;
@@ -32,6 +37,7 @@ public final class EnhancedRenderTelemetry {
     public static MetricsSnapshot getSnapshot() {
         MetricsSnapshot snap = new MetricsSnapshot();
         snap.isUnstableActive = UnstableChannelGuard.isUnstableBuild();
+        snap.avx2SpatialActive = PZONative.isLoaded() && PZONative.isAVX2Supported();
 
         if (!snap.isUnstableActive) {
             return snap;
@@ -39,8 +45,11 @@ public final class EnhancedRenderTelemetry {
 
         snap.drawsCulled = RenderFrustumCuller.getCulledCount();
         snap.subterraneanTilesCulled = ZOcclusionCuller.getCulledCount();
-        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount();
+        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount() + HordeAnimationLODGovernor.getBoneTransformsSaved();
         snap.glCallsFiltered = GLStateOptimizer.getGlCallsFiltered();
+        snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
+        snap.hordeCulledOffscreen = HordeSpatialCuller.lastCulledOffscreenCount.get();
+        snap.hordeHibernating = HordeSpatialCuller.lastHibernatingCount.get();
 
         // Hardware cost weightings:
         // ~0.0015 ms CPU time saved per culled draw call + state check
@@ -60,8 +69,9 @@ public final class EnhancedRenderTelemetry {
     public static String toJson() {
         MetricsSnapshot s = getSnapshot();
         return String.format(Locale.US,
-            "{\"unstable_active\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
-            s.isUnstableActive, s.drawsCulled, s.subterraneanTilesCulled, s.boneTransformsSaved, s.glCallsFiltered,
+            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"horde_tracked\":%d,\"horde_culled\":%d,\"horde_hibernating\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
+            s.isUnstableActive, s.avx2SpatialActive, s.drawsCulled, s.subterraneanTilesCulled, s.boneTransformsSaved, s.glCallsFiltered,
+            s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating,
             s.estimatedCpuMsSaved, s.estimatedGpuMsSaved, s.estimatedFpsGainPercent);
     }
 
@@ -72,7 +82,10 @@ public final class EnhancedRenderTelemetry {
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("#### Enhanced Rendering Telemetry (Unstable Channel)\n");
+        sb.append("#### Enhanced Rendering & Phase 3 SIMD Telemetry (Unstable Channel)\n");
+        sb.append(String.format(Locale.US, "- **SIMD AVX2 Spatial Processor**: %s\n", s.avx2SpatialActive ? "ACTIVE (8-wide YMM registers)" : "SCALAR FALLBACK"));
+        sb.append(String.format(Locale.US, "- **Horde Zombies Monitored**: %,d (Offscreen Culled: %,d | Hibernating: %,d)\n",
+            s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating));
         sb.append(String.format(Locale.US, "- **Screen-Space Draws Culled**: %,d\n", s.drawsCulled));
         sb.append(String.format(Locale.US, "- **Subterranean Z-Tiles Culled**: %,d\n", s.subterraneanTilesCulled));
         sb.append(String.format(Locale.US, "- **Off-Screen Bone Transforms Bypassed**: %,d\n", s.boneTransformsSaved));

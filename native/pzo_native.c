@@ -266,6 +266,199 @@ static int batchCalculateDistancesAVX2(const float* coords, int count, float ox,
     return count;
 }
 
+// Phase 3: AVX2 Vectorized 2D Squared Distance Calculation (Zero-copy, 8 floats per SIMD instruction, no sqrt)
+static int batchCalculateDistancesSqAVX2(const float* coords, int count, float ox, float oy, float* outDistSq) {
+    if (!coords || !outDistSq || count <= 0) return 0;
+
+    int i = 0;
+
+    if (g_avx2Supported && count >= 8) {
+        __m256 vOx = _mm256_set1_ps(ox);
+        __m256 vOy = _mm256_set1_ps(oy);
+        const __m256i permIdx = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
+
+        for (; i <= count - 8; i += 8) {
+            __m256 c0 = _mm256_loadu_ps(&coords[(i + 0) * 2]);
+            __m256 c1 = _mm256_loadu_ps(&coords[(i + 4) * 2]);
+
+            __m256 shuf0 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(2, 0, 2, 0));
+            __m256 shuf1 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(3, 1, 3, 1));
+            __m256 xs = _mm256_permutevar8x32_ps(shuf0, permIdx);
+            __m256 ys = _mm256_permutevar8x32_ps(shuf1, permIdx);
+
+            __m256 dx = _mm256_sub_ps(xs, vOx);
+            __m256 dy = _mm256_sub_ps(ys, vOy);
+            __m256 distSq = _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy));
+
+            _mm256_storeu_ps(&outDistSq[i], distSq);
+        }
+    }
+
+    for (; i < count; i++) {
+        float dx = coords[i * 2] - ox;
+        float dy = coords[i * 2 + 1] - oy;
+        outDistSq[i] = dx * dx + dy * dy;
+    }
+
+    return count;
+}
+
+// Phase 3: AVX2 Vectorized Radial Proximity Culling (Returns count inside radius, writes 0/1 byte mask)
+static int batchCullRadialAVX2(const float* coords, int count, float ox, float oy, float maxRadiusSq, unsigned char* outMask) {
+    if (!coords || !outMask || count <= 0) return 0;
+
+    int insideCount = 0;
+    int i = 0;
+
+    if (g_avx2Supported && count >= 8) {
+        __m256 vOx = _mm256_set1_ps(ox);
+        __m256 vOy = _mm256_set1_ps(oy);
+        __m256 vMaxRadSq = _mm256_set1_ps(maxRadiusSq);
+        const __m256i permIdx = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
+
+        for (; i <= count - 8; i += 8) {
+            __m256 c0 = _mm256_loadu_ps(&coords[(i + 0) * 2]);
+            __m256 c1 = _mm256_loadu_ps(&coords[(i + 4) * 2]);
+
+            __m256 shuf0 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(2, 0, 2, 0));
+            __m256 shuf1 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(3, 1, 3, 1));
+            __m256 xs = _mm256_permutevar8x32_ps(shuf0, permIdx);
+            __m256 ys = _mm256_permutevar8x32_ps(shuf1, permIdx);
+
+            __m256 dx = _mm256_sub_ps(xs, vOx);
+            __m256 dy = _mm256_sub_ps(ys, vOy);
+            __m256 distSq = _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy));
+
+            __m256 cmp = _mm256_cmp_ps(distSq, vMaxRadSq, _CMP_LE_OQ);
+            int mask = _mm256_movemask_ps(cmp);
+            for (int b = 0; b < 8; b++) {
+                unsigned char inRad = (unsigned char)((mask >> b) & 1);
+                outMask[i + b] = inRad;
+                insideCount += inRad;
+            }
+        }
+    }
+
+    for (; i < count; i++) {
+        float dx = coords[i * 2] - ox;
+        float dy = coords[i * 2 + 1] - oy;
+        float distSq = dx * dx + dy * dy;
+        unsigned char inRad = (distSq <= maxRadiusSq) ? 1 : 0;
+        outMask[i] = inRad;
+        insideCount += inRad;
+    }
+
+    return insideCount;
+}
+
+// Phase 3: AVX2 Vectorized 2D AABB / Screen Viewport Culling (Returns count inside AABB, writes 0/1 byte mask)
+static int batchCullAABBAVX2(const float* coords, int count, float minX, float minY, float maxX, float maxY, unsigned char* outMask) {
+    if (!coords || !outMask || count <= 0) return 0;
+
+    int insideCount = 0;
+    int i = 0;
+
+    if (g_avx2Supported && count >= 8) {
+        __m256 vMinX = _mm256_set1_ps(minX);
+        __m256 vMinY = _mm256_set1_ps(minY);
+        __m256 vMaxX = _mm256_set1_ps(maxX);
+        __m256 vMaxY = _mm256_set1_ps(maxY);
+        const __m256i permIdx = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
+
+        for (; i <= count - 8; i += 8) {
+            __m256 c0 = _mm256_loadu_ps(&coords[(i + 0) * 2]);
+            __m256 c1 = _mm256_loadu_ps(&coords[(i + 4) * 2]);
+
+            __m256 shuf0 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(2, 0, 2, 0));
+            __m256 shuf1 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(3, 1, 3, 1));
+            __m256 xs = _mm256_permutevar8x32_ps(shuf0, permIdx);
+            __m256 ys = _mm256_permutevar8x32_ps(shuf1, permIdx);
+
+            __m256 mX1 = _mm256_cmp_ps(xs, vMinX, _CMP_GE_OQ);
+            __m256 mX2 = _mm256_cmp_ps(xs, vMaxX, _CMP_LE_OQ);
+            __m256 mY1 = _mm256_cmp_ps(ys, vMinY, _CMP_GE_OQ);
+            __m256 mY2 = _mm256_cmp_ps(ys, vMaxY, _CMP_LE_OQ);
+
+            __m256 inAABB = _mm256_and_ps(_mm256_and_ps(mX1, mX2), _mm256_and_ps(mY1, mY2));
+            int mask = _mm256_movemask_ps(inAABB);
+            for (int b = 0; b < 8; b++) {
+                unsigned char inBox = (unsigned char)((mask >> b) & 1);
+                outMask[i + b] = inBox;
+                insideCount += inBox;
+            }
+        }
+    }
+
+    for (; i < count; i++) {
+        float x = coords[i * 2];
+        float y = coords[i * 2 + 1];
+        unsigned char inBox = (x >= minX && x <= maxX && y >= minY && y <= maxY) ? 1 : 0;
+        outMask[i] = inBox;
+        insideCount += inBox;
+    }
+
+    return insideCount;
+}
+
+// Phase 3: AVX2 Vectorized Multi-Tier Distance Classification (Tier 0: <=t0, Tier 1: <=t1, Tier 2: <=t2, Tier 3: >t2)
+static int batchClassifyTiersAVX2(const float* coords, int count, float ox, float oy,
+                                  float t0Sq, float t1Sq, float t2Sq, unsigned char* outTiers) {
+    if (!coords || !outTiers || count <= 0) return 0;
+
+    int i = 0;
+
+    if (g_avx2Supported && count >= 8) {
+        __m256 vOx = _mm256_set1_ps(ox);
+        __m256 vOy = _mm256_set1_ps(oy);
+        __m256 vT0 = _mm256_set1_ps(t0Sq);
+        __m256 vT1 = _mm256_set1_ps(t1Sq);
+        __m256 vT2 = _mm256_set1_ps(t2Sq);
+        const __m256i permIdx = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
+
+        for (; i <= count - 8; i += 8) {
+            __m256 c0 = _mm256_loadu_ps(&coords[(i + 0) * 2]);
+            __m256 c1 = _mm256_loadu_ps(&coords[(i + 4) * 2]);
+
+            __m256 shuf0 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(2, 0, 2, 0));
+            __m256 shuf1 = _mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(3, 1, 3, 1));
+            __m256 xs = _mm256_permutevar8x32_ps(shuf0, permIdx);
+            __m256 ys = _mm256_permutevar8x32_ps(shuf1, permIdx);
+
+            __m256 dx = _mm256_sub_ps(xs, vOx);
+            __m256 dy = _mm256_sub_ps(ys, vOy);
+            __m256 distSq = _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy));
+
+            int m0 = _mm256_movemask_ps(_mm256_cmp_ps(distSq, vT0, _CMP_LE_OQ));
+            int m1 = _mm256_movemask_ps(_mm256_cmp_ps(distSq, vT1, _CMP_LE_OQ));
+            int m2 = _mm256_movemask_ps(_mm256_cmp_ps(distSq, vT2, _CMP_LE_OQ));
+
+            for (int b = 0; b < 8; b++) {
+                if ((m0 >> b) & 1) {
+                    outTiers[i + b] = 0;
+                } else if ((m1 >> b) & 1) {
+                    outTiers[i + b] = 1;
+                } else if ((m2 >> b) & 1) {
+                    outTiers[i + b] = 2;
+                } else {
+                    outTiers[i + b] = 3;
+                }
+            }
+        }
+    }
+
+    for (; i < count; i++) {
+        float dx = coords[i * 2] - ox;
+        float dy = coords[i * 2 + 1] - oy;
+        float dSq = dx * dx + dy * dy;
+        if (dSq <= t0Sq) outTiers[i] = 0;
+        else if (dSq <= t1Sq) outTiers[i] = 1;
+        else if (dSq <= t2Sq) outTiers[i] = 2;
+        else outTiers[i] = 3;
+    }
+
+    return count;
+}
+
 // ============================================================================
 // JNI Exports for com.pzoptimizer.PZONative
 // ============================================================================
@@ -358,6 +551,47 @@ JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCalculateDistancesAVX
     float* outDist = (float*)(*env)->GetDirectBufferAddress(env, outDirectBuf);
     if (!inCoords || !outDist) return 0;
     return (jint)batchCalculateDistancesAVX2(inCoords, (int)count, (float)ox, (float)oy, outDist);
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCalculateDistancesSqAVX2(
+    JNIEnv *env, jclass cls, jobject inDirectBuf, jint count, jfloat ox, jfloat oy, jobject outDirectBuf) {
+    (void)cls;
+    if (!inDirectBuf || !outDirectBuf || count <= 0) return 0;
+    float* inCoords = (float*)(*env)->GetDirectBufferAddress(env, inDirectBuf);
+    float* outDistSq = (float*)(*env)->GetDirectBufferAddress(env, outDirectBuf);
+    if (!inCoords || !outDistSq) return 0;
+    return (jint)batchCalculateDistancesSqAVX2(inCoords, (int)count, (float)ox, (float)oy, outDistSq);
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCullRadialAVX2(
+    JNIEnv *env, jclass cls, jobject inDirectBuf, jint count, jfloat ox, jfloat oy, jfloat maxRadiusSq, jobject outMaskBuf) {
+    (void)cls;
+    if (!inDirectBuf || !outMaskBuf || count <= 0) return 0;
+    float* inCoords = (float*)(*env)->GetDirectBufferAddress(env, inDirectBuf);
+    unsigned char* outMask = (unsigned char*)(*env)->GetDirectBufferAddress(env, outMaskBuf);
+    if (!inCoords || !outMask) return 0;
+    return (jint)batchCullRadialAVX2(inCoords, (int)count, (float)ox, (float)oy, (float)maxRadiusSq, outMask);
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCullAABBAVX2(
+    JNIEnv *env, jclass cls, jobject inDirectBuf, jint count, jfloat minX, jfloat minY, jfloat maxX, jfloat maxY, jobject outMaskBuf) {
+    (void)cls;
+    if (!inDirectBuf || !outMaskBuf || count <= 0) return 0;
+    float* inCoords = (float*)(*env)->GetDirectBufferAddress(env, inDirectBuf);
+    unsigned char* outMask = (unsigned char*)(*env)->GetDirectBufferAddress(env, outMaskBuf);
+    if (!inCoords || !outMask) return 0;
+    return (jint)batchCullAABBAVX2(inCoords, (int)count, (float)minX, (float)minY, (float)maxX, (float)maxY, outMask);
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchClassifyTiersAVX2(
+    JNIEnv *env, jclass cls, jobject inDirectBuf, jint count, jfloat ox, jfloat oy,
+    jfloat t0Sq, jfloat t1Sq, jfloat t2Sq, jobject outTiersBuf) {
+    (void)cls;
+    if (!inDirectBuf || !outTiersBuf || count <= 0) return 0;
+    float* inCoords = (float*)(*env)->GetDirectBufferAddress(env, inDirectBuf);
+    unsigned char* outTiers = (unsigned char*)(*env)->GetDirectBufferAddress(env, outTiersBuf);
+    if (!inCoords || !outTiers) return 0;
+    return (jint)batchClassifyTiersAVX2(inCoords, (int)count, (float)ox, (float)oy, (float)t0Sq, (float)t1Sq, (float)t2Sq, outTiers);
 }
 
 // ============================================================================

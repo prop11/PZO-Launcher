@@ -135,6 +135,51 @@ public class PZONative {
         }
     }
 
+    public static int calculateDistancesSqAVX2(FloatBuffer directCoords, int count, float originX, float originY, FloatBuffer directOutDistSq) {
+        if (!isLoaded() || !directCoords.isDirect() || !directOutDistSq.isDirect()) {
+            return fallbackDistancesSq(directCoords, count, originX, originY, directOutDistSq);
+        }
+        try {
+            return batchCalculateDistancesSqAVX2(directCoords, count, originX, originY, directOutDistSq);
+        } catch (Throwable t) {
+            return fallbackDistancesSq(directCoords, count, originX, originY, directOutDistSq);
+        }
+    }
+
+    public static int cullRadialAVX2(FloatBuffer directCoords, int count, float originX, float originY, float maxRadiusSq, ByteBuffer directOutMask) {
+        if (!isLoaded() || !directCoords.isDirect() || !directOutMask.isDirect()) {
+            return fallbackCullRadial(directCoords, count, originX, originY, maxRadiusSq, directOutMask);
+        }
+        try {
+            return batchCullRadialAVX2(directCoords, count, originX, originY, maxRadiusSq, directOutMask);
+        } catch (Throwable t) {
+            return fallbackCullRadial(directCoords, count, originX, originY, maxRadiusSq, directOutMask);
+        }
+    }
+
+    public static int cullAABBAVX2(FloatBuffer directCoords, int count, float minX, float minY, float maxX, float maxY, ByteBuffer directOutMask) {
+        if (!isLoaded() || !directCoords.isDirect() || !directOutMask.isDirect()) {
+            return fallbackCullAABB(directCoords, count, minX, minY, maxX, maxY, directOutMask);
+        }
+        try {
+            return batchCullAABBAVX2(directCoords, count, minX, minY, maxX, maxY, directOutMask);
+        } catch (Throwable t) {
+            return fallbackCullAABB(directCoords, count, minX, minY, maxX, maxY, directOutMask);
+        }
+    }
+
+    public static int classifyTiersAVX2(FloatBuffer directCoords, int count, float originX, float originY,
+                                        float t0Sq, float t1Sq, float t2Sq, ByteBuffer directOutTiers) {
+        if (!isLoaded() || !directCoords.isDirect() || !directOutTiers.isDirect()) {
+            return fallbackClassifyTiers(directCoords, count, originX, originY, t0Sq, t1Sq, t2Sq, directOutTiers);
+        }
+        try {
+            return batchClassifyTiersAVX2(directCoords, count, originX, originY, t0Sq, t1Sq, t2Sq, directOutTiers);
+        } catch (Throwable t) {
+            return fallbackClassifyTiers(directCoords, count, originX, originY, t0Sq, t1Sq, t2Sq, directOutTiers);
+        }
+    }
+
     private static int fallbackDistances(FloatBuffer coords, int count, float ox, float oy, FloatBuffer out) {
         coords.rewind();
         out.rewind();
@@ -144,6 +189,63 @@ public class PZONative {
             float dx = x - ox;
             float dy = y - oy;
             out.put(i, (float) Math.sqrt(dx * dx + dy * dy));
+        }
+        return count;
+    }
+
+    private static int fallbackDistancesSq(FloatBuffer coords, int count, float ox, float oy, FloatBuffer out) {
+        coords.rewind();
+        out.rewind();
+        for (int i = 0; i < count; i++) {
+            float x = coords.get(i * 2);
+            float y = coords.get(i * 2 + 1);
+            float dx = x - ox;
+            float dy = y - oy;
+            out.put(i, dx * dx + dy * dy);
+        }
+        return count;
+    }
+
+    private static int fallbackCullRadial(FloatBuffer coords, int count, float ox, float oy, float maxRadSq, ByteBuffer outMask) {
+        coords.rewind();
+        outMask.rewind();
+        int inside = 0;
+        for (int i = 0; i < count; i++) {
+            float dx = coords.get(i * 2) - ox;
+            float dy = coords.get(i * 2 + 1) - oy;
+            byte in = (byte) ((dx * dx + dy * dy <= maxRadSq) ? 1 : 0);
+            outMask.put(i, in);
+            if (in == 1) inside++;
+        }
+        return inside;
+    }
+
+    private static int fallbackCullAABB(FloatBuffer coords, int count, float minX, float minY, float maxX, float maxY, ByteBuffer outMask) {
+        coords.rewind();
+        outMask.rewind();
+        int inside = 0;
+        for (int i = 0; i < count; i++) {
+            float x = coords.get(i * 2);
+            float y = coords.get(i * 2 + 1);
+            byte in = (byte) ((x >= minX && x <= maxX && y >= minY && y <= maxY) ? 1 : 0);
+            outMask.put(i, in);
+            if (in == 1) inside++;
+        }
+        return inside;
+    }
+
+    private static int fallbackClassifyTiers(FloatBuffer coords, int count, float ox, float oy,
+                                             float t0Sq, float t1Sq, float t2Sq, ByteBuffer outTiers) {
+        coords.rewind();
+        outTiers.rewind();
+        for (int i = 0; i < count; i++) {
+            float dx = coords.get(i * 2) - ox;
+            float dy = coords.get(i * 2 + 1) - oy;
+            float dSq = dx * dx + dy * dy;
+            if (dSq <= t0Sq) outTiers.put(i, (byte) 0);
+            else if (dSq <= t1Sq) outTiers.put(i, (byte) 1);
+            else if (dSq <= t2Sq) outTiers.put(i, (byte) 2);
+            else outTiers.put(i, (byte) 3);
         }
         return count;
     }
@@ -223,6 +325,19 @@ public class PZONative {
     public static native boolean isAVX2Supported();
     private static native int batchCalculateDistancesAVX2(
         FloatBuffer directCoords, int count, float originX, float originY, FloatBuffer directOutDist
+    );
+    private static native int batchCalculateDistancesSqAVX2(
+        FloatBuffer directCoords, int count, float originX, float originY, FloatBuffer directOutDistSq
+    );
+    private static native int batchCullRadialAVX2(
+        FloatBuffer directCoords, int count, float originX, float originY, float maxRadiusSq, ByteBuffer directOutMask
+    );
+    private static native int batchCullAABBAVX2(
+        FloatBuffer directCoords, int count, float minX, float minY, float maxX, float maxY, ByteBuffer directOutMask
+    );
+    private static native int batchClassifyTiersAVX2(
+        FloatBuffer directCoords, int count, float originX, float originY,
+        float t0Sq, float t1Sq, float t2Sq, ByteBuffer directOutTiers
     );
     private static native int decompressBytes(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff, int dstCap);
     private static native int decompressDirect(ByteBuffer src, int srcPos, int srcLen, ByteBuffer dst, int dstPos, int dstCap);
