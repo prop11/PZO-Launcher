@@ -29,6 +29,29 @@ public final class PredictiveChunkStreamer {
     private static final ByteBuffer PREWARM_BUFFER = ByteBuffer.allocateDirect(65536); // 64KB Direct NIO Buffer
     private static final Set<Long> PREWARMED_KEYS = new HashSet<>(512);
     private static volatile long lastPrewarmClearTime = 0;
+    private static volatile Boolean isSolidState = null;
+
+    public static boolean isStorageFast() {
+        if (isSolidState != null) return isSolidState;
+        try {
+            String checkPath = System.getProperty("user.home");
+            File chunkSample = resolveChunkFile(0, 0);
+            if (chunkSample != null && chunkSample.getParent() != null) {
+                checkPath = chunkSample.getParent();
+            }
+            boolean fast = PZONative.isSolidStateDrive(checkPath);
+            isSolidState = fast;
+            if (fast) {
+                PZOLogger.info("[PredictiveChunkStreamer] Fast Solid State Storage (NVMe/SSD) detected: Multi-vector trajectory lookahead active.");
+            } else {
+                PZOLogger.info("[PredictiveChunkStreamer] Mechanical Storage (HDD) detected: Adaptive sequential lookahead active (Head-thrashing protection armed).");
+            }
+            return fast;
+        } catch (Throwable t) {
+            isSolidState = true;
+            return true;
+        }
+    }
 
     public static void initialize() {
         start();
@@ -43,7 +66,7 @@ public final class PredictiveChunkStreamer {
 
             while (running) {
                 try {
-                    Thread.sleep(60); // 16.6 Hz high-cadence trajectory tracking
+                    Thread.sleep(isStorageFast() ? 60 : 250); // 16.6 Hz on SSD/NVMe, relaxed 4 Hz on HDD to protect mechanical head
 
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
@@ -87,7 +110,7 @@ public final class PredictiveChunkStreamer {
         }, "PZO-PredictiveChunkStreamer");
 
         streamerThread.setDaemon(true);
-        streamerThread.setPriority(Thread.NORM_PRIORITY + 1); // Priority 6
+        streamerThread.setPriority(Thread.NORM_PRIORITY - 1); // Priority 4 (never competes with gameplay or WorldStreamer)
         streamerThread.start();
     }
 
@@ -154,11 +177,12 @@ public final class PredictiveChunkStreamer {
             float normX = -dirY;
             float normY = dirX;
 
-            // Lookahead distance scaled to vehicle velocity (up to 160 tiles = 20 chunks ahead)
-            float lookaheadTiles = Math.min(160.0f, Math.abs(speed) * 1.8f);
+            boolean isFast = isStorageFast();
+            int maxSteps = isFast ? 5 : 2;
+            float lookaheadTiles = Math.min(isFast ? 160.0f : 48.0f, Math.abs(speed) * 1.8f);
 
-            for (int step = 1; step <= 5; step++) {
-                float progress = (float) step / 5.0f;
+            for (int step = 1; step <= maxSteps; step++) {
+                float progress = (float) step / (float) maxSteps;
                 float targetX = px + (dirX * lookaheadTiles * progress);
                 float targetY = py + (dirY * lookaheadTiles * progress);
 
@@ -169,12 +193,14 @@ public final class PredictiveChunkStreamer {
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);
 
-                // Pre-warm lateral cone (1 chunk left and right) for smooth turns and highway curves
-                int lateralChunkX = (int) Math.signum(normX);
-                int lateralChunkY = (int) Math.signum(normY);
-                if (lateralChunkX != 0 || lateralChunkY != 0) {
-                    prewarmChunkInOSCache(targetChunkX + lateralChunkX, targetChunkY + lateralChunkY);
-                    prewarmChunkInOSCache(targetChunkX - lateralChunkX, targetChunkY - lateralChunkY);
+                // Pre-warm lateral cone (1 chunk left and right) ONLY on SSDs/NVMe to protect HDD heads from thrashing
+                if (isFast) {
+                    int lateralChunkX = (int) Math.signum(normX);
+                    int lateralChunkY = (int) Math.signum(normY);
+                    if (lateralChunkX != 0 || lateralChunkY != 0) {
+                        prewarmChunkInOSCache(targetChunkX + lateralChunkX, targetChunkY + lateralChunkY);
+                        prewarmChunkInOSCache(targetChunkX - lateralChunkX, targetChunkY - lateralChunkY);
+                    }
                 }
             }
         } catch (Throwable ignored) {}
