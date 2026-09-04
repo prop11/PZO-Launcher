@@ -100,9 +100,13 @@ Created-By: 26.0.2.1 (Oracle Corporation)
     shutil.copy2(dll_path, os.path.join(dist_dir, "pzo_native64.dll"))
     shutil.copy2(client_jar, os.path.join(dist_dir, "PZOptimEngine.jar"))
     shutil.copy2(server_jar, os.path.join(dist_dir, "PZOServerEngine.jar"))
+    shutil.copy2(os.path.join(launcher_dir, "install.bat"), os.path.join(dist_dir, "install.bat"))
 
     # Deploy to live game folder
     shutil.copy2(dll_path, os.path.join(pz_dir, "pzo_native64.dll"))
+    pz_win64 = os.path.join(pz_dir, "win64")
+    if os.path.isdir(pz_win64):
+        shutil.copy2(dll_path, os.path.join(pz_win64, "pzo_native64.dll"))
     shutil.copy2(client_jar, os.path.join(pz_dir, "PZOptimEngine.jar"))
 
     print(f"Deployed to {pz_dir}:")

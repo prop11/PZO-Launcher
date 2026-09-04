@@ -13,6 +13,10 @@ public class UpdateDialog {
     private static final String CONFIG_FILE = "pzo_config.json";
 
     public static boolean promptIfUpdateAvailable(String latestVersion, String downloadUrl) {
+        return promptIfUpdateAvailable(latestVersion, downloadUrl, null);
+    }
+
+    public static boolean promptIfUpdateAvailable(String latestVersion, String downloadUrl, String dllDownloadUrl) {
         if (latestVersion == null || isVersionIgnored(latestVersion)) {
             return false;
         }
@@ -30,7 +34,7 @@ public class UpdateDialog {
             }
 
             if ("UPDATE".equalsIgnoreCase(result)) {
-                performAutoUpdateAndExit(latestVersion, downloadUrl);
+                performAutoUpdateAndExit(latestVersion, downloadUrl, dllDownloadUrl);
                 return true;
             } else if ("SKIP_IGNORE".equalsIgnoreCase(result)) {
                 setIgnoredVersion(latestVersion);
@@ -150,7 +154,7 @@ public class UpdateDialog {
         return "SKIP";
     }
 
-    private static void performAutoUpdateAndExit(String latestVersion, String downloadUrl) {
+    private static void performAutoUpdateAndExit(String latestVersion, String downloadUrl, String dllDownloadUrl) {
         try {
             if (downloadUrl == null || downloadUrl.isEmpty()) {
                 downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
@@ -159,12 +163,90 @@ public class UpdateDialog {
             File newJar = new File("PZOptimEngine.jar.new").getAbsoluteFile();
 
             PZOLogger.info("Downloading latest PZOptimEngine.jar from: " + downloadUrl);
+            boolean jarOk = downloadFileWithRedirects(downloadUrl, newJar);
+            if (!jarOk || newJar.length() < 10000) {
+                showNoticePopup("Update Notice", "Automatic download failed for PZOptimEngine.jar. You can update manually using install.bat.");
+                return;
+            }
+            PZOLogger.success("Downloaded " + newJar.length() + " bytes to " + newJar.getAbsolutePath());
 
-            URL url = new URL(downloadUrl);
+            // Handle Native Companion DLL (pzo_native64.dll)
+            String os = System.getProperty("os.name", "").toLowerCase();
+            File currentDll = new File("pzo_native64.dll").getAbsoluteFile();
+            File newDll = new File("pzo_native64.dll.new").getAbsoluteFile();
+            File win64Dll = new File("win64" + File.separator + "pzo_native64.dll").getAbsoluteFile();
+            boolean hasNewDll = false;
+
+            if (os.contains("win")) {
+                if (dllDownloadUrl == null || dllDownloadUrl.isEmpty()) {
+                    dllDownloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll";
+                }
+                PZOLogger.info("Downloading latest pzo_native64.dll from: " + dllDownloadUrl);
+                boolean dllOk = downloadFileWithRedirects(dllDownloadUrl, newDll);
+                if (dllOk && newDll.length() > 50000) {
+                    hasNewDll = true;
+                    PZOLogger.success("Downloaded " + newDll.length() + " bytes to " + newDll.getAbsolutePath());
+                } else {
+                    PZOLogger.warn("Notice: pzo_native64.dll could not be downloaded; proceeding with JAR update.");
+                }
+            }
+
+            if (os.contains("win")) {
+                String psDllUpdate = hasNewDll ? String.format(
+                    "if (Test-Path -LiteralPath '%s') { Move-Item -LiteralPath '%s' -Destination '%s' -Force; }; " +
+                    "if (Test-Path -LiteralPath '%s') { Copy-Item -LiteralPath '%s' -Destination '%s' -Force; }; ",
+                    newDll.getAbsolutePath().replace("'", "''"),
+                    newDll.getAbsolutePath().replace("'", "''"),
+                    currentDll.getAbsolutePath().replace("'", "''"),
+                    win64Dll.getParentFile().getAbsolutePath().replace("'", "''"),
+                    currentDll.getAbsolutePath().replace("'", "''"),
+                    win64Dll.getAbsolutePath().replace("'", "''")
+                ) : "";
+
+                String psUpdater = String.format(
+                    "Start-Sleep -Milliseconds 800; " +
+                    "Move-Item -LiteralPath '%s' -Destination '%s' -Force; " +
+                    "%s" +
+                    "$nl=[Environment]::NewLine; " +
+                    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); " +
+                    "[Windows.Forms.MessageBox]::Show(('PZO Engine & Native Governor have been updated to v%s!' + $nl + $nl + 'Please restart Project Zomboid to load the new build.'), 'Update Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
+                    newJar.getAbsolutePath().replace("'", "''"),
+                    currentJar.getAbsolutePath().replace("'", "''"),
+                    psDllUpdate,
+                    latestVersion
+                );
+                new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
+            } else if (os.contains("mac")) {
+                String shUpdater = String.format(
+                    "sleep 1 && mv -f \"%s\" \"%s\" && osascript -e 'display notification \"PZO Engine has been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
+                    newJar.getAbsolutePath(), currentJar.getAbsolutePath(), latestVersion
+                );
+                new ProcessBuilder("bash", "-c", shUpdater).start();
+            } else {
+                // Linux & Steam Deck
+                String shUpdater = String.format(
+                    "sleep 1 && mv -f \"%s\" \"%s\" && (kdialog --msgbox \"PZO Engine has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"PZO Engine has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Engine Updated\" \"Please restart Project Zomboid.\")",
+                    newJar.getAbsolutePath(), currentJar.getAbsolutePath(), latestVersion, latestVersion
+                );
+                new ProcessBuilder("bash", "-c", shUpdater).start();
+            }
+
+            PZOLogger.info("Exiting game process to allow atomic file replacement...");
+            System.exit(0);
+
+        } catch (Throwable t) {
+            PZOLogger.error("Auto-update failed: " + t.getMessage(), t);
+            showNoticePopup("Update Notice", "Download error: " + t.getMessage() + "\nPlease update manually using install.bat / pzo_optimizer.sh.");
+        }
+    }
+
+    private static boolean downloadFileWithRedirects(String fileUrl, File targetFile) {
+        try {
+            URL url = new URL(fileUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestProperty("User-Agent", "PZO-UpdateClient");
             conn.setConnectTimeout(8000);
-            conn.setReadTimeout(20000);
+            conn.setReadTimeout(30000);
             conn.setInstanceFollowRedirects(true);
 
             int code = conn.getResponseCode();
@@ -172,56 +254,22 @@ public class UpdateDialog {
                 String newUrl = conn.getHeaderField("Location");
                 conn = (HttpURLConnection) new URL(newUrl).openConnection();
                 conn.setRequestProperty("User-Agent", "PZO-UpdateClient");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(30000);
             }
 
             try (InputStream in = conn.getInputStream();
-                 FileOutputStream out = new FileOutputStream(newJar)) {
+                 FileOutputStream out = new FileOutputStream(targetFile)) {
                 byte[] buffer = new byte[16384];
                 int bytesRead;
                 while ((bytesRead = in.read(buffer)) != -1) {
                     out.write(buffer, 0, bytesRead);
                 }
             }
-
-            if (newJar.exists() && newJar.length() > 10000) {
-                PZOLogger.success("Downloaded " + newJar.length() + " bytes to " + newJar.getAbsolutePath());
-                
-                String os = System.getProperty("os.name", "").toLowerCase();
-                if (os.contains("win")) {
-                    String psUpdater = String.format(
-                        "Start-Sleep -Milliseconds 800; " +
-                        "Move-Item -LiteralPath '%s' -Destination '%s' -Force; " +
-                        "$nl=[Environment]::NewLine; " +
-                        "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); " +
-                        "[Windows.Forms.MessageBox]::Show(('PZO Engine has been updated to v%s!' + $nl + $nl + 'Please restart Project Zomboid to load the new build.'), 'Update Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
-                        newJar.getAbsolutePath().replace("'", "''"),
-                        currentJar.getAbsolutePath().replace("'", "''"),
-                        latestVersion
-                    );
-                    new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
-                } else if (os.contains("mac")) {
-                    String shUpdater = String.format(
-                        "sleep 1 && mv -f \"%s\" \"%s\" && osascript -e 'display notification \"PZO Engine has been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
-                        newJar.getAbsolutePath(), currentJar.getAbsolutePath(), latestVersion
-                    );
-                    new ProcessBuilder("bash", "-c", shUpdater).start();
-                } else {
-                    // Linux & Steam Deck
-                    String shUpdater = String.format(
-                        "sleep 1 && mv -f \"%s\" \"%s\" && (kdialog --msgbox \"PZO Engine has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"PZO Engine has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Engine Updated\" \"Please restart Project Zomboid.\")",
-                        newJar.getAbsolutePath(), currentJar.getAbsolutePath(), latestVersion, latestVersion
-                    );
-                    new ProcessBuilder("bash", "-c", shUpdater).start();
-                }
-
-                PZOLogger.info("Exiting game process to allow atomic file replacement...");
-                System.exit(0);
-            } else {
-                showNoticePopup("Update Notice", "Automatic download failed. You can update manually using install.bat / pzo_optimizer.sh.");
-            }
+            return targetFile.exists() && targetFile.length() > 0;
         } catch (Throwable t) {
-            PZOLogger.error("Auto-update failed: " + t.getMessage(), t);
-            showNoticePopup("Update Notice", "Download error: " + t.getMessage() + "\nPlease update manually using install.bat / pzo_optimizer.sh.");
+            PZOLogger.warn("Download error for " + fileUrl + ": " + t.getMessage());
+            return false;
         }
     }
 

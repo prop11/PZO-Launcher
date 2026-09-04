@@ -215,6 +215,26 @@ function Download-PZOGitHubJar($targetFile) {
     return $false
 }
 
+function Download-PZOGitHubDll($targetFile) {
+    $downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll"
+    Write-Host "`n[*] Downloading latest pzo_native64.dll from GitHub Releases..." -ForegroundColor Cyan
+    Write-Host "    URL: $downloadUrl" -ForegroundColor Gray
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+        $webClient = New-Object System.Net.WebClient
+        $webClient.Headers.Add("User-Agent", "PZO-Installer")
+        $webClient.DownloadFile($downloadUrl, $targetFile)
+        if (Test-Path -LiteralPath $targetFile -ErrorAction SilentlyContinue) {
+            $sizeKB = [Math]::Round((Get-Item -LiteralPath $targetFile).Length / 1KB, 1)
+            Write-Host "    [SUCCESS] Downloaded pzo_native64.dll ($sizeKB KB)" -ForegroundColor Green
+            return $true
+        }
+    } catch {
+        Write-Host "    [WARNING] Download error: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    return $false
+}
+
 function Get-PZInstallPath {
     Write-Host "`nSearching for Project Zomboid installation..." -ForegroundColor Cyan
 
@@ -351,6 +371,12 @@ foreach ($dp in $candidateDllPaths) {
 }
 if ($SourceDll) {
     Write-Host "Using local native governor: $SourceDll" -ForegroundColor Gray
+} else {
+    Write-Host "`n[Notice] '$NativeDllName' not found locally next to install.bat." -ForegroundColor Yellow
+    $dllDownloadTarget = [System.IO.Path]::Combine($ScriptDir, $NativeDllName)
+    if (Download-PZOGitHubDll $dllDownloadTarget) {
+        $SourceDll = $dllDownloadTarget
+    }
 }
 
 # ==========================================
@@ -474,9 +500,20 @@ if (Test-Path $InstalledJarPath) {
                 return
             }
 
-            if ($SourceDll -and (Test-Path -LiteralPath $SourceDll)) {
+            Write-Host "`nUpdating Native Governor ($NativeDllName)..." -ForegroundColor Cyan
+            $dllUpdated = Download-PZOGitHubDll $InstalledDllPath
+            if (-not $dllUpdated -and $SourceDll -and (Test-Path -LiteralPath $SourceDll)) {
                 Copy-Item -LiteralPath $SourceDll -Destination $InstalledDllPath -Force
-                Write-Host "    [SUCCESS] Updated Native Governor: $NativeDllName -> $InstalledDllPath" -ForegroundColor Green
+                Write-Host "    [SUCCESS] Updated from local file: $NativeDllName -> $InstalledDllPath" -ForegroundColor Green
+                $dllUpdated = $true
+            }
+            $win64Dir = [System.IO.Path]::Combine($InstallPath, "win64")
+            if (Test-Path -LiteralPath $win64Dir) {
+                $InstalledWin64Dll = [System.IO.Path]::Combine($win64Dir, $NativeDllName)
+                if (Test-Path -LiteralPath $InstalledDllPath) {
+                    Copy-Item -LiteralPath $InstalledDllPath -Destination $InstalledWin64Dll -Force
+                    Write-Host "    [SUCCESS] Mirrored Native Governor -> $InstalledWin64Dll" -ForegroundColor Green
+                }
             }
 
             Write-Host "`nRe-applying optimal configuration to ProjectZomboid64.json..." -ForegroundColor Cyan
@@ -495,6 +532,11 @@ if (Test-Path $InstalledJarPath) {
             if (Test-Path $InstalledDllPath) {
                 Remove-Item -Path $InstalledDllPath -Force
                 Write-Host "Removed: $NativeDllName" -ForegroundColor Green
+            }
+            $win64DllPath = [System.IO.Path]::Combine($InstallPath, "win64\$NativeDllName")
+            if (Test-Path -LiteralPath $win64DllPath) {
+                Remove-Item -LiteralPath $win64DllPath -Force
+                Write-Host "Removed: win64\$NativeDllName" -ForegroundColor Green
             }
 
             # Purge all pzo_* bridge, telemetry, log and status files from ~/Zomboid/Lua/
@@ -558,6 +600,12 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
 if ($SourceDll -and (Test-Path -LiteralPath $SourceDll -ErrorAction SilentlyContinue)) {
     Copy-Item -LiteralPath $SourceDll -Destination $InstalledDllPath -Force
     Write-Host "Installed Native Governor: $NativeDllName -> $InstallPath" -ForegroundColor Green
+    $win64Dir = [System.IO.Path]::Combine($InstallPath, "win64")
+    if (Test-Path -LiteralPath $win64Dir) {
+        $InstalledWin64Dll = [System.IO.Path]::Combine($win64Dir, $NativeDllName)
+        Copy-Item -LiteralPath $SourceDll -Destination $InstalledWin64Dll -Force
+        Write-Host "Mirrored Native Governor -> $InstalledWin64Dll" -ForegroundColor Green
+    }
 }
 
 Apply-PZOConfiguration

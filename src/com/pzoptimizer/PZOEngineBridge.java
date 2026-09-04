@@ -586,7 +586,7 @@ public class PZOEngineBridge {
                                                         try {
                                                             UpdateChecker.UpdateResult res = UpdateChecker.checkForUpdatesSync(4000);
                                                             if (res != null && res.hasUpdate) {
-                                                                UpdateDialog.promptIfUpdateAvailable(res.latestVersion, res.downloadUrl);
+                                                                UpdateDialog.promptIfUpdateAvailable(res.latestVersion, res.downloadUrl, res.dllDownloadUrl);
                                                             }
                                                         } catch (Throwable ignored) {}
                                                     }, "PZO-AsyncUpdatePrompt");
