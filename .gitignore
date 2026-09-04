@@ -184,3 +184,6 @@ cython_debug/
 *.obj
 *.exp
 *.lib
+
+# Local build script
+build_all.py
