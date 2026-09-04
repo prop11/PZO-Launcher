@@ -33,7 +33,7 @@ public class WorldStreamerBooster {
                     EngineFeaturesTuner.reapplyRuntimeTuning();
                     installStreamBooster();
 
-                    // 1. Boost WorldStreamer.instance.worldStreamer thread
+                    // 1. Maintain WorldStreamer thread at NORM_PRIORITY (prevents main-thread rendering preemption)
                     Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
                     Field instField = wsClass.getField("instance");
                     Object wsInstance = instField.get(null);
@@ -41,13 +41,13 @@ public class WorldStreamerBooster {
                         Field threadField = wsClass.getField("worldStreamer");
                         Thread wsThread = (Thread) threadField.get(wsInstance);
                         if (wsThread != null && wsThread.isAlive()) {
-                            if (wsThread.getPriority() < Thread.NORM_PRIORITY + 2) {
-                                wsThread.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2)); // Priority 7
+                            if (wsThread.getPriority() != Thread.NORM_PRIORITY) {
+                                wsThread.setPriority(Thread.NORM_PRIORITY);
                             }
                         }
                     }
 
-                    // 2. Scan all thread groups for Lighting and Worker threads
+                    // 2. Scan all thread groups and ensure background workers do not preempt gameplay
                     ThreadGroup rootGroup = Thread.currentThread().getThreadGroup();
                     while (rootGroup.getParent() != null) {
                         rootGroup = rootGroup.getParent();
@@ -59,13 +59,9 @@ public class WorldStreamerBooster {
                         if (th != null && th.isAlive()) {
                             String name = th.getName();
                             if (name != null) {
-                                if (name.contains("World Streamer") || name.contains("WorldReuser")) {
-                                    if (th.getPriority() < Thread.NORM_PRIORITY + 2) {
-                                        th.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 2));
-                                    }
-                                } else if (name.contains("Lighting") || name.contains("LightingThread")) {
-                                    if (th.getPriority() < Thread.NORM_PRIORITY + 1) {
-                                        th.setPriority(Math.min(Thread.MAX_PRIORITY, Thread.NORM_PRIORITY + 1));
+                                if (name.contains("World Streamer") || name.contains("WorldReuser") || name.contains("Lighting")) {
+                                    if (th.getPriority() > Thread.NORM_PRIORITY) {
+                                        th.setPriority(Thread.NORM_PRIORITY);
                                     }
                                 }
                             }
@@ -93,7 +89,7 @@ public class WorldStreamerBooster {
             Object wsInstance = instField.get(null);
             if (wsInstance == null) return false;
 
-            // 1. Upgrade decompressor to NativeInflater
+            // 1. Upgrade decompressor to NativeInflater (Multiplayer SIMD AVX2 acceleration)
             Field decompField = wsClass.getDeclaredField("decompressor");
             decompField.setAccessible(true);
             Object curDecomp = decompField.get(wsInstance);
@@ -117,19 +113,8 @@ public class WorldStreamerBooster {
                 setField(wsInstance, zipField, ByteBuffer.allocate(524288));
             }
 
-            // 4. Upgrade IsoChunk.sliceBufferLoad to 1 MB
-            try {
-                Class<?> chunkClass = Class.forName("zombie.iso.IsoChunk");
-                Field sliceField = chunkClass.getDeclaredField("sliceBufferLoad");
-                sliceField.setAccessible(true);
-                ByteBuffer curSlice = (ByteBuffer) sliceField.get(null);
-                if (curSlice == null || curSlice.capacity() < 1048576) {
-                    setStaticField(chunkClass, sliceField, ByteBuffer.allocate(1048576));
-                }
-            } catch (Throwable ignoredChunk) {}
-
             streamBoosterInstalled = true;
-            PZOLogger.success("[WorldStreamerBooster] High-Speed Stream Booster Armed: NativeInflater (256KB readBuf | 512KB zipBB | 1MB sliceBB)");
+            PZOLogger.success("[WorldStreamerBooster] High-Speed Stream Booster Armed: NativeInflater (256KB readBuf | 512KB zipBB)");
             return true;
         } catch (Throwable t) {
             // WorldStreamer not yet initialized; will retry on next daemon cycle
@@ -148,22 +133,6 @@ public class WorldStreamerBooster {
                 sun.misc.Unsafe u = (sun.misc.Unsafe) theUnsafe.get(null);
                 long offset = u.objectFieldOffset(field);
                 u.putObject(instance, offset, value);
-            } catch (Throwable ignored) {}
-        }
-    }
-
-    private static void setStaticField(Class<?> clazz, Field field, Object value) {
-        try {
-            field.setAccessible(true);
-            field.set(null, value);
-        } catch (Throwable t1) {
-            try {
-                Field theUnsafe = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-                theUnsafe.setAccessible(true);
-                sun.misc.Unsafe u = (sun.misc.Unsafe) theUnsafe.get(null);
-                Object base = u.staticFieldBase(field);
-                long offset = u.staticFieldOffset(field);
-                u.putObject(base, offset, value);
             } catch (Throwable ignored) {}
         }
     }
