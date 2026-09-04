@@ -73,6 +73,22 @@ public class PZOEngineBridge {
         return PZONative.isLoaded() && PZONative.isAVX2Supported();
     }
 
+    public static boolean isAVX2SpatialActive() {
+        return PZONative.isLoaded() && PZONative.isAVX2Supported();
+    }
+
+    public static int getHordeZombiesTracked() {
+        return HordeSpatialCuller.lastTrackedZombieCount.get();
+    }
+
+    public static int getHordeCulledOffscreen() {
+        return HordeSpatialCuller.lastCulledOffscreenCount.get();
+    }
+
+    public static long getBoneTransformsSaved() {
+        return HordeAnimationLODGovernor.getBoneTransformsSaved();
+    }
+
     public static boolean isBetaOptIn() {
         return PZOConfig.isBetaOptIn();
     }
@@ -483,6 +499,62 @@ public class PZOEngineBridge {
                                             }
                                         );
                                         tableRawset.invoke(pzoTable, "getRenderTelemetry", getRenderTelemetryFunc);
+
+                                        // isAVX2SpatialActive
+                                        Object isAVX2SpatialFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(isAVX2SpatialActive()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isAVX2SpatialActive", isAVX2SpatialFunc);
+
+                                        // getHordeZombiesTracked
+                                        Object getHordeTrackedFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(getHordeZombiesTracked()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getHordeZombiesTracked", getHordeTrackedFunc);
+
+                                        // getHordeCulledOffscreen
+                                        Object getHordeCulledFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(getHordeCulledOffscreen()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getHordeCulledOffscreen", getHordeCulledFunc);
+
+                                        // getBoneTransformsSaved
+                                        Object getBonesSavedFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(getBoneTransformsSaved()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getBoneTransformsSaved", getBonesSavedFunc);
 
                                         // setBetaOptIn
                                         Object setBetaFunc = Proxy.newProxyInstance(

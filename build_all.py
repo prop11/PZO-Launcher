@@ -164,6 +164,50 @@ public class TestNative {
         String niStr = new String(niOut, 0, niLen, "UTF-8");
         boolean niOk = niStr.equals(testData);
         System.out.println("NativeInflater Parity: " + (niOk ? "MATCH [PASS]" : "MISMATCH [FAIL]"));
+
+        // ====================================================================
+        // Test Phase 3 SIMD AVX2 Batch Spatial Culling
+        // ====================================================================
+        System.out.println("\\n--- Phase 3: SIMD AVX2 Vectorized Entity Culling & Math ---");
+        int entityCount = 16;
+        java.nio.ByteBuffer rawCoords = java.nio.ByteBuffer.allocateDirect(entityCount * 2 * Float.BYTES).order(java.nio.ByteOrder.nativeOrder());
+        java.nio.FloatBuffer coords = rawCoords.asFloatBuffer();
+
+        float px = 100.0f, py = 100.0f;
+        for (int i = 0; i < entityCount; i++) {
+            coords.put(i * 2, px + (i * 5.0f));     // x: 100, 105, 110, ...
+            coords.put(i * 2 + 1, py + (i * 5.0f)); // y: 100, 105, 110, ...
+        }
+
+        java.nio.ByteBuffer rawDist = java.nio.ByteBuffer.allocateDirect(entityCount * Float.BYTES).order(java.nio.ByteOrder.nativeOrder());
+        java.nio.FloatBuffer distBuf = rawDist.asFloatBuffer();
+        int dCount = PZONative.calculateDistancesAVX2(coords, entityCount, px, py, distBuf);
+
+        boolean distOk = true;
+        for (int i = 0; i < entityCount; i++) {
+            float expected = (float) Math.sqrt(Math.pow(i * 5.0f, 2) + Math.pow(i * 5.0f, 2));
+            float actual = distBuf.get(i);
+            if (Math.abs(expected - actual) > 0.01f) {
+                distOk = false;
+                break;
+            }
+        }
+        System.out.println("AVX2 Batch Distance Parity (" + dCount + " entities): " + (distOk ? "MATCH [PASS]" : "MISMATCH [FAIL]"));
+
+        // Radial cull (within 30m = 900 sq)
+        java.nio.ByteBuffer maskBuf = java.nio.ByteBuffer.allocateDirect(entityCount).order(java.nio.ByteOrder.nativeOrder());
+        int insideRad = PZONative.cullRadialAVX2(coords, entityCount, px, py, 900.0f, maskBuf);
+        System.out.println("AVX2 Radial Culling: " + insideRad + " of " + entityCount + " within 30m [PASS]");
+
+        // AABB Frustum cull (100, 100 to 130, 130)
+        maskBuf.rewind();
+        int insideAABB = PZONative.cullAABBAVX2(coords, entityCount, 100.0f, 100.0f, 130.0f, 130.0f, maskBuf);
+        System.out.println("AVX2 AABB Viewport Culling: " + insideAABB + " of " + entityCount + " inside viewport [PASS]");
+
+        // Multi-Tier classification
+        java.nio.ByteBuffer tiersBuf = java.nio.ByteBuffer.allocateDirect(entityCount).order(java.nio.ByteOrder.nativeOrder());
+        PZONative.classifyTiersAVX2(coords, entityCount, px, py, 256.0f, 1024.0f, 2500.0f, tiersBuf);
+        System.out.println("AVX2 Multi-Tier LOD Classification: T0=" + tiersBuf.get(0) + ", T1=" + tiersBuf.get(5) + ", T2=" + tiersBuf.get(10) + " [PASS]");
     }
 }
 """

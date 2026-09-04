@@ -6,13 +6,11 @@ import java.lang.management.MemoryMXBean;
 /**
  * PZO Real-Time Telemetry & Diagnostic HUD Bridge.
  * Aggregates runtime engine health, frame time variance, GC pause overhead,
- * off-heap direct buffer allocation, and chunk streaming rates into a live
- * telemetry dataset.
+ * off-heap direct buffer allocation, SIMD AVX2 horde culler status, and chunk streaming rates.
  */
 public final class PZOTelemetryHUD {
 
     private static final MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
-    private static volatile long lastReportTime = 0;
 
     public static class TelemetrySnapshot {
         public double currentFps = 60.0;
@@ -24,6 +22,9 @@ public final class PZOTelemetryHUD {
         public int activeChunks = 0;
         public int prewarmedChunks = 0;
         public int fmodActiveVoices = 0;
+        public int hordeZombiesTracked = 0;
+        public int hordeCulled = 0;
+        public boolean avx2Active = false;
     }
 
     public static TelemetrySnapshot getLiveSnapshot() {
@@ -37,6 +38,9 @@ public final class PZOTelemetryHUD {
             snap.frameTimeMs = 16.6;
             snap.currentFps = 60.0;
             snap.directMemoryUsedKb = 4096; // 4096 KB off-heap direct ring
+            snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
+            snap.hordeCulled = HordeSpatialCuller.lastCulledOffscreenCount.get();
+            snap.avx2Active = PZONative.isLoaded() && PZONative.isAVX2Supported();
         } catch (Throwable ignored) {}
 
         return snap;
@@ -44,7 +48,8 @@ public final class PZOTelemetryHUD {
 
     public static String getFormattedHUDText() {
         TelemetrySnapshot s = getLiveSnapshot();
-        return String.format("FPS: %.1f | FrameTime: %.2f ms | Heap: %d/%d MB | Off-Heap: %d KB",
-                s.currentFps, s.frameTimeMs, s.heapUsedMb, s.maxHeapMb, s.directMemoryUsedKb);
+        return String.format("FPS: %.1f | FrameTime: %.2f ms | Heap: %d/%d MB | AVX2: %s | Horde: %d (Culled: %d)",
+                s.currentFps, s.frameTimeMs, s.heapUsedMb, s.maxHeapMb, s.avx2Active ? "ACTIVE" : "OFF",
+                s.hordeZombiesTracked, s.hordeCulled);
     }
 }
