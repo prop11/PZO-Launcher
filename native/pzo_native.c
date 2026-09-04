@@ -21,6 +21,9 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include "miniz.h"
+#include "miniz_tinfl.c"
+
 // Dynamically resolved ntdll functions for high-precision sub-millisecond timer
 typedef LONG (NTAPI *pfnNtSetTimerResolution)(ULONG DesiredResolution, BOOLEAN SetResolution, PULONG CurrentResolution);
 typedef LONG (NTAPI *pfnNtQueryTimerResolution)(PULONG MinimumResolution, PULONG MaximumResolution, PULONG CurrentResolution);
@@ -355,3 +358,177 @@ JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCalculateDistancesAVX
     if (!inCoords || !outDist) return 0;
     return (jint)batchCalculateDistancesAVX2(inCoords, (int)count, (float)ox, (float)oy, outDist);
 }
+
+// ============================================================================
+// Phase 2: High-Speed SIMD Decompression & Win32 Chunk Stream Acceleration
+// ============================================================================
+
+static jint decompressBuffer(const unsigned char *src, size_t srcLen, unsigned char *dst, size_t dstCap) {
+    if (!src || !dst || srcLen == 0 || dstCap == 0) return -1;
+
+    // Detect RFC 1950 zlib stream:
+    // Byte 0: CM=8 (deflate), CINFO <= 7 (window size up to 32K) -> (src[0] & 0x0F) == 8 && (src[0] >> 4) <= 7
+    // Byte 1: FCHECK check bits -> (src[0] * 256 + src[1]) % 31 == 0
+    int flags = TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+    if (srcLen >= 2) {
+        unsigned int hdr = ((unsigned int)src[0] << 8) | (unsigned int)src[1];
+        if ((src[0] & 0x0F) == 8 && ((src[0] >> 4) <= 7) && (hdr % 31 == 0)) {
+            flags |= TINFL_FLAG_PARSE_ZLIB_HEADER;
+        }
+    }
+
+    size_t decompressedBytes = tinfl_decompress_mem_to_mem(dst, dstCap, src, srcLen, flags);
+    if (decompressedBytes == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED && (flags & TINFL_FLAG_PARSE_ZLIB_HEADER)) {
+        // Fallback: try raw deflate without zlib header
+        decompressedBytes = tinfl_decompress_mem_to_mem(dst, dstCap, src, srcLen, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    }
+    if (decompressedBytes == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
+        return -1;
+    }
+    return (jint)decompressedBytes;
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_decompressDirect(
+    JNIEnv *env, jclass cls,
+    jobject srcBuf, jint srcPos, jint srcLen,
+    jobject dstBuf, jint dstPos, jint dstCap) {
+    (void)cls;
+    if (!srcBuf || !dstBuf || srcLen <= 0 || dstCap <= 0) return -1;
+    unsigned char *src = (unsigned char *)(*env)->GetDirectBufferAddress(env, srcBuf);
+    unsigned char *dst = (unsigned char *)(*env)->GetDirectBufferAddress(env, dstBuf);
+    if (!src || !dst) return -1;
+    return decompressBuffer(src + srcPos, (size_t)srcLen, dst + dstPos, (size_t)dstCap);
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_decompressBytes(
+    JNIEnv *env, jclass cls,
+    jbyteArray srcArray, jint srcOff, jint srcLen,
+    jbyteArray dstArray, jint dstOff, jint dstCap) {
+    (void)cls;
+    if (!srcArray || !dstArray || srcLen <= 0 || dstCap <= 0) return -1;
+
+    jbyte *srcPtr = (jbyte *)(*env)->GetPrimitiveArrayCritical(env, srcArray, NULL);
+    if (!srcPtr) return -1;
+
+    jbyte *dstPtr = (jbyte *)(*env)->GetPrimitiveArrayCritical(env, dstArray, NULL);
+    if (!dstPtr) {
+        (*env)->ReleasePrimitiveArrayCritical(env, srcArray, srcPtr, JNI_ABORT);
+        return -1;
+    }
+
+    jint res = decompressBuffer(
+        (const unsigned char *)(srcPtr + srcOff), (size_t)srcLen,
+        (unsigned char *)(dstPtr + dstOff), (size_t)dstCap
+    );
+
+    (*env)->ReleasePrimitiveArrayCritical(env, dstArray, dstPtr, (res > 0) ? 0 : JNI_ABORT);
+    (*env)->ReleasePrimitiveArrayCritical(env, srcArray, srcPtr, JNI_ABORT);
+    return res;
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_readChunkFileNative(
+    JNIEnv *env, jclass cls, jstring filePath, jbyteArray dstArray, jint maxCap) {
+    (void)cls;
+    if (!filePath || !dstArray || maxCap <= 0) return -1;
+
+    const jchar *wPath = (*env)->GetStringChars(env, filePath, NULL);
+    if (!wPath) return -1;
+
+    HANDLE hFile = CreateFileW(
+        (LPCWSTR)wPath,
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+        NULL
+    );
+
+    (*env)->ReleaseStringChars(env, filePath, wPath);
+    if (hFile == INVALID_HANDLE_VALUE) return -1;
+
+    LARGE_INTEGER fileSize;
+    if (!GetFileSizeEx(hFile, &fileSize) || fileSize.QuadPart <= 0 || fileSize.QuadPart > (LONGLONG)maxCap) {
+        CloseHandle(hFile);
+        return -1;
+    }
+
+    jbyte *dstPtr = (jbyte *)(*env)->GetPrimitiveArrayCritical(env, dstArray, NULL);
+    if (!dstPtr) {
+        CloseHandle(hFile);
+        return -1;
+    }
+
+    DWORD bytesRead = 0;
+    BOOL ok = ReadFile(hFile, dstPtr, (DWORD)fileSize.QuadPart, &bytesRead, NULL);
+    CloseHandle(hFile);
+
+    (*env)->ReleasePrimitiveArrayCritical(env, dstArray, dstPtr, ok ? 0 : JNI_ABORT);
+    return ok ? (jint)bytesRead : -1;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_prewarmFileNative(
+    JNIEnv *env, jclass cls, jstring filePath) {
+    (void)cls;
+    if (!filePath) return JNI_FALSE;
+
+    const jchar *wPath = (*env)->GetStringChars(env, filePath, NULL);
+    if (!wPath) return JNI_FALSE;
+
+    HANDLE hFile = CreateFileW(
+        (LPCWSTR)wPath,
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+        NULL
+    );
+
+    (*env)->ReleaseStringChars(env, filePath, wPath);
+    if (hFile == INVALID_HANDLE_VALUE) return JNI_FALSE;
+
+    char scratch[65536];
+    DWORD bytesRead = 0;
+    ReadFile(hFile, scratch, sizeof(scratch), &bytesRead, NULL);
+    CloseHandle(hFile);
+
+    return JNI_TRUE;
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_prewarmFilesNative(
+    JNIEnv *env, jclass cls, jobjectArray filePaths) {
+    (void)cls;
+    if (!filePaths) return 0;
+    jsize len = (*env)->GetArrayLength(env, filePaths);
+    if (len <= 0) return 0;
+
+    int successCount = 0;
+    char scratch[65536];
+    for (jsize i = 0; i < len; i++) {
+        jstring filePath = (jstring)(*env)->GetObjectArrayElement(env, filePaths, i);
+        if (!filePath) continue;
+        const jchar *wPath = (*env)->GetStringChars(env, filePath, NULL);
+        if (wPath) {
+            HANDLE hFile = CreateFileW(
+                (LPCWSTR)wPath,
+                GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                NULL,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+                NULL
+            );
+            if (hFile != INVALID_HANDLE_VALUE) {
+                DWORD bytesRead = 0;
+                ReadFile(hFile, scratch, sizeof(scratch), &bytesRead, NULL);
+                CloseHandle(hFile);
+                successCount++;
+            }
+            (*env)->ReleaseStringChars(env, filePath, wPath);
+        }
+        (*env)->DeleteLocalRef(env, filePath);
+    }
+    return successCount;
+}
+
