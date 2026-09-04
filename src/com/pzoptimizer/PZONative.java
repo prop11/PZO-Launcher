@@ -197,6 +197,15 @@ public class PZONative {
         }
     }
 
+    public static boolean isSolidStateDrive(String path) {
+        if (!isLoaded() || path == null) return true;
+        try {
+            return isDriveSSDNative(path);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     // ========================================================================
     // Native JNI Declarations (Implemented in pzo_native.c)
     // ========================================================================
@@ -220,4 +229,5 @@ public class PZONative {
     private static native int readChunkFileNative(String filePath, byte[] dstArray, int maxCap);
     private static native boolean prewarmFileNative(String filePath);
     private static native int prewarmFilesNative(String[] filePaths);
+    private static native boolean isDriveSSDNative(String path);
 }

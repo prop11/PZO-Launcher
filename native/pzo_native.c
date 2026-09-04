@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <winioctl.h>
 
 #include "miniz.h"
 #include "miniz_tinfl.c"
@@ -531,4 +532,54 @@ JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_prewarmFilesNative(
     }
     return successCount;
 }
+
+JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_isDriveSSDNative(JNIEnv *env, jclass cls, jstring pathStr) {
+    (void)cls;
+    if (!pathStr) return JNI_TRUE;
+
+    const jchar *wPath = (*env)->GetStringChars(env, pathStr, NULL);
+    if (!wPath) return JNI_TRUE;
+
+    wchar_t volumePath[MAX_PATH];
+    if (!GetVolumePathNameW((LPCWSTR)wPath, volumePath, MAX_PATH)) {
+        (*env)->ReleaseStringChars(env, pathStr, wPath);
+        return JNI_TRUE;
+    }
+    (*env)->ReleaseStringChars(env, pathStr, wPath);
+
+    size_t len = wcslen(volumePath);
+    if (len > 0 && volumePath[len - 1] == L'\\') {
+        volumePath[len - 1] = L'\0';
+    }
+
+    wchar_t devicePath[MAX_PATH];
+    swprintf_s(devicePath, MAX_PATH, L"\\\\.\\%s", volumePath);
+
+    HANDLE hDevice = CreateFileW(
+        devicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL, OPEN_EXISTING, 0, NULL
+    );
+    if (hDevice == INVALID_HANDLE_VALUE) return JNI_TRUE;
+
+    STORAGE_PROPERTY_QUERY query;
+    ZeroMemory(&query, sizeof(query));
+    query.PropertyId = StorageDeviceSeekPenaltyProperty;
+    query.QueryType = PropertyStandardQuery;
+
+    DEVICE_SEEK_PENALTY_DESCRIPTOR result;
+    ZeroMemory(&result, sizeof(result));
+    DWORD bytesReturned = 0;
+
+    BOOL isSSD = TRUE;
+    if (DeviceIoControl(hDevice, IOCTL_STORAGE_QUERY_PROPERTY,
+                        &query, sizeof(query),
+                        &result, sizeof(result),
+                        &bytesReturned, NULL)) {
+        isSSD = !result.IncursSeekPenalty;
+    }
+
+    CloseHandle(hDevice);
+    return isSSD ? JNI_TRUE : JNI_FALSE;
+}
+
 
