@@ -1,32 +1,24 @@
 package com.pzoptimizer;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.HashSet;
 import java.util.Set;
 
 /**
  * PZO Universal Predictive Chunk Streamer (Next-Gen Chunk Streaming Engine).
  * 
- * Replaces reactive on-demand disk reading with proactive, continuous vector-based pre-caching.
- * Automatically monitors player travel mode:
- * - High-speed driving (pre-warms 4-6 chunks ahead along vehicle velocity vector)
- * - Sprinting / Running (pre-warms 2-3 chunks ahead along foot direction)
- * - Walking / Aiming (pre-warms 1-2 chunks ahead)
+ * Tracks player travel mode (driving, sprinting, walking) and proactively registers
+ * upcoming chunk coordinates along the velocity vector into ChunkRetentionRing to prevent
+ * boundary thrashing and hysteresis unloads.
  * 
- * Pre-reads chunk binary files (.bin) directly into OS page cache and off-heap memory
- * using zero-allocation NIO direct buffers, eliminating cold NVMe/SSD seek latency when
- * crossing chunk borders.
+ * Operates purely in-memory with zero file-handle locks, eliminating NTFS handle contention
+ * with WorldStreamer and ChunkSaveWorker.
  */
 public final class PredictiveChunkStreamer {
 
     private static volatile boolean running = false;
     private static Thread streamerThread = null;
-    private static final ByteBuffer PREWARM_BUFFER = ByteBuffer.allocateDirect(65536); // 64KB Direct NIO Buffer
     private static final Set<Long> PREWARMED_KEYS = new HashSet<>(512);
     private static volatile long lastPrewarmClearTime = 0;
     private static volatile Boolean isSolidState = null;
@@ -34,10 +26,9 @@ public final class PredictiveChunkStreamer {
     public static boolean isStorageFast() {
         if (isSolidState != null) return isSolidState;
         try {
-            String checkPath = System.getProperty("user.home");
-            File chunkSample = resolveChunkFile(0, 0);
-            if (chunkSample != null && chunkSample.getParent() != null) {
-                checkPath = chunkSample.getParent();
+            String checkPath = System.getProperty("user.dir");
+            if (checkPath == null || checkPath.isEmpty()) {
+                checkPath = System.getProperty("user.home");
             }
             boolean fast = PZONative.isSolidStateDrive(checkPath);
             isSolidState = fast;
@@ -66,7 +57,7 @@ public final class PredictiveChunkStreamer {
 
             while (running) {
                 try {
-                    Thread.sleep(isStorageFast() ? 60 : 250); // 16.6 Hz on SSD/NVMe, relaxed 4 Hz on HDD to protect mechanical head
+                    Thread.sleep(isStorageFast() ? 100 : 250); // 10 Hz on SSD/NVMe, relaxed 4 Hz on HDD
 
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
@@ -122,9 +113,6 @@ public final class PredictiveChunkStreamer {
             if (Math.abs(speed) < 8.0f) {
                 return;
             }
-
-            // Dynamic WorldStreamer Priority Boost during driving
-            boostWorldStreamerPriority(8);
 
             float dirX = 0.0f;
             float dirY = 0.0f;
@@ -237,81 +225,13 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
-    private static volatile Method getFilenameMethod = null;
-    private static volatile Object cmfInstance = null;
-    private static volatile boolean cmfResolved = false;
-
-    private static File resolveChunkFile(int wx, int wy) {
-        if (!cmfResolved) {
-            try {
-                Class<?> cmfClass = Class.forName("zombie.iso.ChunkMapFilenames");
-                Field instField = cmfClass.getField("instance");
-                cmfInstance = instField.get(null);
-                if (cmfInstance != null) {
-                    getFilenameMethod = cmfClass.getMethod("getFilename", int.class, int.class);
-                }
-            } catch (Throwable ignored) {}
-            cmfResolved = true;
-        }
-
-        if (cmfInstance != null && getFilenameMethod != null) {
-            try {
-                File f = (File) getFilenameMethod.invoke(cmfInstance, wx, wy);
-                if (f != null && f.exists()) return f;
-            } catch (Throwable ignored) {}
-        }
-
-        try {
-            Class<?> zfsClass = Class.forName("zombie.ZomboidFileSystem");
-            Object zfs = zfsClass.getField("instance").get(null);
-            if (zfs != null) {
-                Method m = zfsClass.getMethod("getFileInCurrentSave", String.class);
-                File f = (File) m.invoke(zfs, wx + File.separator + wy + ".bin");
-                if (f != null && f.exists()) return f;
-                File f2 = (File) m.invoke(zfs, "map_" + wx + "_" + wy + ".bin");
-                if (f2 != null && f2.exists()) return f2;
-            }
-        } catch (Throwable ignored) {}
-
-        return null;
-    }
-
     private static void prewarmChunkInOSCache(int wx, int wy) {
         long key = FastChunkKey.pack(wx, wy);
         if (PREWARMED_KEYS.contains(key)) {
             return;
         }
         PREWARMED_KEYS.add(key);
-
-        try {
-            File chunkFile = resolveChunkFile(wx, wy);
-            if (chunkFile != null && chunkFile.exists() && chunkFile.canRead()) {
-                if (PZONative.isLoaded()) {
-                    PZONative.prewarmFile(chunkFile.getAbsolutePath());
-                } else {
-                    try (FileInputStream fis = new FileInputStream(chunkFile);
-                         FileChannel ch = fis.getChannel()) {
-                        PREWARM_BUFFER.clear();
-                        ch.read(PREWARM_BUFFER); // Reads chunk binary header into OS page cache
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private static void boostWorldStreamerPriority(int targetPriority) {
-        try {
-            Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
-            Field instField = wsClass.getField("instance");
-            Object wsInstance = instField.get(null);
-            if (wsInstance != null) {
-                Field threadField = wsClass.getField("worldStreamer");
-                Thread wsThread = (Thread) threadField.get(wsInstance);
-                if (wsThread != null && wsThread.isAlive() && wsThread.getPriority() < targetPriority) {
-                    wsThread.setPriority(targetPriority);
-                }
-            }
-        } catch (Throwable ignored) {}
+        ChunkRetentionRing.touch(wx, wy);
     }
 
     public static void stop() {

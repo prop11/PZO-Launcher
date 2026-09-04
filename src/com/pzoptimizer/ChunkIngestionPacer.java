@@ -188,16 +188,16 @@ public final class ChunkIngestionPacer {
 
             // Calibrated dynamic pacing budgets:
             // At 60 FPS (16.6ms frame budget):
-            // - Driving: Allow up to 2 chunks per frame or 7.0ms elapsed integration time (120 chunks/sec; 100mph car crosses ~5.6 chunks/sec)
-            // - Walking: Allow up to 1 chunk per frame or 3.5ms elapsed integration time
-            // - Heavy Backlog (> 8 chunks): Allow up to 3 chunks per frame or 9.5ms elapsed time to drain smoothly without freezing
+            // - Driving: Allow up to 8 chunks per frame within 5.0ms so incoming vehicle chunks are ingested immediately without queue lag
+            // - On Foot: Allow up to 3 chunks per frame within 3.5ms
+            // - Heavy Backlog (> 8 chunks): Allow up to 12 chunks per frame within 8.0ms to drain smoothly without freezing
             boolean driving = isPlayerDriving();
-            int maxChunks = driving ? 2 : 1;
-            long budgetNanos = driving ? 7_000_000L : 3_500_000L;
+            int maxChunks = driving ? 8 : 3;
+            long budgetNanos = driving ? 5_000_000L : 3_500_000L;
 
             if (super.size() > 8) {
-                maxChunks = 3;
-                budgetNanos = 9_500_000L;
+                maxChunks = 12;
+                budgetNanos = 8_000_000L;
             }
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
