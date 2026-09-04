@@ -41,7 +41,12 @@ public class PZOEntrypoint {
             PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB)");
         } catch (Throwable ignored) {}
 
-        // 0. HotSpot JIT & System Property Tuning
+        // 0. Native Kernel & Hardware Governor (pzo_native64.dll)
+        try {
+            PZONative.isLoaded();
+        } catch (Throwable ignored) {}
+
+        // HotSpot JIT & System Property Tuning
         HotSpotJITCompilerTuner.tuneRuntimeProperties();
 
         // 1. Core Memory & Hardware Optimization Modules

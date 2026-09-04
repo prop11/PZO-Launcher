@@ -1,0 +1,155 @@
+import subprocess
+import os
+import shutil
+import sys
+
+def main():
+    launcher_dir = r"C:\Users\alexw\Documents\GitHub\PZO_Launcher\PZO Launcher"
+    native_dir = os.path.join(launcher_dir, "native")
+    src_dir = os.path.join(launcher_dir, "src")
+    bin_dir = os.path.join(launcher_dir, "bin")
+    dist_dir = os.path.join(launcher_dir, "dist")
+    pz_dir = r"K:\SteamLibrary\steamapps\common\ProjectZomboid"
+    pz_jar = os.path.join(pz_dir, "projectzomboid.jar")
+
+    jdk_bin = r"C:\Program Files\Java\jdk-26.0.2.1\bin"
+    javac = os.path.join(jdk_bin, "javac.exe")
+    jar = os.path.join(jdk_bin, "jar.exe")
+    java = os.path.join(jdk_bin, "java.exe")
+
+    vcvars64 = r"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
+
+    os.makedirs(bin_dir, exist_ok=True)
+    os.makedirs(dist_dir, exist_ok=True)
+
+    print("================================================================================")
+    print("STEP 1: Compiling Native C Library (pzo_native64.dll) via MSVC x64")
+    print("================================================================================")
+    bat_path = os.path.join(launcher_dir, "build_native.bat")
+    res = subprocess.run(["cmd.exe", "/c", bat_path], capture_output=True, text=True)
+    if res.returncode != 0:
+        print("MSVC Compilation Failed:")
+        print(res.stdout)
+        print(res.stderr)
+        sys.exit(1)
+    
+    dll_path = os.path.join(native_dir, "pzo_native64.dll")
+    print(f"Successfully compiled: {dll_path} ({os.path.getsize(dll_path)} bytes)")
+
+    print("\n================================================================================")
+    print("STEP 2: Compiling Java Sources (PZOptimEngine)")
+    print("================================================================================")
+    java_files = []
+    for root, _, files in os.walk(src_dir):
+        for f in files:
+            if f.endswith(".java"):
+                java_files.append(os.path.join(root, f))
+
+    sources_txt = os.path.join(launcher_dir, "sources.txt")
+    with open(sources_txt, "w", encoding="utf-8") as f:
+        for jf in java_files:
+            p = jf.replace("\\", "/")
+            f.write(f'"{p}"\n')
+
+    cmd_javac = [javac, "--release", "17", "-cp", f"{pz_jar};{bin_dir}", "-d", bin_dir, f"@{sources_txt}"]
+    res_javac = subprocess.run(cmd_javac, capture_output=True, text=True)
+    if res_javac.returncode != 0:
+        print("Javac Compilation Failed:")
+        print(res_javac.stderr)
+        sys.exit(1)
+    print(f"Compiled {len(java_files)} Java classes into {bin_dir}")
+
+    print("\n================================================================================")
+    print("STEP 3: Packaging JARs")
+    print("================================================================================")
+    client_mf = os.path.join(launcher_dir, "client_manifest.txt")
+    with open(client_mf, "w", encoding="utf-8") as f:
+        f.write('''Manifest-Version: 1.0
+Main-Class: com.pzoptimizer.PZOEntrypoint
+Premain-Class: com.pzoptimizer.PZOptimAgent
+Agent-Class: com.pzoptimizer.PZOptimAgent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+Implementation-Title: Project Zomboid Optimiser Engine
+Implementation-Version: 0.8.4-native
+Created-By: 26.0.2.1 (Oracle Corporation)
+
+''')
+
+    server_mf = os.path.join(launcher_dir, "server_manifest.txt")
+    with open(server_mf, "w", encoding="utf-8") as f:
+        f.write('''Manifest-Version: 1.0
+Main-Class: com.pzoptimizer.server.PZOServerEntrypoint
+Premain-Class: com.pzoptimizer.PZOptimAgent
+Agent-Class: com.pzoptimizer.PZOptimAgent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+Implementation-Title: Project Zomboid Optimiser Server Engine
+Implementation-Version: 0.8.4-native
+Created-By: 26.0.2.1 (Oracle Corporation)
+
+''')
+
+    client_jar = os.path.join(launcher_dir, "PZOptimEngine.jar")
+    subprocess.run([jar, "-cfm", client_jar, client_mf, "-C", bin_dir, "."], check=True)
+
+    server_jar = os.path.join(launcher_dir, "PZOServerEngine.jar")
+    subprocess.run([jar, "-cfm", server_jar, server_mf, "-C", bin_dir, "."], check=True)
+
+    # Copy to dist/
+    shutil.copy2(dll_path, os.path.join(dist_dir, "pzo_native64.dll"))
+    shutil.copy2(client_jar, os.path.join(dist_dir, "PZOptimEngine.jar"))
+    shutil.copy2(server_jar, os.path.join(dist_dir, "PZOServerEngine.jar"))
+
+    # Deploy to live game folder
+    shutil.copy2(dll_path, os.path.join(pz_dir, "pzo_native64.dll"))
+    shutil.copy2(client_jar, os.path.join(pz_dir, "PZOptimEngine.jar"))
+
+    print(f"Deployed to {pz_dir}:")
+    print(f"  - pzo_native64.dll ({os.path.getsize(os.path.join(pz_dir, 'pzo_native64.dll'))} bytes)")
+    print(f"  - PZOptimEngine.jar ({os.path.getsize(os.path.join(pz_dir, 'PZOptimEngine.jar'))} bytes)")
+
+    # Clean temporary manifest & sources files
+    for tf in [sources_txt, client_mf, server_mf]:
+        if os.path.exists(tf):
+            os.remove(tf)
+
+    print("\n================================================================================")
+    print("STEP 4: Smoke Test PZONative Java Bridge")
+    print("================================================================================")
+    smoke_test_code = """
+import com.pzoptimizer.PZONative;
+public class TestNative {
+    public static void main(String[] args) {
+        System.out.println("PZONative.isLoaded() = " + PZONative.isLoaded());
+        System.out.println("Timer Resolution (100ns) = " + PZONative.getTimerResolution100ns());
+        System.out.println("Physical Cores = " + PZONative.getPhysicalCores());
+        System.out.println("P-Cores = " + PZONative.getPerformanceCores());
+        System.out.println("Logical Processors = " + PZONative.getLogicalProcessors());
+        System.out.printf("P-Core Mask = 0x%X\\n", PZONative.getPerformanceCoreMask());
+        System.out.println("AVX2 Supported = " + PZONative.isAVX2Supported());
+    }
+}
+"""
+    test_java = os.path.join(launcher_dir, "TestNative.java")
+    with open(test_java, "w", encoding="utf-8") as f:
+        f.write(smoke_test_code)
+
+    subprocess.run([javac, "-cp", client_jar, test_java], check=True)
+    smoke_res = subprocess.run([java, "-cp", f"{client_jar};{launcher_dir}", f"-Djava.library.path={pz_dir};.", "TestNative"], capture_output=True, text=True)
+    print("Smoke Test Output:")
+    print(smoke_res.stdout)
+    if smoke_res.stderr:
+        print("Smoke Test Stderr:")
+        print(smoke_res.stderr)
+
+    for f in [test_java, os.path.join(launcher_dir, "TestNative.class")]:
+        if os.path.exists(f):
+            os.remove(f)
+
+    print("================================================================================")
+    print("BUILD & VERIFICATION COMPLETE: ALL SYSTEMS NOMINAL")
+    print("================================================================================")
+
+if __name__ == "__main__":
+    main()

@@ -57,6 +57,22 @@ public class PZOEngineBridge {
         return true;
     }
 
+    public static boolean isNativeGovernorActive() {
+        return PZONative.isLoaded();
+    }
+
+    public static int getPerformanceCores() {
+        return PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
+    }
+
+    public static double getTimerResolutionMs() {
+        return PZONative.isLoaded() ? (PZONative.getTimerResolution100ns() / 10000.0) : 15.6;
+    }
+
+    public static boolean isAVX2Active() {
+        return PZONative.isLoaded() && PZONative.isAVX2Supported();
+    }
+
     public static boolean isBetaOptIn() {
         return PZOConfig.isBetaOptIn();
     }

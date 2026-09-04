@@ -24,6 +24,11 @@ public class PowerThrottlingShield {
 
     private static void applyWindowsQoS() {
         try {
+            // 0. Native kernel governor (EcoQoS exemption, 0.5ms timer, P-core binding)
+            if (PZONative.isLoaded()) {
+                PZONative.bindCallingThreadToPCores();
+            }
+
             // 1. Keep JVM working set memory resident when minimized / backgrounded
             System.setProperty("sun.awt.keepWorkingSetOnMinimize", "true");
             System.setProperty("sun.awt.erasebackgroundonresize", "false");
