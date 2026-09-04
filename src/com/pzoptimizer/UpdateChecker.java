@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  * 100% pure Java with zero external dependencies.
  */
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "0.8.3.3-unstable";
+    public static final String CURRENT_VERSION = "0.8.5-unstable";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String GITHUB_ALL_RELEASES_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases";
     private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
