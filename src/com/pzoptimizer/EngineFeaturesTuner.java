@@ -20,18 +20,19 @@ public class EngineFeaturesTuner {
 
                 if (debugOptionsInstance != null) {
                     // A. Native Code Pathfinding & Navigation (100% thread-safe)
-                    setOptionValue(debugOptionsInstance, "threadPathfinding", false);
+                    setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Enforce Thread Safety (B42 experimental threading crashes single-threaded Kahlua VM)
+                    // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting, Audio, World Simulation)
+                    // Keep threadAnimation = false to prevent experimental Kahlua Lua single-threaded VM crashes
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
-                    setOptionValue(debugOptionsInstance, "threadLighting", false);
-                    setOptionValue(debugOptionsInstance, "threadAmbient", false);
-                    setOptionValue(debugOptionsInstance, "threadSound", false);
-                    setOptionValue(debugOptionsInstance, "threadWorld", false);
-                    setOptionValue(debugOptionsInstance, "threadGridStacks", false);
-                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", false);
+                    setOptionValue(debugOptionsInstance, "threadLighting", true);
+                    setOptionValue(debugOptionsInstance, "threadAmbient", true);
+                    setOptionValue(debugOptionsInstance, "threadSound", true);
+                    setOptionValue(debugOptionsInstance, "threadWorld", true);
+                    setOptionValue(debugOptionsInstance, "threadGridStacks", true);
+                    setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
                     // C. Model Texture Size Limiter
                     try {
@@ -49,7 +50,7 @@ public class EngineFeaturesTuner {
                     // D. Persist thread-safe options to debug-options.ini
                     persistDebugOptionsFile();
 
-                    PZOLogger.success("EngineFeaturesTuner: Thread Safety Enforced (Preventing Kahlua VM Stack Crashes)");
+                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Audio, World)");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
@@ -132,14 +133,14 @@ public class EngineFeaturesTuner {
                 java.io.File debugOptFile = new java.io.File(zDir, "debug-options.ini");
                 StringBuilder sb = new StringBuilder();
                 sb.append("VERSION=1\n");
-                sb.append("Threading.Pathfinding=false\n");
+                sb.append("Threading.Pathfinding=true\n");
                 sb.append("Threading.Animation=false\n");
-                sb.append("Threading.Lighting=false\n");
-                sb.append("Threading.Ambient=false\n");
-                sb.append("Threading.Sound=false\n");
-                sb.append("Threading.World=false\n");
-                sb.append("Threading.RecalculateGridStacks=false\n");
-                sb.append("Threading.ModelSlotInit=false\n");
+                sb.append("Threading.Lighting=true\n");
+                sb.append("Threading.Ambient=true\n");
+                sb.append("Threading.Sound=true\n");
+                sb.append("Threading.World=true\n");
+                sb.append("Threading.RecalculateGridStacks=true\n");
+                sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
@@ -155,12 +156,13 @@ public class EngineFeaturesTuner {
             Object debugOptionsInstance = debugOptionsClass.getField("instance").get(null);
             if (debugOptionsInstance != null) {
                 setOptionValue(debugOptionsInstance, "threadAnimation", false);
-                setOptionValue(debugOptionsInstance, "threadLighting", false);
-                setOptionValue(debugOptionsInstance, "threadAmbient", false);
-                setOptionValue(debugOptionsInstance, "threadSound", false);
-                setOptionValue(debugOptionsInstance, "threadWorld", false);
-                setOptionValue(debugOptionsInstance, "threadGridStacks", false);
-                setOptionValue(debugOptionsInstance, "threadPathfinding", false);
+                setOptionValue(debugOptionsInstance, "threadLighting", true);
+                setOptionValue(debugOptionsInstance, "threadAmbient", true);
+                setOptionValue(debugOptionsInstance, "threadSound", true);
+                setOptionValue(debugOptionsInstance, "threadWorld", true);
+                setOptionValue(debugOptionsInstance, "threadGridStacks", true);
+                setOptionValue(debugOptionsInstance, "threadPathfinding", true);
+                setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
             }
         } catch (Throwable ignored) {}
     }

@@ -225,6 +225,56 @@ static BOOL bindCurrentThreadToPCores(void) {
     return FALSE;
 }
 
+// Complete Calling Thread Optimization: Priority, MMCSS "Games", and P-Core Affinity
+static BOOL optimizeCallingThread(int priorityLevel, BOOL bindPCores, const wchar_t* mmcssProfile) {
+    HANDLE hThread = GetCurrentThread();
+
+    // 1. Thread priority
+    int p = THREAD_PRIORITY_NORMAL;
+    if (priorityLevel >= 3) {
+        p = THREAD_PRIORITY_TIME_CRITICAL;
+    } else if (priorityLevel == 2) {
+        p = THREAD_PRIORITY_HIGHEST;
+    } else if (priorityLevel == 1) {
+        p = THREAD_PRIORITY_ABOVE_NORMAL;
+    }
+    SetThreadPriority(hThread, p);
+
+    // 2. Performance Core affinity
+    if (bindPCores && g_pCoreAffinityMask != 0) {
+        SetThreadAffinityMask(hThread, g_pCoreAffinityMask);
+    }
+
+    // 3. Multimedia Class Scheduler (MMCSS)
+    if (mmcssProfile != NULL && mmcssProfile[0] != L'\0') {
+        DWORD taskIndex = 0;
+        AvSetMmThreadCharacteristicsW(mmcssProfile, &taskIndex);
+    }
+
+    return TRUE;
+}
+
+// Windows Working Set & Physical RAM Locking
+static BOOL lockProcessWorkingSet(void) {
+    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+
+    MEMORYSTATUSEX memStatus;
+    memStatus.dwLength = sizeof(memStatus);
+    SIZE_T minSize = (SIZE_T)1024 * 1024 * 1024; // Default 1 GB
+    SIZE_T maxSize = (SIZE_T)8 * 1024 * 1024 * 1024; // Default 8 GB
+
+    if (GlobalMemoryStatusEx(&memStatus)) {
+        SIZE_T total = (SIZE_T)memStatus.ullTotalPhys;
+        minSize = (total >= (SIZE_T)8 * 1024 * 1024 * 1024) ? (SIZE_T)2 * 1024 * 1024 * 1024 : (SIZE_T)512 * 1024 * 1024;
+        maxSize = (total > (SIZE_T)4 * 1024 * 1024 * 1024) ? (total * 3 / 4) : total;
+    }
+
+    if (SetProcessWorkingSetSizeEx(GetCurrentProcess(), minSize, maxSize, QUOTA_LIMITS_HARDWS_MIN_ENABLE)) {
+        return TRUE;
+    }
+    return SetProcessWorkingSetSizeEx(GetCurrentProcess(), minSize, maxSize, 0);
+}
+
 // AVX2 Vectorized 2D Distance Calculation (Zero-copy, 8 floats per SIMD instruction)
 static int batchCalculateDistancesAVX2(const float* coords, int count, float ox, float oy, float* outDistances) {
     if (!coords || !outDistances || count <= 0) return 0;
@@ -477,10 +527,30 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_initNative(JNIEnv *env
         g_SetProcessInformation = (pfnSetProcessInformation)GetProcAddress(hKernel32, "SetProcessInformation");
     }
 
+    // Set NVIDIA & GPU multi-threaded driver optimizations for butter-smooth OpenGL command translation
+    SetEnvironmentVariableW(L"__GL_THREADED_OPTIMIZATIONS", L"1");
+    SetEnvironmentVariableW(L"__GL_YIELD", L"NOTHING");
+
     g_avx2Supported = checkCpuAvx2Support();
     detectCpuTopology();
 
     return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_optimizeCallingThread(
+    JNIEnv *env, jclass cls, jint priorityLevel, jboolean bindPCores, jstring profileStr) {
+    (void)cls;
+    const jchar* chars = profileStr ? (*env)->GetStringChars(env, profileStr, NULL) : NULL;
+    BOOL res = optimizeCallingThread((int)priorityLevel, bindPCores == JNI_TRUE, (const wchar_t*)chars);
+    if (chars) {
+        (*env)->ReleaseStringChars(env, profileStr, chars);
+    }
+    return res ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_lockProcessWorkingSet(JNIEnv *env, jclass cls) {
+    (void)env; (void)cls;
+    return lockProcessWorkingSet() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_setHighPrecisionTimer(JNIEnv *env, jclass cls, jboolean enable) {

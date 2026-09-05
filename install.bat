@@ -121,7 +121,9 @@ $Json6To12 = @"
         },
         "10.0.17134": {
             "vmArgs": [
-                "-XX:+UseZGC"
+                "-XX:+UseZGC",
+                "-XX:ZAllocationSpikeTolerance=5",
+                "-XX:+UseStringDeduplication"
             ]
         }
     }
@@ -158,7 +160,9 @@ $Json13To20 = @"
         },
         "10.0.17134": {
             "vmArgs": [
-                "-XX:+UseZGC"
+                "-XX:+UseZGC",
+                "-XX:ZAllocationSpikeTolerance=5",
+                "-XX:+UseStringDeduplication"
             ]
         }
     }
@@ -185,6 +189,9 @@ $JsonAbove20 = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UseZGC",
+        "-XX:ZAllocationSpikeTolerance=5",
+        "-XX:+UseStringDeduplication",
+        "-XX:+UseNUMA",
         "-XX:+AlwaysPreTouch"
     ]
 }
