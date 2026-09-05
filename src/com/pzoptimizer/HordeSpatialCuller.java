@@ -32,7 +32,11 @@ public final class HordeSpatialCuller {
     private static Field fieldX = null;
     private static Field fieldY = null;
     private static Field fieldZ = null;
+    private static Method methodGetX = null;
+    private static Method methodGetY = null;
+    private static Method methodGetZ = null;
     private static boolean reflectionResolved = false;
+    private static boolean reflectionNoticeLogged = false;
 
     // Internal snapshot storage
     private static final int MAX_SNAPSHOT = SpatialBufferPool.MAX_ENTITIES;
@@ -65,13 +69,44 @@ public final class HordeSpatialCuller {
         if (reflectionResolved) return;
         try {
             Class<?> movingObjClass = Class.forName("zombie.iso.IsoMovingObject");
-            fieldX = movingObjClass.getField("x");
-            fieldY = movingObjClass.getField("y");
-            fieldZ = movingObjClass.getField("z");
+            try {
+                fieldX = movingObjClass.getDeclaredField("x");
+                fieldX.setAccessible(true);
+                fieldY = movingObjClass.getDeclaredField("y");
+                fieldY.setAccessible(true);
+                fieldZ = movingObjClass.getDeclaredField("z");
+                fieldZ.setAccessible(true);
+            } catch (Throwable t) {
+                // Fallback to public getters
+                methodGetX = movingObjClass.getMethod("getX");
+                methodGetY = movingObjClass.getMethod("getY");
+                methodGetZ = movingObjClass.getMethod("getZ");
+            }
             reflectionResolved = true;
         } catch (Throwable t) {
-            PZOLogger.warn("HordeSpatialCuller: Reflection resolution notice: " + t.getMessage());
+            if (!reflectionNoticeLogged) {
+                PZOLogger.warn("HordeSpatialCuller: Reflection resolution notice: " + t.getMessage());
+                reflectionNoticeLogged = true;
+            }
         }
+    }
+
+    public static float getObjectX(Object obj) {
+        if (obj == null) return 0.0f;
+        try {
+            if (fieldX != null) return fieldX.getFloat(obj);
+            if (methodGetX != null) return ((Number) methodGetX.invoke(obj)).floatValue();
+        } catch (Throwable ignored) {}
+        return 0.0f;
+    }
+
+    public static float getObjectY(Object obj) {
+        if (obj == null) return 0.0f;
+        try {
+            if (fieldY != null) return fieldY.getFloat(obj);
+            if (methodGetY != null) return ((Number) methodGetY.invoke(obj)).floatValue();
+        } catch (Throwable ignored) {}
+        return 0.0f;
     }
 
     private static void cullerLoop() {
@@ -107,8 +142,8 @@ public final class HordeSpatialCuller {
                 if (!reflectionResolved) return;
             }
 
-            float px = fieldX.getFloat(player);
-            float py = fieldY.getFloat(player);
+            float px = getObjectX(player);
+            float py = getObjectY(player);
 
             // 2. Discover active zombie list from IsoWorld.instance.currentCell
             Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");
@@ -116,8 +151,21 @@ public final class HordeSpatialCuller {
             Object worldInst = instField.get(null);
             if (worldInst == null) return;
 
-            Field cellField = worldClass.getField("currentCell");
-            Object cell = cellField.get(worldInst);
+            Object cell = null;
+            try {
+                Field cellField = worldClass.getField("currentCell");
+                cell = cellField.get(worldInst);
+            } catch (Throwable t1) {
+                try {
+                    Field cellField = worldClass.getField("CurrentCell");
+                    cell = cellField.get(worldInst);
+                } catch (Throwable t2) {
+                    try {
+                        Method getCellM = worldClass.getMethod("getCell");
+                        cell = getCellM.invoke(worldInst);
+                    } catch (Throwable ignored) {}
+                }
+            }
             if (cell == null) return;
 
             Method getZombies = cell.getClass().getMethod("getZombieList");
@@ -140,10 +188,11 @@ public final class HordeSpatialCuller {
             // 3. Populate contiguous coordinate buffer
             coordBuf.rewind();
             for (int i = 0; i < count; i++) {
+                if (i >= zombies.size()) break;
                 Object z = zombies.get(i);
                 if (z != null) {
-                    float zx = fieldX.getFloat(z);
-                    float zy = fieldY.getFloat(z);
+                    float zx = getObjectX(z);
+                    float zy = getObjectY(z);
                     coordBuf.put(i * 2, zx);
                     coordBuf.put(i * 2 + 1, zy);
                 } else {
