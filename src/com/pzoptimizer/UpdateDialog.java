@@ -170,36 +170,40 @@ public class UpdateDialog {
             }
             PZOLogger.success("Downloaded " + newJar.length() + " bytes to " + newJar.getAbsolutePath());
 
-            // Handle Native Companion DLL (pzo_native64.dll)
+            // Handle Native Companion Library (.dll / .so / .dylib)
             String os = System.getProperty("os.name", "").toLowerCase();
-            File currentDll = new File("pzo_native64.dll").getAbsoluteFile();
-            File newDll = new File("pzo_native64.dll.new").getAbsoluteFile();
-            File win64Dll = new File("win64" + File.separator + "pzo_native64.dll").getAbsoluteFile();
-            boolean hasNewDll = false;
+            boolean isWin = os.contains("win");
+            boolean isMac = os.contains("mac") || os.contains("darwin");
+            String nativeFileName = isWin ? "pzo_native64.dll" : (isMac ? "libpzo_native64.dylib" : "libpzo_native64.so");
 
-            if (os.contains("win")) {
-                if (dllDownloadUrl == null || dllDownloadUrl.isEmpty()) {
-                    dllDownloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll";
-                }
-                PZOLogger.info("Downloading latest pzo_native64.dll from: " + dllDownloadUrl);
-                boolean dllOk = downloadFileWithRedirects(dllDownloadUrl, newDll);
-                if (dllOk && newDll.length() > 50000) {
-                    hasNewDll = true;
-                    PZOLogger.success("Downloaded " + newDll.length() + " bytes to " + newDll.getAbsolutePath());
-                } else {
-                    PZOLogger.warn("Notice: pzo_native64.dll could not be downloaded; proceeding with JAR update.");
-                }
+            File currentNative = new File(nativeFileName).getAbsoluteFile();
+            File newNative = new File(nativeFileName + ".new").getAbsoluteFile();
+            boolean hasNewNative = false;
+
+            if (dllDownloadUrl == null || dllDownloadUrl.isEmpty()) {
+                dllDownloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/" + nativeFileName;
             }
 
-            if (os.contains("win")) {
-                String psDllUpdate = hasNewDll ? String.format(
+            PZOLogger.info("Downloading latest " + nativeFileName + " from: " + dllDownloadUrl);
+            boolean nativeOk = downloadFileWithRedirects(dllDownloadUrl, newNative);
+            if (nativeOk && newNative.length() > 5000) {
+                hasNewNative = true;
+                PZOLogger.success("Downloaded " + newNative.length() + " bytes to " + newNative.getAbsolutePath());
+            } else {
+                PZOLogger.warn("Notice: " + nativeFileName + " could not be downloaded; proceeding with JAR update.");
+                if (newNative.exists()) newNative.delete();
+            }
+
+            if (isWin) {
+                File win64Dll = new File("win64" + File.separator + "pzo_native64.dll").getAbsoluteFile();
+                String psDllUpdate = hasNewNative ? String.format(
                     "if (Test-Path -LiteralPath '%s') { Move-Item -LiteralPath '%s' -Destination '%s' -Force; }; " +
                     "if (Test-Path -LiteralPath '%s') { Copy-Item -LiteralPath '%s' -Destination '%s' -Force; }; ",
-                    newDll.getAbsolutePath().replace("'", "''"),
-                    newDll.getAbsolutePath().replace("'", "''"),
-                    currentDll.getAbsolutePath().replace("'", "''"),
+                    newNative.getAbsolutePath().replace("'", "''"),
+                    newNative.getAbsolutePath().replace("'", "''"),
+                    currentNative.getAbsolutePath().replace("'", "''"),
                     win64Dll.getParentFile().getAbsolutePath().replace("'", "''"),
-                    currentDll.getAbsolutePath().replace("'", "''"),
+                    currentNative.getAbsolutePath().replace("'", "''"),
                     win64Dll.getAbsolutePath().replace("'", "''")
                 ) : "";
 
@@ -216,17 +220,31 @@ public class UpdateDialog {
                     latestVersion
                 );
                 new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
-            } else if (os.contains("mac")) {
+            } else if (isMac) {
+                String macNativeUpdate = hasNewNative ? String.format(
+                    " && mv -f \"%s\" \"%s\" && (test -d \"ProjectZomboid.app/Contents/Java\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/Java/%s\" || true) && (test -d \"ProjectZomboid.app/Contents/MacOS\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/MacOS/%s\" || true)",
+                    newNative.getAbsolutePath(), currentNative.getAbsolutePath(),
+                    currentNative.getAbsolutePath(), nativeFileName,
+                    currentNative.getAbsolutePath(), nativeFileName
+                ) : "";
+
                 String shUpdater = String.format(
-                    "sleep 1 && mv -f \"%s\" \"%s\" && osascript -e 'display notification \"PZO Engine has been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
-                    newJar.getAbsolutePath(), currentJar.getAbsolutePath(), latestVersion
+                    "sleep 1 && mv -f \"%s\" \"%s\"%s && osascript -e 'display notification \"PZO Engine & Native Governor have been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
+                    newJar.getAbsolutePath(), currentJar.getAbsolutePath(), macNativeUpdate, latestVersion
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
                 // Linux & Steam Deck
+                String linuxNativeUpdate = hasNewNative ? String.format(
+                    " && mv -f \"%s\" \"%s\" && (test -d \"linux64\" && cp -f \"%s\" \"linux64/%s\" || true) && (test -d \"natives\" && cp -f \"%s\" \"natives/%s\" || true)",
+                    newNative.getAbsolutePath(), currentNative.getAbsolutePath(),
+                    currentNative.getAbsolutePath(), nativeFileName,
+                    currentNative.getAbsolutePath(), nativeFileName
+                ) : "";
+
                 String shUpdater = String.format(
-                    "sleep 1 && mv -f \"%s\" \"%s\" && (kdialog --msgbox \"PZO Engine has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"PZO Engine has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Engine Updated\" \"Please restart Project Zomboid.\")",
-                    newJar.getAbsolutePath(), currentJar.getAbsolutePath(), latestVersion, latestVersion
+                    "sleep 1 && mv -f \"%s\" \"%s\"%s && (kdialog --msgbox \"PZO Engine & Native Governor have been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"PZO Engine & Native Governor have been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Engine Updated\" \"Please restart Project Zomboid.\")",
+                    newJar.getAbsolutePath(), currentJar.getAbsolutePath(), linuxNativeUpdate, latestVersion, latestVersion
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             }

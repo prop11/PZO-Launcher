@@ -3,43 +3,74 @@ package com.pzoptimizer;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Project Zomboid Build 42 - Dedicated High-Performance Native Kernel & Hardware Governor.
- * Bridges Java to pzo_native64.dll for low-latency OS scheduling, 0.5ms timer locking,
- * Windows 11 EcoQoS Power Throttling exemption, and AVX2 spatial SIMD batching.
+ * Bridges Java to pzo_native64.dll / libpzo_native64.so / libpzo_native64.dylib for low-latency
+ * OS scheduling, sub-millisecond timer locking, power throttling exemption, and AVX2 spatial SIMD batching.
  */
 public class PZONative {
 
     private static volatile boolean loaded = false;
     private static volatile boolean initialized = false;
 
+    public static final String OS_NAME;
+    public static final boolean IS_WINDOWS;
+    public static final boolean IS_MAC;
+    public static final boolean IS_LINUX;
+    public static final String NATIVE_LIB_FILENAME;
+
     static {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        OS_NAME = os;
+        IS_WINDOWS = os.contains("win");
+        IS_MAC = os.contains("mac") || os.contains("darwin");
+        IS_LINUX = !IS_WINDOWS && !IS_MAC;
+
+        if (IS_WINDOWS) {
+            NATIVE_LIB_FILENAME = "pzo_native64.dll";
+        } else if (IS_MAC) {
+            NATIVE_LIB_FILENAME = "libpzo_native64.dylib";
+        } else {
+            NATIVE_LIB_FILENAME = "libpzo_native64.so";
+        }
+
         loadNativeLibrary();
     }
 
     private static synchronized void loadNativeLibrary() {
         if (loaded) return;
 
-        String os = System.getProperty("os.name", "").toLowerCase();
-        if (!os.contains("win")) {
-            PZOLogger.info("[PZONative] Operating system is not Windows (" + os + "). Native Windows governor skipped.");
-            return;
-        }
-
         // 1. Try standard Java library path
         try {
             System.loadLibrary("pzo_native64");
             loaded = true;
-            PZOLogger.success("[PZONative] Loaded pzo_native64.dll via System.loadLibrary");
+            PZOLogger.success("[PZONative] Loaded " + NATIVE_LIB_FILENAME + " via System.loadLibrary");
         } catch (Throwable t1) {
             // 2. Try direct paths relative to working directory or game root
-            String[] candidatePaths = new String[] {
-                "pzo_native64.dll",
-                "win64/pzo_native64.dll",
-                System.getProperty("user.dir") + File.separator + "pzo_native64.dll",
-                "K:/SteamLibrary/steamapps/common/ProjectZomboid/pzo_native64.dll"
-            };
+            List<String> candidatePaths = new ArrayList<>();
+            candidatePaths.add(NATIVE_LIB_FILENAME);
+            candidatePaths.add(System.getProperty("user.dir") + File.separator + NATIVE_LIB_FILENAME);
+
+            if (IS_WINDOWS) {
+                candidatePaths.add("win64" + File.separator + NATIVE_LIB_FILENAME);
+                candidatePaths.add("K:/SteamLibrary/steamapps/common/ProjectZomboid/" + NATIVE_LIB_FILENAME);
+            } else if (IS_LINUX) {
+                candidatePaths.add("linux64" + File.separator + NATIVE_LIB_FILENAME);
+                candidatePaths.add("natives" + File.separator + NATIVE_LIB_FILENAME);
+                String home = System.getProperty("user.home", "");
+                if (!home.isEmpty()) {
+                    candidatePaths.add(home + "/.local/share/Steam/steamapps/common/ProjectZomboid/" + NATIVE_LIB_FILENAME);
+                    candidatePaths.add(home + "/.steam/steam/steamapps/common/ProjectZomboid/" + NATIVE_LIB_FILENAME);
+                }
+            } else if (IS_MAC) {
+                candidatePaths.add("ProjectZomboid.app/Contents/MacOS/" + NATIVE_LIB_FILENAME);
+                candidatePaths.add("ProjectZomboid.app/Contents/Java/" + NATIVE_LIB_FILENAME);
+                candidatePaths.add("../MacOS/" + NATIVE_LIB_FILENAME);
+                candidatePaths.add("../Java/" + NATIVE_LIB_FILENAME);
+            }
 
             for (String p : candidatePaths) {
                 try {
@@ -47,7 +78,7 @@ public class PZONative {
                     if (f.exists() && f.isFile()) {
                         System.load(f.getAbsolutePath());
                         loaded = true;
-                        PZOLogger.success("[PZONative] Loaded pzo_native64.dll from: " + f.getAbsolutePath());
+                        PZOLogger.success("[PZONative] Loaded " + NATIVE_LIB_FILENAME + " from: " + f.getAbsolutePath());
                         break;
                     }
                 } catch (Throwable ignored) {}
@@ -64,7 +95,8 @@ public class PZONative {
                 PZOLogger.warn("[PZONative] initNative failed: " + t.getMessage());
             }
         } else {
-            PZOLogger.info("[PZONative] Native companion library pzo_native64.dll not found; operating in pure JVM mode.");
+            String osLabel = IS_WINDOWS ? "Windows" : (IS_MAC ? "macOS" : "Linux");
+            PZOLogger.info("[PZONative] Native companion library (" + NATIVE_LIB_FILENAME + ") not found on " + osLabel + "; operating in pure JVM safe mode.");
         }
     }
 

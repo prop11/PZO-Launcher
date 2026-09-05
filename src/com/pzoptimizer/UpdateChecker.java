@@ -21,15 +21,31 @@ public class UpdateChecker {
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String GITHUB_ALL_RELEASES_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases";
     private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
-    private static final String DEFAULT_DLL_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll";
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)+)");
+
+    public static String getNativeFileName() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) {
+            return "pzo_native64.dll";
+        } else if (os.contains("mac") || os.contains("darwin")) {
+            return "libpzo_native64.dylib";
+        } else {
+            return "libpzo_native64.so";
+        }
+    }
+
+    public static String getDefaultNativeDownloadUrl() {
+        return "https://github.com/prop11/PZO-Launcher/releases/latest/download/" + getNativeFileName();
+    }
 
     public static class UpdateResult {
         public boolean hasUpdate = false;
         public String latestVersion = CURRENT_VERSION;
         public String tagName = "";
         public String downloadUrl = DEFAULT_JAR_DOWNLOAD_URL;
-        public String dllDownloadUrl = DEFAULT_DLL_DOWNLOAD_URL;
+        public String nativeFileName = getNativeFileName();
+        public String nativeDownloadUrl = getDefaultNativeDownloadUrl();
+        public String dllDownloadUrl = nativeDownloadUrl;
         public boolean isBeta = false;
         public String channel = "Stable";
     }
@@ -126,7 +142,11 @@ public class UpdateChecker {
             String releaseName = extractJsonField(selectedReleaseJson, "name");
             String tagName = extractJsonField(selectedReleaseJson, "tag_name");
             String jarAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, "PZOptimEngine.jar");
-            String dllAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, "pzo_native64.dll");
+            String nativeFileName = getNativeFileName();
+            String nativeAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, nativeFileName);
+            if ((nativeAssetUrl == null || nativeAssetUrl.isEmpty()) && nativeFileName.endsWith(".dll")) {
+                nativeAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, "pzo_native64.dll");
+            }
 
             String latestVersion = extractVersionNumber(releaseName);
             if (latestVersion == null) {
@@ -148,21 +168,24 @@ public class UpdateChecker {
 
             boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
             String downloadUrl = (jarAssetUrl != null && !jarAssetUrl.isEmpty()) ? jarAssetUrl : DEFAULT_JAR_DOWNLOAD_URL;
-            String dllUrl = (dllAssetUrl != null && !dllAssetUrl.isEmpty()) ? dllAssetUrl :
+            String defaultNativeUrl = getDefaultNativeDownloadUrl();
+            String nativeUrl = (nativeAssetUrl != null && !nativeAssetUrl.isEmpty()) ? nativeAssetUrl :
                 (tagName != null && !tagName.isEmpty() ?
-                    "https://github.com/prop11/PZO-Launcher/releases/download/" + tagName + "/pzo_native64.dll" :
-                    DEFAULT_DLL_DOWNLOAD_URL);
+                    "https://github.com/prop11/PZO-Launcher/releases/download/" + tagName + "/" + nativeFileName :
+                    defaultNativeUrl);
 
-            writeStatus(hasUpdate, displayVersion, res.channel, downloadUrl, dllUrl);
+            writeStatus(hasUpdate, displayVersion, res.channel, downloadUrl, nativeUrl);
 
             res.hasUpdate = hasUpdate;
             res.latestVersion = displayVersion;
             res.tagName = tagName != null ? tagName : "";
             res.downloadUrl = downloadUrl;
-            res.dllDownloadUrl = dllUrl;
+            res.nativeFileName = nativeFileName;
+            res.nativeDownloadUrl = nativeUrl;
+            res.dllDownloadUrl = nativeUrl;
             return res;
         } catch (Exception e) {
-            writeStatus(false, CURRENT_VERSION, res.channel, DEFAULT_JAR_DOWNLOAD_URL, DEFAULT_DLL_DOWNLOAD_URL);
+            writeStatus(false, CURRENT_VERSION, res.channel, DEFAULT_JAR_DOWNLOAD_URL, getDefaultNativeDownloadUrl());
             return res;
         }
     }
@@ -278,11 +301,11 @@ public class UpdateChecker {
     }
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel) {
-        writeStatus(hasUpdate, latestVer, channel, DEFAULT_JAR_DOWNLOAD_URL, DEFAULT_DLL_DOWNLOAD_URL);
+        writeStatus(hasUpdate, latestVer, channel, DEFAULT_JAR_DOWNLOAD_URL, getDefaultNativeDownloadUrl());
     }
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel, String downloadUrl) {
-        writeStatus(hasUpdate, latestVer, channel, downloadUrl, DEFAULT_DLL_DOWNLOAD_URL);
+        writeStatus(hasUpdate, latestVer, channel, downloadUrl, getDefaultNativeDownloadUrl());
     }
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel, String downloadUrl, String dllUrl) {
@@ -293,10 +316,11 @@ public class UpdateChecker {
             if (!luaDir.exists()) luaDir.mkdirs();
 
             File updateFile = new File(luaDir, "pzo_update.json");
-            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"url\": \"%s\", \"dll_url\": \"%s\", \"channel\": \"%s\", \"beta_opt_in\": %b}",
+            String json = String.format("{\"has_update\": %b, \"current_version\": \"%s\", \"latest_version\": \"%s\", \"url\": \"%s\", \"dll_url\": \"%s\", \"native_file\": \"%s\", \"channel\": \"%s\", \"beta_opt_in\": %b}",
                 hasUpdate, CURRENT_VERSION, latestVer,
                 downloadUrl != null ? downloadUrl : DEFAULT_JAR_DOWNLOAD_URL,
-                dllUrl != null ? dllUrl : DEFAULT_DLL_DOWNLOAD_URL,
+                dllUrl != null ? dllUrl : getDefaultNativeDownloadUrl(),
+                getNativeFileName(),
                 channel, PZOConfig.isBetaOptIn());
 
             try (FileWriter fw = new FileWriter(updateFile, false)) {

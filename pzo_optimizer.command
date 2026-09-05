@@ -180,6 +180,17 @@ if [ "$OS_TYPE" = "Darwin" ]; then
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
+    # Install libpzo_native64.dylib if present
+    for dylib_c in "$SCRIPT_DIR/libpzo_native64.dylib" "$SCRIPT_DIR/dist/libpzo_native64.dylib" "$SCRIPT_DIR/../dist/libpzo_native64.dylib" "$SCRIPT_DIR/native/libpzo_native64.dylib"; do
+        if [ -f "$dylib_c" ]; then
+            cp -f "$dylib_c" "$JAVA_DIR/libpzo_native64.dylib"
+            mkdir -p "$APP_BUNDLE/Contents/MacOS"
+            cp -f "$dylib_c" "$APP_BUNDLE/Contents/MacOS/libpzo_native64.dylib"
+            echo "[+] Installed native companion: libpzo_native64.dylib"
+            break
+        fi
+    done
+
     # 6. Patch Contents/Info.plist
     if [ ! -f "$PLIST" ]; then
         echo "[!] Error: Contents/Info.plist not found in bundle."
@@ -353,6 +364,18 @@ else
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
+    # Install libpzo_native64.so if present
+    for so_c in "$SCRIPT_DIR/libpzo_native64.so" "$SCRIPT_DIR/dist/libpzo_native64.so" "$SCRIPT_DIR/../dist/libpzo_native64.so" "$SCRIPT_DIR/native/libpzo_native64.so"; do
+        if [ -f "$so_c" ]; then
+            cp -f "$so_c" "$PZ_DIR/libpzo_native64.so"
+            if [ -d "$PZ_DIR/linux64" ]; then
+                cp -f "$so_c" "$PZ_DIR/linux64/libpzo_native64.so"
+            fi
+            echo "[+] Installed native companion: libpzo_native64.so"
+            break
+        fi
+    done
+
     if [ -f "$JSON_FILE" ] && [ ! -f "${JSON_FILE}.bak" ]; then
         cp -f "$JSON_FILE" "${JSON_FILE}.bak"
         echo "[+] Backed up original JSON config -> ${JSON_FILE}.bak"
@@ -434,7 +457,7 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.6.1\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.8.7-unstable\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 
