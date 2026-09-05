@@ -47,10 +47,20 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // D. Persist thread-safe options to debug-options.ini
+                    // D. FBO Chunk Baking for Corpses & Ground Items (Massive draw-call reduction)
+                    try {
+                        Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
+                        Object fboGroup = fboGroupField.get(debugOptionsInstance);
+                        if (fboGroup != null) {
+                            setOptionValue(fboGroup, "corpsesInChunkTexture", true);
+                            setOptionValue(fboGroup, "itemsInChunkTexture", true);
+                        }
+                    } catch (Throwable ignored) {}
+
+                    // E. Persist thread-safe options to debug-options.ini
                     persistDebugOptionsFile();
 
-                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Audio, World)");
+                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Audio, World, FBO Baking)");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
@@ -77,10 +87,34 @@ public class EngineFeaturesTuner {
 
                 try {
                     Field lightFpsField = perfClass.getField("lightingFps");
-                    lightFpsField.setInt(null, 30); // 30 FPS lighting updates (eliminates lighting recalculation CPU spikes)
+                    lightFpsField.setInt(null, 15); // Vanilla 15 FPS lighting updates (halves lighting CPU workload)
                 } catch (Throwable ignored) {}
 
-                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (30 FPS Lighting Sync)");
+                try {
+                    Field falloffField = perfClass.getField("zombieAnimationSpeedFalloffCount");
+                    falloffField.setInt(null, 4); // Adaptive animation frame skip for distant horde zombies
+                } catch (Throwable ignored) {}
+
+                try {
+                    Field blendField = perfClass.getField("numberZombiesBlended");
+                    blendField.setInt(null, 16); // High-fidelity skeletal blending for 16 closest zombies
+                } catch (Throwable ignored) {}
+
+                // Decoupled UI FBO rendering
+                try {
+                    Class<?> coreClass = Class.forName("zombie.core.Core");
+                    Method getInstance = coreClass.getMethod("getInstance");
+                    Object coreInst = getInstance.invoke(null);
+                    if (coreInst != null) {
+                        Method setOptionUIFBO = coreClass.getMethod("setOptionUIFBO", boolean.class);
+                        setOptionUIFBO.invoke(coreInst, true);
+                    }
+                    Class<?> uiMgrClass = Class.forName("zombie.ui.UIManager");
+                    Field useUiFboField = uiMgrClass.getField("useUiFbo");
+                    useUiFboField.setBoolean(null, true);
+                } catch (Throwable ignored) {}
+
+                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (15 FPS Lighting | Skeletal Falloff | UI FBO)");
             } catch (Throwable ignored) {}
 
             // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)
@@ -143,6 +177,8 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
+                sb.append("FBORenderChunk.CorpsesInChunkTexture=true\n");
+                sb.append("FBORenderChunk.ItemsInChunkTexture=true\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
                     fw.write(sb.toString());
                 }
@@ -163,6 +199,15 @@ public class EngineFeaturesTuner {
                 setOptionValue(debugOptionsInstance, "threadGridStacks", true);
                 setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                 setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
+
+                try {
+                    Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
+                    Object fboGroup = fboGroupField.get(debugOptionsInstance);
+                    if (fboGroup != null) {
+                        setOptionValue(fboGroup, "corpsesInChunkTexture", true);
+                        setOptionValue(fboGroup, "itemsInChunkTexture", true);
+                    }
+                } catch (Throwable ignored) {}
             }
         } catch (Throwable ignored) {}
     }
