@@ -103,30 +103,70 @@ public final class ChunkIngestionPacer {
         private static volatile Field cachedFrameStateField = null;
         private static volatile long lastDrivingCheckTime = 0;
         private static volatile boolean playerIsDriving = false;
+        private static volatile Class<?> cachedPlayerClass = null;
+        private static volatile Method cachedGetInstMethod = null;
+        private static volatile Method cachedGetVehicleMethod = null;
+        private static volatile boolean playerReflectionResolved = false;
+
+        private static volatile Class<?> cachedGameStateClass = null;
+        private static volatile Field cachedLoadingField = null;
+        private static volatile boolean loadingFieldResolved = false;
+
+        private final java.util.concurrent.atomic.AtomicInteger approximateSize = new java.util.concurrent.atomic.AtomicInteger(0);
 
         public PacedConcurrentQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
             if (existing != null && !existing.isEmpty()) {
                 this.addAll(existing);
+                this.approximateSize.set(existing.size());
             }
+        }
+
+        @Override
+        public boolean add(Object e) {
+            boolean added = super.add(e);
+            if (added) approximateSize.incrementAndGet();
+            return added;
+        }
+
+        @Override
+        public boolean offer(Object e) {
+            boolean offered = super.offer(e);
+            if (offered) approximateSize.incrementAndGet();
+            return offered;
+        }
+
+        @Override
+        public void clear() {
+            super.clear();
+            approximateSize.set(0);
         }
 
         private static boolean isPlayerDriving() {
             long now = System.currentTimeMillis();
-            if (now - lastDrivingCheckTime < 250L) {
+            if (now - lastDrivingCheckTime < 200L) {
                 return playerIsDriving;
             }
             lastDrivingCheckTime = now;
-            try {
-                Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
-                Method getInstMethod = playerClass.getMethod("getInstance");
-                Object player = getInstMethod.invoke(null);
-                if (player != null) {
-                    Method getVehicleMethod = player.getClass().getMethod("getVehicle");
-                    playerIsDriving = (getVehicleMethod.invoke(player) != null);
-                    return playerIsDriving;
+            if (!playerReflectionResolved) {
+                try {
+                    cachedPlayerClass = Class.forName("zombie.characters.IsoPlayer");
+                    cachedGetInstMethod = cachedPlayerClass.getMethod("getInstance");
+                    cachedGetVehicleMethod = cachedPlayerClass.getMethod("getVehicle");
+                    playerReflectionResolved = true;
+                } catch (Throwable ignored) {
+                    playerReflectionResolved = true;
                 }
-            } catch (Throwable ignored) {}
+            }
+            if (cachedGetInstMethod != null && cachedGetVehicleMethod != null) {
+                try {
+                    Object player = cachedGetInstMethod.invoke(null);
+                    if (player != null) {
+                        playerIsDriving = (cachedGetVehicleMethod.invoke(player) != null);
+                        return playerIsDriving;
+                    }
+                } catch (Throwable ignored) {}
+            }
             playerIsDriving = false;
             return false;
         }
@@ -136,12 +176,26 @@ public final class ChunkIngestionPacer {
             // If called from background threads (e.g. WorldStreamer, WorldReuser), pass through immediately
             String threadName = Thread.currentThread().getName();
             if (threadName != null && (threadName.contains("WorldStreamer") || threadName.contains("Reuser"))) {
-                return super.poll();
+                Object chunk = super.poll();
+                if (chunk != null) approximateSize.decrementAndGet();
+                return chunk;
             }
 
             // If game is in loading state (initial boot, teleports, cell loading), drain with zero limit
             if (isEngineLoading()) {
-                return super.poll();
+                Object chunk = super.poll();
+                if (chunk != null) approximateSize.decrementAndGet();
+                return chunk;
+            }
+
+            // CRITICAL DRIVING FIX: When driving a vehicle, high-speed chunk streaming is the #1 priority.
+            // Any artificial frame cap or nanosecond throttling creates an un-drainable queue backlog in towns,
+            // resulting in missing collision tiles, black roads, physics hitches, and cell entry freeze spikes.
+            // Bypassing the pacer during driving allows IsoChunkMap to ingest chunks at full native bandwidth.
+            if (isPlayerDriving()) {
+                Object chunk = super.poll();
+                if (chunk != null) approximateSize.decrementAndGet();
+                return chunk;
             }
 
             long now = System.nanoTime();
@@ -186,40 +240,42 @@ public final class ChunkIngestionPacer {
             }
             lastPollTimestamp = now;
 
-            // Calibrated dynamic pacing budgets:
-            // At 60 FPS (16.6ms frame budget):
-            // - Driving: Allow up to 8 chunks per frame within 5.0ms so incoming vehicle chunks are ingested immediately without queue lag
-            // - On Foot: Allow up to 3 chunks per frame within 3.5ms
-            // - Heavy Backlog (> 8 chunks): Allow up to 12 chunks per frame within 8.0ms to drain smoothly without freezing
-            boolean driving = isPlayerDriving();
-            int maxChunks = driving ? 8 : 3;
-            long budgetNanos = driving ? 5_000_000L : 3_500_000L;
-
-            if (super.size() > 8) {
-                maxChunks = 12;
-                budgetNanos = 8_000_000L;
-            }
+            // Pacing budget for foot travel:
+            // - Normal: Allow up to 3 chunks per frame within 3.5ms
+            // - Backlog (> 4 chunks): Expand up to 12 chunks within 8.0ms to drain without hitches
+            int backlog = approximateSize.get();
+            int maxChunks = (backlog > 4) ? 12 : 3;
+            long budgetNanos = (backlog > 4) ? 8_000_000L : 3_500_000L;
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
-                // Return null to end while-loop for this frame; remaining chunks are smoothly integrated 16ms later
+                // Return null to end while-loop for this frame; remaining chunks are smoothly integrated next frame
                 return null;
             }
 
             Object chunk = super.poll();
             if (chunk != null) {
+                approximateSize.decrementAndGet();
                 chunksThisFrame++;
             }
             return chunk;
         }
 
         private boolean isEngineLoading() {
-            try {
-                Class<?> gameStateClass = Class.forName("zombie.gameStates.IngameState");
-                Field loadingField = gameStateClass.getField("loading");
-                return loadingField.getBoolean(null);
-            } catch (Throwable ignored) {
-                return false;
+            if (!loadingFieldResolved) {
+                try {
+                    cachedGameStateClass = Class.forName("zombie.gameStates.IngameState");
+                    cachedLoadingField = cachedGameStateClass.getField("loading");
+                    loadingFieldResolved = true;
+                } catch (Throwable ignored) {
+                    loadingFieldResolved = true;
+                }
             }
+            if (cachedLoadingField != null) {
+                try {
+                    return cachedLoadingField.getBoolean(null);
+                } catch (Throwable ignored) {}
+            }
+            return false;
         }
     }
 }

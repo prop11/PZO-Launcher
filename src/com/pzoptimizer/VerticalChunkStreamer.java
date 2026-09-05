@@ -45,6 +45,11 @@ public final class VerticalChunkStreamer {
 
     private static void trackVerticalTransitions() {
         try {
+            // Vehicles don't climb building stairs or elevators; skip on-road elevation sweeps
+            if (VehicleTravelOptimizer.isPlayerDriving()) {
+                return;
+            }
+
             Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
             Field playersField = playerClass.getField("players");
             Object[] players = (Object[]) playersField.get(null);
