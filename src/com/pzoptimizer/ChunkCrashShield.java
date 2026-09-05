@@ -54,7 +54,12 @@ public class ChunkCrashShield {
                 Field instField = worldClass.getField("instance");
                 Object world = instField.get(null);
                 if (world != null) {
-                    Field cellField = worldClass.getField("CurrentCell");
+                    Field cellField = null;
+                    try {
+                        cellField = worldClass.getField("currentCell");
+                    } catch (Throwable t) {
+                        cellField = worldClass.getField("CurrentCell");
+                    }
                     Object cell = cellField.get(world);
                     if (cell != null) {
                         Field mapsField = cell.getClass().getField("chunkMap");

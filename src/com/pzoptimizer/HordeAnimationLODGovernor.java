@@ -1,6 +1,7 @@
 package com.pzoptimizer;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -12,17 +13,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * 
  * HordeAnimationLODGovernor dynamically assigns skeletal update fidelity:
  * - Local Players: Always 100% full 60+ FPS fidelity.
- * - LOD 0 (Close Zombies <= 16 tiles): 100% full 60+ FPS skeletal skinning.
- * - LOD 1 (Medium Zombies 16 - 35 tiles): Paced 30 FPS skeletal skinning (every 2nd frame).
- * - LOD 2 (Distant / Offscreen Zombies > 35 tiles): Skips bone matrix recalculations (deferred motion only).
- * 
- * Saves millions of 4x4 matrix multiplications during dense horde encounters with zero visual artifacts.
+ * - Close Zombies (<= 12 tiles): Full multi-track skeletal skinning and blending.
+ * - Horde Zombies (> 12 tiles): Uses SharedSkeleAnimationTrack optimization (doBlending = false),
+ *   saving redundant 4x4 matrix multiplications with zero visual artifacts.
+ * - Guarantees updateBones is always true for active models so zombies never freeze or float.
  */
 public final class HordeAnimationLODGovernor {
 
     private static volatile boolean active = false;
     private static Thread lodThread = null;
-    private static long cycleCounter = 0;
 
     public static final AtomicLong boneTransformsSaved = new AtomicLong(0);
     public static final AtomicLong activeModelsTracked = new AtomicLong(0);
@@ -33,11 +32,12 @@ public final class HordeAnimationLODGovernor {
     private static Field modelField = null;
     private static Field animPlayerField = null;
     private static Field updateBonesField = null;
-    private static Field isRenderingField = null;
+    private static Field doBlendingField = null;
     private static Class<?> zombieClass = null;
     private static Class<?> playerClass = null;
     private static Object modelManagerInst = null;
     private static boolean reflectionResolved = false;
+    private static boolean reflectionNoticeLogged = false;
 
     public static void initialize() {
         if (active) return;
@@ -65,20 +65,25 @@ public final class HordeAnimationLODGovernor {
             Class<?> slotClass = Class.forName("zombie.core.skinnedmodel.ModelManager$ModelSlot");
             chrField = slotClass.getField("character");
             modelField = slotClass.getField("model");
-            isRenderingField = slotClass.getField("renderRefCount");
 
             Class<?> modelInstClass = Class.forName("zombie.core.skinnedmodel.model.ModelInstance");
             animPlayerField = modelInstClass.getField("animPlayer");
 
             Class<?> animPlayerClass = Class.forName("zombie.core.skinnedmodel.animation.AnimationPlayer");
             updateBonesField = animPlayerClass.getField("updateBones");
+            try {
+                doBlendingField = animPlayerClass.getField("doBlending");
+            } catch (Throwable ignored) {}
 
             zombieClass = Class.forName("zombie.characters.IsoZombie");
             playerClass = Class.forName("zombie.characters.IsoPlayer");
 
             reflectionResolved = true;
         } catch (Throwable t) {
-            PZOLogger.warn("HordeAnimationLODGovernor reflection notice: " + t.getMessage());
+            if (!reflectionNoticeLogged) {
+                PZOLogger.warn("HordeAnimationLODGovernor reflection notice: " + t.getMessage());
+                reflectionNoticeLogged = true;
+            }
         }
     }
 
@@ -89,7 +94,7 @@ public final class HordeAnimationLODGovernor {
             } catch (Throwable ignored) {}
 
             try {
-                Thread.sleep(16); // ~60 Hz synchronization cycle
+                Thread.sleep(25); // ~40 Hz synchronization cycle
             } catch (InterruptedException ie) {
                 break;
             }
@@ -102,8 +107,6 @@ public final class HordeAnimationLODGovernor {
             if (!reflectionResolved || modelManagerInst == null) return;
         }
 
-        cycleCounter++;
-
         try {
             @SuppressWarnings("unchecked")
             ArrayList<Object> slots = (ArrayList<Object>) modelSlotsField.get(modelManagerInst);
@@ -115,57 +118,62 @@ public final class HordeAnimationLODGovernor {
             int count = slots.size();
             activeModelsTracked.set(count);
 
+            // Discover local player coordinates for exact Euclidean distance calculation
+            float px = 0.0f, py = 0.0f;
+            boolean havePlayer = false;
+            try {
+                Method getInst = playerClass.getMethod("getInstance");
+                Object player = getInst.invoke(null);
+                if (player != null) {
+                    px = HordeSpatialCuller.getObjectX(player);
+                    py = HordeSpatialCuller.getObjectY(player);
+                    havePlayer = true;
+                }
+            } catch (Throwable ignored) {}
+
             for (int i = 0; i < count; i++) {
+                if (i >= slots.size()) break;
                 Object slot = slots.get(i);
                 if (slot == null) continue;
 
                 Object chr = chrField.get(slot);
                 if (chr == null) continue;
 
-                // Players are always rendered with 100% full bone fidelity
+                Object model = modelField.get(slot);
+                if (model == null) continue;
+
+                Object animPlayer = animPlayerField.get(model);
+                if (animPlayer == null) continue;
+
+                // CRITICAL FIX: updateBones MUST always be true for any 3D skinned model.
+                // Setting updateBones = false bypasses bone matrix transforms and ragdoll/IK ground placement,
+                // which caused zombies to freeze in static bind-poses and float in the air as 2D sprites.
+                updateBonesField.setBoolean(animPlayer, true);
+
+                // Players are always rendered with 100% full blending fidelity
                 if (playerClass.isInstance(chr)) {
-                    Object model = modelField.get(slot);
-                    if (model != null) {
-                        Object animPlayer = animPlayerField.get(model);
-                        if (animPlayer != null) {
-                            updateBonesField.setBoolean(animPlayer, true);
-                        }
+                    if (doBlendingField != null) {
+                        doBlendingField.setBoolean(animPlayer, true);
                     }
                     continue;
                 }
 
-                // Apply LOD to zombies
-                if (zombieClass.isInstance(chr)) {
-                    Object model = modelField.get(slot);
-                    if (model == null) continue;
+                // Apply safe skeletal LOD to zombies:
+                // Close range (<= 12 tiles): full animation blending (doBlending = true)
+                // Horde range (> 12 tiles): enable SharedSkeleAnimationTrack (doBlending = false),
+                // eliminating millions of redundant bone matrix multiplications across the horde with ZERO visual artifacts.
+                if (zombieClass.isInstance(chr) && havePlayer && doBlendingField != null) {
+                    float zx = HordeSpatialCuller.getObjectX(chr);
+                    float zy = HordeSpatialCuller.getObjectY(chr);
+                    float dx = zx - px;
+                    float dy = zy - py;
+                    float distSq = dx * dx + dy * dy;
 
-                    Object animPlayer = animPlayerField.get(model);
-                    if (animPlayer == null) continue;
-
-                    int renderRefCount = isRenderingField.getInt(slot);
-                    boolean isRendering = (renderRefCount > 0);
-
-                    // Check spatial distance to player
-                    float dist = 50.0f;
-                    if (HordeSpatialCuller.getZombieCount() > 0) {
-                        // Rapid spatial query
-                        dist = HordeSpatialCuller.getDistance(i);
-                    }
-
-                    if (!isRendering || dist > 40.0f) {
-                        // Distant / Offscreen: Skip bone matrix skinning (saves 64 bone transforms per frame)
-                        updateBonesField.setBoolean(animPlayer, false);
-                        boneTransformsSaved.addAndGet(64);
-                    } else if (dist <= 16.0f) {
-                        // Close combat: Full 60+ FPS high precision bone skinning
-                        updateBonesField.setBoolean(animPlayer, true);
+                    if (distSq <= 144.0f) { // 12 tiles squared
+                        doBlendingField.setBoolean(animPlayer, true);
                     } else {
-                        // Medium range (16 - 40 tiles): Paced 30 FPS bone skinning (every 2nd frame)
-                        boolean shouldUpdate = ((cycleCounter + i) % 2 == 0);
-                        updateBonesField.setBoolean(animPlayer, shouldUpdate);
-                        if (!shouldUpdate) {
-                            boneTransformsSaved.addAndGet(64);
-                        }
+                        doBlendingField.setBoolean(animPlayer, false);
+                        boneTransformsSaved.addAndGet(32);
                     }
                 }
             }

@@ -50,7 +50,12 @@ public final class DynamicLightingCuller {
             Object world = instField.get(null);
             if (world == null) return;
 
-            Field cellField = worldClass.getField("CurrentCell");
+            Field cellField = null;
+            try {
+                cellField = worldClass.getField("currentCell");
+            } catch (Throwable t) {
+                cellField = worldClass.getField("CurrentCell");
+            }
             Object cell = cellField.get(world);
             if (cell == null) return;
 
