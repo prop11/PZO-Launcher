@@ -29,6 +29,7 @@ public final class EnhancedRenderTelemetry {
         public int hordeZombiesTracked;
         public int hordeCulledOffscreen;
         public int hordeHibernating;
+        public long throttledTownZombies;
         public double estimatedCpuMsSaved;
         public double estimatedGpuMsSaved;
         public double estimatedFpsGainPercent;
@@ -50,13 +51,15 @@ public final class EnhancedRenderTelemetry {
         snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
         snap.hordeCulledOffscreen = HordeSpatialCuller.lastCulledOffscreenCount.get();
         snap.hordeHibernating = HordeSpatialCuller.lastHibernatingCount.get();
+        snap.throttledTownZombies = VehicleTravelOptimizer.throttledTownZombies.get();
 
         // Hardware cost weightings:
         // ~0.0015 ms CPU time saved per culled draw call + state check
         // ~0.0035 ms GPU raster/vertex time saved per subterranean tile
         // ~0.0006 ms CPU SIMD time saved per 4x4 bone matrix multiplication
         // ~0.0010 ms JNI driver switch time saved per redundant GL call
-        snap.estimatedCpuMsSaved = (snap.drawsCulled * 0.0015) + (snap.boneTransformsSaved * 0.0006) + (snap.glCallsFiltered * 0.0010);
+        // ~0.0040 ms CPU time saved per throttled distant zombie AI / pathfind tick
+        snap.estimatedCpuMsSaved = (snap.drawsCulled * 0.0015) + (snap.boneTransformsSaved * 0.0006) + (snap.glCallsFiltered * 0.0010) + (snap.throttledTownZombies * 0.0040);
         snap.estimatedGpuMsSaved = (snap.drawsCulled * 0.0012) + (snap.subterraneanTilesCulled * 0.0035);
 
         // Baseline frame budget 16.6ms (60 FPS); compute estimated efficiency dividend
@@ -69,9 +72,9 @@ public final class EnhancedRenderTelemetry {
     public static String toJson() {
         MetricsSnapshot s = getSnapshot();
         return String.format(Locale.US,
-            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"horde_tracked\":%d,\"horde_culled\":%d,\"horde_hibernating\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
+            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"horde_tracked\":%d,\"horde_culled\":%d,\"horde_hibernating\":%d,\"throttled_town_zombies\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
             s.isUnstableActive, s.avx2SpatialActive, s.drawsCulled, s.subterraneanTilesCulled, s.boneTransformsSaved, s.glCallsFiltered,
-            s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating,
+            s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating, s.throttledTownZombies,
             s.estimatedCpuMsSaved, s.estimatedGpuMsSaved, s.estimatedFpsGainPercent);
     }
 
@@ -86,6 +89,7 @@ public final class EnhancedRenderTelemetry {
         sb.append(String.format(Locale.US, "- **SIMD AVX2 Spatial Processor**: %s\n", s.avx2SpatialActive ? "ACTIVE (8-wide YMM registers)" : "SCALAR FALLBACK"));
         sb.append(String.format(Locale.US, "- **Horde Zombies Monitored**: %,d (Offscreen Culled: %,d | Hibernating: %,d)\n",
             s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating));
+        sb.append(String.format(Locale.US, "- **Driving Town Zombies Throttled**: %,d\n", s.throttledTownZombies));
         sb.append(String.format(Locale.US, "- **Screen-Space Draws Culled**: %,d\n", s.drawsCulled));
         sb.append(String.format(Locale.US, "- **Subterranean Z-Tiles Culled**: %,d\n", s.subterraneanTilesCulled));
         sb.append(String.format(Locale.US, "- **Off-Screen Bone Transforms Bypassed**: %,d\n", s.boneTransformsSaved));

@@ -24,6 +24,7 @@ public final class PZOTelemetryHUD {
         public int fmodActiveVoices = 0;
         public int hordeZombiesTracked = 0;
         public int hordeCulled = 0;
+        public long throttledTownZombies = 0;
         public boolean avx2Active = false;
     }
 
@@ -40,6 +41,7 @@ public final class PZOTelemetryHUD {
             snap.directMemoryUsedKb = 4096; // 4096 KB off-heap direct ring
             snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
             snap.hordeCulled = HordeSpatialCuller.lastCulledOffscreenCount.get();
+            snap.throttledTownZombies = VehicleTravelOptimizer.throttledTownZombies.get();
             snap.avx2Active = PZONative.isLoaded() && PZONative.isAVX2Supported();
         } catch (Throwable ignored) {}
 
@@ -48,8 +50,8 @@ public final class PZOTelemetryHUD {
 
     public static String getFormattedHUDText() {
         TelemetrySnapshot s = getLiveSnapshot();
-        return String.format("FPS: %.1f | FrameTime: %.2f ms | Heap: %d/%d MB | AVX2: %s | Horde: %d (Culled: %d)",
+        return String.format("FPS: %.1f | FrameTime: %.2f ms | Heap: %d/%d MB | AVX2: %s | Horde: %d (Culled: %d | Throttled: %d)",
                 s.currentFps, s.frameTimeMs, s.heapUsedMb, s.maxHeapMb, s.avx2Active ? "ACTIVE" : "OFF",
-                s.hordeZombiesTracked, s.hordeCulled);
+                s.hordeZombiesTracked, s.hordeCulled, s.throttledTownZombies);
     }
 }
