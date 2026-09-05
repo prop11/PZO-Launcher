@@ -81,8 +81,9 @@ public class PZONative {
             // 3. Register Multimedia Class Scheduler (MMCSS) Games profile
             boolean mmcss = setMMCSSProfile("Games");
 
-            // 4. Boost process priority to Above Normal to protect against background hitching
+            // 4. Boost process priority to Above Normal / High and lock working set to physical RAM
             boolean prio = setProcessPriority(1); // 1 = Above Normal
+            boolean wsLock = lockProcessWorkingSet();
 
             // 5. Query hardware topology
             int physCores = getPhysicalCores();
@@ -99,11 +100,11 @@ public class PZONative {
                 physCores, pCores, logProc, pCoreMask
             ));
             PZOLogger.success(String.format(
-                "[PZONative] Kernel QoS Active: Timer: %.2fms (Status: %s) | PowerThrottling Disabled: %s | MMCSS: %s | Priority: %s | AVX2: %s",
+                "[PZONative] Kernel QoS Active: Timer: %.2fms (Status: %s) | PowerThrottling Disabled: %s | MMCSS: %s | RAM WorkingSet Locked: %s | AVX2: %s",
                 timerMs, timerLock ? "LOCKED" : "FALLBACK",
                 powerShield ? "SUCCESS" : "N/A",
                 mmcss ? "ACTIVE" : "N/A",
-                prio ? "ABOVE_NORMAL" : "NORMAL",
+                wsLock ? "YES" : "N/A",
                 avx2 ? "ENABLED" : "DISABLED"
             ));
         } catch (Throwable t) {
@@ -316,8 +317,10 @@ public class PZONative {
     public static native boolean disablePowerThrottling();
     public static native boolean setMMCSSProfile(String profileName);
     public static native boolean setProcessPriority(int priorityLevel);
+    public static native boolean lockProcessWorkingSet();
+    public static native boolean optimizeCallingThread(int priorityLevel, boolean bindPCores, String profileStr);
     public static native long getPerformanceCoreMask();
-    private static native boolean bindThreadToPerformanceCores();
+    public static native boolean bindThreadToPerformanceCores();
     public static native int getPhysicalCores();
     public static native int getPerformanceCores();
     public static native int getLogicalProcessors();

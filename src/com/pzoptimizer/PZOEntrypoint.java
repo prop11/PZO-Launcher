@@ -57,6 +57,7 @@ public class PZOEntrypoint {
         // 1. Core Memory & Hardware Optimization Modules
         PZOEngineBridge.initialize();
         EngineFeaturesTuner.initializeEngineFeatures();
+        EngineThreadGovernor.initialize();
         VehicleTravelOptimizer.initialize();
         FileSystemWhitelistShield.initialize();
         RainAndWeatherOptimizer.initialize();
