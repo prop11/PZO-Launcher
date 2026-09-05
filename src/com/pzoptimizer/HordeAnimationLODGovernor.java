@@ -90,11 +90,17 @@ public final class HordeAnimationLODGovernor {
     private static void governorLoop() {
         while (active) {
             try {
+                // If player is driving, roadside zombie skeletal LOD is irrelevant and CPU cycles
+                // must be 100% dedicated to chunk decompression and vehicle physics streaming.
+                if (VehicleTravelOptimizer.isPlayerDriving()) {
+                    Thread.sleep(500);
+                    continue;
+                }
                 processZombieLOD();
             } catch (Throwable ignored) {}
 
             try {
-                Thread.sleep(25); // ~40 Hz synchronization cycle
+                Thread.sleep(60); // Paced ~16 Hz check
             } catch (InterruptedException ie) {
                 break;
             }
@@ -118,19 +124,6 @@ public final class HordeAnimationLODGovernor {
             int count = slots.size();
             activeModelsTracked.set(count);
 
-            // Discover local player coordinates for exact Euclidean distance calculation
-            float px = 0.0f, py = 0.0f;
-            boolean havePlayer = false;
-            try {
-                Method getInst = playerClass.getMethod("getInstance");
-                Object player = getInst.invoke(null);
-                if (player != null) {
-                    px = HordeSpatialCuller.getObjectX(player);
-                    py = HordeSpatialCuller.getObjectY(player);
-                    havePlayer = true;
-                }
-            } catch (Throwable ignored) {}
-
             for (int i = 0; i < count; i++) {
                 if (i >= slots.size()) break;
                 Object slot = slots.get(i);
@@ -150,32 +143,13 @@ public final class HordeAnimationLODGovernor {
                 // which caused zombies to freeze in static bind-poses and float in the air as 2D sprites.
                 updateBonesField.setBoolean(animPlayer, true);
 
-                // Players are always rendered with 100% full blending fidelity
-                if (playerClass.isInstance(chr)) {
-                    if (doBlendingField != null) {
-                        doBlendingField.setBoolean(animPlayer, true);
-                    }
-                    continue;
-                }
-
-                // Apply safe skeletal LOD to zombies:
-                // Close range (<= 12 tiles): full animation blending (doBlending = true)
-                // Horde range (> 12 tiles): enable SharedSkeleAnimationTrack (doBlending = false),
-                // eliminating millions of redundant bone matrix multiplications across the horde with ZERO visual artifacts.
-                if (zombieClass.isInstance(chr) && havePlayer && doBlendingField != null) {
-                    float zx = HordeSpatialCuller.getObjectX(chr);
-                    float zy = HordeSpatialCuller.getObjectY(chr);
-                    float dx = zx - px;
-                    float dy = zy - py;
-                    float distSq = dx * dx + dy * dy;
-
-                    if (distSq <= 144.0f) { // 12 tiles squared
-                        doBlendingField.setBoolean(animPlayer, true);
-                    } else {
-                        doBlendingField.setBoolean(animPlayer, false);
-                        boneTransformsSaved.addAndGet(32);
-                    }
-                }
+                // Note on doBlending:
+                // We intentionally do NOT force doBlending = false asynchronously from this background thread.
+                // In vanilla PZ (AnimationPlayer.determineCurrentSharedSkeleTrack()), forcing doBlending = false
+                // causes un-cached clips to invoke ModelTransformSampler synchronously on the main thread, baking
+                // 300 animation frames per track and causing massive multi-frame stutter when driving into towns.
+                // Project Zomboid natively and smoothly manages zombie animation blending falloff on the main thread
+                // via PerformanceSettings.numberZombiesBlended in ModelManager.sceneCullZombies().
             }
         } catch (Throwable ignored) {}
     }

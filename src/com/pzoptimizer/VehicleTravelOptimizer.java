@@ -142,22 +142,36 @@ public final class VehicleTravelOptimizer {
         return false;
     }
 
+    private static volatile Class<?> cachedPlayerClass = null;
+    private static volatile Method cachedGetInstMethod = null;
+    private static volatile Method cachedGetVehicleMethod = null;
+    private static volatile boolean playerReflectionResolved = false;
+
     public static boolean isPlayerDriving() {
         long now = System.currentTimeMillis();
-        if (now - lastDrivingCheckTime < 250L) {
+        if (now - lastDrivingCheckTime < 200L) {
             return playerIsDriving;
         }
         lastDrivingCheckTime = now;
-        try {
-            Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
-            Method getInstMethod = playerClass.getMethod("getInstance");
-            Object player = getInstMethod.invoke(null);
-            if (player != null) {
-                Method getVehicleMethod = player.getClass().getMethod("getVehicle");
-                playerIsDriving = (getVehicleMethod.invoke(player) != null);
-                return playerIsDriving;
+        if (!playerReflectionResolved) {
+            try {
+                cachedPlayerClass = Class.forName("zombie.characters.IsoPlayer");
+                cachedGetInstMethod = cachedPlayerClass.getMethod("getInstance");
+                cachedGetVehicleMethod = cachedPlayerClass.getMethod("getVehicle");
+                playerReflectionResolved = true;
+            } catch (Throwable ignored) {
+                playerReflectionResolved = true;
             }
-        } catch (Throwable ignored) {}
+        }
+        if (cachedGetInstMethod != null && cachedGetVehicleMethod != null) {
+            try {
+                Object player = cachedGetInstMethod.invoke(null);
+                if (player != null) {
+                    playerIsDriving = (cachedGetVehicleMethod.invoke(player) != null);
+                    return playerIsDriving;
+                }
+            } catch (Throwable ignored) {}
+        }
         playerIsDriving = false;
         return false;
     }

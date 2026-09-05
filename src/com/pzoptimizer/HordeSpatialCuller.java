@@ -35,6 +35,15 @@ public final class HordeSpatialCuller {
     private static Method methodGetX = null;
     private static Method methodGetY = null;
     private static Method methodGetZ = null;
+
+    private static Class<?> playerClass = null;
+    private static Method playerGetInstMethod = null;
+    private static Class<?> worldClass = null;
+    private static Field worldInstField = null;
+    private static Field cellField = null;
+    private static Method cellGetCellMethod = null;
+    private static Method cellGetZombiesMethod = null;
+
     private static boolean reflectionResolved = false;
     private static boolean reflectionNoticeLogged = false;
 
@@ -82,6 +91,25 @@ public final class HordeSpatialCuller {
                 methodGetY = movingObjClass.getMethod("getY");
                 methodGetZ = movingObjClass.getMethod("getZ");
             }
+
+            playerClass = Class.forName("zombie.characters.IsoPlayer");
+            playerGetInstMethod = playerClass.getMethod("getInstance");
+
+            worldClass = Class.forName("zombie.iso.IsoWorld");
+            worldInstField = worldClass.getField("instance");
+            try {
+                cellField = worldClass.getField("currentCell");
+            } catch (Throwable t1) {
+                try {
+                    cellField = worldClass.getField("CurrentCell");
+                } catch (Throwable t2) {
+                    cellGetCellMethod = worldClass.getMethod("getCell");
+                }
+            }
+
+            Class<?> cellClass = Class.forName("zombie.iso.IsoCell");
+            cellGetZombiesMethod = cellClass.getMethod("getZombieList");
+
             reflectionResolved = true;
         } catch (Throwable t) {
             if (!reflectionNoticeLogged) {
@@ -112,14 +140,13 @@ public final class HordeSpatialCuller {
     private static void cullerLoop() {
         while (active) {
             try {
+                boolean driving = VehicleTravelOptimizer.isPlayerDriving();
                 processSpatialSweep();
-            } catch (Throwable ignored) {}
-
-            try {
-                Thread.sleep(20); // ~50 Hz spatial update cycle
+                // Driving throttle: 4 Hz while driving (zero contention with chunk decompression/vehicle physics), ~20 Hz on foot
+                Thread.sleep(driving ? 250 : 50);
             } catch (InterruptedException ie) {
                 break;
-            }
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -127,50 +154,38 @@ public final class HordeSpatialCuller {
         if (!SpatialBufferPool.isInitialized()) return;
 
         try {
+            if (!reflectionResolved) {
+                resolveReflection();
+                if (!reflectionResolved) return;
+            }
+
+            if (playerGetInstMethod == null || worldInstField == null) return;
+
             // 1. Discover local player
-            Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
-            Method getInst = playerClass.getMethod("getInstance");
-            Object player = getInst.invoke(null);
+            Object player = playerGetInstMethod.invoke(null);
             if (player == null) {
                 lastTrackedZombieCount.set(0);
                 lastCulledOffscreenCount.set(0);
                 return;
             }
 
-            if (!reflectionResolved) {
-                resolveReflection();
-                if (!reflectionResolved) return;
-            }
-
             float px = getObjectX(player);
             float py = getObjectY(player);
 
             // 2. Discover active zombie list from IsoWorld.instance.currentCell
-            Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");
-            Field instField = worldClass.getField("instance");
-            Object worldInst = instField.get(null);
+            Object worldInst = worldInstField.get(null);
             if (worldInst == null) return;
 
             Object cell = null;
-            try {
-                Field cellField = worldClass.getField("currentCell");
+            if (cellField != null) {
                 cell = cellField.get(worldInst);
-            } catch (Throwable t1) {
-                try {
-                    Field cellField = worldClass.getField("CurrentCell");
-                    cell = cellField.get(worldInst);
-                } catch (Throwable t2) {
-                    try {
-                        Method getCellM = worldClass.getMethod("getCell");
-                        cell = getCellM.invoke(worldInst);
-                    } catch (Throwable ignored) {}
-                }
+            } else if (cellGetCellMethod != null) {
+                cell = cellGetCellMethod.invoke(worldInst);
             }
-            if (cell == null) return;
+            if (cell == null || cellGetZombiesMethod == null) return;
 
-            Method getZombies = cell.getClass().getMethod("getZombieList");
             @SuppressWarnings("unchecked")
-            ArrayList<Object> zombies = (ArrayList<Object>) getZombies.invoke(cell);
+            ArrayList<Object> zombies = (ArrayList<Object>) cellGetZombiesMethod.invoke(cell);
             if (zombies == null || zombies.isEmpty()) {
                 lastTrackedZombieCount.set(0);
                 lastCulledOffscreenCount.set(0);
