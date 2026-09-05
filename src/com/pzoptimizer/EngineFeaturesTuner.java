@@ -24,13 +24,14 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting, Audio, World Simulation)
+                    // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting)
                     // Keep threadAnimation = false to prevent experimental Kahlua Lua single-threaded VM crashes
+                    // Keep threadAmbient = false, threadSound = false, threadWorld = false to prevent FMOD audio race conditions (e.g. DayZ Ambient Sound TimSort crash)
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
                     setOptionValue(debugOptionsInstance, "threadLighting", true);
-                    setOptionValue(debugOptionsInstance, "threadAmbient", true);
-                    setOptionValue(debugOptionsInstance, "threadSound", true);
-                    setOptionValue(debugOptionsInstance, "threadWorld", true);
+                    setOptionValue(debugOptionsInstance, "threadAmbient", false);
+                    setOptionValue(debugOptionsInstance, "threadSound", false);
+                    setOptionValue(debugOptionsInstance, "threadWorld", false);
                     setOptionValue(debugOptionsInstance, "threadGridStacks", true);
                     setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
@@ -60,7 +61,7 @@ public class EngineFeaturesTuner {
                     // E. Persist thread-safe options to debug-options.ini
                     persistDebugOptionsFile();
 
-                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Audio, World, FBO Baking)");
+                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Pathfinding Native, FBO Baking)");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
@@ -170,9 +171,9 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.Pathfinding=true\n");
                 sb.append("Threading.Animation=false\n");
                 sb.append("Threading.Lighting=true\n");
-                sb.append("Threading.Ambient=true\n");
-                sb.append("Threading.Sound=true\n");
-                sb.append("Threading.World=true\n");
+                sb.append("Threading.Ambient=false\n");
+                sb.append("Threading.Sound=false\n");
+                sb.append("Threading.World=false\n");
                 sb.append("Threading.RecalculateGridStacks=true\n");
                 sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
@@ -193,9 +194,9 @@ public class EngineFeaturesTuner {
             if (debugOptionsInstance != null) {
                 setOptionValue(debugOptionsInstance, "threadAnimation", false);
                 setOptionValue(debugOptionsInstance, "threadLighting", true);
-                setOptionValue(debugOptionsInstance, "threadAmbient", true);
-                setOptionValue(debugOptionsInstance, "threadSound", true);
-                setOptionValue(debugOptionsInstance, "threadWorld", true);
+                setOptionValue(debugOptionsInstance, "threadAmbient", false);
+                setOptionValue(debugOptionsInstance, "threadSound", false);
+                setOptionValue(debugOptionsInstance, "threadWorld", false);
                 setOptionValue(debugOptionsInstance, "threadGridStacks", true);
                 setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                 setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
