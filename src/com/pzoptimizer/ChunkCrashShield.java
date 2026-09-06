@@ -34,7 +34,10 @@ public class ChunkCrashShield {
             Field widthField = chunkMapClass.getField("chunkGridWidth");
             int width = widthField.getInt(null);
 
-            if (width > 0 && width % 2 == 0) {
+            if (width > 0) {
+                if (width % 2 != 0) {
+                    return; // Already valid odd grid parity (13x13, 11x11, 9x9) - do not touch!
+                }
                 int safeWidth = width + 1; // Force to safe odd number (e.g. 16 -> 17)
                 widthField.setInt(null, safeWidth);
 
@@ -45,6 +48,8 @@ public class ChunkCrashShield {
 
                 PZOLogger.warn(String.format("[ChunkCrashShield] Corrected invalid even chunkGridWidth (%d -> %d) to prevent IndexOutOfBoundsException", width, safeWidth));
                 width = safeWidth;
+            } else {
+                return;
             }
 
             // Ensure active IsoCell chunkMap buffers match or exceed required capacity (width * width)

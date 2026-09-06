@@ -22,11 +22,14 @@ public class WorldStreamerBooster {
         // Start predictive vehicle trajectory streaming daemon
         VehicleTrajectoryStreamer.start();
 
+        // 0. Enforce IsoChunkMap parity once at boot
+        try {
+            ChunkCrashShield.enforceChunkGridSanity();
+        } catch (Throwable ignored) {}
+
         Thread monitor = new Thread(() -> {
             while (true) {
                 try {
-                    // 0. Enforce IsoChunkMap parity and array capacity
-                    ChunkCrashShield.enforceChunkGridSanity();
                     ChunkIngestionPacer.installPacer();
                     VehicleTravelOptimizer.checkAndMaintain();
                     RainAndWeatherOptimizer.checkAndMaintain();
@@ -89,12 +92,14 @@ public class WorldStreamerBooster {
             Object wsInstance = instField.get(null);
             if (wsInstance == null) return false;
 
-            // 1. Upgrade decompressor to NativeInflater (Multiplayer SIMD AVX2 acceleration)
-            Field decompField = wsClass.getDeclaredField("decompressor");
-            decompField.setAccessible(true);
-            Object curDecomp = decompField.get(wsInstance);
-            if (!(curDecomp instanceof NativeInflater)) {
-                setField(wsInstance, decompField, new NativeInflater());
+            // 1. Upgrade decompressor to NativeInflater (Multiplayer SIMD AVX2 acceleration) only if native DLL is loaded
+            if (PZONative.isLoaded()) {
+                Field decompField = wsClass.getDeclaredField("decompressor");
+                decompField.setAccessible(true);
+                Object curDecomp = decompField.get(wsInstance);
+                if (!(curDecomp instanceof NativeInflater)) {
+                    setField(wsInstance, decompField, new NativeInflater());
+                }
             }
 
             // 2. Upgrade readBuf to 256 KB

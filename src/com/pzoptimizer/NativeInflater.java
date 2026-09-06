@@ -44,14 +44,20 @@ public class NativeInflater extends Inflater {
 
     @Override
     public synchronized boolean finished() {
+        if (!PZONative.isLoaded()) {
+            return super.finished();
+        }
         return this.isFinished || super.finished();
     }
 
     @Override
     public synchronized int inflate(byte[] b, int off, int len) throws DataFormatException {
+        if (!PZONative.isLoaded()) {
+            return super.inflate(b, off, len);
+        }
         if (this.isFinished) return 0;
 
-        if (PZONative.isLoaded() && this.inputBuffer != null && this.inputLength > 0) {
+        if (this.inputBuffer != null && this.inputLength > 0) {
             int decompressed = PZONative.decompress(
                 this.inputBuffer, this.inputOffset, this.inputLength,
                 b, off, len
