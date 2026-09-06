@@ -68,14 +68,14 @@ public final class MultiCoreIslandScheduler {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        try {
-            installSchedulerHook();
-            initialized.set(true);
-            active = true;
-            PZOLogger.success("[MultiCoreIslandScheduler] Armed: 32x32 Spatial Island Dual-Phase Parallel Simulation Scheduler");
-        } catch (Throwable t) {
-            PZOLogger.warn("[MultiCoreIslandScheduler] Installation notice: " + t.getMessage());
-        }
+        // NOTE: In Build 42, MovingObjectUpdateScheduler manages IsoGameCharacter.updateAlpha()
+        // and non-thread-safe IsoGridSquare.movingObjects lists. Parallelizing simulation across
+        // background worker threads causes alpha calculation skips (invisible zombies) and race
+        // conditions on square transfer. We preserve main-thread simulation for 100% visual fidelity
+        // and collision integrity.
+        initialized.set(true);
+        active = false;
+        PZOLogger.info("[MultiCoreIslandScheduler] Preserving main-thread simulation for 100% zombie visibility & collision safety");
     }
 
     @SuppressWarnings("unchecked")

@@ -141,6 +141,79 @@ public final class MultiCoreChunkStreamer {
         }
     }
 
+    private static volatile boolean queueHooked = false;
+
+    /**
+     * Specialized queue installed into WorldStreamer.jobQueue via Unsafe.
+     * Intercepts incoming chunk load requests with 0ms latency and routes them directly
+     * to PZO parallel worker threads, while always returning null on poll()/peek()
+     * so that the vanilla WorldStreamer thread never calls DoChunkAlways.
+     */
+    public static class PZOChunkStreamQueue extends ConcurrentLinkedQueue<IsoChunk> {
+        @Override
+        public boolean add(IsoChunk chunk) {
+            if (chunk != null && !chunk.loaded) {
+                dispatchChunkTask(chunk);
+            }
+            return true;
+        }
+
+        @Override
+        public boolean offer(IsoChunk chunk) {
+            return add(chunk);
+        }
+
+        @Override
+        public IsoChunk poll() {
+            // Vanilla WorldStreamer will always see an empty queue, preventing DoChunkAlways collisions
+            return null;
+        }
+
+        @Override
+        public IsoChunk peek() {
+            return null;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return true;
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            return false;
+        }
+    }
+
+    private static void hookWorldStreamerQueue(WorldStreamer ws) {
+        if (ws == null || queueHooked) return;
+        try {
+            Field theUnsafeField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            theUnsafeField.setAccessible(true);
+            sun.misc.Unsafe u = (sun.misc.Unsafe) theUnsafeField.get(null);
+
+            Field jqField = WorldStreamer.class.getDeclaredField("jobQueue");
+            long offset = u.objectFieldOffset(jqField);
+
+            @SuppressWarnings("unchecked")
+            ConcurrentLinkedQueue<IsoChunk> oldQueue = (ConcurrentLinkedQueue<IsoChunk>) u.getObject(ws, offset);
+
+            PZOChunkStreamQueue newQueue = new PZOChunkStreamQueue();
+            if (oldQueue != null && !oldQueue.isEmpty()) {
+                IsoChunk c;
+                while ((c = oldQueue.poll()) != null) {
+                    newQueue.add(c);
+                }
+            }
+
+            u.putObject(ws, offset, newQueue);
+            queueHooked = true;
+            PZOLogger.success("[MultiCoreChunkStreamer] Successfully hooked WorldStreamer.jobQueue with zero-latency PZO direct dispatcher");
+        } catch (Throwable t) {
+            PZOLogger.warn("[MultiCoreChunkStreamer] Notice on jobQueue hook: " + t.getMessage());
+        }
+    }
+
     private static void dispatcherLoop() {
         // Bind dispatcher to P-cores
         PZONative.bindCallingThreadToPCores();
@@ -154,6 +227,10 @@ public final class MultiCoreChunkStreamer {
                     continue;
                 }
 
+                if (!queueHooked) {
+                    hookWorldStreamerQueue(ws);
+                }
+
                 @SuppressWarnings("unchecked")
                 Stack<IsoChunk> jobList = (Stack<IsoChunk>) jobListField.get(ws);
                 @SuppressWarnings("unchecked")
@@ -161,8 +238,8 @@ public final class MultiCoreChunkStreamer {
 
                 boolean dispatchedAny = false;
 
-                // 1. Drain ALL pending chunks from jobQueue
-                if (jobQueue != null && !jobQueue.isEmpty()) {
+                // 1. Drain any pending chunks from jobQueue if not yet hooked
+                if (!queueHooked && jobQueue != null && !jobQueue.isEmpty()) {
                     IsoChunk chunk;
                     while ((chunk = jobQueue.poll()) != null) {
                         if (chunk != null && !chunk.loaded) {
@@ -229,7 +306,9 @@ public final class MultiCoreChunkStreamer {
                             if (!chunk.loaded) {
                                 chunk.LoadChunk(chunk.wx, chunk.wy, null);
                                 if (VehiclesDB2.instance != null) {
-                                    VehiclesDB2.instance.loadChunk(chunk);
+                                    try {
+                                        VehiclesDB2.instance.loadChunk(chunk);
+                                    } catch (Throwable ignored) {}
                                 }
                                 if (chunk.refs != null && !chunk.refs.isEmpty()) {
                                     try {
@@ -283,9 +362,11 @@ public final class MultiCoreChunkStreamer {
                 try {
                     chunk.LoadChunk(chunk.wx, chunk.wy, loadedData);
 
-                    // Vehicles DB: In vanilla WorldStreamer.DoChunkAlways, VehiclesDB2.loadChunk is ONLY called if loadedData == null
-                    if (loadedData == null && VehiclesDB2.instance != null) {
-                        VehiclesDB2.instance.loadChunk(chunk);
+                    // Vehicles DB: Always load vehicle instances from vehicles.db for all chunks
+                    if (VehiclesDB2.instance != null) {
+                        try {
+                            VehiclesDB2.instance.loadChunk(chunk);
+                        } catch (Throwable ignored) {}
                     }
 
                     // 3. Handle conversion, soft reset, or link into loadGridSquare
