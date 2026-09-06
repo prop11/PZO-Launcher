@@ -1,5 +1,7 @@
 package com.pzoptimizer;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashSet;
@@ -225,6 +227,8 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
+    private static final byte[] PREWARM_BUF = new byte[16384];
+
     private static void prewarmChunkInOSCache(int wx, int wy) {
         long key = FastChunkKey.pack(wx, wy);
         if (PREWARMED_KEYS.contains(key)) {
@@ -232,6 +236,16 @@ public final class PredictiveChunkStreamer {
         }
         PREWARMED_KEYS.add(key);
         ChunkRetentionRing.touch(wx, wy);
+
+        // Pre-read chunk file into OS memory cache ahead of vehicle arrival
+        try {
+            File chunkFile = zombie.ChunkMapFilenames.instance.getFilename(wx, wy);
+            if (chunkFile != null && chunkFile.exists()) {
+                try (FileInputStream fis = new FileInputStream(chunkFile)) {
+                    fis.read(PREWARM_BUF);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     public static void stop() {

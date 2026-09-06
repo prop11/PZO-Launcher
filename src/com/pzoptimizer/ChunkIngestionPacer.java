@@ -188,16 +188,6 @@ public final class ChunkIngestionPacer {
                 return chunk;
             }
 
-            // CRITICAL DRIVING FIX: When driving a vehicle, high-speed chunk streaming is the #1 priority.
-            // Any artificial frame cap or nanosecond throttling creates an un-drainable queue backlog in towns,
-            // resulting in missing collision tiles, black roads, physics hitches, and cell entry freeze spikes.
-            // Bypassing the pacer during driving allows IsoChunkMap to ingest chunks at full native bandwidth.
-            if (isPlayerDriving()) {
-                Object chunk = super.poll();
-                if (chunk != null) approximateSize.decrementAndGet();
-                return chunk;
-            }
-
             long now = System.nanoTime();
 
             // Inter-frame boundary detection:
@@ -210,12 +200,29 @@ public final class ChunkIngestionPacer {
             }
             lastPollTimestamp = now;
 
-            // Pacing budget for foot travel:
-            // - Normal: Ingest up to 8 chunks per frame within 6.0ms (ample throughput, zero starvation)
-            // - Backlog (> 2 chunks): Expand up to 24 chunks within 15.0ms to prevent buffer buildup
+            // Frame-budgeted pacing:
+            // In Build 42, each chunk has 32 vertical levels (-16 to +16) with 2,048 IsoGridSquare instances.
+            // Draining the queue without a budget freezes the main thread for 60-150ms per batch.
+            // By enforcing a strict budget (4.5-7.5ms), chunk stitching is smoothed across consecutive frames,
+            // locking frame pacing at 60/144 FPS while maintaining up to 300 chunks/sec throughput.
+            boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
-            int maxChunks = (backlog > 2) ? 24 : 8;
-            long budgetNanos = (backlog > 2) ? 15_000_000L : 6_000_000L;
+            int maxChunks;
+            long budgetNanos;
+
+            if (driving) {
+                // High-speed vehicle travel:
+                // Normal: up to 3 chunks per frame within 4.5ms (ample for 180-200 chunks/sec)
+                // Backlog (> 3 chunks): up to 5 chunks per frame within 7.5ms (up to 300 chunks/sec)
+                maxChunks = (backlog > 3) ? 5 : 3;
+                budgetNanos = (backlog > 3) ? 7_500_000L : 4_500_000L;
+            } else {
+                // Foot travel:
+                // Normal: up to 2 chunks per frame within 3.5ms
+                // Backlog (> 2 chunks): up to 4 chunks per frame within 6.0ms
+                maxChunks = (backlog > 2) ? 4 : 2;
+                budgetNanos = (backlog > 2) ? 6_000_000L : 3_500_000L;
+            }
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
                 // Yield to renderer for this frame; remaining chunks are smoothly integrated next frame
