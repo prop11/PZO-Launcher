@@ -47,12 +47,16 @@ public final class VehicleTravelOptimizer {
 
         obtainUnsafe();
         installUnfairChunkLock();
+        installSaveWorkerShield();
         installSimulationGovernor();
     }
 
     public static void checkAndMaintain() {
         if (!unfairLockInstalled) {
             installUnfairChunkLock();
+        }
+        if (!saveShieldInstalled) {
+            installSaveWorkerShield();
         }
         if (!simulationGovernorInstalled) {
             installSimulationGovernor();
@@ -110,27 +114,34 @@ public final class VehicleTravelOptimizer {
      *    ancillary hotsaves while the player is operating a vehicle.
      */
     public static synchronized boolean installSaveWorkerShield() {
-        // Maintained as safe pass-through: ChunkSaveWorker queue interception is disabled
-        // to ensure IsoCell.save() never encounters artificial saving=true busy-wait loops.
+        if (saveShieldInstalled) return true;
+        obtainUnsafe();
+        if (unsafeInstance == null) return false;
+
         try {
             Class<?> cswClass = Class.forName("zombie.iso.ChunkSaveWorker");
             Field instField = cswClass.getField("instance");
             Object cswInstance = instField.get(null);
-            if (cswInstance == null) return true;
+            if (cswInstance == null) return false;
 
             Field queueField = cswClass.getField("toSaveQueue");
-            Object existingQueue = queueField.get(cswInstance);
+            @SuppressWarnings("unchecked")
+            ConcurrentLinkedQueue<Object> existingQueue = (ConcurrentLinkedQueue<Object>) queueField.get(cswInstance);
             if (existingQueue instanceof ShieldedSaveQueue) {
-                obtainUnsafe();
-                if (unsafeInstance != null) {
-                    ConcurrentLinkedQueue<Object> cleanQueue = new ConcurrentLinkedQueue<>((ShieldedSaveQueue) existingQueue);
-                    long offset = unsafeInstance.objectFieldOffset(queueField);
-                    unsafeInstance.putObject(cswInstance, offset, cleanQueue);
-                    PZOLogger.info("[VehicleTravelOptimizer] Restored standard ConcurrentLinkedQueue in ChunkSaveWorker");
-                }
+                saveShieldInstalled = true;
+                return true;
             }
-        } catch (Throwable ignored) {}
-        return true;
+
+            ShieldedSaveQueue shieldedQueue = new ShieldedSaveQueue(existingQueue);
+            long offset = unsafeInstance.objectFieldOffset(queueField);
+            unsafeInstance.putObject(cswInstance, offset, shieldedQueue);
+            saveShieldInstalled = true;
+            PZOLogger.success("[VehicleTravelOptimizer] ChunkSaveWorker Hotsave Shield installed (Eliminated 150ms ancillary save hitch while driving)");
+            return true;
+        } catch (Throwable t) {
+            PZOLogger.warn("[VehicleTravelOptimizer] Save shield install notice: " + t.getMessage());
+        }
+        return false;
     }
 
     private static volatile Class<?> cachedPlayerClass = null;
@@ -384,11 +395,13 @@ public final class VehicleTravelOptimizer {
 
     /**
      * Specialized ConcurrentLinkedQueue that monitors ChunkSaveWorker chunk drains.
+     * Intercepts isEmpty() right after poll() to defer 150ms HotsaveAncilliarySystems()
+     * during active vehicle operation, while keeping saving=false and normal saves 100% functional.
      */
     public static final class ShieldedSaveQueue extends ConcurrentLinkedQueue<Object> {
         private static final long serialVersionUID = 4242L;
 
-        private volatile boolean justPolledLastElement = false;
+        private volatile boolean justPolled = false;
 
         public ShieldedSaveQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
@@ -400,15 +413,24 @@ public final class VehicleTravelOptimizer {
         @Override
         public Object poll() {
             Object item = super.poll();
-            if (item != null && super.isEmpty()) {
-                // We just drained the final chunk in the queue
-                this.justPolledLastElement = true;
-            }
+            justPolled = (item != null);
             return item;
         }
 
         @Override
         public boolean isEmpty() {
+            if (justPolled) {
+                justPolled = false;
+                // This call is from ChunkSaveWorker.Update() line 148 right after writing a chunk
+                if (isPlayerDriving()) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastAncillaryHotsaveTime < ANCILLARY_HOTSAVE_COOLDOWN_MS) {
+                        // Defer 150ms HotsaveAncilliarySystems() freeze while operating vehicle!
+                        return false;
+                    }
+                    lastAncillaryHotsaveTime = now;
+                }
+            }
             return super.isEmpty();
         }
     }
