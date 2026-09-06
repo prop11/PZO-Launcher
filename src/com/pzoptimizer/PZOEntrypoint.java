@@ -88,6 +88,7 @@ public class PZOEntrypoint {
         }
         PowerThrottlingShield.apply();
         KahluaGCPacer.start();
+        LuaInterpreterAccelerator.apply();
         FastPathCache.normalize("media/textures");
         LogRotationGuard.checkAndRotateLogs();
         NettyBufferPooler.apply();
