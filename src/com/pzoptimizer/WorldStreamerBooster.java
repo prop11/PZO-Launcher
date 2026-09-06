@@ -71,7 +71,8 @@ public class WorldStreamerBooster {
                         }
                     }
 
-                    Thread.sleep(1000);
+                    int sleepMs = (streamBoosterInstalled && ChunkIngestionPacer.isPacerInstalled()) ? 5000 : 1000;
+                    Thread.sleep(sleepMs);
                 } catch (Throwable ignored) {
                     try { Thread.sleep(1500); } catch (Throwable ignored2) {}
                 }

@@ -86,7 +86,27 @@ public class PZOEngineBridge {
     }
 
     public static long getBoneTransformsSaved() {
-        return HordeAnimationLODGovernor.getBoneTransformsSaved();
+        return HordeAnimationLODGovernor.getBoneTransformsSaved() + com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
+    }
+
+    public static boolean isMultiCoreActive() {
+        return com.pzoptimizer.multicore.PZOMultiCoreEngine.isMultiCoreActive();
+    }
+
+    public static int getMultiCoreWorkers() {
+        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getWorkerCount();
+    }
+
+    public static long getParallelChunksStreamed() {
+        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelChunksStreamed();
+    }
+
+    public static long getParallelHordeSweeps() {
+        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelHordeSweeps();
+    }
+
+    public static long getParallelSimulatedEntities() {
+        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
     }
 
     public static boolean isBetaOptIn() {

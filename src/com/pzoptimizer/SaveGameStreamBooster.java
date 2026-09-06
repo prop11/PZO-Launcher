@@ -23,6 +23,7 @@ public class SaveGameStreamBooster {
         try {
             // Tune standard I/O buffer properties
             System.setProperty("zomboid.io.buffersize", String.valueOf(OPTIMAL_BUFFER_SIZE));
+            PopTemplateGuard.ensurePopulated();
         } catch (Throwable ignored) {}
 
         // Launch background daemon to apply SQLite WAL mode and memory-mapping when database connections open

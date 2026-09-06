@@ -30,6 +30,9 @@ public final class EnhancedRenderTelemetry {
         public int hordeCulledOffscreen;
         public int hordeHibernating;
         public long throttledTownZombies;
+        public long parallelChunksStreamed;
+        public long parallelSimulatedEntities;
+        public int multiCoreWorkers;
         public double estimatedCpuMsSaved;
         public double estimatedGpuMsSaved;
         public double estimatedFpsGainPercent;
@@ -46,12 +49,15 @@ public final class EnhancedRenderTelemetry {
 
         snap.drawsCulled = RenderFrustumCuller.getCulledCount();
         snap.subterraneanTilesCulled = ZOcclusionCuller.getCulledCount();
-        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount() + HordeAnimationLODGovernor.getBoneTransformsSaved();
+        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount() + HordeAnimationLODGovernor.getBoneTransformsSaved() + com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
         snap.glCallsFiltered = GLStateOptimizer.getGlCallsFiltered();
         snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
         snap.hordeCulledOffscreen = HordeSpatialCuller.lastCulledOffscreenCount.get();
         snap.hordeHibernating = HordeSpatialCuller.lastHibernatingCount.get();
         snap.throttledTownZombies = VehicleTravelOptimizer.throttledTownZombies.get();
+        snap.parallelChunksStreamed = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelChunksStreamed();
+        snap.parallelSimulatedEntities = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
+        snap.multiCoreWorkers = com.pzoptimizer.multicore.PZOMultiCoreEngine.getWorkerCount();
 
         // Hardware cost weightings:
         // ~0.0015 ms CPU time saved per culled draw call + state check
@@ -72,9 +78,10 @@ public final class EnhancedRenderTelemetry {
     public static String toJson() {
         MetricsSnapshot s = getSnapshot();
         return String.format(Locale.US,
-            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"horde_tracked\":%d,\"horde_culled\":%d,\"horde_hibernating\":%d,\"throttled_town_zombies\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
+            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"horde_tracked\":%d,\"horde_culled\":%d,\"horde_hibernating\":%d,\"throttled_town_zombies\":%d,\"parallel_chunks\":%d,\"parallel_simulated\":%d,\"workers\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
             s.isUnstableActive, s.avx2SpatialActive, s.drawsCulled, s.subterraneanTilesCulled, s.boneTransformsSaved, s.glCallsFiltered,
             s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating, s.throttledTownZombies,
+            s.parallelChunksStreamed, s.parallelSimulatedEntities, s.multiCoreWorkers,
             s.estimatedCpuMsSaved, s.estimatedGpuMsSaved, s.estimatedFpsGainPercent);
     }
 
@@ -85,7 +92,10 @@ public final class EnhancedRenderTelemetry {
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("#### Enhanced Rendering & Phase 3 SIMD Telemetry (Unstable Channel)\n");
+        sb.append("#### Enhanced Rendering & Multi-Core Scaling Telemetry (Unstable Channel)\n");
+        sb.append(String.format(Locale.US, "- **P-Core Performance Workers**: %d Threads (Affinity Mask Active)\n", s.multiCoreWorkers));
+        sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks (Zero-Void Multi-Core Streaming)\n", s.parallelChunksStreamed));
+        sb.append(String.format(Locale.US, "- **Spatial Island Parallel Simulation**: %,d entity updates\n", s.parallelSimulatedEntities));
         sb.append(String.format(Locale.US, "- **SIMD AVX2 Spatial Processor**: %s\n", s.avx2SpatialActive ? "ACTIVE (8-wide YMM registers)" : "SCALAR FALLBACK"));
         sb.append(String.format(Locale.US, "- **Horde Zombies Monitored**: %,d (Offscreen Culled: %,d | Hibernating: %,d)\n",
             s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating));
