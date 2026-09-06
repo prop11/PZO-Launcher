@@ -30,6 +30,7 @@ public class ChunkCrashShield {
      */
     public static void enforceChunkGridSanity() {
         try {
+            PopTemplateGuard.ensurePopulated();
             Class<?> chunkMapClass = Class.forName("zombie.iso.IsoChunkMap");
             Field widthField = chunkMapClass.getField("chunkGridWidth");
             int width = widthField.getInt(null);

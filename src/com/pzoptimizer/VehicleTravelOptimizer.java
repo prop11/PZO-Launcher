@@ -47,16 +47,12 @@ public final class VehicleTravelOptimizer {
 
         obtainUnsafe();
         installUnfairChunkLock();
-        installSaveWorkerShield();
         installSimulationGovernor();
     }
 
     public static void checkAndMaintain() {
         if (!unfairLockInstalled) {
             installUnfairChunkLock();
-        }
-        if (!saveShieldInstalled) {
-            installSaveWorkerShield();
         }
         if (!simulationGovernorInstalled) {
             installSimulationGovernor();
@@ -114,41 +110,27 @@ public final class VehicleTravelOptimizer {
      *    ancillary hotsaves while the player is operating a vehicle.
      */
     public static synchronized boolean installSaveWorkerShield() {
-        if (saveShieldInstalled) return true;
-        obtainUnsafe();
-        if (unsafeInstance == null) return false;
-
+        // Maintained as safe pass-through: ChunkSaveWorker queue interception is disabled
+        // to ensure IsoCell.save() never encounters artificial saving=true busy-wait loops.
         try {
             Class<?> cswClass = Class.forName("zombie.iso.ChunkSaveWorker");
             Field instField = cswClass.getField("instance");
             Object cswInstance = instField.get(null);
-            if (cswInstance == null) return false;
+            if (cswInstance == null) return true;
 
             Field queueField = cswClass.getField("toSaveQueue");
             Object existingQueue = queueField.get(cswInstance);
-
             if (existingQueue instanceof ShieldedSaveQueue) {
-                saveShieldInstalled = true;
-                return true;
+                obtainUnsafe();
+                if (unsafeInstance != null) {
+                    ConcurrentLinkedQueue<Object> cleanQueue = new ConcurrentLinkedQueue<>((ShieldedSaveQueue) existingQueue);
+                    long offset = unsafeInstance.objectFieldOffset(queueField);
+                    unsafeInstance.putObject(cswInstance, offset, cleanQueue);
+                    PZOLogger.info("[VehicleTravelOptimizer] Restored standard ConcurrentLinkedQueue in ChunkSaveWorker");
+                }
             }
-
-            @SuppressWarnings("unchecked")
-            ConcurrentLinkedQueue<Object> typedExisting = (ConcurrentLinkedQueue<Object>) existingQueue;
-            ShieldedSaveQueue shieldedQueue = new ShieldedSaveQueue(typedExisting);
-
-            long offset = unsafeInstance.objectFieldOffset(queueField);
-            unsafeInstance.putObject(cswInstance, offset, shieldedQueue);
-
-            Object verified = queueField.get(cswInstance);
-            if (verified instanceof ShieldedSaveQueue) {
-                saveShieldInstalled = true;
-                PZOLogger.success("[VehicleTravelOptimizer] ChunkSaveWorker Travel Shield armed (Main-thread hotsave hitches during driving eliminated)");
-                return true;
-            }
-        } catch (Throwable t) {
-            PZOLogger.warn("[VehicleTravelOptimizer] Save worker shield install notice: " + t.getMessage());
-        }
-        return false;
+        } catch (Throwable ignored) {}
+        return true;
     }
 
     private static volatile Class<?> cachedPlayerClass = null;
@@ -427,21 +409,6 @@ public final class VehicleTravelOptimizer {
 
         @Override
         public boolean isEmpty() {
-            if (justPolledLastElement) {
-                justPolledLastElement = false;
-                long now = System.currentTimeMillis();
-
-                // If player is driving OR less than 60 seconds have passed, skip the ancillary hotsave
-                if (isPlayerDriving() || (now - lastAncillaryHotsaveTime) < ANCILLARY_HOTSAVE_COOLDOWN_MS) {
-                    // Pretend not empty so HotsaveAncilliarySystems() is NOT invoked on the main thread!
-                    return false;
-                }
-
-                // Allowed to hotsave
-                lastAncillaryHotsaveTime = now;
-                return true;
-            }
-
             return super.isEmpty();
         }
     }

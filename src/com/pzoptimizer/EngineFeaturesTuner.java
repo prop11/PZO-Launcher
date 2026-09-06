@@ -101,21 +101,10 @@ public class EngineFeaturesTuner {
                     blendField.setInt(null, 16); // High-fidelity skeletal blending for 16 closest zombies
                 } catch (Throwable ignored) {}
 
-                // Decoupled UI FBO rendering
-                try {
-                    Class<?> coreClass = Class.forName("zombie.core.Core");
-                    Method getInstance = coreClass.getMethod("getInstance");
-                    Object coreInst = getInstance.invoke(null);
-                    if (coreInst != null) {
-                        Method setOptionUIFBO = coreClass.getMethod("setOptionUIFBO", boolean.class);
-                        setOptionUIFBO.invoke(coreInst, true);
-                    }
-                    Class<?> uiMgrClass = Class.forName("zombie.ui.UIManager");
-                    Field useUiFboField = uiMgrClass.getField("useUiFbo");
-                    useUiFboField.setBoolean(null, true);
-                } catch (Throwable ignored) {}
+                // Decoupled UI FBO rendering is left to display initialization to avoid premature TextureFBO probing.
+                PopTemplateGuard.resetFBOState();
 
-                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (15 FPS Lighting | Skeletal Falloff | UI FBO)");
+                PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (15 FPS Lighting | Skeletal Falloff)");
             } catch (Throwable ignored) {}
 
             // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)

@@ -142,8 +142,8 @@ public final class HordeSpatialCuller {
             try {
                 boolean driving = VehicleTravelOptimizer.isPlayerDriving();
                 processSpatialSweep();
-                // Driving throttle: 4 Hz while driving (zero contention with chunk decompression/vehicle physics), ~20 Hz on foot
-                Thread.sleep(driving ? 250 : 50);
+                // Relaxed telemetry sweep: 2 Hz while driving, 4 Hz on foot (eliminates L3 cache contention with main thread)
+                Thread.sleep(driving ? 500 : 250);
             } catch (InterruptedException ie) {
                 break;
             } catch (Throwable ignored) {}

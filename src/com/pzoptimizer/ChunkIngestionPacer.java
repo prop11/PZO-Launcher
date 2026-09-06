@@ -200,55 +200,25 @@ public final class ChunkIngestionPacer {
 
             long now = System.nanoTime();
 
-            // Detect new frame boundary via exact engine frame count
-            long currentFrame = -1;
-            if (!frameCountFieldResolved) {
-                try {
-                    cachedIsoCamera = Class.forName("zombie.iso.IsoCamera");
-                    cachedFrameStateField = cachedIsoCamera.getField("frameState");
-                    Object frameState = cachedFrameStateField.get(null);
-                    if (frameState != null) {
-                        frameCountField = frameState.getClass().getField("frameCount");
-                        frameCountFieldResolved = true;
-                    }
-                } catch (Throwable ignored) {
-                    frameCountFieldResolved = true;
-                }
-            }
-
-            if (frameCountField != null && cachedFrameStateField != null) {
-                try {
-                    Object frameState = cachedFrameStateField.get(null);
-                    if (frameState != null) {
-                        currentFrame = frameCountField.getLong(frameState);
-                    }
-                } catch (Throwable ignored) {}
-            }
-
-            if (currentFrame != -1) {
-                if (currentFrame != lastFrameCount) {
-                    lastFrameCount = currentFrame;
-                    frameStartTime = now;
-                    chunksThisFrame = 0;
-                }
-            } else {
-                // Fallback: gap > 1.5 ms indicates a new frame step
-                if (now - lastPollTimestamp > 1_500_000L) {
-                    frameStartTime = now;
-                    chunksThisFrame = 0;
-                }
+            // Inter-frame boundary detection:
+            // Within a single frame, IsoChunkMap.processAllLoadGridSquare() executes poll() continuously
+            // in a tight microsecond loop (< 0.05 ms). Between frames, rendering and simulation introduce
+            // at least a 3ms to 16ms gap. A gap > 1.0 ms reliably marks the start of a new frame.
+            if (now - lastPollTimestamp > 1_000_000L) {
+                frameStartTime = now;
+                chunksThisFrame = 0;
             }
             lastPollTimestamp = now;
 
             // Pacing budget for foot travel:
-            // - Normal: Allow up to 3 chunks per frame within 3.5ms
-            // - Backlog (> 4 chunks): Expand up to 12 chunks within 8.0ms to drain without hitches
+            // - Normal: Ingest up to 8 chunks per frame within 6.0ms (ample throughput, zero starvation)
+            // - Backlog (> 2 chunks): Expand up to 24 chunks within 15.0ms to prevent buffer buildup
             int backlog = approximateSize.get();
-            int maxChunks = (backlog > 4) ? 12 : 3;
-            long budgetNanos = (backlog > 4) ? 8_000_000L : 3_500_000L;
+            int maxChunks = (backlog > 2) ? 24 : 8;
+            long budgetNanos = (backlog > 2) ? 15_000_000L : 6_000_000L;
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
-                // Return null to end while-loop for this frame; remaining chunks are smoothly integrated next frame
+                // Yield to renderer for this frame; remaining chunks are smoothly integrated next frame
                 return null;
             }
 

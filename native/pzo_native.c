@@ -417,9 +417,8 @@ static BOOL lockProcessWorkingSet(void) {
         maxSize = (total > (SIZE_T)4 * 1024 * 1024 * 1024) ? (total * 3 / 4) : total;
     }
 
-    if (SetProcessWorkingSetSizeEx(GetCurrentProcess(), minSize, maxSize, QUOTA_LIMITS_HARDWS_MIN_ENABLE)) {
-        return TRUE;
-    }
+    // Use soft working set expansion (flag 0) to ensure Windows kernel memory manager
+    // never stalls application threads with hard paging quota suspensions.
     return SetProcessWorkingSetSizeEx(GetCurrentProcess(), minSize, maxSize, 0);
 #elif defined(MCL_CURRENT)
     return (mlockall(MCL_CURRENT) == 0);

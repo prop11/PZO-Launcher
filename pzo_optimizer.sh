@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.8.8-unstable)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.9.0-unstable)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -457,7 +457,7 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.8.8-unstable\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.0-unstable\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 
