@@ -32,6 +32,8 @@ public final class FrameDropDiagnosticEngine {
 
     private static long lastGcCount = 0;
     private static long lastGcTimeMs = 0;
+    private static int lastDiagnosedChunkX = Integer.MIN_VALUE;
+    private static int lastDiagnosedChunkY = Integer.MIN_VALUE;
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     private static final ConcurrentLinkedQueue<String> pendingDiagnosticLogs = new ConcurrentLinkedQueue<>();
     private static long lastDiskFlushTime = 0;
@@ -173,10 +175,20 @@ public final class FrameDropDiagnosticEngine {
 
         } catch (Throwable ignored) {}
 
+        boolean chunkCrossing = (lastDiagnosedChunkX != Integer.MIN_VALUE) && (chunkX != lastDiagnosedChunkX || chunkY != lastDiagnosedChunkY);
+        lastDiagnosedChunkX = chunkX;
+        lastDiagnosedChunkY = chunkY;
+
         // 3. Classify Root Cause
         String cause;
         if (gcDeltaTimeMs > 10 || gcDeltaCount > 0) {
             cause = "GC_STW_PAUSE (" + gcDeltaTimeMs + "ms)";
+        } else if (chunkCrossing) {
+            if (isDriving) {
+                cause = "VEHICLE_CHUNK_CROSSING (Chunk: " + chunkX + "," + chunkY + " | Speed: " + String.format("%.1f", vehicleSpeed) + " km/h)";
+            } else {
+                cause = "FOOT_CHUNK_CROSSING (Chunk: " + chunkX + "," + chunkY + ")";
+            }
         } else if (isDriving && (Math.abs(vehicleSpeed) > 15.0f || wsQueueSize > 2)) {
             cause = "VEHICLE_CHUNK_STREAMING (Speed: " + String.format("%.1f", vehicleSpeed) + " km/h, WS Queue: " + wsQueueSize + ")";
         } else if (saveQueueSize > 5) {
@@ -206,6 +218,11 @@ public final class FrameDropDiagnosticEngine {
             long timeMs = 0;
             List<GarbageCollectorMXBean> gcs = ManagementFactory.getGarbageCollectorMXBeans();
             for (GarbageCollectorMXBean gc : gcs) {
+                String name = gc.getName();
+                if (name != null && name.contains("Cycles")) {
+                    // Ignore concurrent background cycles under ZGC (sub-millisecond STW pause)
+                    continue;
+                }
                 long c = gc.getCollectionCount();
                 if (c > 0) count += c;
                 long t = gc.getCollectionTime();
