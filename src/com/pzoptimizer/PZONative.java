@@ -448,25 +448,39 @@ public class PZONative {
         if (loaded) return true;
 
         String nativeName = NATIVE_LIB_FILENAME;
-        File cwd = new File(".");
-        if (new File(cwd, nativeName).exists()) return true;
-        if (new File(cwd, "win64" + File.separator + nativeName).exists()) return true;
-
+        List<File> searchDirs = new ArrayList<>();
+        searchDirs.add(new File("."));
         try {
             File jarFile = new File(PZONative.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-            if (jarFile.isFile()) {
-                File parent = jarFile.getParentFile();
-                if (new File(parent, nativeName).exists()) return true;
-                if (new File(parent, "win64" + File.separator + nativeName).exists()) return true;
+            if (jarFile.isFile() && jarFile.getParentFile() != null) {
+                searchDirs.add(jarFile.getParentFile());
             }
         } catch (Throwable ignored) {}
+
+        for (File dir : searchDirs) {
+            if (new File(dir, nativeName).exists()) return true;
+            if (IS_WINDOWS) {
+                if (new File(dir, "win64" + File.separator + nativeName).exists()) return true;
+            } else if (IS_LINUX) {
+                if (new File(dir, "linux64" + File.separator + nativeName).exists()) return true;
+                if (new File(dir, "natives" + File.separator + nativeName).exists()) return true;
+            } else if (IS_MAC) {
+                if (new File(dir, "ProjectZomboid.app/Contents/MacOS/" + nativeName).exists()) return true;
+                if (new File(dir, "ProjectZomboid.app/Contents/Java/" + nativeName).exists()) return true;
+                if (new File(dir, "../MacOS/" + nativeName).exists()) return true;
+                if (new File(dir, "../Java/" + nativeName).exists()) return true;
+            }
+        }
 
         return false;
     }
 
     public static String getInstalledNativeVersion() {
         if (!loaded) {
-            return "Not Loaded";
+            if (!isNativeFilePresent()) {
+                return "Not Installed (Missing)";
+            }
+            return "Load Failed (Incompatible/Corrupt)";
         }
         try {
             String ver = getNativeVersion();
