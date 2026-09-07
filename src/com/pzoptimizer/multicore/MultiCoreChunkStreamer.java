@@ -150,56 +150,39 @@ public final class MultiCoreChunkStreamer {
 
     /**
      * Specialized queue installed into WorldStreamer.jobQueue via Unsafe.
-     * Intercepts incoming chunk load requests with 0ms latency and routes them directly
-     * to PZO parallel worker threads, while always returning null on poll()/peek()
-     * so that the vanilla WorldStreamer thread never calls DoChunkAlways.
+     * Intercepts incoming chunk load requests with 0ms latency, triggers asynchronous
+     * parallel disk pre-read and AVX2 decompression across P-Core workers, and immediately
+     * wakes WorldStreamer from its 140ms idle sleep.
      */
     public static class PZOChunkStreamQueue extends ConcurrentLinkedQueue<IsoChunk> {
         @Override
         public boolean add(IsoChunk chunk) {
-            if (chunk != null && !chunk.loaded) {
-                dispatchChunkTask(chunk);
+            if (chunk == null) return false;
+            boolean added = super.add(chunk);
+            if (added && !chunk.loaded) {
+                // 1. Asynchronously pre-read and decompress chunk in background workers
+                com.pzoptimizer.PredictiveChunkStreamer.prewarmChunkDirect(chunk.wx, chunk.wy);
+                // 2. Wake WorldStreamer thread immediately (bypassing the 140ms idle sleep)
+                wakeWorldStreamer();
             }
-            return true;
+            return added;
         }
 
         @Override
         public boolean offer(IsoChunk chunk) {
             return add(chunk);
         }
+    }
 
-        @Override
-        public IsoChunk poll() {
-            // Vanilla WorldStreamer will always see an empty queue, preventing DoChunkAlways collisions
-            return null;
-        }
-
-        @Override
-        public IsoChunk peek() {
-            return null;
-        }
-
-        @Override
-        public boolean isEmpty() {
-            // WorldStreamer.isBusy() relies on jobQueue.isEmpty() to know if background chunk loading is still active!
-            // When chunks are streaming via PZO parallel workers, report not empty so IsoWorld.init() and
-            // GameLoadingState wait for initial cell chunks to finish loading before attempting player creation.
-            return IN_FLIGHT_CHUNKS.isEmpty() && activeChunkWorkers.get() == 0;
-        }
-
-        @Override
-        public int size() {
-            return Math.max(IN_FLIGHT_CHUNKS.size(), activeChunkWorkers.get());
-        }
-
-        @Override
-        public boolean contains(Object o) {
-            return false;
-        }
-
-        @Override
-        public void clear() {
-            super.clear();
+    public static void wakeWorldStreamer() {
+        WorldStreamer ws = WorldStreamer.instance;
+        if (ws != null && worldStreamerThreadField != null) {
+            try {
+                Thread th = (Thread) worldStreamerThreadField.get(ws);
+                if (th != null && th.isAlive() && th.getState() == Thread.State.TIMED_WAITING) {
+                    th.interrupt();
+                }
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -254,41 +237,22 @@ public final class MultiCoreChunkStreamer {
                 @SuppressWarnings("unchecked")
                 ConcurrentLinkedQueue<IsoChunk> jobQueue = (ConcurrentLinkedQueue<IsoChunk>) jobQueueField.get(ws);
 
-                boolean dispatchedAny = false;
-
-                // 1. Drain any pending chunks from jobQueue if not yet hooked
-                if (!queueHooked && jobQueue != null && !jobQueue.isEmpty()) {
-                    IsoChunk chunk;
-                    while ((chunk = jobQueue.poll()) != null) {
-                        if (chunk != null && !chunk.loaded) {
-                            dispatchChunkTask(chunk);
-                            dispatchedAny = true;
-                        }
-                    }
-                }
-
-                // 2. Drain ALL pending chunks from jobList stack
-                if (jobList != null && !jobList.isEmpty()) {
-                    List<IsoChunk> batch = new ArrayList<>();
-                    synchronized (jobList) {
-                        while (!jobList.isEmpty()) {
-                            IsoChunk top = jobList.pop();
-                            if (top != null && !top.loaded) {
-                                batch.add(top);
+                boolean hasPending = (jobQueue != null && !jobQueue.isEmpty()) || (jobList != null && !jobList.isEmpty());
+                if (hasPending) {
+                    wakeWorldStreamer();
+                    if (jobList != null && !jobList.isEmpty()) {
+                        synchronized (jobList) {
+                            for (int i = 0; i < jobList.size(); i++) {
+                                IsoChunk c = jobList.get(i);
+                                if (c != null && !c.loaded) {
+                                    com.pzoptimizer.PredictiveChunkStreamer.prewarmChunkDirect(c.wx, c.wy);
+                                }
                             }
                         }
                     }
-
-                    for (IsoChunk chunk : batch) {
-                        dispatchChunkTask(chunk);
-                        dispatchedAny = true;
-                    }
                 }
 
-                // Ultra-low latency polling: 2ms if chunks were dispatched, 8ms if idle.
-                // NOTE: We deliberately do NOT interrupt the vanilla WorldStreamer thread.
-                // Leaving WorldStreamer in its natural 140ms sleep guarantees it never races with workers.
-                Thread.sleep(dispatchedAny ? 2 : 8);
+                Thread.sleep(hasPending ? 5 : 25);
 
             } catch (InterruptedException ie) {
                 break;
@@ -416,15 +380,11 @@ public final class MultiCoreChunkStreamer {
                         chunk.doLoadGridsquare();
                         chunk.loaded = true;
                     } else {
-                        // Pre-instantiate ground squares and neighbor level bounds in background worker threads
-                        try {
-                            chunk.loadInWorldStreamerThread();
-                        } catch (Throwable ignored) {}
-
-                        try {
-                            chunk.loadInMainThread();
-                        } catch (Throwable ignored) {}
-
+                        if (chunk.refs != null && !chunk.refs.isEmpty()) {
+                            try {
+                                chunk.loadInWorldStreamerThread();
+                            } catch (Throwable ignored) {}
+                        }
                         IsoChunk.loadGridSquare.add(chunk);
                     }
                 } finally {

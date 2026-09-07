@@ -223,15 +223,26 @@ public final class ChunkIngestionPacer {
             }
             lastPollTimestamp = now;
 
-            // Strict frame-budgeted chunk pacing:
-            // In Build 42, each chunk has 32 vertical levels (-16 to +16) with 2,048 IsoGridSquare instances.
-            // Executing doLoadGridsquare() on more than 1 chunk per frame causes immediate 30-55ms frame hitch spikes.
-            // Enforcing at most 1 chunk per frame during active gameplay completely eliminates multi-chunk spikes,
-            // while still delivering 60-144 chunks/sec throughput (which is >15x to 35x faster than top vehicle speed).
+            // Balanced frame-budgeted chunk pacing:
+            // Allows rapid column integration (up to 6-12 chunks on foot, 8-16 while driving)
+            // within a safe 6.0-12.0ms frame budget. This allows 13-chunk boundary crossings to integrate
+            // in 1-2 frames instead of dragging over 13 frames of missing neighbors and stutter.
             boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
-            int maxChunks = (driving && backlog > 16) ? 2 : 1;
-            long budgetNanos = (driving && backlog > 16) ? 4_500_000L : 3_000_000L;
+            int maxChunks;
+            long budgetNanos;
+
+            if (driving) {
+                // High-speed vehicle travel: Rapid ingestion to eliminate road void pop-in and vehicle physics hitches
+                maxChunks = (backlog > 4) ? 16 : 8;
+                budgetNanos = (backlog > 4) ? 12_000_000L : 8_000_000L;
+            } else {
+                // Foot travel:
+                // Normal: up to 6 chunks per frame within 6.0ms (ample throughput, column integrates in 2 frames)
+                // Backlog (> 3 chunks): up to 12 chunks within 10.0ms to prevent queue buildup
+                maxChunks = (backlog > 3) ? 12 : 6;
+                budgetNanos = (backlog > 3) ? 10_000_000L : 6_000_000L;
+            }
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
                 // Yield to renderer for this frame; remaining chunks are smoothly integrated next frame
