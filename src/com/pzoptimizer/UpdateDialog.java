@@ -4,6 +4,8 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Project Zomboid Build 42 - Pre-Menu Native Interactive Update Prompt & Self-Updater.
@@ -72,8 +74,8 @@ public class UpdateDialog {
             installedVersion, expectedVersion
         ));
 
-        if (dllDownloadUrl == null || dllDownloadUrl.isEmpty()) {
-            dllDownloadUrl = UpdateChecker.getDefaultNativeDownloadUrl();
+        if (dllDownloadUrl == null || dllDownloadUrl.isEmpty() || dllDownloadUrl.contains("/releases/latest/")) {
+            dllDownloadUrl = UpdateChecker.resolveNativeDownloadUrl(expectedVersion, 2500);
         }
 
         try {
@@ -342,12 +344,46 @@ public class UpdateDialog {
             File currentNative = new File(gameDir, nativeFileName);
             File newNative = new File(gameDir, nativeFileName + ".new");
 
-            PZOLogger.info("Downloading native library from: " + dllDownloadUrl);
-            boolean downloaded = downloadFileWithRedirects(dllDownloadUrl, newNative);
+            // Build prioritized candidate URL list
+            List<String> candidateUrls = new ArrayList<>();
+            if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
+                candidateUrls.add(dllDownloadUrl);
+            }
+            String resolved = UpdateChecker.resolveNativeDownloadUrl(targetVersion, 2500);
+            if (resolved != null && !candidateUrls.contains(resolved)) {
+                candidateUrls.add(resolved);
+            }
+            String cleanVer = targetVersion.trim();
+            String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
+            String directUrl = "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFileName;
+            if (!candidateUrls.contains(directUrl)) {
+                candidateUrls.add(directUrl);
+            }
+            String lowerVTag = "v" + cleanVer.replaceFirst("^[vV]", "");
+            String directLowerUrl = "https://github.com/prop11/PZO-Launcher/releases/download/" + lowerVTag + "/" + nativeFileName;
+            if (!candidateUrls.contains(directLowerUrl)) {
+                candidateUrls.add(directLowerUrl);
+            }
+            String rawTagUrl = "https://github.com/prop11/PZO-Launcher/releases/download/" + cleanVer + "/" + nativeFileName;
+            if (!candidateUrls.contains(rawTagUrl)) {
+                candidateUrls.add(rawTagUrl);
+            }
+
+            boolean downloaded = false;
+            for (String tryUrl : candidateUrls) {
+                PZOLogger.info("Attempting native library download from: " + tryUrl);
+                if (downloadFileWithRedirects(tryUrl, newNative) && newNative.exists() && newNative.length() > 1000) {
+                    downloaded = true;
+                    PZOLogger.success("Successfully downloaded " + newNative.length() + " bytes to " + newNative.getAbsolutePath() + " from: " + tryUrl);
+                    break;
+                } else {
+                    if (newNative.exists()) newNative.delete();
+                }
+            }
 
             if (!downloaded || !newNative.exists() || newNative.length() < 1000) {
                 if (newNative.exists()) newNative.delete();
-                PZOLogger.error("Failed to download native library from: " + dllDownloadUrl);
+                PZOLogger.error("Failed to download native library from all candidate sources.");
                 showNoticePopup("Update Notice", "Could not download " + nativeFileName + " from GitHub Releases.\nPlease run install.bat to update manually.");
                 return;
             }
@@ -416,13 +452,34 @@ public class UpdateDialog {
             File currentJar = new File("PZOptimEngine.jar").getAbsoluteFile();
             File newJar = new File("PZOptimEngine.jar.new").getAbsoluteFile();
 
-            PZOLogger.info("Downloading latest PZOptimEngine.jar from: " + downloadUrl);
-            boolean jarOk = downloadFileWithRedirects(downloadUrl, newJar);
-            if (!jarOk || newJar.length() < 10000) {
+            String cleanVer = latestVersion != null ? latestVersion.trim() : UpdateChecker.CURRENT_VERSION;
+            String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
+
+            List<String> jarCandidates = new ArrayList<>();
+            if (downloadUrl != null && !downloadUrl.isEmpty() && !downloadUrl.contains("/releases/latest/")) {
+                jarCandidates.add(downloadUrl);
+            }
+            jarCandidates.add("https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/PZOptimEngine.jar");
+            jarCandidates.add("https://github.com/prop11/PZO-Launcher/releases/download/v" + cleanVer.replaceFirst("^[vV]", "") + "/PZOptimEngine.jar");
+            jarCandidates.add("https://github.com/prop11/PZO-Launcher/releases/download/" + cleanVer + "/PZOptimEngine.jar");
+            jarCandidates.add("https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar");
+
+            boolean jarOk = false;
+            for (String tryJar : jarCandidates) {
+                PZOLogger.info("Downloading latest PZOptimEngine.jar from: " + tryJar);
+                if (downloadFileWithRedirects(tryJar, newJar) && newJar.exists() && newJar.length() > 10000) {
+                    jarOk = true;
+                    PZOLogger.success("Downloaded " + newJar.length() + " bytes to " + newJar.getAbsolutePath());
+                    break;
+                } else {
+                    if (newJar.exists()) newJar.delete();
+                }
+            }
+
+            if (!jarOk || !newJar.exists() || newJar.length() < 10000) {
                 showNoticePopup("Update Notice", "Automatic download failed for PZOptimEngine.jar. You can update manually using install.bat.");
                 return;
             }
-            PZOLogger.success("Downloaded " + newJar.length() + " bytes to " + newJar.getAbsolutePath());
 
             // Handle Native Companion Library (.dll / .so / .dylib)
             String os = System.getProperty("os.name", "").toLowerCase();
@@ -434,17 +491,36 @@ public class UpdateDialog {
             File newNative = new File(nativeFileName + ".new").getAbsoluteFile();
             boolean hasNewNative = false;
 
-            if (dllDownloadUrl == null || dllDownloadUrl.isEmpty()) {
-                dllDownloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/" + nativeFileName;
+            List<String> nativeCandidates = new ArrayList<>();
+            if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
+                nativeCandidates.add(dllDownloadUrl);
+            }
+            String resolvedNative = UpdateChecker.resolveNativeDownloadUrl(latestVersion, 2500);
+            if (resolvedNative != null && !nativeCandidates.contains(resolvedNative)) {
+                nativeCandidates.add(resolvedNative);
+            }
+            String directNativeUrl = "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFileName;
+            if (!nativeCandidates.contains(directNativeUrl)) {
+                nativeCandidates.add(directNativeUrl);
+            }
+            String directNativeLowerUrl = "https://github.com/prop11/PZO-Launcher/releases/download/v" + cleanVer.replaceFirst("^[vV]", "") + "/" + nativeFileName;
+            if (!nativeCandidates.contains(directNativeLowerUrl)) {
+                nativeCandidates.add(directNativeLowerUrl);
             }
 
-            PZOLogger.info("Downloading latest " + nativeFileName + " from: " + dllDownloadUrl);
-            boolean nativeOk = downloadFileWithRedirects(dllDownloadUrl, newNative);
-            if (nativeOk && newNative.length() > 5000) {
-                hasNewNative = true;
-                PZOLogger.success("Downloaded " + newNative.length() + " bytes to " + newNative.getAbsolutePath());
-            } else {
-                PZOLogger.warn("Notice: " + nativeFileName + " could not be downloaded; proceeding with JAR update.");
+            for (String tryNative : nativeCandidates) {
+                PZOLogger.info("Downloading latest " + nativeFileName + " from: " + tryNative);
+                if (downloadFileWithRedirects(tryNative, newNative) && newNative.exists() && newNative.length() > 5000) {
+                    hasNewNative = true;
+                    PZOLogger.success("Downloaded " + newNative.length() + " bytes to " + newNative.getAbsolutePath());
+                    break;
+                } else {
+                    if (newNative.exists()) newNative.delete();
+                }
+            }
+
+            if (!hasNewNative) {
+                PZOLogger.warn("Notice: " + nativeFileName + " could not be downloaded from candidate sources; proceeding with JAR update.");
                 if (newNative.exists()) newNative.delete();
             }
 
@@ -512,37 +588,58 @@ public class UpdateDialog {
         }
     }
 
-    private static boolean downloadFileWithRedirects(String fileUrl, File targetFile) {
-        try {
-            URL url = new URL(fileUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestProperty("User-Agent", "PZO-UpdateClient");
-            conn.setConnectTimeout(8000);
-            conn.setReadTimeout(30000);
-            conn.setInstanceFollowRedirects(true);
-
-            int code = conn.getResponseCode();
-            if (code == HttpURLConnection.HTTP_MOVED_PERM || code == HttpURLConnection.HTTP_MOVED_TEMP || code == 307 || code == 308) {
-                String newUrl = conn.getHeaderField("Location");
-                conn = (HttpURLConnection) new URL(newUrl).openConnection();
+    private static boolean downloadFileWithRedirects(String initialUrl, File targetFile) {
+        String currentUrl = initialUrl;
+        int maxRedirects = 7;
+        for (int i = 0; i < maxRedirects; i++) {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(currentUrl);
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestProperty("User-Agent", "PZO-UpdateClient");
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(30000);
-            }
+                conn.setRequestProperty("Accept", "*/*");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(60000);
+                conn.setInstanceFollowRedirects(false);
 
-            try (InputStream in = conn.getInputStream();
-                 FileOutputStream out = new FileOutputStream(targetFile)) {
-                byte[] buffer = new byte[16384];
-                int bytesRead;
-                while ((bytesRead = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, bytesRead);
+                int code = conn.getResponseCode();
+                if (code == HttpURLConnection.HTTP_MOVED_PERM || code == HttpURLConnection.HTTP_MOVED_TEMP
+                    || code == HttpURLConnection.HTTP_SEE_OTHER || code == 307 || code == 308) {
+                    String location = conn.getHeaderField("Location");
+                    if (location != null && !location.isEmpty()) {
+                        URL base = new URL(currentUrl);
+                        URL next = new URL(base, location);
+                        currentUrl = next.toExternalForm();
+                        conn.disconnect();
+                        continue;
+                    }
+                }
+
+                if (code == HttpURLConnection.HTTP_OK) {
+                    try (InputStream in = conn.getInputStream();
+                         FileOutputStream out = new FileOutputStream(targetFile)) {
+                        byte[] buffer = new byte[32768];
+                        int bytesRead;
+                        while ((bytesRead = in.read(buffer)) != -1) {
+                            out.write(buffer, 0, bytesRead);
+                        }
+                        out.flush();
+                    }
+                    return targetFile.exists() && targetFile.length() > 0;
+                } else {
+                    PZOLogger.warn("Download HTTP status " + code + " from: " + currentUrl);
+                    return false;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("Download attempt error for " + currentUrl + ": " + t.getMessage());
+                return false;
+            } finally {
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Throwable ignored) {}
                 }
             }
-            return targetFile.exists() && targetFile.length() > 0;
-        } catch (Throwable t) {
-            PZOLogger.warn("Download error for " + fileUrl + ": " + t.getMessage());
-            return false;
         }
+        return false;
     }
 
     private static void showNoticePopup(String title, String message) {
