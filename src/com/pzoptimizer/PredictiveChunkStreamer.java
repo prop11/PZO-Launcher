@@ -253,15 +253,20 @@ public final class PredictiveChunkStreamer {
                     if (chunkFile != null && chunkFile.exists()) {
                         long len = chunkFile.length();
                         if (len > 0 && len < 2_097_152L) { // Under 2 MB
-                            try (FileInputStream fis = new FileInputStream(chunkFile)) {
-                                byte[] data = fis.readAllBytes();
-                                if (data != null && data.length > 0) {
-                                    if (PRELOADED_CHUNKS.size() > MAX_PRELOADED_CHUNKS) {
-                                        PRELOADED_CHUNKS.clear();
-                                    }
-                                    PRELOADED_CHUNKS.put(key, data);
-                                    preloadedChunksFetched.incrementAndGet();
+                            byte[] data = new byte[(int) len];
+                            int bytesRead = PZONative.readChunkFile(chunkFile.getAbsolutePath(), data, (int) len);
+                            if (bytesRead <= 0) {
+                                try (FileInputStream fis = new FileInputStream(chunkFile)) {
+                                    data = fis.readAllBytes();
+                                    bytesRead = data != null ? data.length : -1;
                                 }
+                            }
+                            if (data != null && bytesRead > 0) {
+                                if (PRELOADED_CHUNKS.size() > MAX_PRELOADED_CHUNKS) {
+                                    PRELOADED_CHUNKS.clear();
+                                }
+                                PRELOADED_CHUNKS.put(key, data);
+                                preloadedChunksFetched.incrementAndGet();
                             }
                         }
                     }

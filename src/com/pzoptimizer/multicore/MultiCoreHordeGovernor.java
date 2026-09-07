@@ -45,6 +45,9 @@ public final class MultiCoreHordeGovernor {
     private static final byte[] SNAPSHOT_TIERS = new byte[MAX_ENTITIES];
     private static final byte[] SNAPSHOT_MASK = new byte[MAX_ENTITIES];
     private static final float[] SNAPSHOT_DISTANCES = new float[MAX_ENTITIES];
+    private static final byte[] SNAPSHOT_FOV = new byte[MAX_ENTITIES];
+    private static final float[] SNAPSHOT_REPULSION = new float[MAX_ENTITIES * 2];
+    public static final AtomicInteger lastVisibleCount = new AtomicInteger(0);
     private static volatile int snapshotCount = 0;
 
     // Thresholds
@@ -53,11 +56,19 @@ public final class MultiCoreHordeGovernor {
     public static final float TIER_FAR_SQ = 50.0f * 50.0f;      // 2500 tiles^2 (LOD 2)
     public static final float CAMERA_HALF_SPAN = 50.0f;         // 100x100 tile camera safety AABB
 
+    public static final float FOV_DIST_SQ = 24.0f * 24.0f;       // 576 tiles^2 awareness range
+    public static final float COS_HALF_FOV = 0.70710678f;        // 90-degree field-of-view cone (+/- 45 deg)
+    public static final float CLOSE_AWARE_SQ = 2.5f * 2.5f;      // 360-degree awareness within 2.5 tiles
+    public static final float SEPARATION_RADIUS = 1.25f;         // 1.25 tiles crowd repulsion radius
+    public static final float MAX_REPULSION_FORCE = 0.08f;       // Steering nudge clamp
+
     // Cached Reflection Handles
     private static Field fieldX = null;
     private static Field fieldY = null;
     private static Method methodGetX = null;
     private static Method methodGetY = null;
+    private static Method methodGetForwardX = null;
+    private static Method methodGetForwardY = null;
     private static Method playerGetInstMethod = null;
     private static Field worldInstField = null;
     private static Field cellField = null;
@@ -112,6 +123,12 @@ public final class MultiCoreHordeGovernor {
             Class<?> cellClass = Class.forName("zombie.iso.IsoCell");
             cellGetZombiesMethod = cellClass.getMethod("getZombieList");
 
+            try {
+                Class<?> charClass = Class.forName("zombie.characters.IsoGameCharacter");
+                methodGetForwardX = charClass.getMethod("getForwardDirectionX");
+                methodGetForwardY = charClass.getMethod("getForwardDirectionY");
+            } catch (Throwable ignored) {}
+
             reflectionResolved = true;
         } catch (Throwable t) {
             PZOLogger.warn("[MultiCoreHordeGovernor] Reflection notice: " + t.getMessage());
@@ -134,6 +151,22 @@ public final class MultiCoreHordeGovernor {
             if (methodGetY != null) return ((Number) methodGetY.invoke(obj)).floatValue();
         } catch (Throwable ignored) {}
         return 0.0f;
+    }
+
+    private static float getObjectForwardX(Object obj) {
+        if (obj == null || methodGetForwardX == null) return 0.0f;
+        try {
+            return ((Number) methodGetForwardX.invoke(obj)).floatValue();
+        } catch (Throwable ignored) {}
+        return 0.0f;
+    }
+
+    private static float getObjectForwardY(Object obj) {
+        if (obj == null || methodGetForwardY == null) return 1.0f;
+        try {
+            return ((Number) methodGetForwardY.invoke(obj)).floatValue();
+        } catch (Throwable ignored) {}
+        return 1.0f;
     }
 
     private static void governorLoop() {
@@ -198,17 +231,25 @@ public final class MultiCoreHordeGovernor {
             FloatBuffer distBuf = SpatialBufferPool.getDistanceBuffer();
             ByteBuffer maskBuf = SpatialBufferPool.getCullMaskBuffer();
             ByteBuffer tiersBuf = SpatialBufferPool.getTiersBuffer();
+            FloatBuffer headingBuf = SpatialBufferPool.getHeadingBuffer();
+            ByteBuffer fovBuf = SpatialBufferPool.getFovMaskBuffer();
+            FloatBuffer repulsionBuf = SpatialBufferPool.getRepulsionBuffer();
 
-            // Populate coordinates sequentially (fast memory write)
+            // Populate coordinates and headings sequentially (fast memory write)
             coordBuf.rewind();
+            headingBuf.rewind();
             for (int i = 0; i < count; i++) {
                 Object z = zombies.get(i);
                 if (z != null) {
                     coordBuf.put(i * 2, getObjectX(z));
                     coordBuf.put(i * 2 + 1, getObjectY(z));
+                    headingBuf.put(i * 2, getObjectForwardX(z));
+                    headingBuf.put(i * 2 + 1, getObjectForwardY(z));
                 } else {
                     coordBuf.put(i * 2, 0.0f);
                     coordBuf.put(i * 2 + 1, 0.0f);
+                    headingBuf.put(i * 2, 0.0f);
+                    headingBuf.put(i * 2 + 1, 1.0f);
                 }
             }
 
@@ -226,6 +267,7 @@ public final class MultiCoreHordeGovernor {
                 PZONative.calculateDistancesAVX2(coordBuf, count, px, py, distBuf);
                 PZONative.classifyTiersAVX2(coordBuf, count, px, py, TIER_CLOSE_SQ, TIER_MEDIUM_SQ, TIER_FAR_SQ, tiersBuf);
                 PZONative.cullAABBAVX2(coordBuf, count, minX, minY, maxX, maxY, maskBuf);
+                PZONative.calculateFovAVX2(coordBuf, headingBuf, count, px, py, FOV_DIST_SQ, COS_HALF_FOV, CLOSE_AWARE_SQ, fovBuf);
             } else {
                 // Multi-core parallel SIMD execution
                 List<CompletableFuture<Void>> futures = new ArrayList<>(numPartitions);
@@ -239,6 +281,10 @@ public final class MultiCoreHordeGovernor {
                         subCoords.position(startIdx * 2);
                         FloatBuffer partCoords = subCoords.slice();
 
+                        FloatBuffer subHeadings = headingBuf.duplicate();
+                        subHeadings.position(startIdx * 2);
+                        FloatBuffer partHeadings = subHeadings.slice();
+
                         FloatBuffer subDist = distBuf.duplicate();
                         subDist.position(startIdx);
                         FloatBuffer partDist = subDist.slice();
@@ -251,13 +297,25 @@ public final class MultiCoreHordeGovernor {
                         subMask.position(startIdx);
                         ByteBuffer partMask = subMask.slice();
 
+                        ByteBuffer subFov = fovBuf.duplicate();
+                        subFov.position(startIdx);
+                        ByteBuffer partFov = subFov.slice();
+
                         PZONative.calculateDistancesAVX2(partCoords, partLen, px, py, partDist);
                         PZONative.classifyTiersAVX2(partCoords, partLen, px, py, TIER_CLOSE_SQ, TIER_MEDIUM_SQ, TIER_FAR_SQ, partTiers);
                         PZONative.cullAABBAVX2(partCoords, partLen, minX, minY, maxX, maxY, partMask);
+                        PZONative.calculateFovAVX2(partCoords, partHeadings, partLen, px, py, FOV_DIST_SQ, COS_HALF_FOV, CLOSE_AWARE_SQ, partFov);
                     }, PZOMultiCoreEngine.getExecutor()));
                 }
 
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            }
+
+            // SIMD Crowd Flocking & Separation Vector Accelerator across nearby entities
+            if (count >= 2) {
+                PZONative.calculateRepulsionAVX2(coordBuf, count, SEPARATION_RADIUS, MAX_REPULSION_FORCE, repulsionBuf);
+                repulsionBuf.rewind();
+                repulsionBuf.get(SNAPSHOT_REPULSION, 0, count * 2);
             }
 
             // Transfer directly into snapshot arrays for instant thread-safe lookups
@@ -270,18 +328,24 @@ public final class MultiCoreHordeGovernor {
             maskBuf.rewind();
             maskBuf.get(SNAPSHOT_MASK, 0, count);
 
+            fovBuf.rewind();
+            fovBuf.get(SNAPSHOT_FOV, 0, count);
+
             snapshotCount = count;
 
             int culled = 0;
             int hibernating = 0;
+            int visible = 0;
             for (int i = 0; i < count; i++) {
                 if (SNAPSHOT_MASK[i] == 0) culled++;
                 if (SNAPSHOT_TIERS[i] >= 2) hibernating++;
+                if (SNAPSHOT_FOV[i] != 0) visible++;
             }
 
             lastTrackedZombieCount.set(count);
             lastCulledOffscreenCount.set(culled);
             lastHibernatingCount.set(hibernating);
+            lastVisibleCount.set(visible);
 
             long sweepDuration = System.nanoTime() - sweepStart;
             totalParallelSweeps.incrementAndGet();
@@ -306,6 +370,25 @@ public final class MultiCoreHordeGovernor {
     public static float getEntityDistance(int index) {
         if (index < 0 || index >= snapshotCount) return 0.0f;
         return SNAPSHOT_DISTANCES[index];
+    }
+
+    public static boolean hasLineOfSightToPlayer(int index) {
+        if (index < 0 || index >= snapshotCount) return false;
+        return SNAPSHOT_FOV[index] != 0;
+    }
+
+    public static float getRepulsionForceX(int index) {
+        if (index < 0 || index >= snapshotCount) return 0.0f;
+        return SNAPSHOT_REPULSION[index * 2];
+    }
+
+    public static float getRepulsionForceY(int index) {
+        if (index < 0 || index >= snapshotCount) return 0.0f;
+        return SNAPSHOT_REPULSION[index * 2 + 1];
+    }
+
+    public static int getLastVisibleCount() {
+        return lastVisibleCount.get();
     }
 
     public static int getSnapshotCount() {
