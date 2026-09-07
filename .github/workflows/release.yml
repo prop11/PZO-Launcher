@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'V*'
     branches:
       - main
       - Unstable
@@ -69,7 +70,7 @@ jobs:
     name: Publish GitHub Release
     needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     steps:
