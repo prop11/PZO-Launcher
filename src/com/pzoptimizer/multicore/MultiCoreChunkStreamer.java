@@ -156,21 +156,21 @@ public final class MultiCoreChunkStreamer {
      */
     public static class PZOChunkStreamQueue extends ConcurrentLinkedQueue<IsoChunk> {
         @Override
-        public boolean add(IsoChunk chunk) {
+        public boolean offer(IsoChunk chunk) {
             if (chunk == null) return false;
-            boolean added = super.add(chunk);
-            if (added && !chunk.loaded) {
+            boolean offered = super.offer(chunk);
+            if (offered && !chunk.loaded) {
                 // 1. Asynchronously pre-read and decompress chunk in background workers
                 com.pzoptimizer.PredictiveChunkStreamer.prewarmChunkDirect(chunk.wx, chunk.wy);
                 // 2. Wake WorldStreamer thread immediately (bypassing the 140ms idle sleep)
                 wakeWorldStreamer();
             }
-            return added;
+            return offered;
         }
 
         @Override
-        public boolean offer(IsoChunk chunk) {
-            return add(chunk);
+        public boolean add(IsoChunk chunk) {
+            return offer(chunk);
         }
     }
 
