@@ -187,3 +187,4 @@ cython_debug/
 
 # Local build script
 build_all.py
+build_native.bat
