@@ -67,16 +67,16 @@ public class EngineThreadGovernor {
                     tryHookRenderThread();
                 }
 
-                // Try hooking MainThread if not yet optimized
-                if (!mainThreadOptimized) {
+                // Try hooking MainThread if not yet fully optimized and paced
+                if (!mainThreadOptimized || !mainThreadPacerHooked) {
                     tryHookMainThread();
                 }
 
                 // Maintain background workers (LightingThread, PathfindNativeThread, WorldStreamer)
                 maintainWorkerThreads();
 
-                // Once both primary threads are optimized, relax polling to 5000ms
-                if (renderThreadOptimized && mainThreadOptimized) {
+                // Once primary threads are optimized and paced, relax polling to 5000ms
+                if (renderThreadOptimized && mainThreadOptimized && mainThreadPacerHooked) {
                     backoffMs = 5000;
                 } else {
                     backoffMs = Math.min(backoffMs + 200, 1000);
@@ -123,6 +123,8 @@ public class EngineThreadGovernor {
         } catch (Throwable ignored) {}
     }
 
+    private static volatile boolean mainThreadPacerHooked = false;
+
     /**
      * Dispatches a Runnable directly into the Main Simulation Thread queue.
      * When executed on the Main Thread, native scheduler boosts are applied.
@@ -133,7 +135,7 @@ public class EngineThreadGovernor {
             Method isRunningMethod = mainThreadClass.getMethod("isRunning");
             boolean isRunning = (boolean) isRunningMethod.invoke(null);
 
-            if (isRunning) {
+            if (isRunning && !mainThreadOptimized) {
                 mainThreadOptimized = true;
                 Method queueMethod = mainThreadClass.getMethod("queueInvokeOnMainThread", Runnable.class);
                 queueMethod.invoke(null, (Runnable) () -> {
@@ -152,7 +154,53 @@ public class EngineThreadGovernor {
                     }
                 });
             }
+
+            // Hook MainThread.mainThreadLoop with Nanosecond EngineFramePacer
+            if (!mainThreadPacerHooked) {
+                try {
+                    Field loopField = mainThreadClass.getDeclaredField("mainThreadLoop");
+                    loopField.setAccessible(true);
+                    Runnable origLoop = (Runnable) loopField.get(null);
+                    if (origLoop != null && !(origLoop instanceof PacedMainThreadLoop)) {
+                        loopField.set(null, new PacedMainThreadLoop(origLoop));
+                        mainThreadPacerHooked = true;
+                        PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Nanosecond EngineFramePacer (Zero-Jitter Frame Clock)");
+                    }
+                } catch (Throwable t) {
+                    // Non-fatal if field not yet assigned
+                }
+            }
         } catch (Throwable ignored) {}
+    }
+
+    public static class PacedMainThreadLoop implements Runnable {
+        private final Runnable target;
+
+        public PacedMainThreadLoop(Runnable target) {
+            this.target = target;
+        }
+
+        @Override
+        public void run() {
+            long frameStart = System.nanoTime();
+            try {
+                target.run();
+            } finally {
+                try {
+                    int lockFps = zombie.core.PerformanceSettings.getLockFPS();
+                    boolean uncapped = false;
+                    try {
+                        if (zombie.core.PerformanceSettings.instance != null) {
+                            uncapped = zombie.core.PerformanceSettings.instance.isFramerateUncapped();
+                        }
+                    } catch (Throwable ignored) {}
+                    if (lockFps > 0 && !uncapped) {
+                        EngineFramePacer.setTargetFps(lockFps);
+                        EngineFramePacer.paceFrame(frameStart);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
     }
 
     /**

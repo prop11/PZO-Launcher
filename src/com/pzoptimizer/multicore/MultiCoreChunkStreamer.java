@@ -362,22 +362,28 @@ public final class MultiCoreChunkStreamer {
     public static void processChunkParallel(IsoChunk chunk) {
         if (chunk == null || chunk.loaded) return;
 
-        // 0. Save Barrier: If ChunkSaveWorker has uncommitted writes for this chunk, flush to disk first
-        if (ChunkSaveWorker.instance != null) {
-            try {
-                ChunkSaveWorker.instance.Update(chunk);
-            } catch (Throwable ignored) {}
-        }
+        // Note: Save/load mutual exclusion is natively guaranteed by IsoChunk.acquireLock(wx, wy),
+        // and background saves are safely handled by WorldStreamer. Calling ChunkSaveWorker.Update here
+        // caused MainThread freezes and non-thread-safe SaveBufferMap race conditions.
 
         ByteBuffer workerBuf = DIRECT_CHUNK_BUFFER.get();
         workerBuf.clear();
 
         try {
             // 1. Parallel Disk I/O & Decompression via IsoChunk.SafeRead (uses fine-grained per-chunk locks)
-            // Existing chunks on disk are read and decompressed 100% concurrently across all worker threads.
-            // Brand new unvisited chunks bypass disk read and initialize directly via LoadBrandNew.
+            // Checks Predictive Trajectory Preloaded Cache first: 0ms in-memory cache hit!
             ByteBuffer loadedData = null;
-            if (IsoChunk.FileExists(chunk.wx, chunk.wy)) {
+            byte[] preloaded = com.pzoptimizer.PredictiveChunkStreamer.pollPreloadedChunk(chunk.wx, chunk.wy);
+            if (preloaded != null) {
+                workerBuf.clear();
+                if (workerBuf.capacity() < preloaded.length) {
+                    workerBuf = ByteBuffer.allocate(preloaded.length + 65536);
+                }
+                workerBuf.put(preloaded);
+                workerBuf.flip();
+                loadedData = workerBuf;
+                com.pzoptimizer.PredictiveChunkStreamer.recordCacheHit();
+            } else if (IsoChunk.FileExists(chunk.wx, chunk.wy)) {
                 try {
                     loadedData = IsoChunk.SafeRead(chunk.wx, chunk.wy, workerBuf);
                     if (loadedData != null) {

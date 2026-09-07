@@ -96,6 +96,10 @@ public final class PZOMultiCoreEngine {
         return MultiCoreAnimationEngine.getBoneTransformsBypassed();
     }
 
+    public static long getPreloadedTrajectoryHits() {
+        return com.pzoptimizer.PredictiveChunkStreamer.getPreloadedCacheHits();
+    }
+
     public static String getTelemetryReport() {
         if (!active) {
             return "- **PZO Multi-Core Scaling**: Inactive\n";
@@ -104,8 +108,8 @@ public final class PZOMultiCoreEngine {
         StringBuilder sb = new StringBuilder();
         sb.append("#### PZO Multi-Core Scaling Architecture\n");
         sb.append(String.format(Locale.US, "- **Dedicated P-Core Workers**: %d Threads (Affinity Mask Active)\n", workerCount));
-        sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks (Saved: %,d ms I/O void latency)\n",
-            getParallelChunksStreamed(), MultiCoreChunkStreamer.getTotalStreamTimeSavedMs()));
+        sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks (Saved: %,d ms I/O void latency | Trajectory Hits: %,d)\n",
+            getParallelChunksStreamed(), MultiCoreChunkStreamer.getTotalStreamTimeSavedMs(), getPreloadedTrajectoryHits()));
         sb.append(String.format(Locale.US, "- **Multi-Core AVX2 Horde Sweeps**: %,d passes (Entities Tracked: %,d)\n",
             getParallelHordeSweeps(), MultiCoreHordeGovernor.lastTrackedZombieCount.get()));
         sb.append(String.format(Locale.US, "- **Spatial Island Parallel Simulation**: %,d entity updates (Active Islands: %d)\n",

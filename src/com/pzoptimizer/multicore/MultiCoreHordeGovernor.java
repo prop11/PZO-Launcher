@@ -287,6 +287,9 @@ public final class MultiCoreHordeGovernor {
             totalParallelSweeps.incrementAndGet();
             totalSweepTimeNanos.addAndGet(sweepDuration);
 
+            // Multi-Core Skeletal Bone Skinning Governor: bypass off-screen bone matrix evaluations
+            MultiCoreAnimationEngine.applyHordeAnimationGovernor(zombies, count, SNAPSHOT_MASK, SNAPSHOT_TIERS);
+
         } catch (Throwable ignored) {}
     }
 
