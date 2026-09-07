@@ -66,6 +66,9 @@ public class PZOptimAgent {
             if ("zombie/popman/ZombiePopulationManager".equals(className) && classfileBuffer != null) {
                 return patchZombiePopulationManager(classfileBuffer);
             }
+            if ("zombie/iso/IsoGridSquare".equals(className) && classfileBuffer != null) {
+                return patchIsoGridSquare(classfileBuffer);
+            }
             return null;
         }
 
@@ -714,6 +717,99 @@ public class PZOptimAgent {
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during ZombiePopulationManager bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private byte[] patchIsoGridSquare(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+                int[] tagOffsets = new int[cpCount];
+                int[] tags = new int[cpCount];
+                String[] utf8Strings = new String[cpCount];
+
+                int i = 1;
+                while (i < cpCount) {
+                    tags[i] = b[pos] & 0xFF;
+                    tagOffsets[i] = pos;
+                    pos++;
+                    int tag = tags[i];
+                    if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
+                        pos += 4;
+                    } else if (tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                byte[] copy = b.clone();
+                int mpos = pos + 6; // access_flags (2), this_class (2), super_class (2)
+                int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2 + ifaces * 2;
+
+                int fields = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                for (int f = 0; f < fields; f++) {
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6 + alen;
+                    }
+                }
+
+                int methods = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                int patched = 0;
+
+                for (int m = 0; m < methods; m++) {
+                    int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
+                    int descIdx = ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                    String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                    String mdesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6;
+                        if ("Code".equals(aname) && "isWallTo".equals(mname) && "(Lzombie/iso/IsoGridSquare;I)Z".equals(mdesc)) {
+                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
+                            int cstart = mpos + 8;
+                            if (codeLen >= 8 && copy[cstart] == 28 && copy[cstart + 1] == 16 && copy[cstart + 6] == 3 && copy[cstart + 7] == 62) {
+                                // Replace istore_3 (0x3E) with ireturn (0xAC) to correctly return false upon reaching depth recursion limit
+                                copy[cstart + 7] = (byte) 0xAC;
+                                patched++;
+                            }
+                        }
+                        mpos += alen;
+                    }
+                }
+
+                if (patched > 0) {
+                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoGridSquare.isWallTo: Fixed vanilla recursion termination bug (istore_3 -> ireturn, StackOverflowError eliminated)"));
+                    return copy;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoGridSquare bytecode transform: " + t.getMessage());
             }
             return null;
         }
