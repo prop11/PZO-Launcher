@@ -1,0 +1,128 @@
+name: Multi-Platform Native Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - Unstable
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag name (e.g. v0.9.5)'
+        required: false
+        default: 'v0.9.5'
+
+jobs:
+  build-linux:
+    name: Build Native (Linux x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Compile libpzo_native64.so
+        run: |
+          chmod +x native/build_native.sh
+          bash native/build_native.sh
+          ls -lh dist/libpzo_native64.so
+
+      - name: Upload Linux native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpzo_native64-linux
+          path: dist/libpzo_native64.so
+
+  build-macos:
+    name: Build Native (macOS Universal arm64/x86_64)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Compile libpzo_native64.dylib
+        run: |
+          chmod +x native/build_native.sh
+          bash native/build_native.sh
+          ls -lh dist/libpzo_native64.dylib
+
+      - name: Upload macOS native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpzo_native64-macos
+          path: dist/libpzo_native64.dylib
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download Linux native artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libpzo_native64-linux
+          path: dist/
+
+      - name: Download macOS native artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libpzo_native64-macos
+          path: dist/
+
+      - name: Package Release Distributions & Standalone Binaries
+        run: |
+          python3 package_release.py
+
+      - name: Determine Release Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Project Zomboid Optimiser ${{ steps.vars.outputs.tag }}"
+          draft: false
+          prerelease: false
+          files: |
+            dist/PZO-Optimizer-Windows.zip
+            dist/PZO_Optimizer_macOS_Linux.zip
+            dist/PZO-Server-Windows.zip
+            dist/PZO-Server-Linux.zip
+            dist/PZOptimEngine.jar
+            dist/PZOServerEngine.jar
+            dist/pzo_native64.dll
+            dist/libpzo_native64.so
+            dist/libpzo_native64.dylib
+            dist/install.bat
+            dist/pzo_optimizer.sh
+            dist/pzo_optimizer.command
