@@ -40,6 +40,10 @@ public final class PZOConfig {
         load();
         if (betaOptIn) return true;
 
+        if (UpdateChecker.isUnstableIdentifier(UpdateChecker.CURRENT_VERSION)) {
+            return true;
+        }
+
         try {
             Class<?> coreClass = Class.forName("zombie.core.Core");
             java.lang.reflect.Method getInst = coreClass.getMethod("getInstance");

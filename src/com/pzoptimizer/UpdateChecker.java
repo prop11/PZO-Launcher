@@ -35,7 +35,101 @@ public class UpdateChecker {
     }
 
     public static String getDefaultNativeDownloadUrl() {
-        return "https://github.com/prop11/PZO-Launcher/releases/latest/download/" + getNativeFileName();
+        String nativeFile = getNativeFileName();
+        boolean beta = PZOConfig.isBetaOptIn() || isUnstableIdentifier(CURRENT_VERSION);
+        if (beta) {
+            String cleanVer = CURRENT_VERSION.trim();
+            String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
+            return "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFile;
+        }
+        return "https://github.com/prop11/PZO-Launcher/releases/latest/download/" + nativeFile;
+    }
+
+    /**
+     * Resolves the direct download URL for the native library matching the requested version
+     * or active release channel (including beta/unstable prereleases if opted-in or unstable build).
+     */
+    public static String resolveNativeDownloadUrl(String targetVersion, int timeoutMs) {
+        String nativeFileName = getNativeFileName();
+        String cleanVer = targetVersion != null && !targetVersion.isEmpty() ? targetVersion.trim() : CURRENT_VERSION;
+        String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
+        String directFallback = "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFileName;
+
+        boolean betaOptIn = PZOConfig.isBetaOptIn() || isUnstableIdentifier(cleanVer);
+
+        try {
+            String apiUrl = betaOptIn ? GITHUB_ALL_RELEASES_API_URL : GITHUB_LATEST_API_URL;
+            URL url = new URL(apiUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "PZO-UpdateChecker");
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
+
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder response = new StringBuilder();
+                String line;
+                while ((line = in.readLine()) != null) {
+                    response.append(line);
+                }
+                in.close();
+
+                String json = response.toString().trim();
+                List<String> releases = new ArrayList<>();
+                if (json.startsWith("[")) {
+                    releases = splitJsonArrayObjects(json);
+                } else if (json.startsWith("{")) {
+                    releases.add(json);
+                }
+
+                // Pass 1: Look for exact tag or version match
+                for (String relJson : releases) {
+                    if (extractJsonBooleanField(relJson, "draft")) continue;
+                    String tag = extractJsonField(relJson, "tag_name");
+                    String name = extractJsonField(relJson, "name");
+                    boolean tagMatches = tag != null && (tag.equalsIgnoreCase(cleanVer) || tag.equalsIgnoreCase(vTag) || tag.equalsIgnoreCase("v" + cleanVer));
+                    boolean nameMatches = name != null && name.contains(cleanVer);
+
+                    if (tagMatches || nameMatches) {
+                        String assetUrl = extractDownloadUrlForAsset(relJson, nativeFileName);
+                        if ((assetUrl == null || assetUrl.isEmpty()) && nativeFileName.endsWith(".dll")) {
+                            assetUrl = extractDownloadUrlForAsset(relJson, "pzo_native64.dll");
+                        }
+                        if (assetUrl != null && !assetUrl.isEmpty()) {
+                            return assetUrl;
+                        }
+                    }
+                }
+
+                // Pass 2: Look for highest compatible release on the channel containing native asset
+                for (String relJson : releases) {
+                    if (extractJsonBooleanField(relJson, "draft")) continue;
+                    boolean isPrerelease = extractJsonBooleanField(relJson, "prerelease");
+                    String tag = extractJsonField(relJson, "tag_name");
+                    String name = extractJsonField(relJson, "name");
+                    boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
+
+                    if (!betaOptIn && (isPrerelease || hasUnstableTag)) {
+                        continue;
+                    }
+
+                    String assetUrl = extractDownloadUrlForAsset(relJson, nativeFileName);
+                    if ((assetUrl == null || assetUrl.isEmpty()) && nativeFileName.endsWith(".dll")) {
+                        assetUrl = extractDownloadUrlForAsset(relJson, "pzo_native64.dll");
+                    }
+                    if (assetUrl != null && !assetUrl.isEmpty()) {
+                        return assetUrl;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("Notice: Could not query GitHub releases API for native library URL: " + t.getMessage());
+        }
+
+        return directFallback;
     }
 
     public static class UpdateResult {
