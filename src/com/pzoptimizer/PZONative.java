@@ -352,9 +352,47 @@ public class PZONative {
         }
     }
 
+    public static boolean isNativeFilePresent() {
+        if (loaded) return true;
+
+        String nativeName = NATIVE_LIB_FILENAME;
+        File cwd = new File(".");
+        if (new File(cwd, nativeName).exists()) return true;
+        if (new File(cwd, "win64" + File.separator + nativeName).exists()) return true;
+
+        try {
+            File jarFile = new File(PZONative.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            if (jarFile.isFile()) {
+                File parent = jarFile.getParentFile();
+                if (new File(parent, nativeName).exists()) return true;
+                if (new File(parent, "win64" + File.separator + nativeName).exists()) return true;
+            }
+        } catch (Throwable ignored) {}
+
+        return false;
+    }
+
+    public static String getInstalledNativeVersion() {
+        if (!loaded) {
+            return "Not Loaded";
+        }
+        try {
+            String ver = getNativeVersion();
+            if (ver != null && !ver.trim().isEmpty()) {
+                return ver.trim();
+            }
+        } catch (UnsatisfiedLinkError | NoSuchMethodError e) {
+            return "Legacy / Outdated (pre-0.9.0)";
+        } catch (Throwable t) {
+            return "Unknown (" + t.getMessage() + ")";
+        }
+        return "Unknown";
+    }
+
     // ========================================================================
     // Native JNI Declarations (Implemented in pzo_native.c)
     // ========================================================================
+    public static native String getNativeVersion();
     private static native boolean initNative();
     public static native boolean setHighPrecisionTimer(boolean enable);
     public static native boolean disablePowerThrottling();

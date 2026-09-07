@@ -45,6 +45,61 @@ public class UpdateDialog {
         return false;
     }
 
+    /**
+     * Checks if a native governor library exists in the game folder and verifies whether its
+     * version matches the Java mod version. If mismatched or outdated, prompts the user to update.
+     */
+    public static boolean checkAndPromptNativeMismatch(String dllDownloadUrl) {
+        if (!PZONative.isNativeFilePresent()) {
+            return false;
+        }
+
+        String installedVersion = PZONative.getInstalledNativeVersion();
+        String expectedVersion = UpdateChecker.CURRENT_VERSION;
+
+        // If versions match, native library is up-to-date and fully compatible
+        if (expectedVersion.equalsIgnoreCase(installedVersion)) {
+            return false;
+        }
+
+        String ignoreKey = "native_" + expectedVersion;
+        if (isVersionIgnored(ignoreKey)) {
+            return false;
+        }
+
+        PZOLogger.warn(String.format(
+            "[UpdateDialog] Native governor mismatch: Installed [%s], Expected [%s]. Prompting user to update...",
+            installedVersion, expectedVersion
+        ));
+
+        if (dllDownloadUrl == null || dllDownloadUrl.isEmpty()) {
+            dllDownloadUrl = UpdateChecker.getDefaultNativeDownloadUrl();
+        }
+
+        try {
+            String os = System.getProperty("os.name", "").toLowerCase();
+            String result = "SKIP";
+
+            if (os.contains("win")) {
+                result = showWindowsNativeMismatchDialog(installedVersion, expectedVersion);
+            } else if (os.contains("mac")) {
+                result = showMacNativeMismatchDialog(installedVersion, expectedVersion);
+            } else {
+                result = showLinuxNativeMismatchDialog(installedVersion, expectedVersion);
+            }
+
+            if ("UPDATE".equalsIgnoreCase(result)) {
+                performNativeAutoUpdateAndExit(expectedVersion, dllDownloadUrl);
+                return true;
+            } else if ("SKIP_IGNORE".equalsIgnoreCase(result)) {
+                setIgnoredVersion(ignoreKey);
+            }
+        } catch (Throwable t) {
+            PZOLogger.error("Native update dialog launch error: " + t.getMessage(), t);
+        }
+        return false;
+    }
+
     private static String showWindowsDialog(String latestVersion) {
         try {
             String psCode = String.format(
@@ -152,6 +207,205 @@ public class UpdateDialog {
         } catch (Throwable ignored) {}
 
         return "SKIP";
+    }
+
+    private static String showWindowsNativeMismatchDialog(String installedVersion, String expectedVersion) {
+        try {
+            String nativeFileName = PZONative.NATIVE_LIB_FILENAME;
+            String psCode = String.format(
+                "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
+                "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing');" +
+                "$nl=[Environment]::NewLine;" +
+                "$f=New-Object Windows.Forms.Form;" +
+                "$f.Text='Project Zomboid Optimiser - Native Library Update Required';" +
+                "$f.Size=New-Object Drawing.Size(510,260);" +
+                "$f.StartPosition='CenterScreen';" +
+                "$f.FormBorderStyle='FixedDialog';" +
+                "$f.MaximizeBox=$false;$f.MinimizeBox=$false;$f.TopMost=$true;" +
+                "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);" +
+                "$f.ForeColor=[Drawing.Color]::White;" +
+                "$t=New-Object Windows.Forms.Label;" +
+                "$t.Text='[!] Native Governor Library Mismatch Detected';" +
+                "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
+                "$t.ForeColor=[Drawing.Color]::FromArgb(255,185,50);" +
+                "$t.Location=New-Object Drawing.Point(20,15);$t.Size=New-Object Drawing.Size(460,25);$f.Controls.Add($t);" +
+                "$i=New-Object Windows.Forms.Label;" +
+                "$i.Text=('An outdated or mismatched %s was detected in your game folder.' + $nl + $nl + 'Installed DLL: %s' + $nl + 'Required for PZO Engine: v%s');" +
+                "$i.Font=New-Object Drawing.Font('Segoe UI',10);$i.ForeColor=[Drawing.Color]::FromArgb(220,220,220);" +
+                "$i.Location=New-Object Drawing.Point(20,48);$i.Size=New-Object Drawing.Size(460,75);$f.Controls.Add($i);" +
+                "$cb=New-Object Windows.Forms.CheckBox;" +
+                "$cb.Text='Don''t remind me again for this version';" +
+                "$cb.Font=New-Object Drawing.Font('Segoe UI',9);$cb.ForeColor=[Drawing.Color]::FromArgb(170,170,170);" +
+                "$cb.Location=New-Object Drawing.Point(23,130);$cb.Size=New-Object Drawing.Size(350,25);$f.Controls.Add($cb);" +
+                "$bu=New-Object Windows.Forms.Button;$bu.Text='Update Now';" +
+                "$bu.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold);$bu.BackColor=[Drawing.Color]::FromArgb(40,167,69);$bu.ForeColor=[Drawing.Color]::White;$bu.FlatStyle='Flat';" +
+                "$bu.Location=New-Object Drawing.Point(375,170);$bu.Size=New-Object Drawing.Size(105,32);$bu.DialogResult=[Windows.Forms.DialogResult]::Yes;$f.Controls.Add($bu);" +
+                "$bs=New-Object Windows.Forms.Button;$bs.Text='Skip / Launch Game';" +
+                "$bs.Font=New-Object Drawing.Font('Segoe UI',9);$bs.BackColor=[Drawing.Color]::FromArgb(65,65,65);$bs.ForeColor=[Drawing.Color]::White;$bs.FlatStyle='Flat';" +
+                "$bs.Location=New-Object Drawing.Point(225,170);$bs.Size=New-Object Drawing.Size(140,32);$bs.DialogResult=[Windows.Forms.DialogResult]::No;$f.Controls.Add($bs);" +
+                "$f.AcceptButton=$bu;$r=$f.ShowDialog();" +
+                "if($r -eq [Windows.Forms.DialogResult]::Yes){Write-Output 'UPDATE'}else{if($cb.Checked){Write-Output 'SKIP_IGNORE'}else{Write-Output 'SKIP'}}",
+                nativeFileName, installedVersion, expectedVersion
+            );
+
+            ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode);
+            Process p = pb.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    line = line.trim();
+                    if ("UPDATE".equalsIgnoreCase(line) || "SKIP_IGNORE".equalsIgnoreCase(line) || "SKIP".equalsIgnoreCase(line)) {
+                        return line;
+                    }
+                }
+            }
+            p.waitFor();
+        } catch (Throwable t) {
+            PZOLogger.error("Windows native update dialog error: " + t.getMessage(), t);
+        }
+        return "SKIP";
+    }
+
+    private static String showMacNativeMismatchDialog(String installedVersion, String expectedVersion) {
+        try {
+            String script = String.format(
+                "set r to button returned of (display dialog \"[!] Native Governor Library Mismatch Detected.\\n\\nInstalled: %s\\nRequired for PZO Engine: v%s\\n\\nWould you like to update %s now?\" " +
+                "with title \"PZO Engine - Native Library Update\" buttons {\"Don't Remind Me\", \"Skip\", \"Update Now\"} default button \"Update Now\" with icon caution)\n" +
+                "return r",
+                installedVersion, expectedVersion, PZONative.NATIVE_LIB_FILENAME
+            );
+            ProcessBuilder pb = new ProcessBuilder("osascript", "-e", script);
+            Process p = pb.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line = reader.readLine();
+                if (line != null) {
+                    line = line.trim();
+                    if ("Update Now".equalsIgnoreCase(line)) return "UPDATE";
+                    if ("Don't Remind Me".equalsIgnoreCase(line)) return "SKIP_IGNORE";
+                }
+            }
+            p.waitFor();
+        } catch (Throwable t) {
+            PZOLogger.error("Mac native update dialog error: " + t.getMessage(), t);
+        }
+        return "SKIP";
+    }
+
+    private static String showLinuxNativeMismatchDialog(String installedVersion, String expectedVersion) {
+        try {
+            String text = String.format(
+                "Native Governor Library Mismatch Detected!\n\nInstalled: %s\nRequired for PZO Engine: v%s\n\nWould you like to update %s now?",
+                installedVersion, expectedVersion, PZONative.NATIVE_LIB_FILENAME
+            );
+            ProcessBuilder pb = new ProcessBuilder("zenity", "--question", "--title=PZO Engine - Native Library Update",
+                "--text=" + text, "--ok-label=Update Now", "--cancel-label=Skip / Launch Game", "--extra-button=Don't Remind Me");
+            Process p = pb.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String extra = reader.readLine();
+                if (extra != null && extra.contains("Don't Remind Me")) {
+                    return "SKIP_IGNORE";
+                }
+            }
+            if (p.waitFor() == 0) return "UPDATE";
+        } catch (Throwable ignored) {
+            try {
+                String text = String.format(
+                    "Native Governor Library Mismatch Detected!\n\nInstalled: %s\nRequired for PZO Engine: v%s\n\nWould you like to update %s now?",
+                    installedVersion, expectedVersion, PZONative.NATIVE_LIB_FILENAME
+                );
+                ProcessBuilder pb = new ProcessBuilder("kdialog", "--title", "PZO Engine - Native Library Update",
+                    "--yesno", text, "--yes-label", "Update Now", "--no-label", "Skip / Launch Game");
+                Process p = pb.start();
+                if (p.waitFor() == 0) return "UPDATE";
+            } catch (Throwable ignored2) {}
+        }
+        return "SKIP";
+    }
+
+    private static void performNativeAutoUpdateAndExit(String targetVersion, String dllDownloadUrl) {
+        try {
+            File currentJar = null;
+            try {
+                currentJar = new File(UpdateDialog.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            } catch (Throwable ignored) {}
+
+            if (currentJar == null || !currentJar.exists()) {
+                currentJar = new File("PZOptimEngine.jar").getAbsoluteFile();
+            }
+
+            File gameDir = currentJar.getParentFile();
+            if (gameDir == null) {
+                gameDir = new File(".").getAbsoluteFile();
+            }
+
+            String nativeFileName = PZONative.NATIVE_LIB_FILENAME;
+            File currentNative = new File(gameDir, nativeFileName);
+            File newNative = new File(gameDir, nativeFileName + ".new");
+
+            PZOLogger.info("Downloading native library from: " + dllDownloadUrl);
+            boolean downloaded = downloadFileWithRedirects(dllDownloadUrl, newNative);
+
+            if (!downloaded || !newNative.exists() || newNative.length() < 1000) {
+                if (newNative.exists()) newNative.delete();
+                PZOLogger.error("Failed to download native library from: " + dllDownloadUrl);
+                showNoticePopup("Update Notice", "Could not download " + nativeFileName + " from GitHub Releases.\nPlease run install.bat to update manually.");
+                return;
+            }
+
+            PZOLogger.success("Downloaded " + newNative.length() + " bytes to " + newNative.getAbsolutePath());
+
+            String os = System.getProperty("os.name", "").toLowerCase();
+            if (os.contains("win")) {
+                File win64Dll = new File(gameDir, "win64" + File.separator + nativeFileName);
+                String psUpdater = String.format(
+                    "Start-Sleep -Milliseconds 800; " +
+                    "if (Test-Path -LiteralPath '%s') { Move-Item -LiteralPath '%s' -Destination '%s' -Force; }; " +
+                    "if (Test-Path -LiteralPath '%s') { Copy-Item -LiteralPath '%s' -Destination '%s' -Force; }; " +
+                    "$nl=[Environment]::NewLine; " +
+                    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); " +
+                    "[Windows.Forms.MessageBox]::Show(('Native Governor (%s) has been updated to v%s!' + $nl + $nl + 'Please restart Project Zomboid to apply native optimizations.'), 'Update Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
+                    newNative.getAbsolutePath().replace("'", "''"),
+                    newNative.getAbsolutePath().replace("'", "''"),
+                    currentNative.getAbsolutePath().replace("'", "''"),
+                    win64Dll.getParentFile().getAbsolutePath().replace("'", "''"),
+                    currentNative.getAbsolutePath().replace("'", "''"),
+                    win64Dll.getAbsolutePath().replace("'", "''"),
+                    nativeFileName,
+                    targetVersion
+                );
+                new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
+            } else if (os.contains("mac")) {
+                String macNativeUpdate = String.format(
+                    " && (test -d \"ProjectZomboid.app/Contents/Java\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/Java/%s\" || true) && (test -d \"ProjectZomboid.app/Contents/MacOS\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/MacOS/%s\" || true)",
+                    currentNative.getAbsolutePath(), nativeFileName,
+                    currentNative.getAbsolutePath(), nativeFileName
+                );
+                String shUpdater = String.format(
+                    "sleep 1 && mv -f \"%s\" \"%s\"%s && osascript -e 'display notification \"Native Governor (%s) has been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
+                    newNative.getAbsolutePath(), currentNative.getAbsolutePath(), macNativeUpdate, nativeFileName, targetVersion
+                );
+                new ProcessBuilder("bash", "-c", shUpdater).start();
+            } else {
+                // Linux & Steam Deck
+                String linuxNativeUpdate = String.format(
+                    " && (test -d \"linux64\" && cp -f \"%s\" \"linux64/%s\" || true) && (test -d \"natives\" && cp -f \"%s\" \"natives/%s\" || true)",
+                    currentNative.getAbsolutePath(), nativeFileName,
+                    currentNative.getAbsolutePath(), nativeFileName
+                );
+                String shUpdater = String.format(
+                    "sleep 1 && mv -f \"%s\" \"%s\"%s && (kdialog --msgbox \"Native Governor (%s) has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"Native Governor (%s) has been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Native Updated\" \"Please restart Project Zomboid.\")",
+                    newNative.getAbsolutePath(), currentNative.getAbsolutePath(), linuxNativeUpdate, nativeFileName, targetVersion, nativeFileName, targetVersion
+                );
+                new ProcessBuilder("bash", "-c", shUpdater).start();
+            }
+
+            PZOLogger.info("Exiting game process to allow atomic native library replacement...");
+            System.exit(0);
+
+        } catch (Throwable t) {
+            PZOLogger.error("Native auto-update failed: " + t.getMessage(), t);
+            showNoticePopup("Update Notice", "Native update error: " + t.getMessage() + "\nPlease update manually using install.bat / pzo_optimizer.sh.");
+        }
     }
 
     private static void performAutoUpdateAndExit(String latestVersion, String downloadUrl, String dllDownloadUrl) {
