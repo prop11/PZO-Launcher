@@ -416,11 +416,15 @@ public final class MultiCoreChunkStreamer {
                         chunk.doLoadGridsquare();
                         chunk.loaded = true;
                     } else {
-                        if (chunk.refs != null && !chunk.refs.isEmpty()) {
-                            try {
-                                chunk.loadInWorldStreamerThread();
-                            } catch (Throwable ignored) {}
-                        }
+                        // Pre-instantiate ground squares and neighbor level bounds in background worker threads
+                        try {
+                            chunk.loadInWorldStreamerThread();
+                        } catch (Throwable ignored) {}
+
+                        try {
+                            chunk.loadInMainThread();
+                        } catch (Throwable ignored) {}
+
                         IsoChunk.loadGridSquare.add(chunk);
                     }
                 } finally {

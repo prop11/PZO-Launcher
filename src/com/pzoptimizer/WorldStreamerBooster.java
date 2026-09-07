@@ -31,6 +31,7 @@ public class WorldStreamerBooster {
             while (true) {
                 try {
                     ChunkIngestionPacer.installPacer();
+                    ChunkIngestionPacer.upgradeChunkMapLock();
                     VehicleTravelOptimizer.checkAndMaintain();
                     RainAndWeatherOptimizer.checkAndMaintain();
                     EngineFeaturesTuner.reapplyRuntimeTuning();
