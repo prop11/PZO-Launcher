@@ -22,6 +22,11 @@ public final class PredictiveChunkStreamer {
     private static volatile boolean running = false;
     private static Thread streamerThread = null;
     private static final Set<Long> PREWARMED_KEYS = new HashSet<>(512);
+    private static final java.util.concurrent.ConcurrentHashMap<Long, byte[]> PRELOADED_CHUNKS = new java.util.concurrent.ConcurrentHashMap<>(128);
+    private static final java.util.concurrent.atomic.AtomicLong preloadedCacheHits = new java.util.concurrent.atomic.AtomicLong(0);
+    private static final java.util.concurrent.atomic.AtomicLong preloadedChunksFetched = new java.util.concurrent.atomic.AtomicLong(0);
+    private static final int MAX_PRELOADED_CHUNKS = 64;
+
     private static volatile long lastPrewarmClearTime = 0;
     private static volatile Boolean isSolidState = null;
 
@@ -64,6 +69,9 @@ public final class PredictiveChunkStreamer {
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
                         PREWARMED_KEYS.clear();
+                        if (PRELOADED_CHUNKS.size() > MAX_PRELOADED_CHUNKS) {
+                            PRELOADED_CHUNKS.clear();
+                        }
                         lastPrewarmClearTime = now;
                     }
 
@@ -227,8 +235,6 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
-    private static final byte[] PREWARM_BUF = new byte[16384];
-
     private static void prewarmChunkInOSCache(int wx, int wy) {
         long key = FastChunkKey.pack(wx, wy);
         if (PREWARMED_KEYS.contains(key)) {
@@ -237,15 +243,48 @@ public final class PredictiveChunkStreamer {
         PREWARMED_KEYS.add(key);
         ChunkRetentionRing.touch(wx, wy);
 
-        // Pre-read chunk file into OS memory cache ahead of vehicle arrival
-        try {
-            File chunkFile = zombie.ChunkMapFilenames.instance.getFilename(wx, wy);
-            if (chunkFile != null && chunkFile.exists()) {
-                try (FileInputStream fis = new FileInputStream(chunkFile)) {
-                    fis.read(PREWARM_BUF);
-                }
-            }
-        } catch (Throwable ignored) {}
+        // Submit asynchronous pre-load task to dedicated P-Core worker pool
+        java.util.concurrent.ExecutorService pool = com.pzoptimizer.multicore.PZOMultiCoreEngine.getExecutor();
+        if (pool != null && !pool.isShutdown()) {
+            pool.execute(() -> {
+                try {
+                    PZONative.bindCallingThreadToPCores();
+                    File chunkFile = zombie.ChunkMapFilenames.instance.getFilename(wx, wy);
+                    if (chunkFile != null && chunkFile.exists()) {
+                        long len = chunkFile.length();
+                        if (len > 0 && len < 2_097_152L) { // Under 2 MB
+                            try (FileInputStream fis = new FileInputStream(chunkFile)) {
+                                byte[] data = fis.readAllBytes();
+                                if (data != null && data.length > 0) {
+                                    if (PRELOADED_CHUNKS.size() > MAX_PRELOADED_CHUNKS) {
+                                        PRELOADED_CHUNKS.clear();
+                                    }
+                                    PRELOADED_CHUNKS.put(key, data);
+                                    preloadedChunksFetched.incrementAndGet();
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            });
+        }
+    }
+
+    public static byte[] pollPreloadedChunk(int wx, int wy) {
+        long key = FastChunkKey.pack(wx, wy);
+        return PRELOADED_CHUNKS.remove(key);
+    }
+
+    public static void recordCacheHit() {
+        preloadedCacheHits.incrementAndGet();
+    }
+
+    public static long getPreloadedCacheHits() {
+        return preloadedCacheHits.get();
+    }
+
+    public static long getPreloadedChunksFetched() {
+        return preloadedChunksFetched.get();
     }
 
     public static void stop() {

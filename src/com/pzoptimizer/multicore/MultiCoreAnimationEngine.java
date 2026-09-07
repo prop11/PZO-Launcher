@@ -130,6 +130,72 @@ public final class MultiCoreAnimationEngine {
         }
     }
 
+    private static final AtomicLong frameCounter = new AtomicLong(0);
+
+    /**
+     * Applies dynamic multi-threaded skeletal bone update culling and LOD across the active horde.
+     * Off-screen zombies bypass 100% of bone matrix calculations (saving 64 matrix ops per entity per frame).
+     * Distant zombies (Tier 2, 32-50 tiles) downsample bone updates to alternate frames.
+     * Evaluates in parallel across dedicated P-Core worker threads.
+     */
+    public static void applyHordeAnimationGovernor(List<?> zombies, int count, byte[] cullMask, byte[] tiers) {
+        if (zombies == null || count <= 0 || cullMask == null) return;
+
+        long frame = frameCounter.incrementAndGet();
+        int workers = PZOMultiCoreEngine.getWorkerCount();
+        int batchSize = (count + workers - 1) / workers;
+        int numBatches = (count + batchSize - 1) / batchSize;
+
+        if (numBatches <= 1 || PZOMultiCoreEngine.getExecutor() == null) {
+            processHordeBatch(zombies, 0, count, cullMask, tiers, frame);
+        } else {
+            List<CompletableFuture<Void>> futures = new ArrayList<>(numBatches);
+            for (int b = 0; b < numBatches; b++) {
+                final int start = b * batchSize;
+                final int end = Math.min(count, start + batchSize);
+                if (start >= end) break;
+                futures.add(CompletableFuture.runAsync(() -> {
+                    processHordeBatch(zombies, start, end, cullMask, tiers, frame);
+                }, PZOMultiCoreEngine.getExecutor()));
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        }
+    }
+
+    private static void processHordeBatch(List<?> zombies, int start, int end, byte[] cullMask, byte[] tiers, long frame) {
+        long bypassed = 0;
+        for (int i = start; i < end; i++) {
+            if (i >= zombies.size()) break;
+            Object obj = zombies.get(i);
+            if (!(obj instanceof zombie.characters.IsoGameCharacter)) continue;
+            zombie.characters.IsoGameCharacter character = (zombie.characters.IsoGameCharacter) obj;
+
+            zombie.core.skinnedmodel.animation.AnimationPlayer animPlayer = character.getAnimationPlayer();
+            if (animPlayer == null) continue;
+
+            boolean culled = (i < cullMask.length && cullMask[i] == 0);
+            if (culled) {
+                // Off-screen: completely bypass bone transform matrix computations
+                animPlayer.updateBones = false;
+                bypassed += 64;
+            } else {
+                byte tier = (tiers != null && i < tiers.length) ? tiers[i] : 0;
+                if (tier >= 2) {
+                    // Distant entity (32-50 tiles away): evaluate on alternate frames
+                    boolean updateThisFrame = ((frame + i) & 1) == 0;
+                    animPlayer.updateBones = updateThisFrame;
+                    if (!updateThisFrame) bypassed += 64;
+                } else {
+                    // Close / in-view entity: full 60 FPS animation fidelity
+                    animPlayer.updateBones = true;
+                }
+            }
+        }
+        if (bypassed > 0) {
+            totalBoneTransformsBypassed.addAndGet(bypassed);
+        }
+    }
+
     public static long getBoneTransformsBypassed() {
         return totalBoneTransformsBypassed.get();
     }
@@ -138,3 +204,4 @@ public final class MultiCoreAnimationEngine {
         return totalParallelAnimationUpdates.get();
     }
 }
+
