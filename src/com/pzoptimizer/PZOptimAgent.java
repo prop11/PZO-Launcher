@@ -60,6 +60,9 @@ public class PZOptimAgent {
             if ("zombie/iso/IsoChunkMap".equals(className) && classfileBuffer != null) {
                 return patchIsoChunkMap(classfileBuffer);
             }
+            if ("zombie/entity/components/spriteconfig/SpriteConfig".equals(className) && classfileBuffer != null) {
+                return patchSpriteConfig(classfileBuffer);
+            }
             return null;
         }
 
@@ -335,6 +338,8 @@ public class PZOptimAgent {
 
                 int chunksSwapARef = -1;
                 int chunkGridWidthRef = -1;
+                int refsFieldRef = -1;
+                int isEmptyMethodRef = -1;
 
                 for (int k = 1; k < cpCount; k++) {
                     if (tags[k] == 9) { // Fieldref
@@ -350,6 +355,26 @@ public class PZOptimAgent {
                                 chunksSwapARef = k;
                             } else if ("chunkGridWidth".equals(name) && "I".equals(desc)) {
                                 chunkGridWidthRef = k;
+                            } else if ("refs".equals(name) && "Ljava/util/ArrayList;".equals(desc)) {
+                                refsFieldRef = k;
+                            }
+                        }
+                    } else if (tags[k] == 10) { // Methodref
+                        int p = tagOffsets[k] + 1;
+                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                        int clsIdx = ((b[p] & 0xFF) << 8) | (b[p + 1] & 0xFF);
+                        int clsNameIdx = (clsIdx > 0 && clsIdx < cpCount && tags[clsIdx] == 7) ?
+                                         (((b[tagOffsets[clsIdx] + 1] & 0xFF) << 8) | (b[tagOffsets[clsIdx] + 2] & 0xFF)) : -1;
+                        String clsName = (clsNameIdx > 0 && clsNameIdx < cpCount) ? utf8Strings[clsNameIdx] : null;
+
+                        if ("java/util/ArrayList".equals(clsName) && ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
+                            int ntp = tagOffsets[ntIdx] + 1;
+                            int nameIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
+                            int descIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
+                            String name = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : null;
+                            String desc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : null;
+                            if ("isEmpty".equals(name) && "()Z".equals(desc)) {
+                                isEmptyMethodRef = k;
                             }
                         }
                     }
@@ -368,8 +393,7 @@ public class PZOptimAgent {
                 byte[] copy = b.clone();
                 int patchedSites = 0;
 
-                // Pattern: aload_0 (0x2A), getfield (0xB4), oldRefHi, oldRefLo, arraylength (0xBE) -> 5 bytes
-                // Replace with: getstatic (0xB2), newRefHi, newRefLo, nop (0x00), nop (0x00) -> 5 bytes
+                // 1. Loop reduction: calculateZExtentsForChunkMap (28,561 loop down to 169)
                 for (int k = pos; k < copy.length - 4; k++) {
                     if (copy[k] == 0x2A && copy[k + 1] == (byte) 0xB4 &&
                         copy[k + 2] == oldRefHi && copy[k + 3] == oldRefLo &&
@@ -383,12 +407,176 @@ public class PZOptimAgent {
                     }
                 }
 
-                if (patchedSites > 0) {
-                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap.calculateZExtentsForChunkMap: Reduced 28,561 loop iterations down to 169 (%d sites patched - 99.4%% loop overhead eliminated)", patchedSites));
+                // 2. Trailing edge chunk unload pacing: Up, Down, Left, Right
+                int shiftPatched = 0;
+                if (refsFieldRef != -1 && isEmptyMethodRef != -1) {
+                    byte refsHi = (byte) ((refsFieldRef >> 8) & 0xFF);
+                    byte refsLo = (byte) (refsFieldRef & 0xFF);
+                    byte emptyHi = (byte) ((isEmptyMethodRef >> 8) & 0xFF);
+                    byte emptyLo = (byte) (isEmptyMethodRef & 0xFF);
+
+                    byte[] patChunk = new byte[]{
+                        (byte) 0x2d, (byte) 0xb4, refsHi, refsLo,
+                        (byte) 0xb6, emptyHi, emptyLo,
+                        (byte) 0x99, (byte) 0x00, (byte) 0x24
+                    };
+                    byte[] repChunk = new byte[]{
+                        (byte) 0x03, (byte) 0x99, (byte) 0x00, (byte) 0x24,
+                        (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00
+                    };
+
+                    try {
+                        int mpos = pos;
+                        mpos += 6; // access, this, super
+                        int ifacesCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        mpos += 2 + ifacesCount * 2;
+
+                        int fieldsCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        mpos += 2;
+                        for (int f = 0; f < fieldsCount; f++) {
+                            mpos += 6;
+                            int aCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                            mpos += 2;
+                            for (int a = 0; a < aCount; a++) {
+                                int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                                mpos += 6 + alen;
+                            }
+                        }
+
+                        int methodsCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        mpos += 2;
+
+                        for (int m = 0; m < methodsCount; m++) {
+                            int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
+                            String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                            mpos += 6;
+                            int aCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                            mpos += 2;
+                            for (int a = 0; a < aCount; a++) {
+                                int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                                String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+                                int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                                mpos += 6;
+                                if ("Code".equals(aname) && ("Up".equals(mname) || "Down".equals(mname) || "Left".equals(mname) || "Right".equals(mname))) {
+                                    int codeStart = mpos + 8;
+                                    int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
+                                    for (int k = codeStart; k <= codeStart + codeLen - patChunk.length; k++) {
+                                        boolean match = true;
+                                        for (int p = 0; p < patChunk.length; p++) {
+                                            if (copy[k + p] != patChunk[p]) { match = false; break; }
+                                        }
+                                        if (match) {
+                                            System.arraycopy(repChunk, 0, copy, k, repChunk.length);
+                                            shiftPatched++;
+                                            break;
+                                        }
+                                    }
+                                }
+                                mpos += alen;
+                            }
+                        }
+                    } catch (Throwable t) {
+                        PZOLogger.warn("[PZO Agent] Shift method parse notice: " + t.getMessage());
+                    }
+                }
+
+                if (patchedSites > 0 || shiftPatched > 0) {
+                    if (patchedSites > 0) {
+                        PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap.calculateZExtentsForChunkMap: Reduced 28,561 loop iterations down to 169 (%d sites patched - 99.4%% loop overhead eliminated)", patchedSites));
+                    }
+                    if (shiftPatched > 0) {
+                        PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap trailing chunk shift teardowns (%d methods: Up/Down/Left/Right paced via ChunkIngestionPacer)", shiftPatched));
+                    }
                     return copy;
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoChunkMap bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private byte[] patchSpriteConfig(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+                int[] tagOffsets = new int[cpCount];
+                int[] tags = new int[cpCount];
+                String[] utf8Strings = new String[cpCount];
+
+                int i = 1;
+                while (i < cpCount) {
+                    tags[i] = b[pos] & 0xFF;
+                    tagOffsets[i] = pos;
+                    pos++;
+                    int tag = tags[i];
+                    if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
+                        pos += 4;
+                    } else if (tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                int warnRef = -1;
+                int resetRef = -1;
+                for (int k = 1; k < cpCount; k++) {
+                    if (tags[k] == 10) { // Methodref
+                        int p = tagOffsets[k] + 1;
+                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
+                            int ntp = tagOffsets[ntIdx] + 1;
+                            int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
+                            int dIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
+                            String name = (nIdx > 0 && nIdx < cpCount) ? utf8Strings[nIdx] : null;
+                            String desc = (dIdx > 0 && dIdx < cpCount) ? utf8Strings[dIdx] : null;
+                            if ("warn".equals(name) && "(Ljava/lang/Object;)V".equals(desc)) {
+                                warnRef = k;
+                            } else if ("resetObjectInfo".equals(name) && "()V".equals(desc)) {
+                                resetRef = k;
+                            }
+                        }
+                    }
+                }
+
+                if (warnRef == -1 || resetRef == -1) return null;
+
+                byte warnHi = (byte) ((warnRef >> 8) & 0xFF);
+                byte warnLo = (byte) (warnRef & 0xFF);
+                byte resetHi = (byte) ((resetRef >> 8) & 0xFF);
+                byte resetLo = (byte) (resetRef & 0xFF);
+
+                byte[] copy = b.clone();
+                int patched = 0;
+                for (int k = pos; k < copy.length - 7; k++) {
+                    if (copy[k] == (byte) 0xb6 && copy[k + 1] == warnHi && copy[k + 2] == warnLo &&
+                        copy[k + 3] == 0x2a && copy[k + 4] == (byte) 0xb6 && copy[k + 5] == resetHi && copy[k + 6] == resetLo) {
+                        copy[k] = 0x58; // pop2
+                        copy[k + 1] = 0x00; // nop
+                        copy[k + 2] = 0x00; // nop
+                        patched++;
+                    }
+                }
+
+                if (patched > 0) {
+                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched SpriteConfig.initObjectInfo: neutralized %d warn disk log calls", patched));
+                    return copy;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during SpriteConfig bytecode transform: " + t.getMessage());
             }
             return null;
         }
