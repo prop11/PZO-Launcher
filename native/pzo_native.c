@@ -702,6 +702,13 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_initNative(JNIEnv *env
     return JNI_TRUE;
 }
 
+#define PZO_NATIVE_VERSION "0.9.0-unstable"
+
+JNIEXPORT jstring JNICALL Java_com_pzoptimizer_PZONative_getNativeVersion(JNIEnv *env, jclass cls) {
+    (void)cls;
+    return (*env)->NewStringUTF(env, PZO_NATIVE_VERSION);
+}
+
 JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_optimizeCallingThread(
     JNIEnv *env, jclass cls, jint priorityLevel, jboolean bindPCores, jstring profileStr) {
     (void)cls;

@@ -135,14 +135,24 @@ public class PZOEntrypoint {
         }
 
         // 6. Pre-Menu Update Check & Interactive Prompt
+        boolean fullUpdateHandled = false;
         try {
             UpdateChecker.UpdateResult ur = UpdateChecker.checkForUpdatesSync(1800);
             if (ur != null && ur.hasUpdate) {
                 PZOLogger.info("New update detected (v" + ur.latestVersion + "). Opening Pre-Menu update prompt...");
-                UpdateDialog.promptIfUpdateAvailable(ur.latestVersion, ur.downloadUrl, ur.dllDownloadUrl);
+                fullUpdateHandled = UpdateDialog.promptIfUpdateAvailable(ur.latestVersion, ur.downloadUrl, ur.dllDownloadUrl);
             }
         } catch (Throwable t) {
             PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
+        }
+
+        // 6b. Native Governor DLL Version Verification
+        if (!fullUpdateHandled) {
+            try {
+                UpdateDialog.checkAndPromptNativeMismatch(UpdateChecker.getDefaultNativeDownloadUrl());
+            } catch (Throwable t) {
+                PZOLogger.warn("Non-fatal notice on Native Governor version verification: " + t.getMessage());
+            }
         }
 
         // 7. Balanced Game & Streaming Thread Priority
