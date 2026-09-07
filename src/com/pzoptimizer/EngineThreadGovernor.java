@@ -191,6 +191,7 @@ public class EngineThreadGovernor {
                         int fc = zombie.iso.IsoCamera.frameState.frameCount;
                         if (fc != lastFrameCount) {
                             lastFrameCount = fc;
+                            ChunkIngestionPacer.onFrameBoundary(fc);
                             FrameDropDiagnosticEngine.onFrameTick();
                         }
                     }

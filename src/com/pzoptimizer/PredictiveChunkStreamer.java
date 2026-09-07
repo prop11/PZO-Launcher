@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -235,17 +237,39 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
+    private static final ThreadLocal<ByteBuffer> PRELOAD_BUFFER = ThreadLocal.withInitial(() -> 
+        ByteBuffer.allocateDirect(262144).order(ByteOrder.nativeOrder())
+    );
+
     public static void prewarmChunkDirect(int wx, int wy) {
         prewarmChunkInOSCache(wx, wy);
     }
 
     private static void prewarmChunkInOSCache(int wx, int wy) {
         long key = FastChunkKey.pack(wx, wy);
-        if (PREWARMED_KEYS.contains(key)) {
+        ChunkRetentionRing.touch(wx, wy);
+
+        if (PREWARMED_KEYS.contains(key) || PRELOADED_CHUNKS.containsKey(key)) {
             return;
         }
         PREWARMED_KEYS.add(key);
-        ChunkRetentionRing.touch(wx, wy);
+
+        // Preload upcoming chunk data directly into memory cache ahead of vehicle arrival
+        if (PRELOADED_CHUNKS.size() < MAX_PRELOADED_CHUNKS) {
+            try {
+                if (zombie.iso.IsoChunk.FileExists(wx, wy)) {
+                    ByteBuffer buf = PRELOAD_BUFFER.get();
+                    buf.clear();
+                    ByteBuffer readBuf = zombie.iso.IsoChunk.SafeRead(wx, wy, buf);
+                    if (readBuf != null && readBuf.hasRemaining()) {
+                        byte[] data = new byte[readBuf.remaining()];
+                        readBuf.get(data);
+                        PRELOADED_CHUNKS.put(key, data);
+                        preloadedChunksFetched.incrementAndGet();
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
     }
 
     public static byte[] pollPreloadedChunk(int wx, int wy) {
