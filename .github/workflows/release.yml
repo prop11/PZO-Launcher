@@ -32,7 +32,17 @@ jobs:
       - name: Compile libpzo_native64.so
         run: |
           chmod +x native/build_native.sh
-          bash native/build_native.sh
+          if bash native/build_native.sh > /tmp/build.log 2>&1; then
+            cat /tmp/build.log
+            echo "### Linux Build Succeeded" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Linux Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/build.log
+            exit 1
+          fi
           ls -lh dist/libpzo_native64.so
 
       - name: Upload Linux native artifact
@@ -57,7 +67,17 @@ jobs:
       - name: Compile libpzo_native64.dylib
         run: |
           chmod +x native/build_native.sh
-          bash native/build_native.sh
+          if bash native/build_native.sh > /tmp/build.log 2>&1; then
+            cat /tmp/build.log
+            echo "### macOS Build Succeeded" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### macOS Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/build.log
+            exit 1
+          fi
           ls -lh dist/libpzo_native64.dylib
 
       - name: Upload macOS native artifact
