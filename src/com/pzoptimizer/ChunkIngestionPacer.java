@@ -150,12 +150,8 @@ public final class ChunkIngestionPacer {
     public static void processPendingUnloads() {
         if (isEngineLoading()) return;
 
-        // MUTUAL EXCLUSION: If any chunk was ingested in this frame tick,
-        // completely skip teardowns for this frame.
-        // Teardowns only run on slack frames with 0 ingestion, preventing frame time stacking.
-        if (PacedConcurrentQueue.getChunksIngestedThisFrame() > 0) {
-            return;
-        }
+        // Budgeted teardowns: Smoothly free at most 1-2 orphaned chunks per frame
+        // under a 1.5ms ceiling, preventing trailing chunk accumulation during vehicle travel.
 
         try {
             if (zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
@@ -184,9 +180,9 @@ public final class ChunkIngestionPacer {
                 if (totalShared <= 0) return;
 
                 long now = System.nanoTime();
-                // Strict 1-chunk teardown pacing under a 2.5 ms ceiling on slack frames
-                int maxUnloads = 1;
-                long budgetNanos = 2_500_000L;
+                int chunksIngested = PacedConcurrentQueue.getChunksIngestedThisFrame();
+                int maxUnloads = (chunksIngested > 0) ? 1 : 2;
+                long budgetNanos = (chunksIngested > 0) ? 1_500_000L : 2_500_000L;
 
                 int unloadsThisFrame = 0;
                 int checkedEntries = 0;
@@ -398,8 +394,8 @@ public final class ChunkIngestionPacer {
             long budgetNanos;
 
             if (driving) {
-                maxChunks = 1;
-                budgetNanos = 2_500_000L; // 2.5 ms budget ceiling
+                maxChunks = (backlog > 4) ? 2 : 1;
+                budgetNanos = 3_000_000L; // 3.0 ms budget ceiling
             } else {
                 maxChunks = (backlog > 8) ? 3 : 2;
                 budgetNanos = 5_000_000L; // 5.0 ms budget ceiling

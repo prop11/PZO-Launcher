@@ -12,12 +12,34 @@ public class PZOptimAgent {
     private static volatile Instrumentation instrumentationInstance = null;
 
     public static void premain(String agentArgs, Instrumentation inst) {
+        if (instrumentationInstance != null) return;
         instrumentationInstance = inst;
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
         
         try {
             inst.addTransformer(new EngineTransformer(), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
+
+            if (inst.isRetransformClassesSupported()) {
+                for (Class<?> c : inst.getAllLoadedClasses()) {
+                    String name = c.getName();
+                    if ("zombie.iso.IsoGridSquare".equals(name) ||
+                        "zombie.iso.IsoChunkMap".equals(name) ||
+                        "zombie.vehicles.BaseVehicle".equals(name) ||
+                        "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
+                        "zombie.popman.ZombiePopulationManager".equals(name) ||
+                        "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
+                        "zombie.core.skinnedmodel.visual.HumanVisual".equals(name) ||
+                        "zombie.iso.IsoChunk$SanityCheck".equals(name)) {
+                        try {
+                            inst.retransformClasses(c);
+                            PZOLogger.success("[PZO Agent] Retransformed early-loaded class: " + name);
+                        } catch (Throwable t) {
+                            PZOLogger.warn("[PZO Agent] Notice during retransformation of " + name + ": " + t.getMessage());
+                        }
+                    }
+                }
+            }
         } catch (Throwable t) {
             PZOLogger.warn("[PZO Agent] Notice on transformer registration: " + t.getMessage());
         }
@@ -68,6 +90,12 @@ public class PZOptimAgent {
             }
             if ("zombie/iso/IsoGridSquare".equals(className) && classfileBuffer != null) {
                 return patchIsoGridSquare(classfileBuffer);
+            }
+            if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
+                return patchBaseVehicle(classfileBuffer);
+            }
+            if ("zombie/iso/fboRenderChunk/FBORenderCell".equals(className) && classfileBuffer != null) {
+                return patchFBORenderCell(classfileBuffer);
             }
             return null;
         }
@@ -810,6 +838,298 @@ public class PZOptimAgent {
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoGridSquare bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+        private byte[] patchBaseVehicle(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+                String[] utf8Strings = new String[cpCount];
+
+                int i = 1;
+                while (i < cpCount) {
+                    int tag = b[pos] & 0xFF;
+                    pos++;
+                    if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
+                        pos += 4;
+                    } else if (tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                byte[] copy = b.clone();
+                int mpos = pos + 6;
+                int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2 + ifaces * 2;
+
+                int fields = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                for (int f = 0; f < fields; f++) {
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6 + alen;
+                    }
+                }
+
+                int methods = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                int patched = 0;
+
+                for (int m = 0; m < methods; m++) {
+                    int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
+                    int descIdx = ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                    String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                    String mdesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6;
+                        if ("Code".equals(aname) && "addKeyToGloveBox".equals(mname) && "()V".equals(mdesc)) {
+                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
+                            int cstart = mpos + 8;
+                            if (codeLen >= 128 && copy[cstart + 52] == 0x2b && copy[cstart + 53] == (byte) 0xb4 && copy[cstart + 60] == 0x57) {
+                                byte cpHi = copy[cstart + 54];
+                                byte cpLo = copy[cstart + 55];
+                                byte mHi = copy[cstart + 58];
+                                byte mLo = copy[cstart + 59];
+
+                                // Patch 1: offset 52 (21 bytes)
+                                copy[cstart + 52] = 0x2b;
+                                copy[cstart + 53] = (byte) 0xb4;
+                                copy[cstart + 54] = cpHi;
+                                copy[cstart + 55] = cpLo;
+                                copy[cstart + 56] = (byte) 0xc6;
+                                copy[cstart + 57] = 0x00;
+                                copy[cstart + 58] = 0x48; // ifnull 128
+                                copy[cstart + 59] = 0x2b;
+                                copy[cstart + 60] = (byte) 0xb4;
+                                copy[cstart + 61] = cpHi;
+                                copy[cstart + 62] = cpLo;
+                                copy[cstart + 63] = 0x2c;
+                                copy[cstart + 64] = (byte) 0xb6;
+                                copy[cstart + 65] = mHi;
+                                copy[cstart + 66] = mLo;
+                                copy[cstart + 67] = 0x57; // pop
+                                copy[cstart + 68] = 0x00; // nop
+                                copy[cstart + 69] = 0x00; // nop
+                                copy[cstart + 70] = (byte) 0xa7; // goto 128
+                                copy[cstart + 71] = 0x00;
+                                copy[cstart + 72] = 0x3a; // offset: 128 - 70 = 58 (0x003a)
+
+                                // Patch 2: offset 82 (19 bytes)
+                                copy[cstart + 82] = 0x2b;
+                                copy[cstart + 83] = (byte) 0xb4;
+                                copy[cstart + 84] = cpHi;
+                                copy[cstart + 85] = cpLo;
+                                copy[cstart + 86] = (byte) 0xc6;
+                                copy[cstart + 87] = 0x00;
+                                copy[cstart + 88] = 0x2a; // ifnull 128
+                                copy[cstart + 89] = 0x2b;
+                                copy[cstart + 90] = (byte) 0xb4;
+                                copy[cstart + 91] = cpHi;
+                                copy[cstart + 92] = cpLo;
+                                copy[cstart + 93] = 0x2c;
+                                copy[cstart + 94] = (byte) 0xb6;
+                                copy[cstart + 95] = mHi;
+                                copy[cstart + 96] = mLo;
+                                copy[cstart + 97] = 0x57; // pop
+                                copy[cstart + 98] = 0x00; // nop
+                                copy[cstart + 99] = 0x00; // nop
+                                copy[cstart + 100] = (byte) 0xb1; // return
+
+                                // Patch 3: offset 119 (9 bytes)
+                                copy[cstart + 119] = 0x2b;
+                                copy[cstart + 120] = (byte) 0xb4;
+                                copy[cstart + 121] = cpHi;
+                                copy[cstart + 122] = cpLo;
+                                copy[cstart + 123] = (byte) 0xc6;
+                                copy[cstart + 124] = 0x00;
+                                copy[cstart + 125] = 0x05; // ifnull 128
+                                copy[cstart + 126] = 0x00; // nop
+                                copy[cstart + 127] = 0x00; // nop
+
+                                patched++;
+                            }
+                        }
+                        mpos += alen;
+                    }
+                }
+
+                if (patched > 0) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched BaseVehicle.addKeyToGloveBox: Glovebox container null-checks armed (NullPointerException eliminated)");
+                    return copy;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during BaseVehicle bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private byte[] patchFBORenderCell(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+                String[] utf8Strings = new String[cpCount];
+                int[] natNames = new int[cpCount];
+                int[] natDescs = new int[cpCount];
+
+                int i = 1;
+                while (i < cpCount) {
+                    int tag = b[pos] & 0xFF;
+                    pos++;
+                    if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 12) {
+                        natNames[i] = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        natDescs[i] = ((b[pos + 2] & 0xFF) << 8) | (b[pos + 3] & 0xFF);
+                        pos += 4;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 17 || tag == 18) {
+                        pos += 4;
+                    } else if (tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                int cpEnd = pos;
+
+                // Find Fieldref for IsoGridSquare.chunk:Lzombie/iso/IsoChunk;
+                int chunkFieldRef = -1;
+                pos = 10;
+                i = 1;
+                while (i < cpCount) {
+                    int tag = b[pos] & 0xFF;
+                    pos++;
+                    if (tag == 9) {
+                        int natIdx = ((b[pos + 2] & 0xFF) << 8) | (b[pos + 3] & 0xFF);
+                        if (natIdx > 0 && natIdx < cpCount) {
+                            int nName = natNames[natIdx];
+                            int nDesc = natDescs[natIdx];
+                            if ("chunk".equals(utf8Strings[nName]) && "Lzombie/iso/IsoChunk;".equals(utf8Strings[nDesc])) {
+                                chunkFieldRef = i;
+                                break;
+                            }
+                        }
+                        pos += 4;
+                    } else if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2 + len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18 || tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    }
+                    i++;
+                }
+
+                if (chunkFieldRef == -1) {
+                    return null;
+                }
+
+                byte chunkHi = (byte) ((chunkFieldRef >> 8) & 0xFF);
+                byte chunkLo = (byte) (chunkFieldRef & 0xFF);
+
+                byte[] copy = b.clone();
+                int mpos = cpEnd;
+                mpos += 6;
+                int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2 + ifaces * 2;
+
+                int fields = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                for (int f = 0; f < fields; f++) {
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6 + alen;
+                    }
+                }
+
+                int methods = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                int patched = 0;
+
+                for (int m = 0; m < methods; m++) {
+                    int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
+                    int descIdx = ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                    String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                    String mdesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6;
+                        if ("Code".equals(aname) && "shouldRenderSquare".equals(mname) && "(Lzombie/iso/IsoGridSquare;)Z".equals(mdesc)) {
+                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
+                            int cstart = mpos + 8;
+                            if (codeLen >= 32 && copy[cstart + 21] == 0x2b && copy[cstart + 22] == (byte) 0xb4 && copy[cstart + 27] == (byte) 0xc7) {
+                                copy[cstart + 21] = 0x2b;
+                                copy[cstart + 22] = (byte) 0xb4;
+                                copy[cstart + 23] = chunkHi;
+                                copy[cstart + 24] = chunkLo;
+                                copy[cstart + 25] = (byte) 0xc7;
+                                copy[cstart + 26] = 0x00;
+                                copy[cstart + 27] = 0x07; // ifnonnull 32
+                                copy[cstart + 28] = 0x00; // nop
+                                copy[cstart + 29] = 0x00; // nop
+                                patched++;
+                            }
+                        }
+                        mpos += alen;
+                    }
+                }
+
+                if (patched > 0) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched FBORenderCell.shouldRenderSquare: Guarded against null square.chunk (Cutaway NullPointerException eliminated)");
+                    return copy;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during FBORenderCell bytecode transform: " + t.getMessage());
             }
             return null;
         }
