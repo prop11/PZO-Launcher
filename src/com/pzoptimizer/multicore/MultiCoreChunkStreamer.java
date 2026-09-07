@@ -150,9 +150,9 @@ public final class MultiCoreChunkStreamer {
 
     /**
      * Specialized queue installed into WorldStreamer.jobQueue via Unsafe.
-     * Intercepts incoming chunk load requests with 0ms latency, triggers asynchronous
-     * parallel disk pre-read and AVX2 decompression across P-Core workers, and immediately
-     * wakes WorldStreamer from its 140ms idle sleep.
+     * Intercepts incoming chunk load requests, triggers asynchronous
+     * parallel disk pre-read and AVX2 decompression across P-Core workers, and passes
+     * chunks to WorldStreamer with zero monitor lock contention.
      */
     public static class PZOChunkStreamQueue extends ConcurrentLinkedQueue<IsoChunk> {
         @Override
@@ -160,10 +160,8 @@ public final class MultiCoreChunkStreamer {
             if (chunk == null) return false;
             boolean offered = super.offer(chunk);
             if (offered && !chunk.loaded) {
-                // 1. Asynchronously pre-read and decompress chunk in background workers
+                // Asynchronously pre-read and decompress chunk in background workers
                 com.pzoptimizer.PredictiveChunkStreamer.prewarmChunkDirect(chunk.wx, chunk.wy);
-                // 2. Wake WorldStreamer thread immediately (bypassing the 140ms idle sleep)
-                wakeWorldStreamer();
             }
             return offered;
         }
@@ -171,18 +169,6 @@ public final class MultiCoreChunkStreamer {
         @Override
         public boolean add(IsoChunk chunk) {
             return offer(chunk);
-        }
-    }
-
-    public static void wakeWorldStreamer() {
-        WorldStreamer ws = WorldStreamer.instance;
-        if (ws != null && worldStreamerThreadField != null) {
-            try {
-                Thread th = (Thread) worldStreamerThreadField.get(ws);
-                if (th != null && th.isAlive() && th.getState() == Thread.State.TIMED_WAITING) {
-                    th.interrupt();
-                }
-            } catch (Throwable ignored) {}
         }
     }
 
@@ -239,7 +225,6 @@ public final class MultiCoreChunkStreamer {
 
                 boolean hasPending = (jobQueue != null && !jobQueue.isEmpty()) || (jobList != null && !jobList.isEmpty());
                 if (hasPending) {
-                    wakeWorldStreamer();
                     if (jobList != null && !jobList.isEmpty()) {
                         synchronized (jobList) {
                             for (int i = 0; i < jobList.size(); i++) {
