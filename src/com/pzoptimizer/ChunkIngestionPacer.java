@@ -147,8 +147,13 @@ public final class ChunkIngestionPacer {
      * - On slack frames with 0 ingestion, at most 1 orphaned chunk is unlinked under a 2.5ms ceiling.
      * - Locks frametimes flat at 60+ FPS while driving.
      */
+    public static boolean isPlayerDriving() {
+        return PacedConcurrentQueue.isPlayerDriving();
+    }
+
     public static void processPendingUnloads() {
         if (isEngineLoading()) return;
+        if (isPlayerDriving()) return; // Do not unload chunks while driving to avoid collision/mesh gaps
 
         // Budgeted teardowns: Smoothly free at most 1-2 orphaned chunks per frame
         // under a 1.5ms ceiling, preventing trailing chunk accumulation during vehicle travel.
@@ -311,7 +316,7 @@ public final class ChunkIngestionPacer {
             approximateSize.set(0);
         }
 
-        private static boolean isPlayerDriving() {
+        public static boolean isPlayerDriving() {
             long now = System.currentTimeMillis();
             if (now - lastDrivingCheckTime < 100L) {
                 return playerIsDriving;
@@ -385,23 +390,23 @@ public final class ChunkIngestionPacer {
             checkFrameBoundary(now);
 
             // Balanced micro-task chunk pacing:
-            // When driving, strictly pace to 1 chunk per frame under a 2.5 ms budget ceiling.
-            // 1 chunk/frame at 60 FPS yields 60 chunks/sec, easily outpacing vehicle speeds (up to 120 km/h = 43 chunks/sec)
-            // while completely preventing ingestion spikes.
+            // When driving, never artificially throttle ingestion to 1-2 chunks; crossing chunk boundaries
+            // in Build 42 requires 13-26 chunks. We ingest dynamically up to 32 chunks under a 12.0 ms budget ceiling
+            // so vehicles never outrun chunk ingestion or drive into un-ingested missing floor tiles.
             boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
             int maxChunks;
             long budgetNanos;
 
             if (driving) {
-                maxChunks = (backlog > 4) ? 2 : 1;
-                budgetNanos = 3_000_000L; // 3.0 ms budget ceiling
+                maxChunks = Math.max(32, backlog);
+                budgetNanos = 12_000_000L; // 12.0 ms budget ceiling
             } else {
-                maxChunks = (backlog > 8) ? 3 : 2;
-                budgetNanos = 5_000_000L; // 5.0 ms budget ceiling
+                maxChunks = (backlog > 8) ? 8 : 4;
+                budgetNanos = 6_000_000L; // 6.0 ms budget ceiling
             }
 
-            if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
+            if (chunksThisFrame > 0 && (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos)) {
                 // Yield to renderer for this frame; remaining chunks are smoothly integrated next frame
                 return null;
             }

@@ -97,6 +97,9 @@ public class PZOptimAgent {
             if ("zombie/iso/fboRenderChunk/FBORenderCell".equals(className) && classfileBuffer != null) {
                 return patchFBORenderCell(classfileBuffer);
             }
+            if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
+                return patchFBORenderLevels(classfileBuffer);
+            }
             return null;
         }
 
@@ -372,8 +375,6 @@ public class PZOptimAgent {
 
                 int chunksSwapARef = -1;
                 int chunkGridWidthRef = -1;
-                int refsFieldRef = -1;
-                int isEmptyMethodRef = -1;
 
                 for (int k = 1; k < cpCount; k++) {
                     if (tags[k] == 9) { // Fieldref
@@ -389,26 +390,6 @@ public class PZOptimAgent {
                                 chunksSwapARef = k;
                             } else if ("chunkGridWidth".equals(name) && "I".equals(desc)) {
                                 chunkGridWidthRef = k;
-                            } else if ("refs".equals(name) && "Ljava/util/ArrayList;".equals(desc)) {
-                                refsFieldRef = k;
-                            }
-                        }
-                    } else if (tags[k] == 10) { // Methodref
-                        int p = tagOffsets[k] + 1;
-                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
-                        int clsIdx = ((b[p] & 0xFF) << 8) | (b[p + 1] & 0xFF);
-                        int clsNameIdx = (clsIdx > 0 && clsIdx < cpCount && tags[clsIdx] == 7) ?
-                                         (((b[tagOffsets[clsIdx] + 1] & 0xFF) << 8) | (b[tagOffsets[clsIdx] + 2] & 0xFF)) : -1;
-                        String clsName = (clsNameIdx > 0 && clsNameIdx < cpCount) ? utf8Strings[clsNameIdx] : null;
-
-                        if ("java/util/ArrayList".equals(clsName) && ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
-                            int ntp = tagOffsets[ntIdx] + 1;
-                            int nameIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
-                            int descIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
-                            String name = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : null;
-                            String desc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : null;
-                            if ("isEmpty".equals(name) && "()Z".equals(desc)) {
-                                isEmptyMethodRef = k;
                             }
                         }
                     }
@@ -427,7 +408,7 @@ public class PZOptimAgent {
                 byte[] copy = b.clone();
                 int patchedSites = 0;
 
-                // 1. Loop reduction: calculateZExtentsForChunkMap (28,561 loop down to 169)
+                // Loop reduction: calculateZExtentsForChunkMap (28,561 loop down to 169)
                 for (int k = pos; k < copy.length - 4; k++) {
                     if (copy[k] == 0x2A && copy[k + 1] == (byte) 0xB4 &&
                         copy[k + 2] == oldRefHi && copy[k + 3] == oldRefLo &&
@@ -441,83 +422,8 @@ public class PZOptimAgent {
                     }
                 }
 
-                // 2. Trailing edge chunk unload pacing: Up, Down, Left, Right
-                int shiftPatched = 0;
-                if (refsFieldRef != -1 && isEmptyMethodRef != -1) {
-                    byte refsHi = (byte) ((refsFieldRef >> 8) & 0xFF);
-                    byte refsLo = (byte) (refsFieldRef & 0xFF);
-                    byte emptyHi = (byte) ((isEmptyMethodRef >> 8) & 0xFF);
-                    byte emptyLo = (byte) (isEmptyMethodRef & 0xFF);
-
-                    try {
-                        int mpos = pos;
-                        mpos += 6; // access, this, super
-                        int ifacesCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                        mpos += 2 + ifacesCount * 2;
-
-                        int fieldsCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                        mpos += 2;
-                        for (int f = 0; f < fieldsCount; f++) {
-                            mpos += 6;
-                            int aCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                            mpos += 2;
-                            for (int a = 0; a < aCount; a++) {
-                                int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
-                                mpos += 6 + alen;
-                            }
-                        }
-
-                        int methodsCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                        mpos += 2;
-
-                        for (int m = 0; m < methodsCount; m++) {
-                            int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
-                            String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
-                            mpos += 6;
-                            int aCount = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                            mpos += 2;
-                            for (int a = 0; a < aCount; a++) {
-                                int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                                String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
-                                int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
-                                mpos += 6;
-                                if ("Code".equals(aname) && ("Up".equals(mname) || "Down".equals(mname) || "Left".equals(mname) || "Right".equals(mname))) {
-                                    int codeStart = mpos + 8;
-                                    int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
-                                    for (int k = codeStart; k <= codeStart + codeLen - 10; k++) {
-                                        if (copy[k] == 0x57 && // pop
-                                            copy[k + 1] == 0x2d && // aload_3
-                                            copy[k + 2] == (byte) 0xb4 && copy[k + 3] == refsHi && copy[k + 4] == refsLo && // getfield refs
-                                            copy[k + 5] == (byte) 0xb6 && copy[k + 6] == emptyHi && copy[k + 7] == emptyLo && // invokevirtual isEmpty
-                                            copy[k + 8] == (byte) 0x99) { // ifeq
-                                            // Replace aload_3; getfield refs; invokevirtual isEmpty (7 bytes) with iconst_0; nop*6
-                                            // Leaving ifeq (copy[k + 8]) and its original branch offset untouched preserves the StackMapTable 100%
-                                            copy[k + 1] = 0x03; // iconst_0
-                                            copy[k + 2] = 0x00; // nop
-                                            copy[k + 3] = 0x00; // nop
-                                            copy[k + 4] = 0x00; // nop
-                                            copy[k + 5] = 0x00; // nop
-                                            copy[k + 6] = 0x00; // nop
-                                            copy[k + 7] = 0x00; // nop
-                                            shiftPatched++;
-                                        }
-                                    }
-                                }
-                                mpos += alen;
-                            }
-                        }
-                    } catch (Throwable t) {
-                        PZOLogger.warn("[PZO Agent] Shift method parse notice: " + t.getMessage());
-                    }
-                }
-
-                if (patchedSites > 0 || shiftPatched > 0) {
-                    if (patchedSites > 0) {
-                        PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap.calculateZExtentsForChunkMap: Reduced 28,561 loop iterations down to 169 (%d sites patched - 99.4%% loop overhead eliminated)", patchedSites));
-                    }
-                    if (shiftPatched > 0) {
-                        PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap trailing chunk shift teardowns (%d methods: Up/Down/Left/Right paced via ChunkIngestionPacer)", shiftPatched));
-                    }
+                if (patchedSites > 0) {
+                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap.calculateZExtentsForChunkMap: Reduced 28,561 loop iterations down to 169 (%d sites patched - 99.4%% loop overhead eliminated)", patchedSites));
                     return copy;
                 }
             } catch (Throwable t) {
@@ -1130,6 +1036,215 @@ public class PZOptimAgent {
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during FBORenderCell bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private byte[] patchFBORenderLevels(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+                String[] utf8Strings = new String[cpCount];
+                int stackmapUtf8Idx = -1;
+                int i = 1;
+                while (i < cpCount) {
+                    int tag = b[pos] & 0xFF;
+                    pos++;
+                    if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        if ("StackMapTable".equals(utf8Strings[i])) {
+                            stackmapUtf8Idx = i;
+                        }
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18 || tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                if (stackmapUtf8Idx == -1) return null;
+
+                pos += 6; // access, this, super
+                int ifaces = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                pos += 2 + ifaces * 2;
+
+                int fields = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                pos += 2;
+                for (int f = 0; f < fields; f++) {
+                    pos += 6;
+                    int attrs = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                    pos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int alen = ((b[pos + 2] & 0xFF) << 24) | ((b[pos + 3] & 0xFF) << 16) | ((b[pos + 4] & 0xFF) << 8) | (b[pos + 5] & 0xFF);
+                        pos += 6 + alen;
+                    }
+                }
+
+                int methods = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                pos += 2;
+
+                byte[] result = new byte[b.length + 256];
+                int rpos = 0;
+                System.arraycopy(b, 0, result, 0, pos);
+                rpos = pos;
+
+                int patched = 0;
+
+                for (int m = 0; m < methods; m++) {
+                    int nameIdx = ((b[pos + 2] & 0xFF) << 8) | (b[pos + 3] & 0xFF);
+                    int descIdx = ((b[pos + 4] & 0xFF) << 8) | (b[pos + 5] & 0xFF);
+                    String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                    String mdesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
+
+                    System.arraycopy(b, pos, result, rpos, 6);
+                    rpos += 6;
+                    pos += 6;
+                    int attrs = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                    result[rpos] = b[pos];
+                    result[rpos + 1] = b[pos + 1];
+                    rpos += 2;
+                    pos += 2;
+
+                    for (int a = 0; a < attrs; a++) {
+                        int anameIdx = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+                        int alen = ((b[pos + 2] & 0xFF) << 24) | ((b[pos + 3] & 0xFF) << 16) | ((b[pos + 4] & 0xFF) << 8) | (b[pos + 5] & 0xFF);
+
+                        if ("Code".equals(aname) && "isOnScreen".equals(mname) && "(I)Z".equals(mdesc)) {
+                            byte origGetNLevelsHi = b[pos + 17];
+                            byte origGetNLevelsLo = b[pos + 18];
+                            byte origOnScreenHi = b[pos + 20];
+                            byte origOnScreenLo = b[pos + 21];
+
+                            byte[] newCode = new byte[] {
+                                0x1b,                      // 0: iload_1
+                                0x10, (byte) 0xe0,         // 1: bipush -32
+                                (byte) 0xa1, 0x00, 0x09,  // 3: if_icmplt +9 -> 12
+                                0x1b,                      // 6: iload_1
+                                0x10, 0x1f,                // 7: bipush 31
+                                (byte) 0xa4, 0x00, 0x05,  // 9: if_icmple +5 -> 14
+                                0x03,                      // 12: iconst_0
+                                (byte) 0xac,               // 13: ireturn
+                                0x2a,                      // 14: aload_0
+                                0x1b,                      // 15: iload_1
+                                (byte) 0xb6, origGetNLevelsHi, origGetNLevelsLo, // 16: invokevirtual getNLevels
+                                (byte) 0xb4, origOnScreenHi, origOnScreenLo,     // 19: getfield onScreen
+                                (byte) 0xac                // 22: ireturn
+                            };
+
+                            byte[] stackmapAttr = new byte[] {
+                                (byte) ((stackmapUtf8Idx >> 8) & 0xFF), (byte) (stackmapUtf8Idx & 0xFF),
+                                0x00, 0x00, 0x00, 0x04,
+                                0x00, 0x02,
+                                0x0c,                      // same_frame offset 12
+                                0x01                       // same_frame offset 14 (14 - 12 - 1 = 1)
+                            };
+
+                            int codeAttrBodyLen = 8 + newCode.length + 2 + 2 + stackmapAttr.length;
+                            result[rpos] = b[pos];
+                            result[rpos + 1] = b[pos + 1];
+                            result[rpos + 2] = (byte) ((codeAttrBodyLen >> 24) & 0xFF);
+                            result[rpos + 3] = (byte) ((codeAttrBodyLen >> 16) & 0xFF);
+                            result[rpos + 4] = (byte) ((codeAttrBodyLen >> 8) & 0xFF);
+                            result[rpos + 5] = (byte) (codeAttrBodyLen & 0xFF);
+                            rpos += 6;
+
+                            result[rpos++] = 0x00; result[rpos++] = 0x02; // max_stack
+                            result[rpos++] = 0x00; result[rpos++] = 0x02; // max_locals
+                            result[rpos++] = 0x00; result[rpos++] = 0x00;
+                            result[rpos++] = 0x00; result[rpos++] = (byte) newCode.length;
+                            System.arraycopy(newCode, 0, result, rpos, newCode.length);
+                            rpos += newCode.length;
+                            result[rpos++] = 0x00; result[rpos++] = 0x00; // exception_table_length
+                            result[rpos++] = 0x00; result[rpos++] = 0x01; // attributes_count (1: StackMapTable)
+                            System.arraycopy(stackmapAttr, 0, result, rpos, stackmapAttr.length);
+                            rpos += stackmapAttr.length;
+                            patched++;
+                        } else if ("Code".equals(aname) && "indexForLevel".equals(mname) && "(I)I".equals(mdesc)) {
+                            byte calcMinHi = b[pos + 17];
+                            byte calcMinLo = b[pos + 18];
+
+                            byte[] newCode = new byte[] {
+                                0x1b,                      // 0: iload_1
+                                0x10, (byte) 0xe0,         // 1: bipush -32
+                                (byte) 0xa2, 0x00, 0x05,  // 3: if_icmpge +5 -> 8
+                                0x03,                      // 6: iconst_0
+                                (byte) 0xac,               // 7: ireturn
+                                0x1b,                      // 8: iload_1
+                                0x10, 0x1f,                // 9: bipush 31
+                                (byte) 0xa4, 0x00, 0x06,  // 11: if_icmple +6 -> 17
+                                0x10, 0x1f,                // 14: bipush 31
+                                (byte) 0xac,               // 16: ireturn
+                                0x1b,                      // 17: iload_1
+                                (byte) 0xb8, calcMinHi, calcMinLo, // 18: invokestatic calculateMinLevel
+                                0x10, 0x20,                // 21: bipush 32
+                                0x60,                      // 23: iadd
+                                0x05,                      // 24: iconst_2
+                                0x6c,                      // 25: idiv
+                                (byte) 0xac                // 26: ireturn
+                            };
+
+                            byte[] stackmapAttr = new byte[] {
+                                (byte) ((stackmapUtf8Idx >> 8) & 0xFF), (byte) (stackmapUtf8Idx & 0xFF),
+                                0x00, 0x00, 0x00, 0x04,
+                                0x00, 0x02,
+                                0x08,                      // same_frame offset 8
+                                0x08                       // same_frame offset 17 (17 - 8 - 1 = 8)
+                            };
+
+                            int codeAttrBodyLen = 8 + newCode.length + 2 + 2 + stackmapAttr.length;
+                            result[rpos] = b[pos];
+                            result[rpos + 1] = b[pos + 1];
+                            result[rpos + 2] = (byte) ((codeAttrBodyLen >> 24) & 0xFF);
+                            result[rpos + 3] = (byte) ((codeAttrBodyLen >> 16) & 0xFF);
+                            result[rpos + 4] = (byte) ((codeAttrBodyLen >> 8) & 0xFF);
+                            result[rpos + 5] = (byte) (codeAttrBodyLen & 0xFF);
+                            rpos += 6;
+
+                            result[rpos++] = 0x00; result[rpos++] = 0x02; // max_stack
+                            result[rpos++] = 0x00; result[rpos++] = 0x02; // max_locals
+                            result[rpos++] = 0x00; result[rpos++] = 0x00;
+                            result[rpos++] = 0x00; result[rpos++] = (byte) newCode.length;
+                            System.arraycopy(newCode, 0, result, rpos, newCode.length);
+                            rpos += newCode.length;
+                            result[rpos++] = 0x00; result[rpos++] = 0x00; // exception_table_length
+                            result[rpos++] = 0x00; result[rpos++] = 0x01; // attributes_count (1: StackMapTable)
+                            System.arraycopy(stackmapAttr, 0, result, rpos, stackmapAttr.length);
+                            rpos += stackmapAttr.length;
+                            patched++;
+                        } else {
+                            System.arraycopy(b, pos, result, rpos, 6 + alen);
+                            rpos += 6 + alen;
+                        }
+                        pos += 6 + alen;
+                    }
+                }
+
+                int remaining = b.length - pos;
+                if (remaining > 0) {
+                    System.arraycopy(b, pos, result, rpos, remaining);
+                    rpos += remaining;
+                }
+
+                if (patched > 0) {
+                    byte[] trimmed = new byte[rpos];
+                    System.arraycopy(result, 0, trimmed, 0, rpos);
+                    PZOLogger.success("[PZO Agent] Bytecode-patched FBORenderLevels: Boundary guards installed on isOnScreen & indexForLevel (ArrayIndexOutOfBoundsException & Black Void eliminated)");
+                    return trimmed;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during FBORenderLevels bytecode transform: " + t.getMessage());
             }
             return null;
         }
