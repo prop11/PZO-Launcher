@@ -235,6 +235,10 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
+    public static void prewarmChunkDirect(int wx, int wy) {
+        prewarmChunkInOSCache(wx, wy);
+    }
+
     private static void prewarmChunkInOSCache(int wx, int wy) {
         long key = FastChunkKey.pack(wx, wy);
         if (PREWARMED_KEYS.contains(key)) {

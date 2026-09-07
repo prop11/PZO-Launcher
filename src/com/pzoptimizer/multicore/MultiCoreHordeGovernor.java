@@ -347,6 +347,9 @@ public final class MultiCoreHordeGovernor {
             lastHibernatingCount.set(hibernating);
             lastVisibleCount.set(visible);
 
+            // Synchronize with HordeSpatialCuller for zero-overhead legacy lookups
+            com.pzoptimizer.HordeSpatialCuller.syncFromMultiCore(count, culled, hibernating, SNAPSHOT_DISTANCES, SNAPSHOT_TIERS, SNAPSHOT_MASK);
+
             long sweepDuration = System.nanoTime() - sweepStart;
             totalParallelSweeps.incrementAndGet();
             totalSweepTimeNanos.addAndGet(sweepDuration);

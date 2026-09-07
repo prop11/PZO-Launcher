@@ -63,15 +63,23 @@ public final class HordeSpatialCuller {
     public static void initialize() {
         if (active) return;
         SpatialBufferPool.initialize();
-        resolveReflection();
-
         active = true;
-        cullerThread = new Thread(HordeSpatialCuller::cullerLoop, "PZO-HordeSpatialCuller");
-        cullerThread.setDaemon(true);
-        cullerThread.setPriority(Thread.NORM_PRIORITY - 1);
-        cullerThread.start();
+        PZOLogger.success("HordeSpatialCuller: Delegated to MultiCoreHordeGovernor (Unified Multi-Core AVX2 SIMD Engine)");
+    }
 
-        PZOLogger.success("HordeSpatialCuller: Active (SIMD AVX2 Batch Horde Spatial Culler & Vectorized Entity Processor)");
+    public static void syncFromMultiCore(int count, int culled, int hibernating, float[] dists, byte[] tiers, byte[] mask) {
+        if (count > 0 && dists != null && tiers != null && mask != null) {
+            int copyLen = Math.min(count, MAX_SNAPSHOT);
+            System.arraycopy(dists, 0, SNAPSHOT_DISTANCES, 0, copyLen);
+            System.arraycopy(tiers, 0, SNAPSHOT_TIERS, 0, copyLen);
+            System.arraycopy(mask, 0, SNAPSHOT_MASK, 0, copyLen);
+            snapshotCount = copyLen;
+        } else {
+            snapshotCount = 0;
+        }
+        lastTrackedZombieCount.set(count);
+        lastCulledOffscreenCount.set(culled);
+        lastHibernatingCount.set(hibernating);
     }
 
     private static void resolveReflection() {
