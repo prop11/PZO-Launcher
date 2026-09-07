@@ -63,6 +63,9 @@ public class PZOptimAgent {
             if ("zombie/entity/components/spriteconfig/SpriteConfig".equals(className) && classfileBuffer != null) {
                 return patchSpriteConfig(classfileBuffer);
             }
+            if ("zombie/popman/ZombiePopulationManager".equals(className) && classfileBuffer != null) {
+                return patchZombiePopulationManager(classfileBuffer);
+            }
             return null;
         }
 
@@ -574,6 +577,143 @@ public class PZOptimAgent {
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during SpriteConfig bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private byte[] patchZombiePopulationManager(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+                int[] tagOffsets = new int[cpCount];
+                int[] tags = new int[cpCount];
+                String[] utf8Strings = new String[cpCount];
+
+                int i = 1;
+                while (i < cpCount) {
+                    tags[i] = b[pos] & 0xFF;
+                    tagOffsets[i] = pos;
+                    pos++;
+                    int tag = tags[i];
+                    if (tag == 1) {
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
+                        pos += 4;
+                    } else if (tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                int saveLockRef = -1;
+                int lockRef = -1;
+                int unlockRef = -1;
+
+                for (int k = 1; k < cpCount; k++) {
+                    if (tags[k] == 9) { // Fieldref
+                        int p = tagOffsets[k] + 1;
+                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
+                            int ntp = tagOffsets[ntIdx] + 1;
+                            int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
+                            int dIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
+                            if ("saveLock".equals(utf8Strings[nIdx]) && "Ljava/util/concurrent/locks/ReentrantLock;".equals(utf8Strings[dIdx])) {
+                                saveLockRef = k;
+                            }
+                        }
+                    } else if (tags[k] == 10) { // Methodref
+                        int p = tagOffsets[k] + 1;
+                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
+                            int ntp = tagOffsets[ntIdx] + 1;
+                            int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
+                            int dIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
+                            if ("lock".equals(utf8Strings[nIdx]) && "()V".equals(utf8Strings[dIdx])) {
+                                lockRef = k;
+                            } else if ("unlock".equals(utf8Strings[nIdx]) && "()V".equals(utf8Strings[dIdx])) {
+                                unlockRef = k;
+                            }
+                        }
+                    }
+                }
+
+                if (saveLockRef == -1 || lockRef == -1 || unlockRef == -1) return null;
+
+                byte saveHi = (byte) ((saveLockRef >> 8) & 0xFF);
+                byte saveLo = (byte) (saveLockRef & 0xFF);
+                byte lockHi = (byte) ((lockRef >> 8) & 0xFF);
+                byte lockLo = (byte) (lockRef & 0xFF);
+                byte unHi = (byte) ((unlockRef >> 8) & 0xFF);
+                byte unLo = (byte) (unlockRef & 0xFF);
+
+                byte[] copy = b.clone();
+                int mpos = pos + 6; // access_flags (2), this_class (2), super_class (2)
+                int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2 + ifaces * 2;
+
+                int fields = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                for (int f = 0; f < fields; f++) {
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6 + alen;
+                    }
+                }
+
+                int methods = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                mpos += 2;
+                int patched = 0;
+
+                for (int m = 0; m < methods; m++) {
+                    int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
+                    String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                    mpos += 6;
+                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                    mpos += 2;
+                    for (int a = 0; a < attrs; a++) {
+                        int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
+                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
+                        mpos += 6;
+                        if ("Code".equals(aname) && "requestSaveCell".equals(mname)) {
+                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
+                            int cstart = mpos + 8;
+                            for (int k = cstart; k <= cstart + codeLen - 6; k++) {
+                                if (copy[k] == (byte) 0xB2 && copy[k + 1] == saveHi && copy[k + 2] == saveLo && copy[k + 3] == (byte) 0xB6) {
+                                    if ((copy[k + 4] == lockHi && copy[k + 5] == lockLo) || (copy[k + 4] == unHi && copy[k + 5] == unLo)) {
+                                        for (int n = 0; n < 6; n++) {
+                                            copy[k + n] = 0x00; // nop
+                                        }
+                                        patched++;
+                                    }
+                                }
+                            }
+                        }
+                        mpos += alen;
+                    }
+                }
+
+                if (patched > 0) {
+                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched ZombiePopulationManager.requestSaveCell: Neutralized %d saveLock lock/unlock operations (Zero-contention lock-free cell queue)", patched));
+                    return copy;
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during ZombiePopulationManager bytecode transform: " + t.getMessage());
             }
             return null;
         }

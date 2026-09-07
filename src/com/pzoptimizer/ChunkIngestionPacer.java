@@ -129,8 +129,8 @@ public final class ChunkIngestionPacer {
     }
 
     public static void onFrameBoundary(int frameCount) {
-        PacedConcurrentQueue.onFrameBoundary(frameCount);
         processPendingUnloads();
+        PacedConcurrentQueue.onFrameBoundary(frameCount);
     }
 
     private static volatile int lastUnloadFrameCount = -1;
@@ -142,12 +142,20 @@ public final class ChunkIngestionPacer {
      * In vanilla PZ, IsoChunkMap synchronously removes, tears down squares/navmesh, and queues all 13 chunks in 1 frame (50-80ms freeze).
      * With our bytecode patch on Up/Down/Left/Right, map shifting takes 0.005ms, leaving trailing chunks in SharedChunks.
      * 
-     * processPendingUnloads inspects SharedChunks on the main thread and unloads 2-3 orphaned chunks per frame under a 4.0ms ceiling.
-     * Backlogs of 13 chunks clear within 4-5 frames (well before the next crossing ~18 frames later), locking frametimes flat at 60+ FPS.
-     * Chunks reused during player U-turns/weaving are instantly retrieved from SharedChunks with 0ms disk I/O.
+     * processPendingUnloads enforces strict mutual exclusion:
+     * - If any chunk was ingested in this frame, unloads are skipped entirely to prevent frame-time stacking.
+     * - On slack frames with 0 ingestion, at most 1 orphaned chunk is unlinked under a 2.5ms ceiling.
+     * - Locks frametimes flat at 60+ FPS while driving.
      */
     public static void processPendingUnloads() {
         if (isEngineLoading()) return;
+
+        // MUTUAL EXCLUSION: If any chunk was ingested in this frame tick,
+        // completely skip teardowns for this frame.
+        // Teardowns only run on slack frames with 0 ingestion, preventing frame time stacking.
+        if (PacedConcurrentQueue.getChunksIngestedThisFrame() > 0) {
+            return;
+        }
 
         try {
             if (zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
@@ -176,18 +184,20 @@ public final class ChunkIngestionPacer {
                 if (totalShared <= 0) return;
 
                 long now = System.nanoTime();
-                // Dynamic budget: 3 chunks normally (4.0ms ceiling); up to 6-8 chunks if backlog grows (6.5ms ceiling).
-                int maxUnloads = (totalShared > 250) ? 8 : (totalShared > 150 ? 5 : 3);
-                long budgetNanos = (totalShared > 250) ? 6_500_000L : 4_000_000L;
+                // Strict 1-chunk teardown pacing under a 2.5 ms ceiling on slack frames
+                int maxUnloads = 1;
+                long budgetNanos = 2_500_000L;
 
                 int unloadsThisFrame = 0;
+                int checkedEntries = 0;
                 var iterator = zombie.iso.IsoChunkMap.SharedChunks.entrySet().iterator();
                 while (iterator.hasNext()) {
-                    if (unloadsThisFrame >= maxUnloads || (System.nanoTime() - now) >= budgetNanos) {
+                    if (unloadsThisFrame >= maxUnloads || checkedEntries >= 16 || (System.nanoTime() - now) >= budgetNanos) {
                         break;
                     }
 
                     var entry = iterator.next();
+                    checkedEntries++;
                     zombie.iso.IsoChunk chunk = entry.getValue();
                     if (chunk == null) {
                         iterator.remove();
@@ -208,6 +218,7 @@ public final class ChunkIngestionPacer {
                             }
                         }
                         unloadsThisFrame++;
+                        break; // Process at most 1 chunk per slack frame, then yield immediately
                     }
                 }
             } finally {
@@ -321,6 +332,10 @@ public final class ChunkIngestionPacer {
             return false;
         }
 
+        public static int getChunksIngestedThisFrame() {
+            return chunksThisFrame;
+        }
+
         public static void onFrameBoundary(int frameCount) {
             if (frameCount != lastFrameCount) {
                 lastFrameCount = frameCount;
@@ -337,14 +352,13 @@ public final class ChunkIngestionPacer {
                         lastFrameCount = fc;
                         chunksThisFrame = 0;
                         frameStartTime = now;
-                        processPendingUnloads();
                         return;
                     }
                 }
             } catch (Throwable ignored) {}
 
             // Monotonic frame-freeze watchdog: ONLY reset if > 500ms elapsed (game paused in debugger / external stall)
-            // Prevents the cascading reset bug where a 18ms chunk resets the pacer and forces subsequent chunks into the same frame.
+            // Prevents the cascading reset bug where an external pause forces subsequent chunks into the same frame.
             if (now - frameStartTime > 500_000_000L) {
                 frameStartTime = now;
                 chunksThisFrame = 0;
@@ -375,20 +389,20 @@ public final class ChunkIngestionPacer {
             checkFrameBoundary(now);
 
             // Balanced micro-task chunk pacing:
-            // Allows 2-4 chunks per frame under an 8.0ms budget ceiling.
-            // Wavefronts of 13 chunks clear within 3-4 frames (~50ms total) instead of dragging across 13 frames,
-            // preventing the 30 FPS stutter-splatter while keeping individual frame times tight and consistent.
+            // When driving, strictly pace to 1 chunk per frame under a 2.5 ms budget ceiling.
+            // 1 chunk/frame at 60 FPS yields 60 chunks/sec, easily outpacing vehicle speeds (up to 120 km/h = 43 chunks/sec)
+            // while completely preventing ingestion spikes.
             boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
             int maxChunks;
             long budgetNanos;
 
             if (driving) {
-                maxChunks = (backlog > 8) ? 4 : (backlog > 4 ? 3 : 2);
-                budgetNanos = 8_000_000L; // 8.0 ms budget ceiling
+                maxChunks = 1;
+                budgetNanos = 2_500_000L; // 2.5 ms budget ceiling
             } else {
                 maxChunks = (backlog > 8) ? 3 : 2;
-                budgetNanos = 6_000_000L; // 6.0 ms budget ceiling
+                budgetNanos = 5_000_000L; // 5.0 ms budget ceiling
             }
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {

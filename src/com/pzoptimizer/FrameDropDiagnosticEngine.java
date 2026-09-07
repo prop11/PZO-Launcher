@@ -190,7 +190,7 @@ public final class FrameDropDiagnosticEngine {
 
         // 3. Classify Root Cause
         String cause;
-        if (gcDeltaTimeMs > 10 || gcDeltaCount > 0) {
+        if (gcDeltaTimeMs > 5) {
             cause = "GC_STW_PAUSE (" + gcDeltaTimeMs + "ms)";
         } else if (chunkCrossing) {
             if (isDriving) {
