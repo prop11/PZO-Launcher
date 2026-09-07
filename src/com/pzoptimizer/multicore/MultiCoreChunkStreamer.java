@@ -2,6 +2,7 @@ package com.pzoptimizer.multicore;
 
 import com.pzoptimizer.PZOLogger;
 import com.pzoptimizer.PZONative;
+import zombie.iso.ChunkSaveWorker;
 import zombie.iso.IsoChunk;
 import zombie.iso.WorldStreamer;
 import zombie.vehicles.VehiclesDB2;
@@ -10,6 +11,7 @@ import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.Stack;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -42,6 +44,9 @@ public final class MultiCoreChunkStreamer {
     private static final ThreadLocal<ByteBuffer> DIRECT_CHUNK_BUFFER = ThreadLocal.withInitial(() -> {
         return ByteBuffer.allocate(1048576); // 1,048,576 bytes = 1 MB heap buffer
     });
+
+    // Thread-safe in-flight chunk tracking to eliminate duplicate parallel loading
+    private static final Set<Long> IN_FLIGHT_CHUNKS = ConcurrentHashMap.newKeySet();
 
     // Guard lock for brief static state parsing in IsoChunk.LoadFromDiskOrBufferInternal
     private static final Object CHUNK_PARSE_LOCK = new Object();
@@ -281,57 +286,75 @@ public final class MultiCoreChunkStreamer {
     }
 
     private static void dispatchChunkTask(IsoChunk chunk) {
-        if (chunk == null) return;
+        if (chunk == null || chunk.loaded) return;
+
+        long chunkKey = (((long) chunk.wx) << 32) | (((long) chunk.wy) & 0xFFFFFFFFL);
+        if (!IN_FLIGHT_CHUNKS.add(chunkKey)) {
+            // Chunk coordinate is ALREADY in-flight on another worker; deduplicate
+            return;
+        }
+
         activeChunkWorkers.incrementAndGet();
 
         workerPool.execute(() -> {
-            long startTime = System.nanoTime();
             try {
-                // Ensure worker thread has P-Core affinity
-                PZONative.bindCallingThreadToPCores();
-
-                processChunkParallel(chunk);
-
-                long durationMs = (System.nanoTime() - startTime) / 1_000_000L;
-                totalChunksStreamedParallel.incrementAndGet();
-                totalStreamTimeSavedMs.addAndGet(Math.max(1, 140L - durationMs)); // Vanilla wastes 140ms sleep
-            } catch (Throwable t) {
-                PZOLogger.warn("[MultiCoreChunkStreamer] Fallback recovery for chunk (" + chunk.wx + "," + chunk.wy + "): " + t.getMessage());
-                // Fallback: Safely parse synchronously under parse lock without dumping into WorldStreamer.jobQueue
-                // (Dumping into WorldStreamer risks thread collisions because WorldStreamer does not acquire CHUNK_PARSE_LOCK).
+                long startTime = System.nanoTime();
                 try {
-                    synchronized (getParseLock()) {
-                        resetSanityCheck();
-                        try {
-                            if (!chunk.loaded) {
-                                chunk.LoadChunk(chunk.wx, chunk.wy, null);
-                                if (VehiclesDB2.instance != null) {
-                                    try {
-                                        VehiclesDB2.instance.loadChunk(chunk);
-                                    } catch (Throwable ignored) {}
-                                }
-                                if (chunk.refs != null && !chunk.refs.isEmpty()) {
-                                    try {
-                                        chunk.loadInWorldStreamerThread();
-                                    } catch (Throwable ignored) {}
-                                }
-                                IsoChunk.loadGridSquare.add(chunk);
-                            }
-                        } finally {
+                    // Ensure worker thread has P-Core affinity
+                    PZONative.bindCallingThreadToPCores();
+
+                    processChunkParallel(chunk);
+
+                    long durationMs = (System.nanoTime() - startTime) / 1_000_000L;
+                    totalChunksStreamedParallel.incrementAndGet();
+                    totalStreamTimeSavedMs.addAndGet(Math.max(1, 140L - durationMs)); // Vanilla wastes 140ms sleep
+                } catch (Throwable t) {
+                    PZOLogger.warn("[MultiCoreChunkStreamer] Fallback recovery for chunk (" + chunk.wx + "," + chunk.wy + "): " + t.getMessage());
+                    // Fallback: Safely parse synchronously under parse lock without dumping into WorldStreamer.jobQueue
+                    // (Dumping into WorldStreamer risks thread collisions because WorldStreamer does not acquire CHUNK_PARSE_LOCK).
+                    try {
+                        synchronized (getParseLock()) {
                             resetSanityCheck();
+                            try {
+                                if (!chunk.loaded) {
+                                    chunk.LoadChunk(chunk.wx, chunk.wy, null);
+                                    if (VehiclesDB2.instance != null) {
+                                        try {
+                                            VehiclesDB2.instance.loadChunk(chunk);
+                                        } catch (Throwable ignored) {}
+                                    }
+                                    if (chunk.refs != null && !chunk.refs.isEmpty()) {
+                                        try {
+                                            chunk.loadInWorldStreamerThread();
+                                        } catch (Throwable ignored) {}
+                                    }
+                                    IsoChunk.loadGridSquare.add(chunk);
+                                }
+                            } finally {
+                                resetSanityCheck();
+                            }
                         }
+                    } catch (Throwable fallbackErr) {
+                        PZOLogger.error("[MultiCoreChunkStreamer] Fallback failed for chunk (" + chunk.wx + "," + chunk.wy + "): " + fallbackErr.getMessage());
                     }
-                } catch (Throwable fallbackErr) {
-                    PZOLogger.error("[MultiCoreChunkStreamer] Fallback failed for chunk (" + chunk.wx + "," + chunk.wy + "): " + fallbackErr.getMessage());
+                } finally {
+                    activeChunkWorkers.decrementAndGet();
                 }
             } finally {
-                activeChunkWorkers.decrementAndGet();
+                IN_FLIGHT_CHUNKS.remove(chunkKey);
             }
         });
     }
 
     public static void processChunkParallel(IsoChunk chunk) {
         if (chunk == null || chunk.loaded) return;
+
+        // 0. Save Barrier: If ChunkSaveWorker has uncommitted writes for this chunk, flush to disk first
+        if (ChunkSaveWorker.instance != null) {
+            try {
+                ChunkSaveWorker.instance.Update(chunk);
+            } catch (Throwable ignored) {}
+        }
 
         ByteBuffer workerBuf = DIRECT_CHUNK_BUFFER.get();
         workerBuf.clear();
