@@ -59,6 +59,7 @@ typedef void* HANDLE;
 #endif
 
 #include <jni.h>
+#include <jvmti.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1465,3 +1466,163 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_isDriveSSDNative(JNIEn
     return JNI_TRUE;
 #endif
 }
+
+/* ========================================================================= */
+/* JVMTI Native Agent Bridge (ZombieBuddy Architecture Bypass for javaagent)  */
+/* ========================================================================= */
+
+#define PZO_JAR "PZOptimEngine.jar"
+#define PZO_AGENT_OPTIONS_MAX 2048
+
+#ifdef _WIN32
+static HMODULE g_hInstrument = NULL;
+#else
+static void* g_hInstrument = NULL;
+#endif
+
+static jint (JNICALL *g_pAgent_OnAttach)(JavaVM*, char*, void*) = NULL;
+static jint (JNICALL *g_pAgent_OnLoad)(JavaVM*, char*, void*)   = NULL;
+static void (JNICALL *g_pAgent_OnUnload)(JavaVM*)               = NULL;
+
+static void write_pzo_console(const char* msg) {
+#ifdef _WIN32
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut && hOut != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteConsoleA(hOut, msg, (DWORD)strlen(msg), &written, NULL);
+    }
+#else
+    fprintf(stdout, "%s", msg);
+    fflush(stdout);
+#endif
+}
+
+static void init_instrument_dll(void) {
+    if (g_hInstrument) return;
+
+#ifdef _WIN32
+    // 1. Try relative jre64\\bin directory
+    SetDllDirectoryA(".\\jre64\\bin");
+    g_hInstrument = LoadLibraryA("instrument.dll");
+    SetDllDirectoryA(NULL);
+
+    // 2. Direct path fallbacks
+    if (!g_hInstrument) {
+        g_hInstrument = LoadLibraryA("jre64\\bin\\instrument.dll");
+    }
+    if (!g_hInstrument) {
+        g_hInstrument = LoadLibraryA("instrument.dll");
+    }
+    if (!g_hInstrument) {
+        g_hInstrument = LoadLibraryA("bin\\instrument.dll");
+    }
+
+    if (!g_hInstrument) {
+        write_pzo_console("[PZONative] Notice: instrument.dll could not be loaded directly.\n");
+        return;
+    }
+
+    g_pAgent_OnAttach = (jint (JNICALL *)(JavaVM*, char*, void*))GetProcAddress(g_hInstrument, "Agent_OnAttach");
+    g_pAgent_OnLoad   = (jint (JNICALL *)(JavaVM*, char*, void*))GetProcAddress(g_hInstrument, "Agent_OnLoad");
+    g_pAgent_OnUnload = (void (JNICALL *)(JavaVM*))GetProcAddress(g_hInstrument, "Agent_OnUnload");
+#else
+    g_hInstrument = dlopen("libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!g_hInstrument) {
+        g_hInstrument = dlopen("libinstrument.dylib", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_hInstrument) {
+        g_hInstrument = dlopen("jre/lib/libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_hInstrument) {
+        return;
+    }
+    g_pAgent_OnAttach = (jint (JNICALL *)(JavaVM*, char*, void*))dlsym(g_hInstrument, "Agent_OnAttach");
+    g_pAgent_OnLoad   = (jint (JNICALL *)(JavaVM*, char*, void*))dlsym(g_hInstrument, "Agent_OnLoad");
+    g_pAgent_OnUnload = (void (JNICALL *)(JavaVM*))dlsym(g_hInstrument, "Agent_OnUnload");
+#endif
+}
+
+static int build_pzo_agent_options(const char* tail, char* out, int outSize) {
+    const char* jarName = PZO_JAR;
+#ifdef _WIN32
+    if (GetFileAttributesA(jarName) == INVALID_FILE_ATTRIBUTES) {
+        if (GetFileAttributesA("win64\\PZOptimEngine.jar") != INVALID_FILE_ATTRIBUTES) {
+            jarName = "win64\\PZOptimEngine.jar";
+        }
+    }
+#endif
+    int jarLen = (int)strlen(jarName);
+    int tailLen = (tail == NULL) ? 0 : (int)strlen(tail);
+    int needsArgs = tailLen > 0;
+    int totalLen = jarLen + (needsArgs ? 1 + tailLen : 0);
+
+    if (totalLen + 1 > outSize) {
+        write_pzo_console("[PZONative] Error: agent options string too long\n");
+        return 0;
+    }
+
+    strcpy(out, jarName);
+    if (needsArgs) {
+        out[jarLen] = '=';
+        strcpy(out + jarLen + 1, tail);
+    }
+    return 1;
+}
+
+JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
+    write_pzo_console("[PZONative] JVMTI Agent_OnLoad: Initializing PZO Instrumentation Bridge via instrument.dll...\n");
+    if (g_hInstrument == NULL) {
+        init_instrument_dll();
+    }
+    if (!g_pAgent_OnLoad) {
+        write_pzo_console("[PZONative] Error: Could not resolve Agent_OnLoad in instrument.dll\n");
+        return -1;
+    }
+
+    char agentOptions[PZO_AGENT_OPTIONS_MAX];
+    if (!build_pzo_agent_options(options, agentOptions, sizeof(agentOptions))) {
+        return -1;
+    }
+
+    jint res = g_pAgent_OnLoad(vm, agentOptions, reserved);
+    if (res == 0) {
+        write_pzo_console("[PZONative] JVMTI Agent_OnLoad: PZOptimEngine.jar successfully attached as instrumentation agent!\n");
+    } else {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "[PZONative] Warning: instrument.dll Agent_OnLoad returned %d\n", res);
+        write_pzo_console(msg);
+    }
+    return res;
+}
+
+JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options, void *reserved) {
+    if (g_hInstrument == NULL) {
+        init_instrument_dll();
+    }
+    if (!g_pAgent_OnAttach) {
+        return -1;
+    }
+
+    char agentOptions[PZO_AGENT_OPTIONS_MAX];
+    if (!build_pzo_agent_options(options, agentOptions, sizeof(agentOptions))) {
+        return -1;
+    }
+
+    return g_pAgent_OnAttach(vm, agentOptions, reserved);
+}
+
+JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm) {
+    if (g_hInstrument == NULL) {
+        return;
+    }
+    if (g_pAgent_OnUnload) {
+        g_pAgent_OnUnload(vm);
+    }
+#ifdef _WIN32
+    FreeLibrary(g_hInstrument);
+#else
+    dlclose(g_hInstrument);
+#endif
+    g_hInstrument = NULL;
+}
+

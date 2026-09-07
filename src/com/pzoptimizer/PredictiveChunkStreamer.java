@@ -66,7 +66,7 @@ public final class PredictiveChunkStreamer {
 
             while (running) {
                 try {
-                    Thread.sleep(isStorageFast() ? 80 : 250); // 12.5 Hz on SSD/NVMe, relaxed 4 Hz on HDD
+                    Thread.sleep(isStorageFast() ? 200 : 350); // 5 Hz on SSD/NVMe, relaxed 3 Hz on HDD
 
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
@@ -173,9 +173,13 @@ public final class PredictiveChunkStreamer {
 
             if (dirX == 0.0f && dirY == 0.0f) return;
 
+            // Lateral normal vector (-dirY, dirX) to cover road curvature and lane turns
+            float normX = -dirY;
+            float normY = dirX;
+
             boolean isFast = isStorageFast();
-            int maxSteps = isFast ? 5 : 2;
-            float lookaheadTiles = Math.min(isFast ? 160.0f : 48.0f, Math.abs(speed) * 2.0f);
+            int maxSteps = isFast ? 3 : 2;
+            float lookaheadTiles = Math.min(isFast ? 80.0f : 40.0f, Math.abs(speed) * 1.5f);
 
             for (int step = 1; step <= maxSteps; step++) {
                 float progress = (float) step / (float) maxSteps;
@@ -185,24 +189,16 @@ public final class PredictiveChunkStreamer {
                 int targetChunkX = (int) (targetX / 8.0f);
                 int targetChunkY = (int) (targetY / 8.0f);
 
-                // Pre-warm center trajectory chunk
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);
 
-                // Pre-warm leading wavefront (perpendicular row / column of 13 chunks)
-                // When moving East/West (abs(dirX) > 0.3), preload the entire Y-column (-6 to +6)
-                // When moving North/South (abs(dirY) > 0.3), preload the entire X-row (-6 to +6)
-                // When the vehicle crosses the boundary, all 13 chunks are 100% in-memory cache hits!
+                // Pre-warm lateral cone (1 chunk left and right) on fast storage to cover curved turns
                 if (isFast) {
-                    if (Math.abs(dirX) > 0.3f) {
-                        for (int dy = -6; dy <= 6; dy++) {
-                            prewarmChunkInOSCache(targetChunkX, targetChunkY + dy);
-                        }
-                    }
-                    if (Math.abs(dirY) > 0.3f) {
-                        for (int dx = -6; dx <= 6; dx++) {
-                            prewarmChunkInOSCache(targetChunkX + dx, targetChunkY);
-                        }
+                    int lateralChunkX = (int) Math.signum(normX);
+                    int lateralChunkY = (int) Math.signum(normY);
+                    if (lateralChunkX != 0 || lateralChunkY != 0) {
+                        prewarmChunkInOSCache(targetChunkX + lateralChunkX, targetChunkY + lateralChunkY);
+                        prewarmChunkInOSCache(targetChunkX - lateralChunkX, targetChunkY - lateralChunkY);
                     }
                 }
             }
@@ -241,7 +237,7 @@ public final class PredictiveChunkStreamer {
     }
 
     private static final ThreadLocal<ByteBuffer> PRELOAD_BUFFER = ThreadLocal.withInitial(() -> 
-        ByteBuffer.allocateDirect(262144).order(ByteOrder.nativeOrder())
+        ByteBuffer.allocate(262144).order(ByteOrder.nativeOrder())
     );
 
     public static void prewarmChunkDirect(int wx, int wy) {

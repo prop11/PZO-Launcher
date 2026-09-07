@@ -230,22 +230,21 @@ public final class ChunkIngestionPacer {
             // Checks engine frame counter directly from IsoCamera.frameState.frameCount (0ns overhead)
             checkFrameBoundary(now);
 
-            // Custom Micro-Task Main Thread Slicer (Hard Frame Budgeting):
-            // While driving: enforce a strict 1-chunk hard ceiling per frame if chunk time >= 2.0ms.
-            // In Build 42 (32 vertical levels), each chunk takes 10-18ms to construct 2,048 IsoGridSquares + Lua hooks.
-            // By capping at 1 chunk per frame, 13 chunks integrate smoothly across 13 frames (~200ms total, car travels < 1.5m).
-            // Completely eliminates the 104ms sequential doLoadGridsquare() freeze!
+            // Balanced micro-task chunk pacing:
+            // Allows 2-4 chunks per frame under an 8.0ms budget ceiling.
+            // Wavefronts of 13 chunks clear within 3-4 frames (~50ms total) instead of dragging across 13 frames,
+            // preventing the 30 FPS stutter-splatter while keeping individual frame times tight and consistent.
             boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
             int maxChunks;
             long budgetNanos;
 
             if (driving) {
-                maxChunks = (backlog > 16) ? 2 : 1;
-                budgetNanos = 2_000_000L; // 2.0 ms hard ceiling
+                maxChunks = (backlog > 8) ? 4 : (backlog > 4 ? 3 : 2);
+                budgetNanos = 8_000_000L; // 8.0 ms budget ceiling
             } else {
                 maxChunks = (backlog > 8) ? 3 : 2;
-                budgetNanos = 3_500_000L; // 3.5 ms
+                budgetNanos = 6_000_000L; // 6.0 ms budget ceiling
             }
 
             if (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos) {
