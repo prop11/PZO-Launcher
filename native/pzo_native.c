@@ -32,6 +32,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <errno.h>
+#include <dlfcn.h>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <mach/mach.h>
@@ -427,6 +428,11 @@ static BOOL lockProcessWorkingSet(void) {
     return TRUE;
 #endif
 }
+
+#if (defined(__x86_64__) || defined(_M_X64)) && (defined(__GNUC__) || defined(__clang__))
+#pragma GCC push_options
+#pragma GCC target("avx2")
+#endif
 
 // AVX2 Vectorized 2D Distance Calculation (Zero-copy, 8 floats per SIMD instruction)
 static int batchCalculateDistancesAVX2(const float* coords, int count, float ox, float oy, float* outDistances) {
@@ -861,6 +867,10 @@ static int batchCalculateRepulsionAVX2(
 
     return count;
 }
+
+#if (defined(__x86_64__) || defined(_M_X64)) && (defined(__GNUC__) || defined(__clang__))
+#pragma GCC pop_options
+#endif
 
 // ============================================================================
 // JNI Exports for com.pzoptimizer.PZONative

@@ -56,9 +56,9 @@ if [ "$OS_NAME" = "Darwin" ]; then
     JNI_MD_DIR="$JAVA_HOME/include/darwin"
     
     echo "[*] Compiling $TARGET_LIB for macOS (Universal: arm64 + x86_64)..."
-    if $CC -O3 -shared -fPIC -arch arm64 -arch x86_64 \
+    if $CC -O3 -dynamiclib -arch arm64 -arch x86_64 \
         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
-        pzo_native.c -o "$TARGET_LIB" -lm -lpthread 2>/dev/null; then
+        pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl 2>/dev/null; then
         echo "[+] Universal macOS binary compiled successfully"
     else
         ARCH_FLAGS=""
@@ -66,9 +66,9 @@ if [ "$OS_NAME" = "Darwin" ]; then
             ARCH_FLAGS="-mavx2"
         fi
         echo "[*] Compiling $TARGET_LIB for native arch ($ARCH_NAME)..."
-        $CC -O3 -shared -fPIC $ARCH_FLAGS \
+        $CC -O3 -dynamiclib $ARCH_FLAGS \
             -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
-            pzo_native.c -o "$TARGET_LIB" -lm -lpthread
+            pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl
     fi
         
     cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
@@ -84,7 +84,9 @@ elif [ "$OS_NAME" = "Linux" ]; then
     fi
     
     echo "[*] Compiling $TARGET_LIB for Linux ($ARCH_NAME)..."
-    $CC -O3 -shared -fPIC $ARCH_FLAGS         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR"         pzo_native.c -o "$TARGET_LIB" -lm -lpthread
+    $CC -O3 -shared -fPIC $ARCH_FLAGS \
+        -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
+        pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl
         
     cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
     echo "[+] Successfully built: $TARGET_LIB -> dist/$TARGET_LIB"
