@@ -415,16 +415,6 @@ public class PZOptimAgent {
                     byte emptyHi = (byte) ((isEmptyMethodRef >> 8) & 0xFF);
                     byte emptyLo = (byte) (isEmptyMethodRef & 0xFF);
 
-                    byte[] patChunk = new byte[]{
-                        (byte) 0x2d, (byte) 0xb4, refsHi, refsLo,
-                        (byte) 0xb6, emptyHi, emptyLo,
-                        (byte) 0x99, (byte) 0x00, (byte) 0x24
-                    };
-                    byte[] repChunk = new byte[]{
-                        (byte) 0x03, (byte) 0x99, (byte) 0x00, (byte) 0x24,
-                        (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00
-                    };
-
                     try {
                         int mpos = pos;
                         mpos += 6; // access, this, super
@@ -460,15 +450,22 @@ public class PZOptimAgent {
                                 if ("Code".equals(aname) && ("Up".equals(mname) || "Down".equals(mname) || "Left".equals(mname) || "Right".equals(mname))) {
                                     int codeStart = mpos + 8;
                                     int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
-                                    for (int k = codeStart; k <= codeStart + codeLen - patChunk.length; k++) {
-                                        boolean match = true;
-                                        for (int p = 0; p < patChunk.length; p++) {
-                                            if (copy[k + p] != patChunk[p]) { match = false; break; }
-                                        }
-                                        if (match) {
-                                            System.arraycopy(repChunk, 0, copy, k, repChunk.length);
+                                    for (int k = codeStart; k <= codeStart + codeLen - 10; k++) {
+                                        if (copy[k] == 0x57 && // pop
+                                            copy[k + 1] == 0x2d && // aload_3
+                                            copy[k + 2] == (byte) 0xb4 && copy[k + 3] == refsHi && copy[k + 4] == refsLo && // getfield refs
+                                            copy[k + 5] == (byte) 0xb6 && copy[k + 6] == emptyHi && copy[k + 7] == emptyLo && // invokevirtual isEmpty
+                                            copy[k + 8] == (byte) 0x99) { // ifeq
+                                            // Replace aload_3; getfield refs; invokevirtual isEmpty (7 bytes) with iconst_0; nop*6
+                                            // Leaving ifeq (copy[k + 8]) and its original branch offset untouched preserves the StackMapTable 100%
+                                            copy[k + 1] = 0x03; // iconst_0
+                                            copy[k + 2] = 0x00; // nop
+                                            copy[k + 3] = 0x00; // nop
+                                            copy[k + 4] = 0x00; // nop
+                                            copy[k + 5] = 0x00; // nop
+                                            copy[k + 6] = 0x00; // nop
+                                            copy[k + 7] = 0x00; // nop
                                             shiftPatched++;
-                                            break;
                                         }
                                     }
                                 }
