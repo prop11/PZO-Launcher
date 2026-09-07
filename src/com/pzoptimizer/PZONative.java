@@ -224,6 +224,41 @@ public class PZONative {
         }
     }
 
+    public static int calculateFovAVX2(FloatBuffer directCoords, FloatBuffer directHeadings, int count,
+                                       float targetX, float targetY, float viewDistSq, float cosHalfFov,
+                                       float closeRadiusSq, ByteBuffer directOutMask) {
+        if (!isLoaded() || !directCoords.isDirect() || !directHeadings.isDirect() || !directOutMask.isDirect()) {
+            return fallbackCalculateFov(directCoords, directHeadings, count, targetX, targetY, viewDistSq, cosHalfFov, closeRadiusSq, directOutMask);
+        }
+        try {
+            return batchCalculateFovAVX2(directCoords, directHeadings, count, targetX, targetY, viewDistSq, cosHalfFov, closeRadiusSq, directOutMask);
+        } catch (Throwable t) {
+            return fallbackCalculateFov(directCoords, directHeadings, count, targetX, targetY, viewDistSq, cosHalfFov, closeRadiusSq, directOutMask);
+        }
+    }
+
+    public static int calculateRepulsionAVX2(FloatBuffer directCoords, int count, float separationRadius,
+                                            float maxForce, FloatBuffer directOutForces) {
+        if (!isLoaded() || !directCoords.isDirect() || !directOutForces.isDirect()) {
+            return fallbackCalculateRepulsion(directCoords, count, separationRadius, maxForce, directOutForces);
+        }
+        try {
+            return batchCalculateRepulsionAVX2(directCoords, count, separationRadius, maxForce, directOutForces);
+        } catch (Throwable t) {
+            return fallbackCalculateRepulsion(directCoords, count, separationRadius, maxForce, directOutForces);
+        }
+    }
+
+    public static int readAndDecompressChunk(String filePath, ByteBuffer dstDirectBuf) {
+        if (filePath == null || dstDirectBuf == null || !dstDirectBuf.isDirect()) return -1;
+        if (!isLoaded()) return -1;
+        try {
+            return readAndDecompressChunkDirect(filePath, dstDirectBuf, dstDirectBuf.capacity());
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
     private static int fallbackDistances(FloatBuffer coords, int count, float ox, float oy, FloatBuffer out) {
         coords.rewind();
         out.rewind();
@@ -290,6 +325,63 @@ public class PZONative {
             else if (dSq <= t1Sq) outTiers.put(i, (byte) 1);
             else if (dSq <= t2Sq) outTiers.put(i, (byte) 2);
             else outTiers.put(i, (byte) 3);
+        }
+        return count;
+    }
+
+    private static int fallbackCalculateFov(FloatBuffer coords, FloatBuffer headings, int count,
+                                            float targetX, float targetY, float viewDistSq, float cosHalfFov,
+                                            float closeRadiusSq, ByteBuffer outMask) {
+        int visible = 0;
+        float cosSq = cosHalfFov * cosHalfFov;
+        for (int i = 0; i < count; i++) {
+            float x = coords.get(i * 2);
+            float y = coords.get(i * 2 + 1);
+            float dx = targetX - x;
+            float dy = targetY - y;
+            float distSq = dx * dx + dy * dy;
+            if (distSq <= closeRadiusSq) {
+                outMask.put(i, (byte) 1);
+                visible++;
+                continue;
+            }
+            if (distSq <= viewDistSq && distSq > 0.0001f) {
+                float hx = headings.get(i * 2);
+                float hy = headings.get(i * 2 + 1);
+                float dot = dx * hx + dy * hy;
+                if (dot > 0.0f && (dot * dot) >= (cosSq * distSq)) {
+                    outMask.put(i, (byte) 1);
+                    visible++;
+                    continue;
+                }
+            }
+            outMask.put(i, (byte) 0);
+        }
+        return visible;
+    }
+
+    private static int fallbackCalculateRepulsion(FloatBuffer coords, int count, float separationRadius,
+                                                  float maxForce, FloatBuffer outForces) {
+        float radSq = separationRadius * separationRadius;
+        for (int i = 0; i < count; i++) {
+            float xi = coords.get(i * 2);
+            float yi = coords.get(i * 2 + 1);
+            float fx = 0.0f, fy = 0.0f;
+            for (int j = 0; j < count; j++) {
+                if (i == j) continue;
+                float dx = xi - coords.get(j * 2);
+                float dy = yi - coords.get(j * 2 + 1);
+                float dSq = dx * dx + dy * dy;
+                if (dSq < radSq && dSq > 0.0001f) {
+                    float invD = 1.0f / dSq;
+                    fx += dx * invD;
+                    fy += dy * invD;
+                }
+            }
+            if (fx > maxForce) fx = maxForce; else if (fx < -maxForce) fx = -maxForce;
+            if (fy > maxForce) fy = maxForce; else if (fy < -maxForce) fy = -maxForce;
+            outForces.put(i * 2, fx);
+            outForces.put(i * 2 + 1, fy);
         }
         return count;
     }
@@ -423,9 +515,18 @@ public class PZONative {
         FloatBuffer directCoords, int count, float originX, float originY,
         float t0Sq, float t1Sq, float t2Sq, ByteBuffer directOutTiers
     );
+    private static native int batchCalculateFovAVX2(
+        FloatBuffer directCoords, FloatBuffer directHeadings, int count,
+        float targetX, float targetY, float viewDistSq, float cosHalfFov, float closeRadiusSq,
+        ByteBuffer directOutMask
+    );
+    private static native int batchCalculateRepulsionAVX2(
+        FloatBuffer directCoords, int count, float separationRadius, float maxForce, FloatBuffer directOutForces
+    );
     private static native int decompressBytes(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff, int dstCap);
     private static native int decompressDirect(ByteBuffer src, int srcPos, int srcLen, ByteBuffer dst, int dstPos, int dstCap);
     private static native int readChunkFileNative(String filePath, byte[] dstArray, int maxCap);
+    private static native int readAndDecompressChunkDirect(String filePath, ByteBuffer dstDirectBuf, int dstCap);
     private static native boolean prewarmFileNative(String filePath);
     private static native int prewarmFilesNative(String[] filePaths);
     private static native boolean isDriveSSDNative(String path);

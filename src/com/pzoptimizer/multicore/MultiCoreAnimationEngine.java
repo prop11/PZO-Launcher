@@ -180,13 +180,23 @@ public final class MultiCoreAnimationEngine {
                 bypassed += 64;
             } else {
                 byte tier = (tiers != null && i < tiers.length) ? tiers[i] : 0;
-                if (tier >= 2) {
-                    // Distant entity (32-50 tiles away): evaluate on alternate frames
+                if (tier >= 3) {
+                    // Ultra-Distant entity (40+ tiles away): evaluate 1-in-4 frames (15 FPS keyframing)
+                    boolean updateThisFrame = ((frame + i) & 3) == 0;
+                    animPlayer.updateBones = updateThisFrame;
+                    if (!updateThisFrame) bypassed += 64;
+                } else if (tier == 2) {
+                    // Far entity (25-40 tiles away): evaluate 1-in-3 frames (20 FPS keyframing)
+                    boolean updateThisFrame = ((frame + i) % 3) == 0;
+                    animPlayer.updateBones = updateThisFrame;
+                    if (!updateThisFrame) bypassed += 64;
+                } else if (tier == 1) {
+                    // Mid entity (12-25 tiles away): evaluate alternate frames (30 FPS keyframing)
                     boolean updateThisFrame = ((frame + i) & 1) == 0;
                     animPlayer.updateBones = updateThisFrame;
                     if (!updateThisFrame) bypassed += 64;
                 } else {
-                    // Close / in-view entity: full 60 FPS animation fidelity
+                    // Close / combat entity (0-12 tiles): full 60 FPS animation fidelity
                     animPlayer.updateBones = true;
                 }
             }

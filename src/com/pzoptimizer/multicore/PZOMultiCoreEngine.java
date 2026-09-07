@@ -110,11 +110,11 @@ public final class PZOMultiCoreEngine {
         sb.append(String.format(Locale.US, "- **Dedicated P-Core Workers**: %d Threads (Affinity Mask Active)\n", workerCount));
         sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks (Saved: %,d ms I/O void latency | Trajectory Hits: %,d)\n",
             getParallelChunksStreamed(), MultiCoreChunkStreamer.getTotalStreamTimeSavedMs(), getPreloadedTrajectoryHits()));
-        sb.append(String.format(Locale.US, "- **Multi-Core AVX2 Horde Sweeps**: %,d passes (Entities Tracked: %,d)\n",
-            getParallelHordeSweeps(), MultiCoreHordeGovernor.lastTrackedZombieCount.get()));
+        sb.append(String.format(Locale.US, "- **Multi-Core AVX2 Horde Sweeps**: %,d passes (Entities Tracked: %,d | In FOV: %,d | Culled: %,d)\n",
+            getParallelHordeSweeps(), MultiCoreHordeGovernor.lastTrackedZombieCount.get(), MultiCoreHordeGovernor.getLastVisibleCount(), MultiCoreHordeGovernor.lastCulledOffscreenCount.get()));
         sb.append(String.format(Locale.US, "- **Spatial Island Parallel Simulation**: %,d entity updates (Active Islands: %d)\n",
             getParallelSimulatedEntities(), MultiCoreIslandScheduler.lastSimulatedIslands.get()));
-        sb.append(String.format(Locale.US, "- **Skeletal Bone Transforms Bypassed**: %,d matrices\n",
+        sb.append(String.format(Locale.US, "- **Skeletal Bone Transforms Bypassed**: %,d matrices (Adaptive 4-Tier LOD)\n",
             getBonesSaved()));
         return sb.toString();
     }

@@ -669,6 +669,198 @@ static int batchClassifyTiersAVX2(const float* coords, int count, float ox, floa
     return count;
 }
 
+// AVX2 Vectorized Field-of-View & Line-of-Sight Visibility Engine
+// Tests 8 entities per cycle for range, directional dot-product, and FOV cone.
+static int batchCalculateFovAVX2(
+    const float* coords, const float* headings, int count,
+    float targetX, float targetY, float viewDistSq, float cosHalfFov, float closeRadiusSq,
+    unsigned char* outMask) {
+    if (!coords || !headings || !outMask || count <= 0) return 0;
+
+    int visibleCount = 0;
+    int i = 0;
+    float cosSq = cosHalfFov * cosHalfFov;
+
+#if defined(__x86_64__) || defined(_M_X64)
+    if (g_avx2Supported && count >= 8) {
+        __m256 vTargetX = _mm256_set1_ps(targetX);
+        __m256 vTargetY = _mm256_set1_ps(targetY);
+        __m256 vMaxDistSq = _mm256_set1_ps(viewDistSq);
+        __m256 vCloseRadSq = _mm256_set1_ps(closeRadiusSq);
+        __m256 vCosSq = _mm256_set1_ps(cosSq);
+        __m256 vZero = _mm256_setzero_ps();
+        __m256 vMinDist = _mm256_set1_ps(0.0001f);
+        const __m256i permIdx = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
+
+        for (; i <= count - 8; i += 8) {
+            __m256 c0 = _mm256_loadu_ps(&coords[(i + 0) * 2]);
+            __m256 c1 = _mm256_loadu_ps(&coords[(i + 4) * 2]);
+            __m256 xs = _mm256_permutevar8x32_ps(_mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(2, 0, 2, 0)), permIdx);
+            __m256 ys = _mm256_permutevar8x32_ps(_mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(3, 1, 3, 1)), permIdx);
+
+            __m256 h0 = _mm256_loadu_ps(&headings[(i + 0) * 2]);
+            __m256 h1 = _mm256_loadu_ps(&headings[(i + 4) * 2]);
+            __m256 hx = _mm256_permutevar8x32_ps(_mm256_shuffle_ps(h0, h1, _MM_SHUFFLE(2, 0, 2, 0)), permIdx);
+            __m256 hy = _mm256_permutevar8x32_ps(_mm256_shuffle_ps(h0, h1, _MM_SHUFFLE(3, 1, 3, 1)), permIdx);
+
+            __m256 dx = _mm256_sub_ps(vTargetX, xs);
+            __m256 dy = _mm256_sub_ps(vTargetY, ys);
+            __m256 distSq = _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy));
+
+            __m256 mClose = _mm256_cmp_ps(distSq, vCloseRadSq, _CMP_LE_OQ);
+            __m256 mDist = _mm256_and_ps(_mm256_cmp_ps(distSq, vMaxDistSq, _CMP_LE_OQ),
+                                         _mm256_cmp_ps(distSq, vMinDist, _CMP_GT_OQ));
+
+            __m256 dot = _mm256_add_ps(_mm256_mul_ps(dx, hx), _mm256_mul_ps(dy, hy));
+            __m256 mFront = _mm256_cmp_ps(dot, vZero, _CMP_GT_OQ);
+
+            __m256 dotSq = _mm256_mul_ps(dot, dot);
+            __m256 threshold = _mm256_mul_ps(vCosSq, distSq);
+            __m256 mCone = _mm256_cmp_ps(dotSq, threshold, _CMP_GE_OQ);
+
+            __m256 mFov = _mm256_and_ps(mDist, _mm256_and_ps(mFront, mCone));
+            __m256 mFinal = _mm256_or_ps(mFov, mClose);
+
+            int mask = _mm256_movemask_ps(mFinal);
+            for (int b = 0; b < 8; b++) {
+                unsigned char vis = (unsigned char)((mask >> b) & 1);
+                outMask[i + b] = vis;
+                visibleCount += vis;
+            }
+        }
+    }
+#endif
+
+    for (; i < count; i++) {
+        float dx = targetX - coords[i * 2];
+        float dy = targetY - coords[i * 2 + 1];
+        float distSq = dx * dx + dy * dy;
+
+        if (distSq <= closeRadiusSq) {
+            outMask[i] = 1;
+            visibleCount++;
+            continue;
+        }
+
+        if (distSq <= viewDistSq && distSq > 0.0001f) {
+            float hx = headings[i * 2];
+            float hy = headings[i * 2 + 1];
+            float dot = dx * hx + dy * hy;
+            if (dot > 0.0f && (dot * dot) >= (cosSq * distSq)) {
+                outMask[i] = 1;
+                visibleCount++;
+                continue;
+            }
+        }
+        outMask[i] = 0;
+    }
+
+    return visibleCount;
+}
+
+// AVX2 Vectorized Crowd Separation & Repulsion Vector Engine
+// For each entity i, computes accumulated steering repulsion away from nearby entities.
+static int batchCalculateRepulsionAVX2(
+    const float* coords, int count, float separationRadius, float maxForce, float* outForces) {
+    if (!coords || !outForces || count <= 0) return 0;
+
+    float radSq = separationRadius * separationRadius;
+    int i = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+    if (g_avx2Supported && count >= 8) {
+        __m256 vRadSq = _mm256_set1_ps(radSq);
+        __m256 vMinDistSq = _mm256_set1_ps(0.0001f);
+        const __m256i permIdx = _mm256_setr_epi32(0, 1, 4, 5, 2, 3, 6, 7);
+
+        for (i = 0; i < count; i++) {
+            float xi = coords[i * 2];
+            float yi = coords[i * 2 + 1];
+            __m256 vXi = _mm256_set1_ps(xi);
+            __m256 vYi = _mm256_set1_ps(yi);
+            __m256 vTotalFx = _mm256_setzero_ps();
+            __m256 vTotalFy = _mm256_setzero_ps();
+
+            int j = 0;
+            for (; j <= count - 8; j += 8) {
+                __m256 c0 = _mm256_loadu_ps(&coords[(j + 0) * 2]);
+                __m256 c1 = _mm256_loadu_ps(&coords[(j + 4) * 2]);
+                __m256 xj = _mm256_permutevar8x32_ps(_mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(2, 0, 2, 0)), permIdx);
+                __m256 yj = _mm256_permutevar8x32_ps(_mm256_shuffle_ps(c0, c1, _MM_SHUFFLE(3, 1, 3, 1)), permIdx);
+
+                __m256 dx = _mm256_sub_ps(vXi, xj);
+                __m256 dy = _mm256_sub_ps(vYi, yj);
+                __m256 dSq = _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy));
+
+                __m256 mask = _mm256_and_ps(_mm256_cmp_ps(dSq, vRadSq, _CMP_LT_OQ),
+                                            _mm256_cmp_ps(dSq, vMinDistSq, _CMP_GT_OQ));
+
+                __m256 invDistSq = _mm256_rcp_ps(dSq);
+                invDistSq = _mm256_and_ps(invDistSq, mask);
+
+                vTotalFx = _mm256_add_ps(vTotalFx, _mm256_mul_ps(dx, invDistSq));
+                vTotalFy = _mm256_add_ps(vTotalFy, _mm256_mul_ps(dy, invDistSq));
+            }
+
+            float fxArr[8], fyArr[8];
+            _mm256_storeu_ps(fxArr, vTotalFx);
+            _mm256_storeu_ps(fyArr, vTotalFy);
+            float accumFx = fxArr[0] + fxArr[1] + fxArr[2] + fxArr[3] + fxArr[4] + fxArr[5] + fxArr[6] + fxArr[7];
+            float accumFy = fyArr[0] + fyArr[1] + fyArr[2] + fyArr[3] + fyArr[4] + fyArr[5] + fyArr[6] + fyArr[7];
+
+            for (; j < count; j++) {
+                if (i == j) continue;
+                float dx = xi - coords[j * 2];
+                float dy = yi - coords[j * 2 + 1];
+                float dSq = dx * dx + dy * dy;
+                if (dSq < radSq && dSq > 0.0001f) {
+                    float invD = 1.0f / dSq;
+                    accumFx += dx * invD;
+                    accumFy += dy * invD;
+                }
+            }
+
+            if (accumFx > maxForce) accumFx = maxForce;
+            else if (accumFx < -maxForce) accumFx = -maxForce;
+            if (accumFy > maxForce) accumFy = maxForce;
+            else if (accumFy < -maxForce) accumFy = -maxForce;
+
+            outForces[i * 2] = accumFx;
+            outForces[i * 2 + 1] = accumFy;
+        }
+        return count;
+    }
+#endif
+
+    for (i = 0; i < count; i++) {
+        float xi = coords[i * 2];
+        float yi = coords[i * 2 + 1];
+        float accumFx = 0.0f, accumFy = 0.0f;
+
+        for (int j = 0; j < count; j++) {
+            if (i == j) continue;
+            float dx = xi - coords[j * 2];
+            float dy = yi - coords[j * 2 + 1];
+            float dSq = dx * dx + dy * dy;
+            if (dSq < radSq && dSq > 0.0001f) {
+                float invD = 1.0f / dSq;
+                accumFx += dx * invD;
+                accumFy += dy * invD;
+            }
+        }
+
+        if (accumFx > maxForce) accumFx = maxForce;
+        else if (accumFx < -maxForce) accumFx = -maxForce;
+        if (accumFy > maxForce) accumFy = maxForce;
+        else if (accumFy < -maxForce) accumFy = -maxForce;
+
+        outForces[i * 2] = accumFx;
+        outForces[i * 2 + 1] = accumFy;
+    }
+
+    return count;
+}
+
 // ============================================================================
 // JNI Exports for com.pzoptimizer.PZONative
 // ============================================================================
@@ -854,6 +1046,36 @@ JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchClassifyTiersAVX2(
     return (jint)batchClassifyTiersAVX2(inCoords, (int)count, (float)ox, (float)oy, (float)t0Sq, (float)t1Sq, (float)t2Sq, outTiers);
 }
 
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCalculateFovAVX2(
+    JNIEnv *env, jclass cls, jobject inCoordsDirectBuf, jobject inHeadingsDirectBuf, jint count,
+    jfloat targetX, jfloat targetY, jfloat viewDistSq, jfloat cosHalfFov, jfloat closeRadiusSq,
+    jobject outMaskDirectBuf) {
+    (void)cls;
+    if (!inCoordsDirectBuf || !inHeadingsDirectBuf || !outMaskDirectBuf || count <= 0) return 0;
+    float* inCoords = (float*)(*env)->GetDirectBufferAddress(env, inCoordsDirectBuf);
+    float* inHeadings = (float*)(*env)->GetDirectBufferAddress(env, inHeadingsDirectBuf);
+    unsigned char* outMask = (unsigned char*)(*env)->GetDirectBufferAddress(env, outMaskDirectBuf);
+    if (!inCoords || !inHeadings || !outMask) return 0;
+    return (jint)batchCalculateFovAVX2(
+        inCoords, inHeadings, (int)count,
+        (float)targetX, (float)targetY, (float)viewDistSq, (float)cosHalfFov, (float)closeRadiusSq,
+        outMask
+    );
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCalculateRepulsionAVX2(
+    JNIEnv *env, jclass cls, jobject inCoordsDirectBuf, jint count, jfloat separationRadius, jfloat maxForce,
+    jobject outForcesDirectBuf) {
+    (void)cls;
+    if (!inCoordsDirectBuf || !outForcesDirectBuf || count <= 0) return 0;
+    float* inCoords = (float*)(*env)->GetDirectBufferAddress(env, inCoordsDirectBuf);
+    float* outForces = (float*)(*env)->GetDirectBufferAddress(env, outForcesDirectBuf);
+    if (!inCoords || !outForces) return 0;
+    return (jint)batchCalculateRepulsionAVX2(
+        inCoords, (int)count, (float)separationRadius, (float)maxForce, outForces
+    );
+}
+
 // ============================================================================
 // Phase 2: High-Speed SIMD Decompression & Win32/POSIX Chunk Stream Acceleration
 // ============================================================================
@@ -986,6 +1208,108 @@ JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_readChunkFileNative(
 
     (*env)->ReleasePrimitiveArrayCritical(env, dstArray, dstPtr, (bytesRead > 0) ? 0 : JNI_ABORT);
     return (bytesRead > 0) ? (jint)bytesRead : -1;
+#endif
+}
+
+JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_readAndDecompressChunkDirect(
+    JNIEnv *env, jclass cls, jstring filePath, jobject dstDirectBuf, jint dstCap) {
+    (void)cls;
+    if (!filePath || !dstDirectBuf || dstCap <= 0) return -1;
+
+    unsigned char *dst = (unsigned char *)(*env)->GetDirectBufferAddress(env, dstDirectBuf);
+    if (!dst) return -1;
+
+#if defined(_WIN32)
+    const jchar *wPath = (*env)->GetStringChars(env, filePath, NULL);
+    if (!wPath) return -1;
+
+    HANDLE hFile = CreateFileW(
+        (LPCWSTR)wPath,
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+        NULL
+    );
+    (*env)->ReleaseStringChars(env, filePath, wPath);
+    if (hFile == INVALID_HANDLE_VALUE) return -1;
+
+    LARGE_INTEGER fileSize;
+    if (!GetFileSizeEx(hFile, &fileSize) || fileSize.QuadPart <= 0 || fileSize.QuadPart > 4194304) {
+        CloseHandle(hFile);
+        return -1;
+    }
+
+    DWORD compLen = (DWORD)fileSize.QuadPart;
+    unsigned char stackBuf[131072];
+    unsigned char *compBuf = stackBuf;
+    BOOL heapAllocated = FALSE;
+    if (compLen > sizeof(stackBuf)) {
+        compBuf = (unsigned char *)malloc(compLen);
+        if (!compBuf) {
+            CloseHandle(hFile);
+            return -1;
+        }
+        heapAllocated = TRUE;
+    }
+
+    DWORD bytesRead = 0;
+    BOOL ok = ReadFile(hFile, compBuf, compLen, &bytesRead, NULL);
+    CloseHandle(hFile);
+
+    if (!ok || bytesRead == 0) {
+        if (heapAllocated) free(compBuf);
+        return -1;
+    }
+
+    jint decompBytes = decompressBuffer(compBuf, (size_t)bytesRead, dst, (size_t)dstCap);
+    if (heapAllocated) free(compBuf);
+
+    return decompBytes;
+#else
+    const char *uPath = (*env)->GetStringUTFChars(env, filePath, NULL);
+    if (!uPath) return -1;
+
+    int fd = open(uPath, O_RDONLY);
+    (*env)->ReleaseStringUTFChars(env, filePath, uPath);
+    if (fd < 0) return -1;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0 || st.st_size <= 0 || st.st_size > 4194304) {
+        close(fd);
+        return -1;
+    }
+
+#if defined(POSIX_FADV_SEQUENTIAL)
+    posix_fadvise(fd, 0, st.st_size, POSIX_FADV_SEQUENTIAL);
+#endif
+
+    size_t compLen = (size_t)st.st_size;
+    unsigned char stackBuf[131072];
+    unsigned char *compBuf = stackBuf;
+    BOOL heapAllocated = FALSE;
+    if (compLen > sizeof(stackBuf)) {
+        compBuf = (unsigned char *)malloc(compLen);
+        if (!compBuf) {
+            close(fd);
+            return -1;
+        }
+        heapAllocated = TRUE;
+    }
+
+    ssize_t bytesRead = read(fd, compBuf, compLen);
+    close(fd);
+
+    if (bytesRead <= 0) {
+        if (heapAllocated) free(compBuf);
+        return -1;
+    }
+
+    jint decompBytes = decompressBuffer(compBuf, (size_t)bytesRead, dst, (size_t)dstCap);
+    if (heapAllocated) free(compBuf);
+
+    return decompBytes;
 #endif
 }
 
