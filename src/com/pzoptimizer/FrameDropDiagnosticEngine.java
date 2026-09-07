@@ -117,6 +117,7 @@ public final class FrameDropDiagnosticEngine {
         int activeCorpses = 0;
         int wsQueueSize = 0;
         int saveQueueSize = 0;
+        int ingestionQueueSize = 0;
 
         try {
             Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
@@ -173,6 +174,14 @@ public final class FrameDropDiagnosticEngine {
                 if (sq != null) saveQueueSize = sq.size();
             }
 
+            // Query IsoChunk.loadGridSquare ingestion queue
+            Class<?> chunkClass = Class.forName("zombie.iso.IsoChunk");
+            Field lgsField = chunkClass.getField("loadGridSquare");
+            Object lgsObj = lgsField.get(null);
+            if (lgsObj instanceof java.util.Collection) {
+                ingestionQueueSize = ((java.util.Collection<?>) lgsObj).size();
+            }
+
         } catch (Throwable ignored) {}
 
         boolean chunkCrossing = (lastDiagnosedChunkX != Integer.MIN_VALUE) && (chunkX != lastDiagnosedChunkX || chunkY != lastDiagnosedChunkY);
@@ -189,6 +198,8 @@ public final class FrameDropDiagnosticEngine {
             } else {
                 cause = "FOOT_CHUNK_CROSSING (Chunk: " + chunkX + "," + chunkY + ")";
             }
+        } else if (ingestionQueueSize > 0) {
+            cause = "CHUNK_INGESTION_BACKLOG (" + ingestionQueueSize + " chunks remaining)";
         } else if (isDriving && (Math.abs(vehicleSpeed) > 15.0f || wsQueueSize > 2)) {
             cause = "VEHICLE_CHUNK_STREAMING (Speed: " + String.format("%.1f", vehicleSpeed) + " km/h, WS Queue: " + wsQueueSize + ")";
         } else if (saveQueueSize > 5) {

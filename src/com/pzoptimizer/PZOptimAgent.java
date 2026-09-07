@@ -17,48 +17,16 @@ public class PZOptimAgent {
         
         try {
             inst.addTransformer(new EngineTransformer(), true);
-        } catch (Throwable ignored) {}
-
-        // Early-boot runtime properties & core memory tuning
-        HotSpotJITCompilerTuner.tuneRuntimeProperties();
-        PZOEngineBridge.initialize();
-        HighPrecisionTimer.initialize();
-        LuaInterpreterAccelerator.apply();
-        FileSystemWhitelistShield.initialize();
-        PopTemplateGuard.initialize();
-        StreamBufferBooster.applyStreamTweaks();
-        SaveGameStreamBooster.tuneSaveEngine();
-        EngineFeaturesTuner.initializeEngineFeatures();
-        VehicleTravelOptimizer.initialize();
-        RainAndWeatherOptimizer.initialize();
-        WorldStreamerBooster.startDaemon();
-        PZOFastMath.initialize();
-        GenerationalHeapCleaner.startGovernor();
-        AsyncEntityDistanceCache.initialize();
-        CorpseAudioGovernor.applyCorpseAudioLimits();
-        EngineGLStateGovernor.initialize();
-        EngineFramePacer.initialize();
-        NativeDirectMemoryPool.initialize();
-        FastBitwiseChunkIndexer.initialize();
-        DirectBufferAllocatorGovernor.initialize();
-        FrameDropDiagnosticEngine.initialize();
-        ChunkIngestionPacer.initialize();
-        PredictiveChunkStreamer.initialize();
-        ContainerConfiguratorGuard.initialize();
-        com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
-        if (UnstableChannelGuard.isUnstableBuild()) {
-            PZOLogger.success("[PZO Agent] Unstable Render Acceleration & Telemetry Matrix Armed");
+            PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZO Agent] Notice on transformer registration: " + t.getMessage());
         }
-        
-        // Dedicated Server optimizations if running in headless / server environment
+
+        // Early-boot properties that do not depend on LWJGL or game classes
         try {
-            boolean isHeadless = java.awt.GraphicsEnvironment.isHeadless();
-            if (isHeadless || System.getProperty("zomboid.steam") != null || System.getProperty("zomboid.server") != null) {
-                com.pzoptimizer.server.LinuxSteamServerSanitizer.sanitize();
-                com.pzoptimizer.server.ServerNetworkTuner.apply();
-                com.pzoptimizer.server.ServerHordeSimEngine.apply();
-                com.pzoptimizer.server.ServerChunkStreamBooster.apply();
-            }
+            HotSpotJITCompilerTuner.tuneRuntimeProperties();
+            PZOEngineBridge.initialize();
+            HighPrecisionTimer.initialize();
         } catch (Throwable ignored) {}
 
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
@@ -67,7 +35,7 @@ public class PZOptimAgent {
         try {
             JavaModLoader.loadMods(inst);
         } catch (Throwable t) {
-            PZOLogger.error("[PZO Agent] Error during Java mod discovery", t);
+            PZOLogger.warn("[PZO Agent] Notice during Java mod discovery: " + t.getMessage());
         }
     }
 
