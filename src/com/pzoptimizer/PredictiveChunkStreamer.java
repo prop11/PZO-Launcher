@@ -27,7 +27,7 @@ public final class PredictiveChunkStreamer {
     private static final java.util.concurrent.ConcurrentHashMap<Long, byte[]> PRELOADED_CHUNKS = new java.util.concurrent.ConcurrentHashMap<>(128);
     private static final java.util.concurrent.atomic.AtomicLong preloadedCacheHits = new java.util.concurrent.atomic.AtomicLong(0);
     private static final java.util.concurrent.atomic.AtomicLong preloadedChunksFetched = new java.util.concurrent.atomic.AtomicLong(0);
-    private static final int MAX_PRELOADED_CHUNKS = 64;
+    private static final int MAX_PRELOADED_CHUNKS = 256;
 
     private static volatile long lastPrewarmClearTime = 0;
     private static volatile Boolean isSolidState = null;
@@ -66,7 +66,7 @@ public final class PredictiveChunkStreamer {
 
             while (running) {
                 try {
-                    Thread.sleep(isStorageFast() ? 100 : 250); // 10 Hz on SSD/NVMe, relaxed 4 Hz on HDD
+                    Thread.sleep(isStorageFast() ? 80 : 250); // 12.5 Hz on SSD/NVMe, relaxed 4 Hz on HDD
 
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
@@ -173,13 +173,9 @@ public final class PredictiveChunkStreamer {
 
             if (dirX == 0.0f && dirY == 0.0f) return;
 
-            // Lateral normal vector (-dirY, dirX) to cover road curvature and lane turns
-            float normX = -dirY;
-            float normY = dirX;
-
             boolean isFast = isStorageFast();
             int maxSteps = isFast ? 5 : 2;
-            float lookaheadTiles = Math.min(isFast ? 160.0f : 48.0f, Math.abs(speed) * 1.8f);
+            float lookaheadTiles = Math.min(isFast ? 160.0f : 48.0f, Math.abs(speed) * 2.0f);
 
             for (int step = 1; step <= maxSteps; step++) {
                 float progress = (float) step / (float) maxSteps;
@@ -193,13 +189,20 @@ public final class PredictiveChunkStreamer {
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);
 
-                // Pre-warm lateral cone (1 chunk left and right) ONLY on SSDs/NVMe to protect HDD heads from thrashing
+                // Pre-warm leading wavefront (perpendicular row / column of 13 chunks)
+                // When moving East/West (abs(dirX) > 0.3), preload the entire Y-column (-6 to +6)
+                // When moving North/South (abs(dirY) > 0.3), preload the entire X-row (-6 to +6)
+                // When the vehicle crosses the boundary, all 13 chunks are 100% in-memory cache hits!
                 if (isFast) {
-                    int lateralChunkX = (int) Math.signum(normX);
-                    int lateralChunkY = (int) Math.signum(normY);
-                    if (lateralChunkX != 0 || lateralChunkY != 0) {
-                        prewarmChunkInOSCache(targetChunkX + lateralChunkX, targetChunkY + lateralChunkY);
-                        prewarmChunkInOSCache(targetChunkX - lateralChunkX, targetChunkY - lateralChunkY);
+                    if (Math.abs(dirX) > 0.3f) {
+                        for (int dy = -6; dy <= 6; dy++) {
+                            prewarmChunkInOSCache(targetChunkX, targetChunkY + dy);
+                        }
+                    }
+                    if (Math.abs(dirY) > 0.3f) {
+                        for (int dx = -6; dx <= 6; dx++) {
+                            prewarmChunkInOSCache(targetChunkX + dx, targetChunkY);
+                        }
                     }
                 }
             }
