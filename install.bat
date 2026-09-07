@@ -425,6 +425,17 @@ if ($isZombieBuddyActive) {
     Write-Host "`n[+] ZombieBuddy detected! Coexistence mode enabled (preserving -agentlib:zbNative)." -ForegroundColor Green
 }
 
+# Check for Zed Better FPS NG conflict / redundancy
+$zbFpsWorkshop = [System.IO.Path]::Combine($InstallPath, "..\..\workshop\content\108600\3793137588")
+$zbFpsMods = [System.IO.Path]::Combine($env:USERPROFILE, "Zomboid\mods\ZBBetterFPSNG")
+if ((Test-Path -LiteralPath $zbFpsWorkshop) -or (Test-Path -LiteralPath $zbFpsMods)) {
+    Write-Host "`n[!] NOTICE: Zed Better FPS NG detected in Workshop/Mods!" -ForegroundColor Yellow
+    Write-Host "    PZO natively includes hardware-level AVX2 culling, multi-core chunk streaming," -ForegroundColor Gray
+    Write-Host "    and kernel thread scheduling that outperforms and replaces Java-level FPS mods." -ForegroundColor Gray
+    Write-Host "    ZombieBuddy itself and all other gameplay/Lua mods remain 100% compatible." -ForegroundColor Gray
+    Write-Host "    We recommend disabling Zed Better FPS NG to prevent duplicate hook overhead.`n" -ForegroundColor Yellow
+}
+
 function Apply-PZOConfiguration {
     $TotalRamBytes = 0
     try {

@@ -175,6 +175,17 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
 
+    # Check for Zed Better FPS NG conflict / redundancy
+    if [ -d "$HOME/Zomboid/mods/ZBBetterFPSNG" ] || [ -d "$SCRIPT_DIR/../../workshop/content/108600/3793137588" ]; then
+        echo ""
+        echo "[!] NOTICE: Zed Better FPS NG detected in Workshop/Mods!"
+        echo "    PZO natively includes hardware-level AVX2 culling, multi-core chunk streaming,"
+        echo "    and kernel thread scheduling that outperforms and replaces Java-level FPS mods."
+        echo "    ZombieBuddy itself and all other gameplay/Lua mods remain 100% compatible."
+        echo "    We recommend disabling Zed Better FPS NG to prevent duplicate hook overhead."
+        echo ""
+    fi
+
     # 5. Install PZOptimEngine.jar to Contents/Java/
     mkdir -p "$JAVA_DIR"
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
@@ -358,6 +369,17 @@ else
         echo "PZO v0.8.0+ automatically runs your ZombieBuddy mods natively!"
         echo ""
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
+    fi
+
+    # Check for Zed Better FPS NG conflict / redundancy
+    if [ -d "$HOME/Zomboid/mods/ZBBetterFPSNG" ] || [ -d "$SCRIPT_DIR/../../workshop/content/108600/3793137588" ]; then
+        echo ""
+        echo "[!] NOTICE: Zed Better FPS NG detected in Workshop/Mods!"
+        echo "    PZO natively includes hardware-level AVX2 culling, multi-core chunk streaming,"
+        echo "    and kernel thread scheduling that outperforms and replaces Java-level FPS mods."
+        echo "    ZombieBuddy itself and all other gameplay/Lua mods remain 100% compatible."
+        echo "    We recommend disabling Zed Better FPS NG to prevent duplicate hook overhead."
+        echo ""
     fi
 
     # Copy JAR

@@ -12,6 +12,7 @@ public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
+    private static volatile boolean isolateConflictingFpsMods = true;
     private static volatile boolean loaded = false;
 
     public static synchronized void load() {
@@ -24,6 +25,11 @@ public final class PZOConfig {
                 betaOptIn = content.contains("\"beta_opt_in\":true") || content.contains("\"beta_opt_in\": true") || content.contains("\"beta_opt_in\":1");
                 ignoredVersion = extractJsonField(content, "ignored_version");
                 if (ignoredVersion == null) ignoredVersion = "";
+                if (content.contains("\"isolate_conflicting_fps_mods\":false") || content.contains("\"isolate_conflicting_fps_mods\": false") || content.contains("\"isolate_conflicting_fps_mods\":0")) {
+                    isolateConflictingFpsMods = false;
+                } else {
+                    isolateConflictingFpsMods = true;
+                }
             }
         } catch (Throwable ignored) {}
     }
@@ -31,7 +37,8 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\"}", betaOptIn, ignoredVersion != null ? ignoredVersion : "");
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b}",
+                betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods);
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -89,6 +96,18 @@ public final class PZOConfig {
     public static boolean isVersionIgnored(String version) {
         load();
         return ignoredVersion != null && !ignoredVersion.isEmpty() && ignoredVersion.equalsIgnoreCase(version);
+    }
+
+    public static boolean isIsolateConflictingFpsMods() {
+        load();
+        return isolateConflictingFpsMods;
+    }
+
+    public static void setIsolateConflictingFpsMods(boolean isolate) {
+        load();
+        isolateConflictingFpsMods = isolate;
+        save();
+        PZOLogger.info("[PZO Config] Isolate conflicting FPS mods set to: " + isolate);
     }
 
     private static String extractJsonField(String json, String fieldName) {
