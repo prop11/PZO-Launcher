@@ -55,13 +55,21 @@ if [ "$OS_NAME" = "Darwin" ]; then
     TARGET_LIB="libpzo_native64.dylib"
     JNI_MD_DIR="$JAVA_HOME/include/darwin"
     
-    ARCH_FLAGS=""
-    if [ "$ARCH_NAME" = "x86_64" ]; then
-        ARCH_FLAGS="-mavx2"
+    echo "[*] Compiling $TARGET_LIB for macOS (Universal: arm64 + x86_64)..."
+    if $CC -O3 -shared -fPIC -arch arm64 -arch x86_64 \
+        -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
+        pzo_native.c -o "$TARGET_LIB" -lm -lpthread 2>/dev/null; then
+        echo "[+] Universal macOS binary compiled successfully"
+    else
+        ARCH_FLAGS=""
+        if [ "$ARCH_NAME" = "x86_64" ]; then
+            ARCH_FLAGS="-mavx2"
+        fi
+        echo "[*] Compiling $TARGET_LIB for native arch ($ARCH_NAME)..."
+        $CC -O3 -shared -fPIC $ARCH_FLAGS \
+            -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
+            pzo_native.c -o "$TARGET_LIB" -lm -lpthread
     fi
-    
-    echo "[*] Compiling $TARGET_LIB for macOS ($ARCH_NAME)..."
-    $CC -O3 -shared -fPIC $ARCH_FLAGS         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR"         pzo_native.c -o "$TARGET_LIB" -lm -lpthread
         
     cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
     echo "[+] Successfully built: $TARGET_LIB -> dist/$TARGET_LIB"
