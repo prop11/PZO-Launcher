@@ -246,37 +246,6 @@ public final class PredictiveChunkStreamer {
         }
         PREWARMED_KEYS.add(key);
         ChunkRetentionRing.touch(wx, wy);
-
-        // Submit asynchronous pre-load task to dedicated P-Core worker pool
-        java.util.concurrent.ExecutorService pool = com.pzoptimizer.multicore.PZOMultiCoreEngine.getExecutor();
-        if (pool != null && !pool.isShutdown()) {
-            pool.execute(() -> {
-                try {
-                    PZONative.bindCallingThreadToPCores();
-                    File chunkFile = zombie.ChunkMapFilenames.instance.getFilename(wx, wy);
-                    if (chunkFile != null && chunkFile.exists()) {
-                        long len = chunkFile.length();
-                        if (len > 0 && len < 2_097_152L) { // Under 2 MB
-                            byte[] data = new byte[(int) len];
-                            int bytesRead = PZONative.readChunkFile(chunkFile.getAbsolutePath(), data, (int) len);
-                            if (bytesRead <= 0) {
-                                try (FileInputStream fis = new FileInputStream(chunkFile)) {
-                                    data = fis.readAllBytes();
-                                    bytesRead = data != null ? data.length : -1;
-                                }
-                            }
-                            if (data != null && bytesRead > 0) {
-                                if (PRELOADED_CHUNKS.size() > MAX_PRELOADED_CHUNKS) {
-                                    PRELOADED_CHUNKS.clear();
-                                }
-                                PRELOADED_CHUNKS.put(key, data);
-                                preloadedChunksFetched.incrementAndGet();
-                            }
-                        }
-                    }
-                } catch (Throwable ignored) {}
-            });
-        }
     }
 
     public static byte[] pollPreloadedChunk(int wx, int wy) {

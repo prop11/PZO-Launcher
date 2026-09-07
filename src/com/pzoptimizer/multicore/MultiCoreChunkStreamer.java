@@ -158,12 +158,7 @@ public final class MultiCoreChunkStreamer {
         @Override
         public boolean offer(IsoChunk chunk) {
             if (chunk == null) return false;
-            boolean offered = super.offer(chunk);
-            if (offered && !chunk.loaded) {
-                // Asynchronously pre-read and decompress chunk in background workers
-                com.pzoptimizer.PredictiveChunkStreamer.prewarmChunkDirect(chunk.wx, chunk.wy);
-            }
-            return offered;
+            return super.offer(chunk);
         }
 
         @Override
@@ -209,7 +204,7 @@ public final class MultiCoreChunkStreamer {
             try {
                 WorldStreamer ws = WorldStreamer.instance;
                 if (ws == null || !reflectionResolved) {
-                    Thread.sleep(100);
+                    Thread.sleep(200);
                     if (!reflectionResolved) resolveReflection();
                     continue;
                 }
@@ -218,31 +213,12 @@ public final class MultiCoreChunkStreamer {
                     hookWorldStreamerQueue(ws);
                 }
 
-                @SuppressWarnings("unchecked")
-                Stack<IsoChunk> jobList = (Stack<IsoChunk>) jobListField.get(ws);
-                @SuppressWarnings("unchecked")
-                ConcurrentLinkedQueue<IsoChunk> jobQueue = (ConcurrentLinkedQueue<IsoChunk>) jobQueueField.get(ws);
-
-                boolean hasPending = (jobQueue != null && !jobQueue.isEmpty()) || (jobList != null && !jobList.isEmpty());
-                if (hasPending) {
-                    if (jobList != null && !jobList.isEmpty()) {
-                        synchronized (jobList) {
-                            for (int i = 0; i < jobList.size(); i++) {
-                                IsoChunk c = jobList.get(i);
-                                if (c != null && !c.loaded) {
-                                    com.pzoptimizer.PredictiveChunkStreamer.prewarmChunkDirect(c.wx, c.wy);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Thread.sleep(hasPending ? 5 : 25);
+                Thread.sleep(500);
 
             } catch (InterruptedException ie) {
                 break;
             } catch (Throwable t) {
-                try { Thread.sleep(50); } catch (Throwable ignored) {}
+                try { Thread.sleep(500); } catch (Throwable ignored) {}
             }
         }
     }

@@ -10,7 +10,7 @@ import java.util.concurrent.locks.LockSupport;
  */
 public final class EngineFramePacer {
 
-    private static volatile boolean enabled = true;
+    private static volatile boolean enabled = false;
     private static long targetFrameTimeNanos = 16_666_666L; // 60 FPS default
 
     public static void initialize() {

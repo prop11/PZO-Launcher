@@ -155,16 +155,16 @@ public class EngineThreadGovernor {
                 });
             }
 
-            // Hook MainThread.mainThreadLoop with Nanosecond EngineFramePacer
+            // Hook MainThread.mainThreadLoop with Zero-Lock Diagnostic Probe (No Sleeping, Zero Lock Contention)
             if (!mainThreadPacerHooked) {
                 try {
                     Field loopField = mainThreadClass.getDeclaredField("mainThreadLoop");
                     loopField.setAccessible(true);
                     Runnable origLoop = (Runnable) loopField.get(null);
-                    if (origLoop != null && !(origLoop instanceof PacedMainThreadLoop)) {
-                        loopField.set(null, new PacedMainThreadLoop(origLoop));
+                    if (origLoop != null && !(origLoop instanceof MainThreadDiagnosticHook)) {
+                        loopField.set(null, new MainThreadDiagnosticHook(origLoop));
                         mainThreadPacerHooked = true;
-                        PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Nanosecond EngineFramePacer (Zero-Jitter Frame Clock)");
+                        PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Zero-Lock Diagnostic Probe (Uncapped Native Clock)");
                     }
                 } catch (Throwable t) {
                     // Non-fatal if field not yet assigned
@@ -173,30 +173,26 @@ public class EngineThreadGovernor {
         } catch (Throwable ignored) {}
     }
 
-    public static class PacedMainThreadLoop implements Runnable {
+    public static class MainThreadDiagnosticHook implements Runnable {
         private final Runnable target;
+        private int lastFrameCount = -1;
 
-        public PacedMainThreadLoop(Runnable target) {
+        public MainThreadDiagnosticHook(Runnable target) {
             this.target = target;
         }
 
         @Override
         public void run() {
-            long frameStart = System.nanoTime();
             try {
                 target.run();
             } finally {
                 try {
-                    int lockFps = zombie.core.PerformanceSettings.getLockFPS();
-                    boolean uncapped = false;
-                    try {
-                        if (zombie.core.PerformanceSettings.instance != null) {
-                            uncapped = zombie.core.PerformanceSettings.instance.isFramerateUncapped();
+                    if (zombie.iso.IsoCamera.frameState != null) {
+                        int fc = zombie.iso.IsoCamera.frameState.frameCount;
+                        if (fc != lastFrameCount) {
+                            lastFrameCount = fc;
+                            FrameDropDiagnosticEngine.onFrameTick();
                         }
-                    } catch (Throwable ignored) {}
-                    if (lockFps > 0 && !uncapped) {
-                        EngineFramePacer.setTargetFps(lockFps);
-                        EngineFramePacer.paceFrame(frameStart);
                     }
                 } catch (Throwable ignored) {}
             }

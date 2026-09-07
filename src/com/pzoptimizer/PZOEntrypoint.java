@@ -82,6 +82,7 @@ public class PZOEntrypoint {
         DynamicLightingCuller.initialize();
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
+        ContainerConfiguratorGuard.initialize();
         com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
         if (UnstableChannelGuard.isUnstableBuild()) {
             PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD AVX2 Batch Horde Spatial Culler & Skeletal LOD Armed");

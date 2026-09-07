@@ -44,6 +44,7 @@ public class PZOptimAgent {
         FrameDropDiagnosticEngine.initialize();
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
+        ContainerConfiguratorGuard.initialize();
         com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
         if (UnstableChannelGuard.isUnstableBuild()) {
             PZOLogger.success("[PZO Agent] Unstable Render Acceleration & Telemetry Matrix Armed");
