@@ -105,25 +105,36 @@ public class PZONative {
 
         try {
             // 1. Completely exempt Project Zomboid from Windows 11 EcoQoS Power Throttling
-            boolean powerShield = disablePowerThrottling();
+            boolean powerShield = false;
+            try { powerShield = disablePowerThrottling(); } catch (Throwable ignored) {}
 
             // 2. Lock OS Interrupt Timer to 0.5ms high-precision
-            boolean timerLock = setHighPrecisionTimer(true);
+            boolean timerLock = false;
+            try { timerLock = setHighPrecisionTimer(true); } catch (Throwable ignored) {}
 
             // 3. Register Multimedia Class Scheduler (MMCSS) Games profile
-            boolean mmcss = setMMCSSProfile("Games");
+            boolean mmcss = false;
+            try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
 
             // 4. Boost process priority to Above Normal / High and lock working set to physical RAM
-            boolean prio = setProcessPriority(1); // 1 = Above Normal
-            boolean wsLock = lockProcessWorkingSet();
+            boolean prio = false;
+            try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
+            boolean wsLock = false;
+            try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
 
             // 5. Query hardware topology
-            int physCores = getPhysicalCores();
-            int pCores = getPerformanceCores();
-            int logProc = getLogicalProcessors();
-            long pCoreMask = getPerformanceCoreMask();
-            int timerRes100ns = getTimerResolution100ns();
-            boolean avx2 = isAVX2Supported();
+            int physCores = 0;
+            try { physCores = getPhysicalCores(); } catch (Throwable ignored) {}
+            int pCores = 0;
+            try { pCores = getPerformanceCores(); } catch (Throwable ignored) {}
+            int logProc = 0;
+            try { logProc = getLogicalProcessors(); } catch (Throwable ignored) {}
+            long pCoreMask = 0;
+            try { pCoreMask = getPerformanceCoreMask(); } catch (Throwable ignored) {}
+            int timerRes100ns = 0;
+            try { timerRes100ns = getTimerResolution100ns(); } catch (Throwable ignored) {}
+            boolean avx2 = false;
+            try { avx2 = isAVX2Supported(); } catch (Throwable ignored) {}
 
             double timerMs = timerRes100ns / 10000.0;
 

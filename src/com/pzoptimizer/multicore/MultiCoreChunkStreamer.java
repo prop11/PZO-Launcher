@@ -181,12 +181,25 @@ public final class MultiCoreChunkStreamer {
 
         @Override
         public boolean isEmpty() {
-            return true;
+            // WorldStreamer.isBusy() relies on jobQueue.isEmpty() to know if background chunk loading is still active!
+            // When chunks are streaming via PZO parallel workers, report not empty so IsoWorld.init() and
+            // GameLoadingState wait for initial cell chunks to finish loading before attempting player creation.
+            return IN_FLIGHT_CHUNKS.isEmpty() && activeChunkWorkers.get() == 0;
+        }
+
+        @Override
+        public int size() {
+            return Math.max(IN_FLIGHT_CHUNKS.size(), activeChunkWorkers.get());
         }
 
         @Override
         public boolean contains(Object o) {
             return false;
+        }
+
+        @Override
+        public void clear() {
+            super.clear();
         }
     }
 

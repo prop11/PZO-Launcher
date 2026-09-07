@@ -102,17 +102,21 @@ public class EngineThreadGovernor {
             boolean isRunning = (boolean) isRunningMethod.invoke(null);
 
             if (isRunning) {
+                renderThreadOptimized = true;
                 Method queueMethod = renderThreadClass.getMethod("queueInvokeOnRenderContext", Runnable.class);
                 queueMethod.invoke(null, (Runnable) () -> {
                     try {
                         if (PZONative.isLoaded()) {
-                            PZONative.optimizeCallingThread(2, true, "Games");
+                            try {
+                                PZONative.optimizeCallingThread(2, true, "Games");
+                                PZOLogger.success("[EngineThreadGovernor] RenderThread successfully optimized: Priority HIGHEST | MMCSS Games | P-Core Affinity");
+                            } catch (Throwable t) {
+                                PZOLogger.warn("[EngineThreadGovernor] RenderThread native optimization notice: " + t.getMessage());
+                            }
                         }
                         Thread.currentThread().setName("PZO-RenderThread");
-                        renderThreadOptimized = true;
-                        PZOLogger.success("[EngineThreadGovernor] RenderThread successfully optimized: Priority HIGHEST | MMCSS Games | P-Core Affinity");
                     } catch (Throwable t) {
-                        PZOLogger.warn("[EngineThreadGovernor] RenderThread optimization notice: " + t.getMessage());
+                        PZOLogger.warn("[EngineThreadGovernor] RenderThread hook notice: " + t.getMessage());
                     }
                 });
             }
@@ -130,17 +134,21 @@ public class EngineThreadGovernor {
             boolean isRunning = (boolean) isRunningMethod.invoke(null);
 
             if (isRunning) {
+                mainThreadOptimized = true;
                 Method queueMethod = mainThreadClass.getMethod("queueInvokeOnMainThread", Runnable.class);
                 queueMethod.invoke(null, (Runnable) () -> {
                     try {
                         if (PZONative.isLoaded()) {
-                            PZONative.optimizeCallingThread(1, true, "Games");
+                            try {
+                                PZONative.optimizeCallingThread(1, true, "Games");
+                                PZOLogger.success("[EngineThreadGovernor] MainThread successfully optimized: Priority ABOVE_NORMAL | MMCSS Games | P-Core Affinity");
+                            } catch (Throwable t) {
+                                PZOLogger.warn("[EngineThreadGovernor] MainThread native optimization notice: " + t.getMessage());
+                            }
                         }
                         Thread.currentThread().setName("PZO-MainSimulationThread");
-                        mainThreadOptimized = true;
-                        PZOLogger.success("[EngineThreadGovernor] MainThread successfully optimized: Priority ABOVE_NORMAL | MMCSS Games | P-Core Affinity");
                     } catch (Throwable t) {
-                        PZOLogger.warn("[EngineThreadGovernor] MainThread optimization notice: " + t.getMessage());
+                        PZOLogger.warn("[EngineThreadGovernor] MainThread hook notice: " + t.getMessage());
                     }
                 });
             }
