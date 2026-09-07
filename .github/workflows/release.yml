@@ -1,10 +1,6 @@
 name: Multi-Platform Native Build & Release
 
 on:
-  push:
-    tags:
-      - 'v*'
-      - 'V*'
   workflow_dispatch:
     inputs:
       tag_name:
@@ -87,7 +83,6 @@ jobs:
     name: Publish GitHub Release
     needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V') || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     steps:
