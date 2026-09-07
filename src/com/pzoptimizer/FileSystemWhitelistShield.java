@@ -188,35 +188,6 @@ public final class FileSystemWhitelistShield {
             Object lazy = allowedField.get(fsInstance);
             if (lazy != null) {
                 hookLazySupplier(lazy);
-            }
-
-            // 2. Populate and maintain modFolders
-            try {
-                Method getAllModFoldersMethod = fsClass.getMethod("getAllModFolders", List.class);
-                getAllModFoldersMethod.invoke(fsInstance, new ArrayList<>());
-            } catch (Throwable ignored) {}
-
-            Field modFoldersField = fsClass.getDeclaredField("modFolders");
-            modFoldersField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            ArrayList<String> modFolders = (ArrayList<String>) modFoldersField.get(fsInstance);
-
-            if (modFolders != null) {
-                int added = 0;
-                for (String r : discoveredRoots) {
-                    if (!modFolders.contains(r)) {
-                        modFolders.add(r);
-                        added++;
-                    }
-                }
-
-                if (added > 0 && lazy != null) {
-                    try {
-                        Method resetMethod = lazy.getClass().getMethod("reset");
-                        resetMethod.invoke(lazy);
-                    } catch (Throwable ignored) {}
-                }
-
                 if (!applied) {
                     applied = true;
                     PZOLogger.success(String.format("[FileSystemWhitelistShield] Successfully injected %d drive/workshop roots into ZomboidFileSystem whitelist (Secondary drive crash protected)", discoveredRoots.size()));
