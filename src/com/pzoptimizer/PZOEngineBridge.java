@@ -791,8 +791,8 @@ public class PZOEngineBridge {
                                             "    MainScreen.instance.pzoNoticeShown = true\n" +
                                             "    local scrW = getCore():getScreenWidth()\n" +
                                             "    local scrH = getCore():getScreenHeight()\n" +
-                                            "    local modalW = math.min(640, scrW - 40)\n" +
-                                            "    local modalH = math.min(380, scrH - 40)\n" +
+                                            "    local modalW = math.min(680, scrW - 40)\n" +
+                                            "    local modalH = math.min(390, scrH - 40)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
                                             "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.5\"\n" +
@@ -826,18 +826,20 @@ public class PZOEngineBridge {
                                             "        end\n" +
                                             "        old_destroy(self)\n" +
                                             "    end\n" +
+                                            "    local btnH = math.max(28, modal.ok and modal.ok:getHeight() or 28)\n" +
+                                            "    local btnY = modal:getHeight() - btnH - 12\n" +
                                             "    if modal.ok then\n" +
                                             "        modal.ok.title = \"Acknowledge\"\n" +
                                             "        modal.ok.backgroundColor = {r=0.15, g=0.55, b=0.25, a=1.0}\n" +
                                             "        modal.ok.borderColor = {r=0.3, g=0.8, b=0.4, a=1.0}\n" +
-                                            "        modal.ok:setWidth(160)\n" +
-                                            "        modal.ok:setX(modal:getWidth() - 175)\n" +
-                                            "        modal.ok:setY(modal:getHeight() - 38)\n" +
-                                            "        modal.ok:setHeight(28)\n" +
+                                            "        local okW = 160\n" +
+                                            "        modal.ok:setWidth(okW)\n" +
+                                            "        modal.ok:setHeight(btnH)\n" +
+                                            "        modal.ok:setX(modal:getWidth() - okW - 20)\n" +
+                                            "        modal.ok:setY(btnY)\n" +
                                             "    end\n" +
-                                            "    local btnH = modal.ok and modal.ok:getHeight() or 28\n" +
-                                            "    local btnY = modal.ok and modal.ok:getY() or (modal:getHeight() - btnH - 10)\n" +
-                                            "    local wsBtn = ISButton:new(16, btnY, 150, btnH, \"Steam Workshop\", modal, function(self, button)\n" +
+                                            "    local wsW = 160\n" +
+                                            "    local wsBtn = ISButton:new(20, btnY, wsW, btnH, \"Steam Workshop\", modal, function(self, button)\n" +
                                             "        if openUrl then\n" +
                                             "            openUrl(\"https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250\")\n" +
                                             "        elseif PZOEngine and PZOEngine.openWorkshopPage then\n" +
@@ -846,11 +848,15 @@ public class PZOEngineBridge {
                                             "    end)\n" +
                                             "    wsBtn:initialise()\n" +
                                             "    wsBtn:instantiate()\n" +
+                                            "    wsBtn:setWidth(wsW)\n" +
+                                            "    wsBtn:setHeight(btnH)\n" +
                                             "    wsBtn.backgroundColor = {r=0.12, g=0.35, b=0.55, a=1.0}\n" +
                                             "    wsBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
                                             "    wsBtn.textColor = {r=0.9, g=0.95, b=1.0, a=1.0}\n" +
                                             "    modal:addChild(wsBtn)\n" +
-                                            "    local ghBtn = ISButton:new(176, btnY, 145, btnH, \"GitHub Issues\", modal, function(self, button)\n" +
+                                            "    local ghX = wsBtn:getX() + wsBtn:getWidth() + 24\n" +
+                                            "    local ghW = 150\n" +
+                                            "    local ghBtn = ISButton:new(ghX, btnY, ghW, btnH, \"GitHub Issues\", modal, function(self, button)\n" +
                                             "        if openUrl then\n" +
                                             "            openUrl(\"https://github.com/prop11/PZO-Launcher/issues\")\n" +
                                             "        elseif PZOEngine and PZOEngine.openGithubPage then\n" +
@@ -859,6 +865,8 @@ public class PZOEngineBridge {
                                             "    end)\n" +
                                             "    ghBtn:initialise()\n" +
                                             "    ghBtn:instantiate()\n" +
+                                            "    ghBtn:setWidth(ghW)\n" +
+                                            "    ghBtn:setHeight(btnH)\n" +
                                             "    ghBtn.backgroundColor = {r=0.2, g=0.2, b=0.25, a=1.0}\n" +
                                             "    ghBtn.borderColor = {r=0.5, g=0.5, b=0.6, a=1.0}\n" +
                                             "    ghBtn.textColor = {r=0.9, g=0.9, b=0.9, a=1.0}\n" +
