@@ -1,0 +1,122 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\pzo_optimizer.command||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:pzo_optimizer.command||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\com\\pzoptimizer\\PZOEntrypoint.java||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\com\\pzoptimizer\\PZOEntrypoint.java||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\META-INF\\MANIFEST_SERVER.MF||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\META-INF\\MANIFEST_SERVER.MF||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\install.bat||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:install.bat||{3B902123-F8A7-4915-9F01-361F908088D0}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\native\\pzo_native.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:native\\pzo_native.c||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\META-INF\\MANIFEST.MF||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:src\\META-INF\\MANIFEST.MF||{8B382828-6202-11D1-8870-0000F87579D2}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "pzo_optimizer.command",
+              "DocumentMoniker": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\pzo_optimizer.command",
+              "RelativeDocumentMoniker": "pzo_optimizer.command",
+              "ToolTip": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\pzo_optimizer.command",
+              "RelativeToolTip": "pzo_optimizer.command",
+              "ViewState": "AgIAAAgAAAAAAAAAAAAAAAgAAAA4AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-09-08T18:28:35.937Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "PZOEntrypoint.java",
+              "DocumentMoniker": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\com\\pzoptimizer\\PZOEntrypoint.java",
+              "RelativeDocumentMoniker": "src\\com\\pzoptimizer\\PZOEntrypoint.java",
+              "ToolTip": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\com\\pzoptimizer\\PZOEntrypoint.java",
+              "RelativeToolTip": "src\\com\\pzoptimizer\\PZOEntrypoint.java",
+              "ViewState": "AgIAACAAAAAAAAAAAAAAACAAAAB4AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-09-08T18:28:30.778Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "MANIFEST_SERVER.MF",
+              "DocumentMoniker": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\META-INF\\MANIFEST_SERVER.MF",
+              "RelativeDocumentMoniker": "src\\META-INF\\MANIFEST_SERVER.MF",
+              "ToolTip": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\META-INF\\MANIFEST_SERVER.MF",
+              "RelativeToolTip": "src\\META-INF\\MANIFEST_SERVER.MF",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAdAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-09-08T18:28:25.596Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "install.bat",
+              "DocumentMoniker": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\install.bat",
+              "RelativeDocumentMoniker": "install.bat",
+              "ToolTip": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\install.bat",
+              "RelativeToolTip": "install.bat",
+              "ViewState": "AgIAANsBAAAAAAAAAAAnwP8BAAAcAAAAAAAAAA==",
+              "Icon": "00000000-0000-0000-0000-000000000000.000000|iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAE8SURBVDhPvZJNSwJRGIWfmcaQiH6DEdEHFBEFBe6KoKKoTf8iAlOmgdbipqBf0rKICAuDkj4WERgulL5o06gLx9S53lZJzrVQgh54uXDOuefdvPAXpJReqW00y4xkQAa8RmtoWb2dz4tLKw0vyACWGZaVSkWZ48SVPDpLKvr3scyw1BtWAPfpLIenl9i5PO92jv2DODd3KW\u002BsjlJg6DqOU2JidIjJsWGckoNhKLE6iuMKQbVaQdQENSFwq1VcV3hjdZSCcrmMBsTPk5wkLtA0SF7f4pQ\u002BvFFoVjA\u002BMsja8hw93V0IV/D69sLj8xOx3T1SD2lvXC34YnVhlvmZIIV8gei2Sd628fs7vbGfCwCKRQdDh/VQBJ\u002Bvo\u002Bnl/low0N/HVmiD4PQUO7EovQH15jTL3MyApjotIbNe5f/5BEiOoURWS5r0AAAAAElFTkSuQmCC",
+              "WhenOpened": "2026-09-08T18:28:03.944Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "pzo_native.c",
+              "DocumentMoniker": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\native\\pzo_native.c",
+              "RelativeDocumentMoniker": "native\\pzo_native.c",
+              "ToolTip": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\native\\pzo_native.c",
+              "RelativeToolTip": "native\\pzo_native.c",
+              "ViewState": "AgIAAGgDAAAAAAAAAAAawIsDAAAhAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000423|",
+              "WhenOpened": "2026-09-08T18:27:44.294Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "MANIFEST.MF",
+              "DocumentMoniker": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\META-INF\\MANIFEST.MF",
+              "RelativeDocumentMoniker": "src\\META-INF\\MANIFEST.MF",
+              "ToolTip": "C:\\Users\\alexw\\Documents\\GitHub\\PZO_Launcher\\PZO Launcher\\src\\META-INF\\MANIFEST.MF",
+              "RelativeToolTip": "src\\META-INF\\MANIFEST.MF",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAcAAAAdAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-09-08T18:27:24.402Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
