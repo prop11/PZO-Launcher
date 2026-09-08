@@ -75,16 +75,18 @@ Using your hosting panel's **File Manager** or **SFTP/FTP client** (FileZilla / 
 
 ### Step 2: Configure `ProjectZomboid64.json`
 Open `ProjectZomboid64.json` in your File Manager:
-1. Change `"mainClass"` to:
+1. Keep `"mainClass": "zombie/network/GameServer"` untouched.
+   > **Note for Linux / Pterodactyl / Docker hosts**: The native launcher binary (`ProjectZomboid64`) checks if `mainClass` matches `zombie/network/GameServer`. If `mainClass` is changed, the binary assumes it is booting a client game and throws a failing `SteamAPI_Init()` check. Keeping `mainClass` stock avoids this issue.
+2. Add `"-javaagent:PZOServerEngine.jar"` to the top of your `"vmArgs"` array:
    ```json
-   "mainClass": "com/pzoptimizer/server/PZOServerEntrypoint",
-   ```
-2. Add `"PZOServerEngine.jar"` to the top of your `"classpath"` array:
-   ```json
-   "classpath": [
-       "PZOServerEngine.jar",
-       "projectzomboid.jar"
-   ],
+   "vmArgs": [
+       "-javaagent:PZOServerEngine.jar",
+       "-Djava.awt.headless=true",
+       "-Xmx6G",
+       "-Dzomboid.server=1",
+       "-Dzomboid.steam=1",
+       ...
+   ]
    ```
 3. Save the file and restart your server from your host web panel!
 

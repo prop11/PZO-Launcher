@@ -1,7 +1,7 @@
 Manifest-Version: 1.0
 Main-Class: com.pzoptimizer.server.PZOServerEntrypoint
-Premain-Class: com.pzoptimizer.PZOptimAgent
-Agent-Class: com.pzoptimizer.PZOptimAgent
+Premain-Class: com.pzoptimizer.server.PZOServerEntrypoint
+Agent-Class: com.pzoptimizer.server.PZOServerEntrypoint
 Can-Redefine-Classes: true
 Can-Retransform-Classes: true
 Implementation-Title: Project Zomboid Optimiser Server Engine
