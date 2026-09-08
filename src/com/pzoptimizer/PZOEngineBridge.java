@@ -117,6 +117,22 @@ public class PZOEngineBridge {
         PZOConfig.setBetaOptIn(optIn);
     }
 
+    public static boolean isMultithreadingNoticeAcknowledged() {
+        return PZOConfig.isMultithreadingNoticeAcknowledged();
+    }
+
+    public static void acknowledgeMultithreadingNotice() {
+        PZOConfig.setMultithreadingNoticeAcknowledged(true);
+    }
+
+    public static void openWorkshopPage() {
+        PZOEntrypoint.openBrowser("https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250");
+    }
+
+    public static void openGithubPage() {
+        PZOEntrypoint.openBrowser("https://github.com/prop11/PZO-Launcher/issues");
+    }
+
     public static void openBrowser(String url) {
         PZOEntrypoint.openBrowser(url);
     }
@@ -658,6 +674,62 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "setJvmIntOption", setJvmIntFunc);
 
+                                        // isMultithreadingNoticeAcknowledged
+                                        Object isNoticeAckFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(PZOConfig.isMultithreadingNoticeAcknowledged()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isMultithreadingNoticeAcknowledged", isNoticeAckFunc);
+
+                                        // acknowledgeMultithreadingNotice
+                                        Object ackNoticeFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    PZOConfig.setMultithreadingNoticeAcknowledged(true);
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "acknowledgeMultithreadingNotice", ackNoticeFunc);
+
+                                        // openWorkshopPage
+                                        Object openWorkshopFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    PZOEntrypoint.openBrowser("https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250");
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "openWorkshopPage", openWorkshopFunc);
+
+                                        // openGithubPage
+                                        Object openGithubFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    PZOEntrypoint.openBrowser("https://github.com/prop11/PZO-Launcher/issues");
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "openGithubPage", openGithubFunc);
+
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] JavaFunction proxy warning: " + t.getMessage());
                                     }
@@ -710,6 +782,99 @@ public class PZOEngineBridge {
                                             "    MainScreen.instance:addChild(btn)\n" +
                                             "    MainScreen.instance.pzoBetaButton = btn\n" +
                                             "end\n" +
+                                            "local function showPZOMultithreadingNotice()\n" +
+                                            "    if not MainScreen or not MainScreen.instance or MainScreen.instance.inGame then return end\n" +
+                                            "    if MainScreen.instance.pzoNoticeShown then return end\n" +
+                                            "    if not ISModalRichText then return end\n" +
+                                            "    if not PZOEngine or not PZOEngine.isMultithreadingNoticeAcknowledged then return end\n" +
+                                            "    if PZOEngine.isMultithreadingNoticeAcknowledged() then return end\n" +
+                                            "    MainScreen.instance.pzoNoticeShown = true\n" +
+                                            "    local scrW = getCore():getScreenWidth()\n" +
+                                            "    local scrH = getCore():getScreenHeight()\n" +
+                                            "    local modalW = math.min(640, scrW - 40)\n" +
+                                            "    local modalH = math.min(380, scrH - 40)\n" +
+                                            "    local modalX = (scrW - modalW) / 2\n" +
+                                            "    local modalY = (scrH - modalH) / 2\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.5\"\n" +
+                                            "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
+                                            "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
+                                            "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
+                                            "        \"PZO's parallel multi-threaded engine is now running. Multi-core chunk streaming, background island simulation, and native hardware kernel acceleration are actively distributing workload across your CPU cores to maximize framerates and eliminate micro-stutters. <LINE> <LINE> \" ..\n" +
+                                            "        \"<RGB:1.0,0.85,0.3> Issues or Feedback: <LINE> \" ..\n" +
+                                            "        \"<RGB:0.85,0.85,0.85> If you experience any issues, crashes, or compatibility glitches, please report them on our <RGB:0.4,0.8,1.0> GitHub <RGB:0.85,0.85,0.85> or the <RGB:0.4,0.8,1.0> Steam Workshop <RGB:0.85,0.85,0.85> page so we can resolve them quickly. <LINE> <LINE> \" ..\n" +
+                                            "        \"<RGB:0.3,1.0,0.5> Enjoying the Performance? <LINE> \" ..\n" +
+                                            "        \"<RGB:0.85,0.85,0.85> Likewise, if this mod is helping your game run smoother, please take a moment to <RGB:1.0,0.85,0.2> give us an upvote <RGB:0.85,0.85,0.85> on the Steam Workshop! It helps more survivors discover PZO and supports future development. <LINE> \"\n" +
+                                            "    local modal = ISModalRichText:new(modalX, modalY, modalW, modalH, text, false, nil, function(target, button)\n" +
+                                            "        if PZOEngine and PZOEngine.acknowledgeMultithreadingNotice then\n" +
+                                            "            PZOEngine.acknowledgeMultithreadingNotice()\n" +
+                                            "        end\n" +
+                                            "        if MainScreen and MainScreen.instance then\n" +
+                                            "            MainScreen.instance.pzoNoticeModal = nil\n" +
+                                            "        end\n" +
+                                            "    end)\n" +
+                                            "    modal:initialise()\n" +
+                                            "    modal.destroyOnClick = true\n" +
+                                            "    modal.backgroundColor = {r=0.07, g=0.08, b=0.11, a=0.96}\n" +
+                                            "    modal.borderColor = {r=0.25, g=0.85, b=0.45, a=1.0}\n" +
+                                            "    local old_destroy = modal.destroy\n" +
+                                            "    modal.destroy = function(self)\n" +
+                                            "        if PZOEngine and PZOEngine.acknowledgeMultithreadingNotice then\n" +
+                                            "            PZOEngine.acknowledgeMultithreadingNotice()\n" +
+                                            "        end\n" +
+                                            "        if MainScreen and MainScreen.instance then\n" +
+                                            "            MainScreen.instance.pzoNoticeModal = nil\n" +
+                                            "        end\n" +
+                                            "        old_destroy(self)\n" +
+                                            "    end\n" +
+                                            "    if modal.ok then\n" +
+                                            "        modal.ok.title = \"Acknowledge\"\n" +
+                                            "        modal.ok.backgroundColor = {r=0.15, g=0.55, b=0.25, a=1.0}\n" +
+                                            "        modal.ok.borderColor = {r=0.3, g=0.8, b=0.4, a=1.0}\n" +
+                                            "        modal.ok:setWidth(160)\n" +
+                                            "        modal.ok:setX(modal:getWidth() - 175)\n" +
+                                            "        modal.ok:setY(modal:getHeight() - 38)\n" +
+                                            "        modal.ok:setHeight(28)\n" +
+                                            "    end\n" +
+                                            "    local btnH = modal.ok and modal.ok:getHeight() or 28\n" +
+                                            "    local btnY = modal.ok and modal.ok:getY() or (modal:getHeight() - btnH - 10)\n" +
+                                            "    local wsBtn = ISButton:new(16, btnY, 150, btnH, \"Steam Workshop\", modal, function(self, button)\n" +
+                                            "        if openUrl then\n" +
+                                            "            openUrl(\"https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250\")\n" +
+                                            "        elseif PZOEngine and PZOEngine.openWorkshopPage then\n" +
+                                            "            PZOEngine.openWorkshopPage()\n" +
+                                            "        end\n" +
+                                            "    end)\n" +
+                                            "    wsBtn:initialise()\n" +
+                                            "    wsBtn:instantiate()\n" +
+                                            "    wsBtn.backgroundColor = {r=0.12, g=0.35, b=0.55, a=1.0}\n" +
+                                            "    wsBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
+                                            "    wsBtn.textColor = {r=0.9, g=0.95, b=1.0, a=1.0}\n" +
+                                            "    modal:addChild(wsBtn)\n" +
+                                            "    local ghBtn = ISButton:new(176, btnY, 145, btnH, \"GitHub Issues\", modal, function(self, button)\n" +
+                                            "        if openUrl then\n" +
+                                            "            openUrl(\"https://github.com/prop11/PZO-Launcher/issues\")\n" +
+                                            "        elseif PZOEngine and PZOEngine.openGithubPage then\n" +
+                                            "            PZOEngine.openGithubPage()\n" +
+                                            "        end\n" +
+                                            "    end)\n" +
+                                            "    ghBtn:initialise()\n" +
+                                            "    ghBtn:instantiate()\n" +
+                                            "    ghBtn.backgroundColor = {r=0.2, g=0.2, b=0.25, a=1.0}\n" +
+                                            "    ghBtn.borderColor = {r=0.5, g=0.5, b=0.6, a=1.0}\n" +
+                                            "    ghBtn.textColor = {r=0.9, g=0.9, b=0.9, a=1.0}\n" +
+                                            "    modal:addChild(ghBtn)\n" +
+                                            "    modal:addToUIManager()\n" +
+                                            "    modal:setAlwaysOnTop(true)\n" +
+                                            "    modal:bringToTop()\n" +
+                                            "    if MainScreen and MainScreen.instance then\n" +
+                                            "        MainScreen.instance.pzoNoticeModal = modal\n" +
+                                            "    end\n" +
+                                            "    local joypadData = JoypadState and JoypadState.getMainMenuJoypad and JoypadState.getMainMenuJoypad()\n" +
+                                            "    if joypadData then\n" +
+                                            "        joypadData.focus = modal\n" +
+                                            "        if updateJoypadFocus then updateJoypadFocus(joypadData) end\n" +
+                                            "    end\n" +
+                                            "end\n" +
                                             "local function isMainMenuOnly(ms)\n" +
                                             "    if not ms or ms.inGame then return false end\n" +
                                             "    if not ms.bottomPanel or not ms.bottomPanel:getIsVisible() then return false end\n" +
@@ -726,6 +891,7 @@ public class PZOEngineBridge {
                                             "end\n" +
                                             "Events.OnMainMenuEnter.Add(function()\n" +
                                             "    addPZOBetaToggle()\n" +
+                                            "    showPZOMultithreadingNotice()\n" +
                                             "    if MainScreen and not MainScreen.pzoHooked then\n" +
                                             "        MainScreen.pzoHooked = true\n" +
                                             "        local old_prerender = MainScreen.prerender\n" +
@@ -733,6 +899,10 @@ public class PZOEngineBridge {
                                             "            old_prerender(self)\n" +
                                             "            if not self.inGame and not self.pzoBetaButton then\n" +
                                             "                addPZOBetaToggle()\n" +
+                                            "            end\n" +
+                                            "            if not self.inGame and not self.pzoNoticeChecked then\n" +
+                                            "                self.pzoNoticeChecked = true\n" +
+                                            "                showPZOMultithreadingNotice()\n" +
                                             "            end\n" +
                                             "            if self.pzoBetaButton then\n" +
                                             "                local shouldShow = isMainMenuOnly(self)\n" +
@@ -756,6 +926,13 @@ public class PZOEngineBridge {
                                             "    if MainScreen and MainScreen.instance and MainScreen.instance.pzoBetaButton then\n" +
                                             "        local btn = MainScreen.instance.pzoBetaButton\n" +
                                             "        btn:setY((MainScreen.instance.height or getCore():getScreenHeight()) - btn.height - 18)\n" +
+                                            "    end\n" +
+                                            "    if MainScreen and MainScreen.instance and MainScreen.instance.pzoNoticeModal then\n" +
+                                            "        local modal = MainScreen.instance.pzoNoticeModal\n" +
+                                            "        local scrW = getCore():getScreenWidth()\n" +
+                                            "        local scrH = getCore():getScreenHeight()\n" +
+                                            "        modal:setX((scrW - modal:getWidth()) / 2)\n" +
+                                            "        modal:setY((scrH - modal:getHeight()) / 2)\n" +
                                             "    end\n" +
                                             "end)\n";
 
