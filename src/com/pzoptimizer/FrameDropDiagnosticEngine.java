@@ -220,7 +220,7 @@ public final class FrameDropDiagnosticEngine {
         );
 
         pendingDiagnosticLogs.offer(logEntry);
-        PZOLogger.warn(logEntry);
+       // PZOLogger.warn(logEntry);
     }
 
     private static void updateGcStats() {

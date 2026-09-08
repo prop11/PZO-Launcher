@@ -795,7 +795,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(490, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.5\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.6\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +

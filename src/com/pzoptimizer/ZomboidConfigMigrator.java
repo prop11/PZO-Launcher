@@ -289,7 +289,7 @@ public final class ZomboidConfigMigrator {
             String migrated = migrateJsonContent(original, jsonFile.getParentFile());
 
             Files.writeString(jsonFile.toPath(), migrated, StandardCharsets.UTF_8);
-            PZOLogger.success("[ZomboidConfigMigrator] Successfully migrated " + jsonFile.getName() + " to v0.9.5 configuration.");
+            PZOLogger.success("[ZomboidConfigMigrator] Successfully migrated " + jsonFile.getName() + " to v0.9.* configuration.");
             return true;
         } catch (Throwable t) {
             PZOLogger.error("[ZomboidConfigMigrator] Error migrating " + jsonFile.getName() + ": " + t.getMessage(), t);
@@ -347,10 +347,10 @@ public final class ZomboidConfigMigrator {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();
             File jsonFile = new File(gameDir, TARGET_JSON_NAME);
             if (jsonFile.exists() && isMigrationNeeded(jsonFile)) {
-                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 0.9.5 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
+                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 0.9.6 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
                 boolean ok = migrateFileInPlace(jsonFile);
                 if (ok) {
-                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v0.9.5 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
+                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v0.9.6 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
                 }
             }
         } catch (Throwable t) {
