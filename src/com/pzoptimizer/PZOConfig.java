@@ -120,7 +120,7 @@ public final class PZOConfig {
 
     public static boolean isMultithreadingNoticeAcknowledged() {
         load();
-        return multithreadingNoticeAckVersion != null && !multithreadingNoticeAckVersion.isEmpty();
+        return CURRENT_NOTICE_VERSION.equals(multithreadingNoticeAckVersion);
     }
 
     public static void setMultithreadingNoticeAcknowledged(boolean ack) {
