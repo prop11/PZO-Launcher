@@ -791,15 +791,15 @@ public class PZOEngineBridge {
                                             "    MainScreen.instance.pzoNoticeShown = true\n" +
                                             "    local scrW = getCore():getScreenWidth()\n" +
                                             "    local scrH = getCore():getScreenHeight()\n" +
-                                            "    local modalW = math.min(680, scrW - 40)\n" +
-                                            "    local modalH = math.min(390, scrH - 40)\n" +
+                                            "    local modalW = math.min(740, scrW - 40)\n" +
+                                            "    local modalH = math.min(490, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
                                             "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.5\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
-                                            "        \"PZO's parallel multi-threaded engine is now running. Multi-core chunk streaming, background island simulation, and native hardware kernel acceleration are actively distributing workload across your CPU cores to maximize framerates and eliminate micro-stutters. <LINE> <LINE> \" ..\n" +
+                                            "        \"PZO's parallel multi-threaded engine is active. Multi-core chunk streaming, background island simulation, and native kernel acceleration are distributing workload across your CPU cores to maximize framerates and eliminate stutters. <LINE> <LINE> \" ..\n" +
                                             "        \"<RGB:1.0,0.85,0.3> Issues or Feedback: <LINE> \" ..\n" +
                                             "        \"<RGB:0.85,0.85,0.85> If you experience any issues, crashes, or compatibility glitches, please report them on our <RGB:0.4,0.8,1.0> GitHub <RGB:0.85,0.85,0.85> or the <RGB:0.4,0.8,1.0> Steam Workshop <RGB:0.85,0.85,0.85> page so we can resolve them quickly. <LINE> <LINE> \" ..\n" +
                                             "        \"<RGB:0.3,1.0,0.5> Enjoying the Performance? <LINE> \" ..\n" +
@@ -826,20 +826,14 @@ public class PZOEngineBridge {
                                             "        end\n" +
                                             "        old_destroy(self)\n" +
                                             "    end\n" +
-                                            "    local btnH = math.max(28, modal.ok and modal.ok:getHeight() or 28)\n" +
-                                            "    local btnY = modal:getHeight() - btnH - 12\n" +
-                                            "    if modal.ok then\n" +
-                                            "        modal.ok.title = \"Acknowledge\"\n" +
-                                            "        modal.ok.backgroundColor = {r=0.15, g=0.55, b=0.25, a=1.0}\n" +
-                                            "        modal.ok.borderColor = {r=0.3, g=0.8, b=0.4, a=1.0}\n" +
-                                            "        local okW = 160\n" +
-                                            "        modal.ok:setWidth(okW)\n" +
-                                            "        modal.ok:setHeight(btnH)\n" +
-                                            "        modal.ok:setX(modal:getWidth() - okW - 20)\n" +
-                                            "        modal.ok:setY(btnY)\n" +
-                                            "    end\n" +
-                                            "    local wsW = 160\n" +
-                                            "    local wsBtn = ISButton:new(20, btnY, wsW, btnH, \"Steam Workshop\", modal, function(self, button)\n" +
+                                            "    local tm = getTextManager and getTextManager()\n" +
+                                            "    local font = UIFont.Small\n" +
+                                            "    local fontH = (tm and tm:getFontHeight(font)) or 16\n" +
+                                            "    local btnH = math.max(34, fontH + 14)\n" +
+                                            "    local wsW = math.max(180, (tm and tm:MeasureStringX(font, \"Steam Workshop\") or 140) + 40)\n" +
+                                            "    local ghW = math.max(170, (tm and tm:MeasureStringX(font, \"GitHub Issues\") or 130) + 40)\n" +
+                                            "    local okW = math.max(170, (tm and tm:MeasureStringX(font, \"Acknowledge\") or 130) + 40)\n" +
+                                            "    local wsBtn = ISButton:new(24, modal:getHeight() - btnH - 16, wsW, btnH, \"Steam Workshop\", modal, function(self, button)\n" +
                                             "        if openUrl then\n" +
                                             "            openUrl(\"https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250\")\n" +
                                             "        elseif PZOEngine and PZOEngine.openWorkshopPage then\n" +
@@ -848,15 +842,16 @@ public class PZOEngineBridge {
                                             "    end)\n" +
                                             "    wsBtn:initialise()\n" +
                                             "    wsBtn:instantiate()\n" +
-                                            "    wsBtn:setWidth(wsW)\n" +
-                                            "    wsBtn:setHeight(btnH)\n" +
+                                            "    wsBtn:setFont(font)\n" +
+                                            "    wsBtn.font = font\n" +
+                                            "    wsBtn.anchorTop = false\n" +
+                                            "    wsBtn.anchorBottom = true\n" +
                                             "    wsBtn.backgroundColor = {r=0.12, g=0.35, b=0.55, a=1.0}\n" +
                                             "    wsBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
                                             "    wsBtn.textColor = {r=0.9, g=0.95, b=1.0, a=1.0}\n" +
                                             "    modal:addChild(wsBtn)\n" +
-                                            "    local ghX = wsBtn:getX() + wsBtn:getWidth() + 24\n" +
-                                            "    local ghW = 150\n" +
-                                            "    local ghBtn = ISButton:new(ghX, btnY, ghW, btnH, \"GitHub Issues\", modal, function(self, button)\n" +
+                                            "    modal.pzoWsBtn = wsBtn\n" +
+                                            "    local ghBtn = ISButton:new(24 + wsW + 16, modal:getHeight() - btnH - 16, ghW, btnH, \"GitHub Issues\", modal, function(self, button)\n" +
                                             "        if openUrl then\n" +
                                             "            openUrl(\"https://github.com/prop11/PZO-Launcher/issues\")\n" +
                                             "        elseif PZOEngine and PZOEngine.openGithubPage then\n" +
@@ -865,12 +860,82 @@ public class PZOEngineBridge {
                                             "    end)\n" +
                                             "    ghBtn:initialise()\n" +
                                             "    ghBtn:instantiate()\n" +
-                                            "    ghBtn:setWidth(ghW)\n" +
-                                            "    ghBtn:setHeight(btnH)\n" +
+                                            "    ghBtn:setFont(font)\n" +
+                                            "    ghBtn.font = font\n" +
+                                            "    ghBtn.anchorTop = false\n" +
+                                            "    ghBtn.anchorBottom = true\n" +
                                             "    ghBtn.backgroundColor = {r=0.2, g=0.2, b=0.25, a=1.0}\n" +
                                             "    ghBtn.borderColor = {r=0.5, g=0.5, b=0.6, a=1.0}\n" +
                                             "    ghBtn.textColor = {r=0.9, g=0.9, b=0.9, a=1.0}\n" +
                                             "    modal:addChild(ghBtn)\n" +
+                                            "    modal.pzoGhBtn = ghBtn\n" +
+                                            "    if modal.ok then\n" +
+                                            "        modal.ok:setTitle(\"Acknowledge\")\n" +
+                                            "        modal.ok.title = \"Acknowledge\"\n" +
+                                            "        modal.ok:setFont(font)\n" +
+                                            "        modal.ok.font = font\n" +
+                                            "        modal.ok.anchorTop = false\n" +
+                                            "        modal.ok.anchorBottom = true\n" +
+                                            "        modal.ok.backgroundColor = {r=0.15, g=0.55, b=0.25, a=1.0}\n" +
+                                            "        modal.ok.borderColor = {r=0.3, g=0.8, b=0.4, a=1.0}\n" +
+                                            "        modal.ok.textColor = {r=1.0, g=1.0, b=1.0, a=1.0}\n" +
+                                            "    end\n" +
+                                            "    local function layoutModalButtons(self)\n" +
+                                            "        if not self then return end\n" +
+                                            "        local tmInst = getTextManager and getTextManager()\n" +
+                                            "        local cFont = UIFont.Small\n" +
+                                            "        local cFontH = (tmInst and tmInst:getFontHeight(cFont)) or 16\n" +
+                                            "        local bH = math.max(34, cFontH + 14)\n" +
+                                            "        local bY = self:getHeight() - bH - 16\n" +
+                                            "        local cWsW = math.max(180, (tmInst and tmInst:MeasureStringX(cFont, \"Steam Workshop\") or 140) + 40)\n" +
+                                            "        local cGhW = math.max(170, (tmInst and tmInst:MeasureStringX(cFont, \"GitHub Issues\") or 130) + 40)\n" +
+                                            "        local cOkW = math.max(170, (tmInst and tmInst:MeasureStringX(cFont, \"Acknowledge\") or 130) + 40)\n" +
+                                            "        local padX = 24\n" +
+                                            "        local gap = 16\n" +
+                                            "        local avail = self:getWidth() - (padX * 2)\n" +
+                                            "        if avail < (cWsW + cGhW + cOkW + gap * 2) then\n" +
+                                            "            gap = 8\n" +
+                                            "            padX = 12\n" +
+                                            "        end\n" +
+                                            "        if self.pzoWsBtn then\n" +
+                                            "            self.pzoWsBtn:setX(padX)\n" +
+                                            "            self.pzoWsBtn:setY(bY)\n" +
+                                            "            self.pzoWsBtn:setWidth(cWsW)\n" +
+                                            "            self.pzoWsBtn:setHeight(bH)\n" +
+                                            "        end\n" +
+                                            "        if self.pzoGhBtn then\n" +
+                                            "            self.pzoGhBtn:setX(padX + cWsW + gap)\n" +
+                                            "            self.pzoGhBtn:setY(bY)\n" +
+                                            "            self.pzoGhBtn:setWidth(cGhW)\n" +
+                                            "            self.pzoGhBtn:setHeight(bH)\n" +
+                                            "        end\n" +
+                                            "        if self.ok then\n" +
+                                            "            self.ok:setX(self:getWidth() - cOkW - padX)\n" +
+                                            "            self.ok:setY(bY)\n" +
+                                            "            self.ok:setWidth(cOkW)\n" +
+                                            "            self.ok:setHeight(bH)\n" +
+                                            "        end\n" +
+                                            "    end\n" +
+                                            "    modal.updateButtons = function(self)\n" +
+                                            "        layoutModalButtons(self)\n" +
+                                            "    end\n" +
+                                            "    local old_update = modal.update\n" +
+                                            "    modal.update = function(self)\n" +
+                                            "        old_update(self)\n" +
+                                            "        if self.chatText then\n" +
+                                            "            local tmInst = getTextManager and getTextManager()\n" +
+                                            "            local cFontH = (tmInst and tmInst:getFontHeight(UIFont.Small)) or 16\n" +
+                                            "            local bH = math.max(34, cFontH + 14)\n" +
+                                            "            local reservedBottom = bH + 32\n" +
+                                            "            local targetChatH = math.max(60, self:getHeight() - reservedBottom)\n" +
+                                            "            if self.chatText:getHeight() ~= targetChatH then\n" +
+                                            "                self.chatText:setHeight(targetChatH)\n" +
+                                            "                self.chatText:updateScrollbars()\n" +
+                                            "            end\n" +
+                                            "        end\n" +
+                                            "        layoutModalButtons(self)\n" +
+                                            "    end\n" +
+                                            "    layoutModalButtons(modal)\n" +
                                             "    modal:addToUIManager()\n" +
                                             "    modal:setAlwaysOnTop(true)\n" +
                                             "    modal:bringToTop()\n" +
