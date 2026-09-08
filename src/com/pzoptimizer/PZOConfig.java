@@ -10,9 +10,11 @@ import java.nio.file.Files;
  */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
+    public static final String CURRENT_NOTICE_VERSION = "0.9.5";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
     private static volatile boolean isolateConflictingFpsMods = true;
+    private static volatile String multithreadingNoticeAckVersion = "";
     private static volatile boolean loaded = false;
 
     public static synchronized void load() {
@@ -25,6 +27,11 @@ public final class PZOConfig {
                 betaOptIn = content.contains("\"beta_opt_in\":true") || content.contains("\"beta_opt_in\": true") || content.contains("\"beta_opt_in\":1");
                 ignoredVersion = extractJsonField(content, "ignored_version");
                 if (ignoredVersion == null) ignoredVersion = "";
+                multithreadingNoticeAckVersion = extractJsonField(content, "multithreading_notice_ack_version");
+                if (multithreadingNoticeAckVersion == null) multithreadingNoticeAckVersion = "";
+                if (multithreadingNoticeAckVersion.isEmpty() && (content.contains("\"multithreading_notice_ack\":true") || content.contains("\"multithreading_notice_ack\": true"))) {
+                    multithreadingNoticeAckVersion = CURRENT_NOTICE_VERSION;
+                }
                 if (content.contains("\"isolate_conflicting_fps_mods\":false") || content.contains("\"isolate_conflicting_fps_mods\": false") || content.contains("\"isolate_conflicting_fps_mods\":0")) {
                     isolateConflictingFpsMods = false;
                 } else {
@@ -37,8 +44,9 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b}",
-                betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods);
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\"}",
+                betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
+                multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "");
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -108,6 +116,23 @@ public final class PZOConfig {
         isolateConflictingFpsMods = isolate;
         save();
         PZOLogger.info("[PZO Config] Isolate conflicting FPS mods set to: " + isolate);
+    }
+
+    public static boolean isMultithreadingNoticeAcknowledged() {
+        load();
+        return multithreadingNoticeAckVersion != null && !multithreadingNoticeAckVersion.isEmpty();
+    }
+
+    public static void setMultithreadingNoticeAcknowledged(boolean ack) {
+        load();
+        multithreadingNoticeAckVersion = ack ? CURRENT_NOTICE_VERSION : "";
+        save();
+        PZOLogger.info("[PZO Config] Multithreading notice acknowledged set to: " + ack + " (" + multithreadingNoticeAckVersion + ")");
+    }
+
+    public static String getMultithreadingNoticeAckVersion() {
+        load();
+        return multithreadingNoticeAckVersion;
     }
 
     private static String extractJsonField(String json, String fieldName) {
