@@ -5,6 +5,7 @@ A high-performance Java engine optimizer, configuration booster, and dedicated s
 ---
 
 ## 📑 Table of Contents
+- [📖 Official Wiki Documentation](https://github.com/prop11/PZO-Launcher/wiki)
 - [⚡ Client Optimization Engine (`PZOptimEngine.jar`)](#-client-optimization-engine-pzoptimenginejar)
 - [🖥️ Client Installation & Quick Start](#️-client-installation--quick-start)
 - [🌐 Dedicated Server Engine (`PZOServerEngine.jar`)](#-dedicated-server-engine-pzoserverenginejar)
