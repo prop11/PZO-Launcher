@@ -426,7 +426,24 @@ public class UpdateDialog {
             long pid = ProcessHandle.current().pid();
             File win64Dll = new File(gameDir, "win64" + File.separator + nativeFileName);
 
+            // Stage ProjectZomboid64.json update if missing required 0.9.5 flags (such as -agentlib:pzo_native64)
+            File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
+            File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
+            boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
+
             if (os.contains("win")) {
+                String psJsonUpdate = hasNewJson ? String.format(
+                    "if (Test-Path -LiteralPath '%s') { " +
+                    "    for ($i=0; $i -lt 30; $i++) { " +
+                    "        try { Move-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
+                    "        catch { Start-Sleep -Milliseconds 200; } " +
+                    "    } " +
+                    "}; ",
+                    newJson.getAbsolutePath().replace("'", "''"),
+                    newJson.getAbsolutePath().replace("'", "''"),
+                    currentJson.getAbsolutePath().replace("'", "''")
+                ) : "";
+
                 String psUpdater = String.format(
                     "$proc = Get-Process -Id %d -ErrorAction SilentlyContinue; " +
                     "if ($proc) { $proc.WaitForExit(15000); }; " +
@@ -443,9 +460,10 @@ public class UpdateDialog {
                     "        catch { Start-Sleep -Milliseconds 200; } " +
                     "    } " +
                     "}; " +
+                    "%s" +
                     "$nl=[Environment]::NewLine; " +
                     "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); " +
-                    "[Windows.Forms.MessageBox]::Show(('Native Governor (%s) has been successfully installed/updated to v%s!' + $nl + $nl + 'Please restart Project Zomboid to apply native optimizations.'), 'Setup Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
+                    "[Windows.Forms.MessageBox]::Show(('Native Governor (%s) and configuration have been successfully updated to v%s!' + $nl + $nl + 'Please restart Project Zomboid to apply native optimizations.'), 'Setup Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
                     pid,
                     newNative.getAbsolutePath().replace("'", "''"),
                     win64Dll.getParentFile().getAbsolutePath().replace("'", "''"),
@@ -453,11 +471,16 @@ public class UpdateDialog {
                     win64Dll.getAbsolutePath().replace("'", "''"),
                     newNative.getAbsolutePath().replace("'", "''"),
                     currentNative.getAbsolutePath().replace("'", "''"),
+                    psJsonUpdate,
                     nativeFileName,
                     targetVersion
                 );
                 new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
             } else if (os.contains("mac")) {
+                String macJsonUpdate = hasNewJson ? String.format(
+                    " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
+                    newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
+                ) : "";
                 String macNativeUpdate = String.format(
                     " && cp -f \"%s\" \"%s\" && (test -d \"ProjectZomboid.app/Contents/Java\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/Java/%s\" || true) && (test -d \"ProjectZomboid.app/Contents/MacOS\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/MacOS/%s\" || true) && rm -f \"%s\"",
                     newNative.getAbsolutePath(), currentNative.getAbsolutePath(),
@@ -466,12 +489,16 @@ public class UpdateDialog {
                     newNative.getAbsolutePath()
                 );
                 String shUpdater = String.format(
-                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5%s && osascript -e 'display notification \"Native Governor (%s) has been successfully installed/updated to v%s! Please restart Project Zomboid.\" with title \"Setup Complete\"'",
-                    pid, macNativeUpdate, nativeFileName, targetVersion
+                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5%s%s && osascript -e 'display notification \"Native Governor (%s) has been successfully installed/updated to v%s! Please restart Project Zomboid.\" with title \"Setup Complete\"'",
+                    pid, macNativeUpdate, macJsonUpdate, nativeFileName, targetVersion
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
                 // Linux & Steam Deck
+                String linuxJsonUpdate = hasNewJson ? String.format(
+                    " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
+                    newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
+                ) : "";
                 String linuxNativeUpdate = String.format(
                     " && cp -f \"%s\" \"%s\" && (test -d \"linux64\" && cp -f \"%s\" \"linux64/%s\" || true) && (test -d \"natives\" && cp -f \"%s\" \"natives/%s\" || true) && rm -f \"%s\"",
                     newNative.getAbsolutePath(), currentNative.getAbsolutePath(),
@@ -480,8 +507,8 @@ public class UpdateDialog {
                     newNative.getAbsolutePath()
                 );
                 String shUpdater = String.format(
-                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5%s && (kdialog --msgbox \"Native Governor (%s) has been successfully installed/updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"Native Governor (%s) has been successfully installed/updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Native Setup Complete\" \"Please restart Project Zomboid.\")",
-                    pid, linuxNativeUpdate, nativeFileName, targetVersion, nativeFileName, targetVersion
+                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5%s%s && (kdialog --msgbox \"Native Governor (%s) has been successfully installed/updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"Native Governor (%s) has been successfully installed/updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Native Setup Complete\" \"Please restart Project Zomboid.\")",
+                    pid, linuxNativeUpdate, linuxJsonUpdate, nativeFileName, targetVersion, nativeFileName, targetVersion
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             }
@@ -599,7 +626,24 @@ public class UpdateDialog {
 
             long pid = ProcessHandle.current().pid();
 
+            // Stage ProjectZomboid64.json update if missing required 0.9.5 flags (such as -agentlib:pzo_native64)
+            File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
+            File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
+            boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
+
             if (isWin) {
+                String psJsonUpdate = hasNewJson ? String.format(
+                    "if (Test-Path -LiteralPath '%s') { " +
+                    "    for ($i=0; $i -lt 30; $i++) { " +
+                    "        try { Move-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
+                    "        catch { Start-Sleep -Milliseconds 200; } " +
+                    "    } " +
+                    "}; ",
+                    newJson.getAbsolutePath().replace("'", "''"),
+                    newJson.getAbsolutePath().replace("'", "''"),
+                    currentJson.getAbsolutePath().replace("'", "''")
+                ) : "";
+
                 String psDllUpdate = hasNewNative ? String.format(
                     "if (Test-Path -LiteralPath '%s') { " +
                     "    if (Test-Path -LiteralPath '%s') { " +
@@ -633,6 +677,7 @@ public class UpdateDialog {
                     "    } " +
                     "}; " +
                     "%s" +
+                    "%s" +
                     "$nl=[Environment]::NewLine; " +
                     "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); " +
                     "[Windows.Forms.MessageBox]::Show(('" + msgTitle + "' + $nl + $nl + 'Please restart Project Zomboid to load the new build.'), 'Update Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
@@ -641,10 +686,16 @@ public class UpdateDialog {
                     newJar.getAbsolutePath().replace("'", "''"),
                     currentJar.getAbsolutePath().replace("'", "''"),
                     psDllUpdate,
+                    psJsonUpdate,
                     latestVersion
                 );
                 new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
             } else if (isMac) {
+                String macJsonUpdate = hasNewJson ? String.format(
+                    " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
+                    newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
+                ) : "";
+
                 String macNativeUpdate = hasNewNative ? String.format(
                     " && cp -f \"%s\" \"%s\" && (test -d \"ProjectZomboid.app/Contents/Java\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/Java/%s\" || true) && (test -d \"ProjectZomboid.app/Contents/MacOS\" && cp -f \"%s\" \"ProjectZomboid.app/Contents/MacOS/%s\" || true) && rm -f \"%s\"",
                     newNative.getAbsolutePath(), currentNative.getAbsolutePath(),
@@ -654,12 +705,17 @@ public class UpdateDialog {
                 ) : "";
 
                 String shUpdater = String.format(
-                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5 && mv -f \"%s\" \"%s\"%s && osascript -e 'display notification \"PZO Engine & Native Governor have been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
-                    pid, newJar.getAbsolutePath(), currentJar.getAbsolutePath(), macNativeUpdate, latestVersion
+                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5 && mv -f \"%s\" \"%s\"%s%s && osascript -e 'display notification \"PZO Engine & Native Governor have been updated to v%s! Please restart Project Zomboid.\" with title \"Update Complete\"'",
+                    pid, newJar.getAbsolutePath(), currentJar.getAbsolutePath(), macNativeUpdate, macJsonUpdate, latestVersion
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
                 // Linux & Steam Deck
+                String linuxJsonUpdate = hasNewJson ? String.format(
+                    " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
+                    newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
+                ) : "";
+
                 String linuxNativeUpdate = hasNewNative ? String.format(
                     " && cp -f \"%s\" \"%s\" && (test -d \"linux64\" && cp -f \"%s\" \"linux64/%s\" || true) && (test -d \"natives\" && cp -f \"%s\" \"natives/%s\" || true) && rm -f \"%s\"",
                     newNative.getAbsolutePath(), currentNative.getAbsolutePath(),
@@ -669,8 +725,8 @@ public class UpdateDialog {
                 ) : "";
 
                 String shUpdater = String.format(
-                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5 && mv -f \"%s\" \"%s\"%s && (kdialog --msgbox \"PZO Engine & Native Governor have been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"PZO Engine & Native Governor have been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Engine Updated\" \"Please restart Project Zomboid.\")",
-                    pid, newJar.getAbsolutePath(), currentJar.getAbsolutePath(), linuxNativeUpdate, latestVersion, latestVersion
+                    "while kill -0 %d 2>/dev/null; do sleep 0.2; done; sleep 0.5 && mv -f \"%s\" \"%s\"%s%s && (kdialog --msgbox \"PZO Engine & Native Governor have been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || zenity --info --text=\"PZO Engine & Native Governor have been updated to v%s!\\n\\nPlease restart Project Zomboid.\" || notify-send \"PZO Engine Updated\" \"Please restart Project Zomboid.\")",
+                    pid, newJar.getAbsolutePath(), currentJar.getAbsolutePath(), linuxNativeUpdate, linuxJsonUpdate, latestVersion, latestVersion
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             }

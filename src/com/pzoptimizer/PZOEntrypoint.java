@@ -30,6 +30,11 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
+        // Automatically inspect and migrate ProjectZomboid64.json if upgrading from older releases (e.g. 0.8.2 -> 0.9.5)
+        try {
+            ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
+        } catch (Throwable ignored) {}
+
         // 0. Native Kernel & Hardware Governor (pzo_native64.dll)
         boolean isNative = false;
         double timerMs = 15.6;
