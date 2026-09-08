@@ -138,7 +138,7 @@ if [ "$OS_TYPE" = "Darwin" ]; then
                 echo "[*] Updating PZOptimEngine.jar..."
                 cp -f "$PZ_JAR" "$INSTALLED_JAR"
                 echo "[+] Successfully updated PZOptimEngine.jar -> $INSTALLED_JAR"
-                exit 0
+                echo "[*] Refreshing native governor and Info.plist configuration..."
                 ;;
             2)
                 echo "[*] Uninstalling PZOptimEngine..."
@@ -254,6 +254,7 @@ for cp_key in ["JVMClassPath", "ClassPath"]:
                 pl[cp_key] = "PZOptimEngine.jar:" + pl[cp_key]
 
 jvm_args = [
+    "-agentlib:pzo_native64",
     "-javaagent:PZOptimEngine.jar",
     f"-Xmx{ram_mb}m",
     "-XX:+UseG1GC",
@@ -261,6 +262,12 @@ jvm_args = [
     "-XX:InitiatingHeapOccupancyPercent=45",
     "-XX:G1ReservePercent=15",
     "-XX:+AlwaysPreTouch",
+    "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+UseCompactObjectHeaders",
+    "-XX:+UseSuperWord",
+    "-XX:MaxInlineLevel=15",
+    "-XX:InlineSmallCode=2500",
+    "-XX:+UseNUMA",
     "--enable-native-access=ALL-UNNAMED",
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
     "-Dzomboid.steam=1"
@@ -339,7 +346,7 @@ else
                 echo "[*] Updating PZOptimEngine.jar..."
                 cp -f "$PZ_JAR" "$INSTALLED_JAR"
                 echo "[+] Successfully updated PZOptimEngine.jar -> $INSTALLED_JAR"
-                exit 0
+                echo "[*] Refreshing native governor and ProjectZomboid64.json configuration..."
                 ;;
             2)
                 echo "[*] Uninstalling PZOptimEngine..."
@@ -459,6 +466,7 @@ if not has_lib_path:
     filtered_args.append("-Djava.library.path=linux64/:natives/:.")
 
 pzo_args = [
+    "-agentlib:pzo_native64",
     f"-Xmx{ram_mb}m",
     "-XX:+UseG1GC",
     "-XX:+PerfDisableSharedMem",
@@ -466,6 +474,11 @@ pzo_args = [
     "-XX:G1ReservePercent=15",
     "-XX:+AlwaysPreTouch",
     "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+UseCompactObjectHeaders",
+    "-XX:+UseSuperWord",
+    "-XX:MaxInlineLevel=15",
+    "-XX:InlineSmallCode=2500",
+    "-XX:+UseNUMA",
     "--enable-native-access=ALL-UNNAMED",
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 ]
