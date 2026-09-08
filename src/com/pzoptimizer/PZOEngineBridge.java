@@ -830,9 +830,24 @@ public class PZOEngineBridge {
                                             "    local font = UIFont.Small\n" +
                                             "    local fontH = (tm and tm:getFontHeight(font)) or 16\n" +
                                             "    local btnH = math.max(34, fontH + 14)\n" +
+                                            "    local reservedBottom = btnH + 32\n" +
                                             "    local wsW = math.max(180, (tm and tm:MeasureStringX(font, \"Steam Workshop\") or 140) + 40)\n" +
                                             "    local ghW = math.max(170, (tm and tm:MeasureStringX(font, \"GitHub Issues\") or 130) + 40)\n" +
                                             "    local okW = math.max(170, (tm and tm:MeasureStringX(font, \"Acknowledge\") or 130) + 40)\n" +
+                                            "    if modal.chatText then\n" +
+                                            "        modal.chatText:setHeight(modal:getHeight() - reservedBottom)\n" +
+                                            "        modal.chatText:updateScrollbars()\n" +
+                                            "        modal.chatText.onMouseWheel = function(self, del)\n" +
+                                            "            self:setYScroll(self:getYScroll() - (del * 30))\n" +
+                                            "            return true\n" +
+                                            "        end\n" +
+                                            "    end\n" +
+                                            "    modal.onMouseWheel = function(self, del)\n" +
+                                            "        if self.chatText and self.chatText.onMouseWheel then\n" +
+                                            "            return self.chatText:onMouseWheel(del)\n" +
+                                            "        end\n" +
+                                            "        return false\n" +
+                                            "    end\n" +
                                             "    local wsBtn = ISButton:new(24, modal:getHeight() - btnH - 16, wsW, btnH, \"Steam Workshop\", modal, function(self, button)\n" +
                                             "        if openUrl then\n" +
                                             "            openUrl(\"https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250\")\n" +
@@ -919,21 +934,40 @@ public class PZOEngineBridge {
                                             "    modal.updateButtons = function(self)\n" +
                                             "        layoutModalButtons(self)\n" +
                                             "    end\n" +
-                                            "    local old_update = modal.update\n" +
                                             "    modal.update = function(self)\n" +
-                                            "        old_update(self)\n" +
+                                            "        ISPanelJoypad.update(self)\n" +
+                                            "        local tmInst = getTextManager and getTextManager()\n" +
+                                            "        local cFontH = (tmInst and tmInst:getFontHeight(UIFont.Small)) or 16\n" +
+                                            "        local bH = math.max(34, cFontH + 14)\n" +
+                                            "        local rBottom = bH + 32\n" +
+                                            "        local maxModalH = getCore():getScreenHeight() - 40\n" +
+                                            "        if self:getHeight() > maxModalH then\n" +
+                                            "            self:setHeight(maxModalH)\n" +
+                                            "            self:ignoreHeightChange()\n" +
+                                            "            self:setY(20)\n" +
+                                            "        end\n" +
                                             "        if self.chatText then\n" +
-                                            "            local tmInst = getTextManager and getTextManager()\n" +
-                                            "            local cFontH = (tmInst and tmInst:getFontHeight(UIFont.Small)) or 16\n" +
-                                            "            local bH = math.max(34, cFontH + 14)\n" +
-                                            "            local reservedBottom = bH + 32\n" +
-                                            "            local targetChatH = math.max(60, self:getHeight() - reservedBottom)\n" +
+                                            "            local targetChatH = math.max(60, self:getHeight() - rBottom)\n" +
                                             "            if self.chatText:getHeight() ~= targetChatH then\n" +
                                             "                self.chatText:setHeight(targetChatH)\n" +
-                                            "                self.chatText:updateScrollbars()\n" +
                                             "            end\n" +
+                                            "            self.chatText:updateScrollbars()\n" +
                                             "        end\n" +
                                             "        layoutModalButtons(self)\n" +
+                                            "        if self.alwaysOnTop then\n" +
+                                            "            self:bringToTop()\n" +
+                                            "        end\n" +
+                                            "    end\n" +
+                                            "    modal.setHeightToContents = function(self)\n" +
+                                            "        local tmInst = getTextManager and getTextManager()\n" +
+                                            "        local cFontH = (tmInst and tmInst:getFontHeight(UIFont.Small)) or 16\n" +
+                                            "        local bH = math.max(34, cFontH + 14)\n" +
+                                            "        local rBottom = bH + 32\n" +
+                                            "        local minH = (self.chatText and self.chatText:getScrollHeight() or 200) + rBottom + 10\n" +
+                                            "        local maxH = getCore():getScreenHeight() - 40\n" +
+                                            "        self:setHeight(math.min(minH, maxH))\n" +
+                                            "        self:ignoreHeightChange()\n" +
+                                            "        if self.updateButtons then self:updateButtons() end\n" +
                                             "    end\n" +
                                             "    layoutModalButtons(modal)\n" +
                                             "    modal:addToUIManager()\n" +
