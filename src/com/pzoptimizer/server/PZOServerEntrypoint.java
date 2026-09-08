@@ -11,7 +11,20 @@ import java.lang.reflect.Method;
 public class PZOServerEntrypoint {
     public static final String SERVER_VERSION = "0.9.5";
 
-    public static void main(String[] args) {
+    private static volatile boolean initialized = false;
+
+    public static void premain(String agentArgs, java.lang.instrument.Instrumentation inst) {
+        initServerPipelines(inst);
+    }
+
+    public static void agentmain(String agentArgs, java.lang.instrument.Instrumentation inst) {
+        premain(agentArgs, inst);
+    }
+
+    public static synchronized void initServerPipelines(java.lang.instrument.Instrumentation inst) {
+        if (initialized) return;
+        initialized = true;
+
         long startTime = System.currentTimeMillis();
 
         // 1. Enforce headless execution for dedicated servers
@@ -27,6 +40,15 @@ public class PZOServerEntrypoint {
         int cores = Runtime.getRuntime().availableProcessors();
         long maxHeapMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
         PZOServerLogger.info("Host Server Resources: " + cores + " CPU Cores | Max JVM Heap: " + maxHeapMB + " MB");
+
+        // 1.1. If instrumentation is available, hook bytecode transformers
+        if (inst != null) {
+            try {
+                com.pzoptimizer.PZOptimAgent.premain(null, inst);
+            } catch (Throwable t) {
+                PZOServerLogger.warn("Notice during server agent transformer registration: " + t.getMessage());
+            }
+        }
 
         // 1.2. Automatic Linux Dedicated Server Steam Native Sanitizer
         LinuxSteamServerSanitizer.sanitize();
@@ -63,8 +85,12 @@ public class PZOServerEntrypoint {
 
         long initDuration = System.currentTimeMillis() - startTime;
         PZOServerLogger.success("All server optimization pipelines armed in " + initDuration + "ms!");
-        PZOServerLogger.info("Handing execution over to Project Zomboid Dedicated Server (zombie.network.GameServer)...");
         PZOServerLogger.info("================================================================================");
+    }
+
+    public static void main(String[] args) {
+        initServerPipelines(null);
+        PZOServerLogger.info("Handing execution over to Project Zomboid Dedicated Server (zombie.network.GameServer)...");
 
         // 7. Invoke Vanilla GameServer Entrypoint
         try {

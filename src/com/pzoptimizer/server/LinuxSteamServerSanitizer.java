@@ -24,13 +24,19 @@ public class LinuxSteamServerSanitizer {
             PZOServerLogger.info("[Linux Sanitizer] Checking Linux Steam native environment...");
 
             File workingDir = new File(".").getAbsoluteFile();
+            String userHome = System.getProperty("user.home", "");
+            String envHome = System.getenv("HOME");
+
             File[] candidateLocations = new File[] {
                 new File(workingDir, "linux64/steamclient.so"),
                 new File(workingDir, "natives/steamclient.so"),
                 new File(workingDir, "natives/linux64/steamclient.so"),
                 new File(workingDir, "steamclient.so"),
+                new File("/home/container/linux64/steamclient.so"),
+                new File("/home/container/steamclient.so"),
                 new File("/home/server-files/linux64/steamclient.so"),
-                new File("/home/steam/linux64/steamclient.so")
+                new File("/home/steam/linux64/steamclient.so"),
+                new File("/home/steam/.steam/sdk64/steamclient.so")
             };
 
             File foundSteamclient = null;
@@ -52,14 +58,21 @@ public class LinuxSteamServerSanitizer {
                     PZOServerLogger.info("[Linux Sanitizer] System.load notice: " + t.getMessage());
                 }
 
-                // 2. Ensure ~/.steam/sdk64/steamclient.so exists (where SteamAPI_Init looks)
-                try {
-                    String userHome = System.getProperty("user.home", "");
-                    if (userHome != null && !userHome.isEmpty()) {
-                        Path sdk64Dir = Paths.get(userHome, ".steam", "sdk64");
+                // 2. Ensure ~/.steam/sdk64/steamclient.so exists (where Steam searches on Linux)
+                java.util.Set<Path> targetDirs = new java.util.LinkedHashSet<>();
+                if (userHome != null && !userHome.isEmpty()) {
+                    targetDirs.add(Paths.get(userHome, ".steam", "sdk64"));
+                }
+                if (envHome != null && !envHome.isEmpty()) {
+                    targetDirs.add(Paths.get(envHome, ".steam", "sdk64"));
+                }
+                targetDirs.add(Paths.get("/home/container/.steam/sdk64"));
+                targetDirs.add(Paths.get("/home/steam/.steam/sdk64"));
+
+                for (Path sdk64Dir : targetDirs) {
+                    try {
                         Files.createDirectories(sdk64Dir);
                         Path targetSteamclient = sdk64Dir.resolve("steamclient.so");
-
                         if (!Files.exists(targetSteamclient)) {
                             try {
                                 Files.createSymbolicLink(targetSteamclient, foundSteamclient.toPath());
@@ -69,9 +82,9 @@ public class LinuxSteamServerSanitizer {
                                 PZOServerLogger.success("[Linux Sanitizer] Copied steamclient.so to " + targetSteamclient);
                             }
                         }
+                    } catch (Throwable t) {
+                        PZOServerLogger.info("[Linux Sanitizer] Target directory notice (" + sdk64Dir + "): " + t.getMessage());
                     }
-                } catch (Throwable t) {
-                    PZOServerLogger.info("[Linux Sanitizer] Home directory steam link notice: " + t.getMessage());
                 }
             } else {
                 PZOServerLogger.warn("[Linux Sanitizer] steamclient.so not found in standard paths. SteamAPI fallback will be used.");
