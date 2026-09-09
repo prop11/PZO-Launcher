@@ -4,11 +4,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Project Zomboid Build 42 - Kahlua Lua Virtual Machine Accelerator.
- * Optimizes Lua global function resolutions, string interning pools, and table key caches
- * without modifying any public Lua API contracts, making 50+ mod setups run 30-40% faster.
- */
 public class LuaInterpreterAccelerator {
     private static final ConcurrentHashMap<String, Object> globalMethodCache = new ConcurrentHashMap<>(256);
     private static volatile boolean active = false;

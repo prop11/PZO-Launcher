@@ -2,12 +2,6 @@ package com.pzoptimizer;
 
 import java.util.concurrent.locks.LockSupport;
 
-/**
- * PZO Nanosecond-Precise Engine Frame Pacer & Jitter Eraser.
- * Uses hybrid OS timer sleep and CPU nanosecond spin-yielding to guarantee
- * perfectly flat frame times (e.g. exactly 16.666ms at 60 FPS, 6.944ms at 144 FPS).
- * 100% safe across Windows, macOS, and Linux.
- */
 public final class EngineFramePacer {
 
     private static volatile boolean enabled = false;
@@ -27,7 +21,6 @@ public final class EngineFramePacer {
     }
 
     public static void paceFrame(long frameStartNanos) {
-        // Record frame time in telemetry diagnostic probe
         FrameDropDiagnosticEngine.onFrameTick();
 
         if (!enabled) return;
@@ -35,7 +28,7 @@ public final class EngineFramePacer {
         long targetEnd = frameStartNanos + targetFrameTimeNanos;
         long remainingNanos = targetEnd - System.nanoTime();
 
-        // 1. Coarse sleep for the bulk of the wait (leaving 1ms buffer)
+        // Leave 1 ms for the finer waits below.
         if (remainingNanos > 1_500_000L) {
             long sleepMillis = (remainingNanos - 1_000_000L) / 1_000_000L;
             try {
@@ -43,13 +36,11 @@ public final class EngineFramePacer {
             } catch (InterruptedException ignored) {}
         }
 
-        // 2. Fine-grained microsecond park
         remainingNanos = targetEnd - System.nanoTime();
         if (remainingNanos > 100_000L) {
             LockSupport.parkNanos(remainingNanos - 50_000L);
         }
 
-        // 3. Nanosecond spin-yield for exact deadline
         while (System.nanoTime() < targetEnd) {
             Thread.onSpinWait();
         }

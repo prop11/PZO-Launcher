@@ -3,12 +3,7 @@ package com.pzoptimizer;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-/**
- * PZO Native SIMD-Accelerated Chunk Decompressor.
- * Extends java.util.zip.Inflater to act as a seamless drop-in replacement for WorldStreamer.
- * Uses AVX2 tinfl in pzo_native64.dll for 50x-100x faster decompression with zero heap allocations.
- * Falls back transparently to JVM Inflater if native library is unavailable or on malformed stream.
- */
+/** Uses native decompression when available, with a JVM Inflater fallback. */
 public class NativeInflater extends Inflater {
 
     private byte[] inputBuffer = null;

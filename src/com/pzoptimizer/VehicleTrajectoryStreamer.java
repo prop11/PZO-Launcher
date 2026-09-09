@@ -1,10 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * PZO Predictive Vehicle Trajectory & Chunk Stream Accelerator.
- * Subsumed and upgraded by PredictiveChunkStreamer for universal walking, sprinting, and driving acceleration.
- * Maintained as a seamless delegator for backward compatibility.
- */
+/** Compatibility entry point delegating to PredictiveChunkStreamer. */
 public final class VehicleTrajectoryStreamer {
 
     public static void start() {

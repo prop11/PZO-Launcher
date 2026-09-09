@@ -9,10 +9,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Dedicated Server - Live Server Telemetry Bridge.
- * Streams real-time TPS, memory metrics, GC pause latencies, and thread states for server admins and Discord bots.
- */
 public class ServerTelemetryBridge {
     private static final java.util.Set<File> telemetryFiles = java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<>());
 

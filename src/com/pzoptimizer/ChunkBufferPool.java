@@ -2,10 +2,6 @@ package com.pzoptimizer;
 
 import java.nio.ByteBuffer;
 
-/**
- * Project Zomboid Build 42 - Reusable Thread-Local Chunk Decompression Buffers.
- * Eliminates repeated 128KB-256KB byte array allocations during high-speed vehicle driving.
- */
 public class ChunkBufferPool {
     public static volatile boolean enabled = true;
 

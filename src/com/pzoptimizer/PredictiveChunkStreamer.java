@@ -9,16 +9,7 @@ import java.nio.ByteOrder;
 import java.util.HashSet;
 import java.util.Set;
 
-/**
- * PZO Universal Predictive Chunk Streamer (Next-Gen Chunk Streaming Engine).
- * 
- * Tracks player travel mode (driving, sprinting, walking) and proactively registers
- * upcoming chunk coordinates along the velocity vector into ChunkRetentionRing to prevent
- * boundary thrashing and hysteresis unloads.
- * 
- * Operates purely in-memory with zero file-handle locks, eliminating NTFS handle contention
- * with WorldStreamer and ChunkSaveWorker.
- */
+/** Retains and preloads chunks along the player or vehicle travel direction. */
 public final class PredictiveChunkStreamer {
 
     private static volatile boolean running = false;
@@ -77,7 +68,6 @@ public final class PredictiveChunkStreamer {
                         lastPrewarmClearTime = now;
                     }
 
-                    // 1. Discover active player via reflection
                     Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
                     Method getInstMethod = playerClass.getMethod("getInstance");
                     Object player = getInstMethod.invoke(null);
@@ -96,7 +86,6 @@ public final class PredictiveChunkStreamer {
                     int currentChunkY = (int) (py / 8.0f);
                     ChunkRetentionRing.touch(currentChunkX, currentChunkY);
 
-                    // 2. Check if player is operating a vehicle
                     Method getVehicleMethod = playerClass.getMethod("getVehicle");
                     Object vehicle = getVehicleMethod.invoke(player);
 
@@ -113,7 +102,7 @@ public final class PredictiveChunkStreamer {
         }, "PZO-PredictiveChunkStreamer");
 
         streamerThread.setDaemon(true);
-        streamerThread.setPriority(Thread.NORM_PRIORITY - 1); // Priority 4 (never competes with gameplay or WorldStreamer)
+        streamerThread.setPriority(Thread.NORM_PRIORITY - 1);
         streamerThread.start();
     }
 
@@ -129,7 +118,7 @@ public final class PredictiveChunkStreamer {
             float dirX = 0.0f;
             float dirY = 0.0f;
 
-            // 1. Try JNI linear velocity vector first (pure physical trajectory, handles drifts and turns)
+            // Prefer physical velocity so prediction follows drifts and turns.
             try {
                 Field velField = vehicle.getClass().getField("jniLinearVelocity");
                 Object velObj = velField.get(vehicle);
@@ -143,7 +132,7 @@ public final class PredictiveChunkStreamer {
                 }
             } catch (Throwable ignored) {}
 
-            // 2. Fallback to vehicle forward vector with speed sign (handles reverses)
+            // Fall back to the forward vector, reversing it for negative speed.
             if (dirX == 0.0f && dirY == 0.0f) {
                 try {
                     Method getForwardVectorMethod = vehicle.getClass().getMethod("getForwardVector", org.joml.Vector3f.class);
@@ -160,7 +149,7 @@ public final class PredictiveChunkStreamer {
                 } catch (Throwable ignored) {}
             }
 
-            // 3. Fallback to player facing direction
+            // Use the player facing direction if vehicle velocity is unavailable.
             if (dirX == 0.0f && dirY == 0.0f) {
                 try {
                     Class<?> playerClass = player.getClass();
@@ -253,7 +242,6 @@ public final class PredictiveChunkStreamer {
         }
         PREWARMED_KEYS.add(key);
 
-        // Preload upcoming chunk data directly into memory cache ahead of vehicle arrival
         if (PRELOADED_CHUNKS.size() < MAX_PRELOADED_CHUNKS) {
             try {
                 if (zombie.iso.IsoChunk.FileExists(wx, wy)) {

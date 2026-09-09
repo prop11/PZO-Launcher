@@ -8,18 +8,6 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * PZO Master Multi-Core Engine Coordinator.
- * 
- * Orchestrates all 4 architectural multi-core scaling pillars:
- * 1. MultiCoreChunkStreamer: Parallel multi-threaded chunk decompression & stream decoding pool.
- * 2. MultiCoreHordeGovernor: Parallel AVX2 SIMD horde spatial culling, frustum/AABB culling, and LOD classification.
- * 3. MultiCoreAnimationEngine: Thread-safe multi-core skeletal animation and bone matrix transform pipeline.
- * 4. MultiCoreIslandScheduler: Island-based spatial grid partitioning (32x32 tiles / dual-phase checkerboard).
- * 
- * Manages dedicated physical P-core pinned worker pool and feeds real-time telemetry into
- * PZOEngineBridge and EnhancedRenderTelemetry.
- */
 public final class PZOMultiCoreEngine {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -31,7 +19,6 @@ public final class PZOMultiCoreEngine {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        // 1. Hardware topology detection & worker pool configuration
         int pCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
         workerCount = Math.max(2, Math.min(pCores, 16));
 
@@ -46,7 +33,6 @@ public final class PZOMultiCoreEngine {
             }
         });
 
-        // 2. Initialize all 4 core pillars
         MultiCoreChunkStreamer.initialize();
         MultiCoreHordeGovernor.initialize();
         MultiCoreAnimationEngine.initialize();

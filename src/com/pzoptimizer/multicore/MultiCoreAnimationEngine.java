@@ -15,28 +15,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Multi-Core Skeletal Animation Engine (Pillar 3).
- * 
- * Solves Build 42 skeletal skinning CPU bottlenecks without static scratch race conditions:
- * 
- * 1. Off-screen bone matrix multiplication elimination:
- *    Hooks MultiCoreHordeGovernor AABB culling mask to skip 100% of CPU skeletal matrix computations
- *    for non-visible entities (saving 64 bone transforms per entity per frame).
- * 2. Distant entity (Tier 2, 32-50 tiles away) LOD downsampling:
- *    Reduces animation evaluation from 60 FPS to 15 FPS (4x computation reduction) with cached matrices.
- * 3. Multi-threaded ModelInstance.UpdateDir() pre-staging across CPU cores, protected by ModelInstance.lock.
- * 4. Thread-local transform scratchpads for thread safety without static variable collision.
- */
 public final class MultiCoreAnimationEngine {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
 
-    // Telemetry metrics
     public static final AtomicLong totalParallelAnimationUpdates = new AtomicLong(0);
     public static final AtomicLong totalBoneTransformsBypassed = new AtomicLong(0);
 
-    // Thread-local math scratchpads ensuring zero collision with AnimationPlayer$L_updateBoneAnimationTransform
+    // Per-thread scratch storage avoids sharing transform temporaries.
     public static final ThreadLocal<Matrix4f> TL_MATRIX = ThreadLocal.withInitial(Matrix4f::new);
     public static final ThreadLocal<Quaternion> TL_QUAT = ThreadLocal.withInitial(Quaternion::new);
     public static final ThreadLocal<Vector3f> TL_VEC3 = ThreadLocal.withInitial(Vector3f::new);
@@ -48,17 +34,12 @@ public final class MultiCoreAnimationEngine {
         PZOLogger.success("[MultiCoreAnimationEngine] Armed: Thread-Safe Multi-Core Skeletal Animation Pipeline");
     }
 
-    /**
-     * Determines whether full skeletal skinning matrix transformation should occur for a given entity.
-     */
     public static boolean shouldSkinModel(float screenX, float screenY, int entityIndex) {
-        // 1. Check if HordeGovernor marked this entity as outside camera frustum
         if (entityIndex >= 0 && MultiCoreHordeGovernor.isEntityCulled(entityIndex)) {
             totalBoneTransformsBypassed.addAndGet(64);
             return false;
         }
 
-        // 2. Fall back to screen viewport bounds check
         if (!ModelSkinningGovernor.shouldSkinModel(screenX, screenY)) {
             totalBoneTransformsBypassed.addAndGet(64);
             return false;
@@ -67,30 +48,23 @@ public final class MultiCoreAnimationEngine {
         return true;
     }
 
-    /**
-     * Determines whether bone transforms should be evaluated this frame for distant entities (LOD downsampling).
-     */
     public static boolean shouldUpdateLOD(int entityIndex, long frameCounter) {
         if (entityIndex < 0) return true;
 
         byte tier = MultiCoreHordeGovernor.getEntityTier(entityIndex);
         if (tier >= 2) {
-            // Tier 2 (32-50 tiles): Evaluate only every 4th frame (15 FPS), reusing bone matrices
+            // Evaluate tier 2 every fourth frame, reusing bone matrices in between.
             return (frameCounter & 3) == 0;
         }
 
         return true;
     }
 
-    /**
-     * Parallelizes ModelSlot direction and track pre-staging across worker pool.
-     */
     public static void stageParallelModelSlots(List<ModelManager.ModelSlot> slots, float delta) {
         if (slots == null || slots.isEmpty() || PZOMultiCoreEngine.getExecutor() == null) return;
 
         int size = slots.size();
         if (size <= 16) {
-            // Small count: process sequentially
             for (int i = 0; i < size; i++) {
                 updateSlotDirect(slots.get(i), delta);
             }
@@ -132,12 +106,6 @@ public final class MultiCoreAnimationEngine {
 
     private static final AtomicLong frameCounter = new AtomicLong(0);
 
-    /**
-     * Applies dynamic multi-threaded skeletal bone update culling and LOD across the active horde.
-     * Off-screen zombies bypass 100% of bone matrix calculations (saving 64 matrix ops per entity per frame).
-     * Distant zombies (Tier 2, 32-50 tiles) downsample bone updates to alternate frames.
-     * Evaluates in parallel across dedicated P-Core worker threads.
-     */
     public static void applyHordeAnimationGovernor(List<?> zombies, int count, byte[] cullMask, byte[] tiers) {
         if (zombies == null || count <= 0 || cullMask == null) return;
 
@@ -175,28 +143,23 @@ public final class MultiCoreAnimationEngine {
 
             boolean culled = (i < cullMask.length && cullMask[i] == 0);
             if (culled) {
-                // Off-screen: completely bypass bone transform matrix computations
                 animPlayer.updateBones = false;
                 bypassed += 64;
             } else {
                 byte tier = (tiers != null && i < tiers.length) ? tiers[i] : 0;
                 if (tier >= 3) {
-                    // Ultra-Distant entity (40+ tiles away): evaluate 1-in-4 frames (15 FPS keyframing)
                     boolean updateThisFrame = ((frame + i) & 3) == 0;
                     animPlayer.updateBones = updateThisFrame;
                     if (!updateThisFrame) bypassed += 64;
                 } else if (tier == 2) {
-                    // Far entity (25-40 tiles away): evaluate 1-in-3 frames (20 FPS keyframing)
                     boolean updateThisFrame = ((frame + i) % 3) == 0;
                     animPlayer.updateBones = updateThisFrame;
                     if (!updateThisFrame) bypassed += 64;
                 } else if (tier == 1) {
-                    // Mid entity (12-25 tiles away): evaluate alternate frames (30 FPS keyframing)
                     boolean updateThisFrame = ((frame + i) & 1) == 0;
                     animPlayer.updateBones = updateThisFrame;
                     if (!updateThisFrame) bypassed += 64;
                 } else {
-                    // Close / combat entity (0-12 tiles): full 60 FPS animation fidelity
                     animPlayer.updateBones = true;
                 }
             }

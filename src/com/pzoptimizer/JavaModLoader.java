@@ -20,11 +20,6 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
-/**
- * Project Zomboid Build 42 - Embedded Java & ZombieBuddy Mod Loader.
- * Automatically discovers, deduplicates, classloads, and hooks 3rd-party Java Workshop mods
- * across all mounted Steam libraries and custom mod directories.
- */
 public class JavaModLoader {
     private static final Set<String> LOADED_MODS = new HashSet<>();
     private static int successCount = 0;
@@ -87,7 +82,6 @@ public class JavaModLoader {
         for (File jar : rawJars) {
             String path = jar.getAbsolutePath().replace('\\', '/');
 
-            // Extract Workshop Mod ID if inside /workshop/content/108600/<id>/
             String modKey = jar.getName();
             int wsIdx = path.indexOf("/108600/");
             if (wsIdx != -1) {
@@ -102,7 +96,6 @@ public class JavaModLoader {
             if (existing == null) {
                 modMap.put(modKey, jar);
             } else {
-                // If existing is B41 and new is B42, replace it
                 String existPath = existing.getAbsolutePath().replace('\\', '/');
                 if ((!existPath.contains("42") && path.contains("42")) ||
                     (existPath.contains("42.1") && path.contains("42.2")) ||
@@ -120,7 +113,6 @@ public class JavaModLoader {
         Set<String> scannedDirs = new HashSet<>();
         List<File> searchRoots = new ArrayList<>();
 
-        // 1. User Zomboid mods directory (%USERPROFILE%/Zomboid/mods/)
         try {
             String userHome = System.getProperty("user.home");
             File zomboidMods = new File(userHome, "Zomboid" + File.separator + "mods");
@@ -129,7 +121,6 @@ public class JavaModLoader {
             }
         } catch (Throwable ignored) {}
 
-        // 2. Relative paths from working directory
         try {
             File currentDir = new File(".").getAbsoluteFile();
             File ws1 = new File(currentDir, "../../workshop/content/108600");
@@ -139,7 +130,6 @@ public class JavaModLoader {
             if (ws2.exists() && ws2.isDirectory()) searchRoots.add(ws2);
         } catch (Throwable ignored) {}
 
-        // 3. Scan all mounted drive roots for Steam libraries (C:, D:, E:, K:, etc.)
         try {
             File[] roots = File.listRoots();
             if (roots != null) {
@@ -161,7 +151,6 @@ public class JavaModLoader {
                             }
                         }
 
-                        // Parse libraryfolders.vdf
                         File vdfFile = new File(root, "Program Files (x86)/Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
                         if (!vdfFile.exists()) {
                             vdfFile = new File(root, "Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
@@ -174,7 +163,6 @@ public class JavaModLoader {
             }
         } catch (Throwable ignored) {}
 
-        // 4. Unix standard paths
         try {
             String userHome = System.getProperty("user.home");
             File linuxWs = new File(userHome, ".local/share/Steam/steamapps/workshop/content/108600".replace('/', File.separatorChar));
@@ -184,7 +172,6 @@ public class JavaModLoader {
             if (macWs.exists() && macWs.isDirectory()) searchRoots.add(macWs);
         } catch (Throwable ignored) {}
 
-        // 5. Deep scan all discovered search roots (Depth up to 12 levels)
         for (File root : searchRoots) {
             String cPath = getCanonicalPath(root);
             if (!scannedDirs.contains(cPath)) {
@@ -248,7 +235,6 @@ public class JavaModLoader {
         PZOLogger.info(String.format("[JavaModLoader] Inspecting Java mod: %s (%d KB) at %s", jarFile.getName(), sizeKB, jarFile.getPath()));
 
         try (JarFile jar = new JarFile(jarFile)) {
-            // 1. Add JAR to System ClassLoader search path
             if (inst != null) {
                 try {
                     inst.appendToSystemClassLoaderSearch(jar);
@@ -258,7 +244,6 @@ public class JavaModLoader {
                 }
             }
 
-            // 2. Check MANIFEST.MF for Premain-Class, Main-Class, or ZB-Preload
             Manifest manifest = jar.getManifest();
             String agentClass = null;
             if (manifest != null) {
@@ -272,7 +257,6 @@ public class JavaModLoader {
                 }
             }
 
-            // 2. Check for Redundant / Conflicting Bytecode Performance Mods (e.g. Zed Better FPS NG)
             boolean conflictingFpsMod = isConflictingFpsMod(jarFile, agentClass);
             if (!conflictingFpsMod) {
                 Enumeration<JarEntry> testEntries = jar.entries();
@@ -309,7 +293,6 @@ public class JavaModLoader {
                 hooked = invokeEntrypoint(jarFile, agentClass.trim(), inst);
             }
 
-            // 3. Scan class entries for candidate entrypoints (e.g. lugli.optimizations.Main, *Patch, *Plugin)
             if (!hooked) {
                 Enumeration<JarEntry> entries = jar.entries();
                 List<String> candidateClasses = new ArrayList<>();
@@ -322,7 +305,6 @@ public class JavaModLoader {
                     }
                 }
 
-                // Prioritize Main, Plugin, Agent, Patch
                 for (String className : candidateClasses) {
                     if (className.toLowerCase().endsWith(".main") ||
                         className.toLowerCase().contains("plugin") ||
@@ -371,7 +353,6 @@ public class JavaModLoader {
                 clazz = Class.forName(className, true, ucl);
             }
 
-            // 1. Try premain(String, Instrumentation)
             if (inst != null) {
                 try {
                     Method m = clazz.getDeclaredMethod("premain", String.class, Instrumentation.class);
@@ -381,7 +362,6 @@ public class JavaModLoader {
                     return true;
                 } catch (NoSuchMethodException ignored) {}
 
-                // 2. Try premain(String)
                 try {
                     Method m = clazz.getDeclaredMethod("premain", String.class);
                     m.setAccessible(true);
@@ -390,7 +370,6 @@ public class JavaModLoader {
                     return true;
                 } catch (NoSuchMethodException ignored) {}
 
-                // 3. Try agentmain(String, Instrumentation)
                 try {
                     Method m = clazz.getDeclaredMethod("agentmain", String.class, Instrumentation.class);
                     m.setAccessible(true);
@@ -399,7 +378,6 @@ public class JavaModLoader {
                     return true;
                 } catch (NoSuchMethodException ignored) {}
 
-                // 4. Try init(Instrumentation)
                 try {
                     Method m = clazz.getDeclaredMethod("init", Instrumentation.class);
                     m.setAccessible(true);
@@ -409,7 +387,6 @@ public class JavaModLoader {
                 } catch (NoSuchMethodException ignored) {}
             }
 
-            // 5. Try init()
             try {
                 Method m = clazz.getDeclaredMethod("init");
                 m.setAccessible(true);
@@ -418,7 +395,6 @@ public class JavaModLoader {
                 return true;
             } catch (NoSuchMethodException ignored) {}
 
-            // 6. Try load()
             try {
                 Method m = clazz.getDeclaredMethod("load");
                 m.setAccessible(true);
@@ -427,7 +403,6 @@ public class JavaModLoader {
                 return true;
             } catch (NoSuchMethodException ignored) {}
 
-            // 7. Try main(String[])
             try {
                 Method m = clazz.getDeclaredMethod("main", String[].class);
                 m.setAccessible(true);

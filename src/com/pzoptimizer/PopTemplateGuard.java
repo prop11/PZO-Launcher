@@ -5,29 +5,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Build 42 - PopTemplateManager Crash Guard & Visual Bounds Shield.
- * 
- * Prevents game-ending exceptions in HumanVisual and CharacterCreationMain:
- * 1. Early Headless Pre-Initialization: Populates PopTemplateManager lists at boot
- *    so background save loading (PlayerDB.loadLocalPlayer) never crashes with
- *    IndexOutOfBoundsException: Index 0 out of bounds for length 0.
- * 2. Strict Vanilla Bounds: Caps maleSkins and femaleSkins to exactly 5 elements so
- *    CharacterCreationMain.lua:652 (self.skinColors[1..5]) is never indexed out of bounds
- *    with 'attempted index: r of non-table: null'.
- * 3. FBO State Safety Guard: Resets TextureFBO.checked if it was probed before the
- *    OpenGL display context was created, preventing ModelManager.create() from aborting
- * 3. GuardedSurvivorMap Interceptor: Replaces IsoGameCharacter.SurvivorMap with a guarded map
- *    that automatically ensures any newly created SurvivorDesc has HumanVisual.skinTextureIndex >= 0.
- *    This completely eliminates CharacterCreationMain.lua:1674 'attempted index: r of non-table: null'
- *    (caused by skinTextureIndex being -1, producing skinColor 0 which indexes nil in Lua).
- * 4. SurvivorFactory Fallback Name Shield: Ensures FemaleForenames, MaleForenames, and Surnames
- *    always contain at least one fallback entry, preventing early CreateSurvivor() from throwing
- *    IndexOutOfBoundsException: Index 0 out of bounds for length 0.
- * 5. FBO State Safety Guard: Resets TextureFBO.checked if it was probed before the
- *    OpenGL display context was created, preventing ModelManager.create() from aborting
- *    with 'FBO not compatible with gfx card at this time'.
- */
+/** Supplies missing survivor defaults and resets FBO probes made before display creation. */
 public class PopTemplateGuard {
 
     private static volatile boolean initialized = false;
@@ -74,7 +52,6 @@ public class PopTemplateGuard {
         resetFBOState();
         obtainUnsafe();
 
-        // 1. PopTemplateManager Skins & Population Guard
         try {
             Class<?> ptmClass = Class.forName("zombie.core.skinnedmodel.population.PopTemplateManager");
             Field instField = ptmClass.getField("instance");
@@ -92,9 +69,7 @@ public class PopTemplateGuard {
                     }
                 }
 
-                // Enforce exact vanilla list sizes:
-                // maleSkins & femaleSkins MUST be exactly 5 items (MaleBody01..05)
-                // so CharacterCreationMain.lua:652 self.skinColors[1..5] is never indexed out-of-bounds!
+                // CharacterCreationMain.lua indexes five skin colors; keep the skin lists at five entries.
                 trimToSize(ptm, "maleSkins", 5, "MaleBody01");
                 trimToSize(ptm, "femaleSkins", 5, "FemaleBody01");
                 trimToSize(ptm, "maleSkinsZombie1", 4, "MaleZombie01");
@@ -118,7 +93,6 @@ public class PopTemplateGuard {
             PZOLogger.warn("[PopTemplateGuard] Non-fatal notice on PopTemplateManager: " + t.getMessage());
         }
 
-        // 2. SurvivorFactory Fallback Names Guard
         try {
             Class<?> sfClass = Class.forName("zombie.characters.SurvivorFactory");
             Field ff = sfClass.getField("FemaleForenames");
@@ -132,13 +106,10 @@ public class PopTemplateGuard {
             if (surnames != null && surnames.isEmpty()) surnames.add("Doe");
         } catch (Throwable ignored) {}
 
-        // 3. Armed GuardedSurvivorMap on IsoGameCharacter.SurvivorMap
         armSurvivorMapGuard();
 
-        // 4. Armed Guard on IsoWorld.instance.survivorDescriptors if active
         armIsoWorldDescriptorsGuard();
 
-        // 5. Sanitize existing survivors
         sanitizeLoadedSurvivors();
     }
 

@@ -21,7 +21,6 @@ public class TelemetryReporter {
 
     public static void refreshDiscoveredDirectories(String[] cliArgs) {
         try {
-            // 1. Check CLI args for -cachedir
             if (cliArgs != null) {
                 for (int i = 0; i < cliArgs.length; i++) {
                     String arg = cliArgs[i];
@@ -36,7 +35,6 @@ public class TelemetryReporter {
                 }
             }
 
-            // 2. System properties and environment variables
             String propCache = System.getProperty("zomboid.cachedir");
             if (propCache != null && !propCache.trim().isEmpty()) {
                 registerZomboidDir(new File(propCache.trim()));
@@ -47,7 +45,6 @@ public class TelemetryReporter {
                 registerZomboidDir(new File(envCache.trim()));
             }
 
-            // 3. User Home, UserProfile, Documents & OneDrive
             String userHome = System.getProperty("user.home");
             if (userHome != null) {
                 registerZomboidDir(new File(userHome, "Zomboid"));
@@ -62,11 +59,9 @@ public class TelemetryReporter {
                 registerZomboidDir(new File(userProfile, "OneDrive" + File.separator + "Documents" + File.separator + "Zomboid"));
             }
 
-            // 4. Working directory
             registerZomboidDir(new File("Zomboid"));
             registerZomboidDir(new File("."));
 
-            // 5. Scan all mounted drive roots (D:\, E:\, F:\, etc.)
             try {
                 File[] roots = File.listRoots();
                 if (roots != null) {
@@ -81,7 +76,6 @@ public class TelemetryReporter {
                 }
             } catch (Throwable ignored) {}
 
-            // 6. Dynamic Reflection into zombie.ZomboidFileSystem
             queryZomboidFileSystem();
 
         } catch (Throwable ignored) {}

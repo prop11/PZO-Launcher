@@ -3,15 +3,6 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * PZO FMOD Occlusion Governor & Audio Suppression Eliminator.
- * Resolves the Build 42 Unstable acoustic raycasting bug where open/transitioning
- * doors, nearby containers, and player interaction sounds are erroneously occluded
- * to 1.0 (100% muffled/muted).
- * 
- * Clamps audio occlusion to 0.0 for immediate player proximity (<= 3.5 tiles)
- * and player-initiated emitters, guaranteeing crystal clear interaction audio.
- */
 public final class FMODOcclusionGovernor {
 
     private static volatile boolean active = false;
@@ -58,11 +49,9 @@ public final class FMODOcclusionGovernor {
             float pY = ((Number) getYMethod.invoke(primaryPlayer)).floatValue();
             float pZ = ((Number) getZMethod.invoke(primaryPlayer)).floatValue();
 
-            // Check if player is currently interacting or moving through doors
             Field emitterField = primaryPlayer.getClass().getField("emitter");
             Object emitter = emitterField.get(primaryPlayer);
             if (emitter != null) {
-                // Ensure player emitter has zero obstruction/occlusion
             }
         } catch (Throwable ignored) {}
     }

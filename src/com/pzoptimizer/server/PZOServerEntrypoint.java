@@ -3,11 +3,6 @@ package com.pzoptimizer.server;
 import java.io.File;
 import java.lang.reflect.Method;
 
-/**
- * Project Zomboid Build 42 & 41 - Dedicated Server Master Optimization Entrypoint.
- * Bootstraps zero-lag networking, multi-threaded horde simulation, and 24/7 memory stability
- * before handing execution over to zombie.network.GameServer.
- */
 public class PZOServerEntrypoint {
     public static final String SERVER_VERSION = "0.9.6";
 
@@ -27,7 +22,6 @@ public class PZOServerEntrypoint {
 
         long startTime = System.currentTimeMillis();
 
-        // 1. Enforce headless execution for dedicated servers
         try {
             System.setProperty("java.awt.headless", "true");
         } catch (Throwable ignored) {}
@@ -41,7 +35,6 @@ public class PZOServerEntrypoint {
         long maxHeapMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
         PZOServerLogger.info("Host Server Resources: " + cores + " CPU Cores | Max JVM Heap: " + maxHeapMB + " MB");
 
-        // 1.1. If instrumentation is available, hook bytecode transformers
         if (inst != null) {
             try {
                 com.pzoptimizer.PZOptimAgent.premain(null, inst);
@@ -50,10 +43,8 @@ public class PZOServerEntrypoint {
             }
         }
 
-        // 1.2. Automatic Linux Dedicated Server Steam Native Sanitizer
         LinuxSteamServerSanitizer.sanitize();
 
-        // 1.5. HotSpot JIT & Engine Architecture Tuner
         com.pzoptimizer.HotSpotJITCompilerTuner.tuneRuntimeProperties();
         com.pzoptimizer.EngineFeaturesTuner.initializeEngineFeatures();
         com.pzoptimizer.WorldStreamerBooster.startDaemon();
@@ -66,21 +57,16 @@ public class PZOServerEntrypoint {
         com.pzoptimizer.NativeDirectMemoryPool.initialize();
         com.pzoptimizer.FastBitwiseChunkIndexer.initialize();
 
-        // 2. Initialize Server Network Buffer Pooler
         com.pzoptimizer.PZOEngineBridge.initialize();
         ServerNetworkTuner.apply();
         PZOServerNetGovernor.initialize();
 
-        // 3. Initialize Multi-Threaded Zombie Simulation
         ServerHordeSimEngine.apply();
 
-        // 4. Initialize Zero-Lag World Save & Chunk Stream Booster
         ServerChunkStreamBooster.apply();
 
-        // 5. Check & Support ZombieBuddy Server Coexistence
         checkZombieBuddyServer();
 
-        // 6. Launch Server Telemetry Daemon
         ServerTelemetryBridge.startTelemetryDaemon();
 
         long initDuration = System.currentTimeMillis() - startTime;
@@ -92,7 +78,6 @@ public class PZOServerEntrypoint {
         initServerPipelines(null);
         PZOServerLogger.info("Handing execution over to Project Zomboid Dedicated Server (zombie.network.GameServer)...");
 
-        // 7. Invoke Vanilla GameServer Entrypoint
         try {
             Class<?> targetClass = Class.forName("zombie.network.GameServer");
             Method mainMethod = targetClass.getMethod("main", String[].class);

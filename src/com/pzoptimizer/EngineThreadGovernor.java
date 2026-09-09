@@ -4,27 +4,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Project Zomboid Build 42 - Dedicated High-Performance Thread and Scheduler Governor.
- * 
- * Intercepts the engine's core execution pipelines:
- * 1. RenderThread (via RenderThread.queueInvokeOnRenderContext):
- *    - Elevates priority to THREAD_PRIORITY_HIGHEST (+2)
- *    - Binds affinity directly to physical Performance Cores (P-Cores)
- *    - Registers thread with Windows Multimedia Class Scheduler Service (MMCSS "Games")
- *    - Eliminates micro-stutter and frame-time variance during vehicle travel in dense towns
- * 
- * 2. MainThread (via MainThread.queueInvokeOnMainThread):
- *    - Elevates priority to THREAD_PRIORITY_ABOVE_NORMAL (+1)
- *    - Binds affinity to physical Performance Cores (P-Cores)
- *    - Registers with Windows MMCSS "Games"
- * 
- * 3. Working Set and Physical RAM Lock:
- *    - Invokes SetProcessWorkingSetSizeEx to prevent Windows memory trimming
- * 
- * 4. Asynchronous Subsystem Worker Affinity:
- *    - Ensures LightingThread, WorldStreamer, and PathfindNativeThread run with rock-solid scheduling
- */
 public class EngineThreadGovernor {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -37,7 +16,6 @@ public class EngineThreadGovernor {
         }
 
         try {
-            // 1. Process-wide Working Set Lock and High Priority
             if (PZONative.isLoaded()) {
                 PZONative.lockProcessWorkingSet();
                 PZONative.setProcessPriority(2); // HIGH_PRIORITY_CLASS
@@ -49,7 +27,6 @@ public class EngineThreadGovernor {
             PZOLogger.warn("[EngineThreadGovernor] Process lock notice: " + t.getMessage());
         }
 
-        // 2. Launch asynchronous hooker daemon to catch RenderThread and MainThread upon engine boot
         Thread governorDaemon = new Thread(EngineThreadGovernor::governorLoop, "PZO-ThreadGovernor");
         governorDaemon.setDaemon(true);
         governorDaemon.setPriority(Thread.MIN_PRIORITY);
@@ -62,20 +39,16 @@ public class EngineThreadGovernor {
         int backoffMs = 100;
         while (true) {
             try {
-                // Try hooking RenderThread if not yet optimized
                 if (!renderThreadOptimized) {
                     tryHookRenderThread();
                 }
 
-                // Try hooking MainThread if not yet fully optimized and paced
                 if (!mainThreadOptimized || !mainThreadPacerHooked) {
                     tryHookMainThread();
                 }
 
-                // Maintain background workers (LightingThread, PathfindNativeThread, WorldStreamer)
                 maintainWorkerThreads();
 
-                // Once primary threads are optimized and paced, relax polling to 5000ms
                 if (renderThreadOptimized && mainThreadOptimized && mainThreadPacerHooked) {
                     backoffMs = 5000;
                 } else {
@@ -155,7 +128,7 @@ public class EngineThreadGovernor {
                 });
             }
 
-            // Hook MainThread.mainThreadLoop with Zero-Lock Diagnostic Probe (No Sleeping, Zero Lock Contention)
+            // Sample mainThreadLoop without sleeping on the main thread.
             if (!mainThreadPacerHooked) {
                 try {
                     Field loopField = mainThreadClass.getDeclaredField("mainThreadLoop");
@@ -200,12 +173,8 @@ public class EngineThreadGovernor {
         }
     }
 
-    /**
-     * Maintains optimal scheduling for engine worker subsystems (Lighting, Pathfinding).
-     */
     private static void maintainWorkerThreads() {
         try {
-            // LightingThread
             try {
                 Class<?> ltClass = Class.forName("zombie.iso.LightingThread");
                 Field instField = ltClass.getField("instance");
@@ -221,7 +190,6 @@ public class EngineThreadGovernor {
                 }
             } catch (Throwable ignored) {}
 
-            // PathfindNativeThread
             try {
                 Class<?> pfClass = Class.forName("zombie.pathfind.nativeCode.PathfindNativeThread");
                 Field instField = pfClass.getField("instance");

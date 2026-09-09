@@ -3,19 +3,6 @@ package com.pzoptimizer;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Off-Screen Skeletal Skinning Governor (3D Model Animation Culler).
- * 
- * In Project Zomboid Build 42, 3D animated models (zombies, characters, animals) compute
- * full 60+ bone matrix skinning transforms on the CPU every frame for all active entities in the cell.
- * 
- * ModelSkinningGovernor checks whether a 3D model's screen projection is within the visible display frustum
- * (with a 128px safety buffer for wide limb sweeps):
- * - If outside the viewport: skips CPU skeletal skinning matrix recalculations.
- * - If inside the viewport: runs at full 100% native animation fidelity.
- * - Only active in Unstable / Beta channel builds.
- * - Saves millions of matrix multiplications during dense horde encounters.
- */
 public final class ModelSkinningGovernor {
 
     public static final AtomicLong boneTransformsSaved = new AtomicLong(0);
@@ -32,7 +19,6 @@ public final class ModelSkinningGovernor {
 
         updateScreenDimensions();
 
-        // Check if model's screen projection is completely outside screen plus padding
         if (screenX < -PADDING || screenX > (screenWidth + PADDING)
                 || screenY < -PADDING || screenY > (screenHeight + PADDING)) {
             boneTransformsSaved.addAndGet(64); // Average 64 bone transforms per character model

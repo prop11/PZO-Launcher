@@ -1,13 +1,5 @@
 package com.pzoptimizer;
 
-/**
- * PZO Unstable Channel Gatekeeper.
- * 
- * Enforces strict channel isolation:
- * Experimental rendering optimizations and advanced telemetry collectors ONLY run
- * when operating on the Unstable / Beta channel.
- * In standard stable production releases, these modules remain 100% dormant no-ops.
- */
 public final class UnstableChannelGuard {
 
     private static volatile Boolean cachedIsUnstable = null;

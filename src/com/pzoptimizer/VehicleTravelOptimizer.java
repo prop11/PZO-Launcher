@@ -6,22 +6,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.ReentrantLock;
 import sun.misc.Unsafe;
 
-/**
- * Project Zomboid Build 42 - Vehicle Travel & High-Speed Chunk Streaming Optimizer.
- * 
- * Solves the primary architectural root causes of vehicle stutter in Build 42:
- * 1. IsoChunkMap Fair-Lock Bottleneck:
- *    Vanilla PZ declares `public static final ReentrantLock bSettingChunk = new ReentrantLock(true);`.
- *    A fair lock enforces strict FIFO queueing across threads (MainThread, WorldStreamer, LightingThread).
- *    This causes extreme thread context switching and OS descheduling whenever chunks are stitched.
- *    VehicleTravelOptimizer reflectively replaces this with a non-fair atomic lock (10x-50x throughput).
- * 
- * 2. ChunkSaveWorker Main-Thread Hotsave Hitch:
- *    When driving fast, trailing chunks unload and enter ChunkSaveWorker.toSaveQueue.
- *    Whenever the save queue empties, ChunkSaveWorker invokes HotsaveAncilliarySystems() on the MAIN THREAD,
- *    freezing the game for 50-150ms to serialize the entire MetaGrid, World Map, Animals, and GameEntities.
- *    VehicleTravelOptimizer shields toSaveQueue so ancillary hotsaves are deferred during vehicle travel.
- */
 public final class VehicleTravelOptimizer {
 
     private static volatile boolean initialized = false;
@@ -38,7 +22,6 @@ public final class VehicleTravelOptimizer {
 
     public static final java.util.concurrent.atomic.AtomicLong throttledTownZombies = new java.util.concurrent.atomic.AtomicLong(0);
 
-    // Minimum cooldown between ancillary systems hotsaves (60 seconds)
     private static final long ANCILLARY_HOTSAVE_COOLDOWN_MS = 60_000L;
 
     public static synchronized void initialize() {
@@ -74,9 +57,6 @@ public final class VehicleTravelOptimizer {
         }
     }
 
-    /**
-     * 1. Replaces IsoChunkMap.bSettingChunk fair lock with a high-throughput non-fair lock.
-     */
     public static synchronized boolean installUnfairChunkLock() {
         if (unfairLockInstalled) return true;
         obtainUnsafe();
@@ -109,10 +89,6 @@ public final class VehicleTravelOptimizer {
         return false;
     }
 
-    /**
-     * 2. Replaces ChunkSaveWorker.toSaveQueue with a shielded queue that defers main-thread
-     *    ancillary hotsaves while the player is operating a vehicle.
-     */
     public static synchronized boolean installSaveWorkerShield() {
         if (saveShieldInstalled) return true;
         obtainUnsafe();
@@ -274,12 +250,6 @@ public final class VehicleTravelOptimizer {
         return System.identityHashCode(obj);
     }
 
-    /**
-     * 3. Installs a dynamic entity simulation governor into MovingObjectUpdateScheduler.
-     * Intercepts the FULL simulation bucket (where 500+ alerted town zombies are dumped by engine sound)
-     * and redirects distant zombies (> 20 tiles) to QUARTER (15 FPS) and EIGHTH (7.5 FPS) simulation,
-     * dropping main-thread pathfinding and collision overhead by 75-85% during vehicle travel.
-     */
     public static synchronized boolean installSimulationGovernor() {
         if (simulationGovernorInstalled) return true;
 
@@ -314,7 +284,6 @@ public final class VehicleTravelOptimizer {
             GovernedSimulationList governed = new GovernedSimulationList(fullBuckets[0], quarterBuckets, eighthBuckets);
             fullBuckets[0] = governed;
 
-            // Also shield HALF simulation bucket (index 1)
             @SuppressWarnings("unchecked")
             java.util.List<Object>[] halfBuckets = (java.util.List<Object>[]) bucketsField.get(simLevels[1]);
             if (halfBuckets != null) {
@@ -334,9 +303,6 @@ public final class VehicleTravelOptimizer {
         return false;
     }
 
-    /**
-     * Specialized ArrayList that intercepts MovingObjectUpdateScheduler FULL bucket distribution.
-     */
     public static final class GovernedSimulationList extends java.util.ArrayList<Object> {
         private static final long serialVersionUID = 4243L;
 
@@ -365,14 +331,12 @@ public final class VehicleTravelOptimizer {
                 float dy = zy - py;
                 float distSq = dx * dx + dy * dy;
 
-                // Close-range zombies (<= 20 tiles): Keep in FULL 60 FPS for responsive combat and vehicle bumper physics
                 if (distSq <= 400.0f) {
                     return super.add(obj);
                 }
 
                 int id = getObjectId(obj);
 
-                // Mid-range zombies (20 to 50 tiles): Redirect to QUARTER simulation (15 FPS updates interleaved)
                 if (distSq <= 2500.0f && quarterBuckets != null && quarterBuckets.length > 0) {
                     int slot = (id & 0x7FFFFFFF) % quarterBuckets.length;
                     quarterBuckets[slot].add(obj);
@@ -380,7 +344,6 @@ public final class VehicleTravelOptimizer {
                     return true;
                 }
 
-                // Distant town zombies (> 50 tiles): Redirect to EIGHTH simulation (7.5 FPS updates interleaved)
                 if (eighthBuckets != null && eighthBuckets.length > 0) {
                     int slot = (id & 0x7FFFFFFF) % eighthBuckets.length;
                     eighthBuckets[slot].add(obj);
@@ -393,11 +356,7 @@ public final class VehicleTravelOptimizer {
         }
     }
 
-    /**
-     * Specialized ConcurrentLinkedQueue that monitors ChunkSaveWorker chunk drains.
-     * Intercepts isEmpty() right after poll() to defer 150ms HotsaveAncilliarySystems()
-     * during active vehicle operation, while keeping saving=false and normal saves 100% functional.
-     */
+    /** Overrides isEmpty() after a chunk drain to defer ancillary hotsaves while driving. */
     public static final class ShieldedSaveQueue extends ConcurrentLinkedQueue<Object> {
         private static final long serialVersionUID = 4242L;
 
@@ -425,7 +384,7 @@ public final class VehicleTravelOptimizer {
                 if (isPlayerDriving()) {
                     long now = System.currentTimeMillis();
                     if (now - lastAncillaryHotsaveTime < ANCILLARY_HOTSAVE_COOLDOWN_MS) {
-                        // Defer 150ms HotsaveAncilliarySystems() freeze while operating vehicle!
+                        // Defer HotsaveAncilliarySystems() while driving.
                         return false;
                     }
                     lastAncillaryHotsaveTime = now;

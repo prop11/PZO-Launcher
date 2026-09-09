@@ -5,10 +5,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
-/**
- * Dedicated Kahlua / LuaManager Java-Lua bridge for Project Zomboid.
- * Exposes native zero-overhead engine diagnostic and optimization methods directly to Lua scripts.
- */
 public class PZOEngineBridge {
 
     private static volatile boolean initialized = false;
@@ -260,9 +256,6 @@ public class PZOEngineBridge {
         }
     }
 
-    /**
-     * Asynchronously discovers and binds to zombie.Lua.LuaManager when Kahlua initializes.
-     */
     public static synchronized void initialize() {
         if (initialized) return;
         initialized = true;
@@ -276,7 +269,6 @@ public class PZOEngineBridge {
                 try {
                     Class<?> lmClass = Class.forName("zombie.Lua.LuaManager");
 
-                    // 1. Try exposer if available
                     try {
                         Field exposerField = lmClass.getField("exposer");
                         Object exposer = exposerField.get(null);
@@ -286,19 +278,16 @@ public class PZOEngineBridge {
                         }
                     } catch (Throwable ignored) {}
 
-                    // 2. Bind directly into LuaManager.env
                     Field envField = lmClass.getField("env");
                     Object env = envField.get(null);
                     if (env != null) {
                         Method rawset = env.getClass().getMethod("rawset", Object.class, Object.class);
 
-                        // Direct boolean and number globals
                         rawset.invoke(env, "PZOEngineActive", Boolean.TRUE);
                         rawset.invoke(env, "isPZOEngineActive", Boolean.TRUE);
                         rawset.invoke(env, "PZOEngineRAM", cachedRamGb);
                         rawset.invoke(env, "PZOEngineVersion", UpdateChecker.CURRENT_VERSION);
 
-                        // Create KahluaTable for PZOEngine and PZOEngineBridge
                         try {
                             Field platformField = lmClass.getField("platform");
                             Object platform = platformField.get(null);
@@ -312,14 +301,12 @@ public class PZOEngineBridge {
                                     tableRawset.invoke(pzoTable, "version", UpdateChecker.CURRENT_VERSION);
                                     tableRawset.invoke(pzoTable, "g1gc", Boolean.TRUE);
 
-                                    // Build dynamic JavaFunction proxies for Kahlua
                                     try {
                                         Class<?> javaFuncClass = Class.forName("se.krka.kahlua.vm.JavaFunction");
                                         Class<?> callFrameClass = Class.forName("se.krka.kahlua.vm.LuaCallFrame");
                                         Method pushObj = callFrameClass.getMethod("push", Object.class);
                                         Method getArg = callFrameClass.getMethod("get", int.class);
 
-                                        // isEnginePresent / isActive
                                         Object isPresentFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -334,7 +321,6 @@ public class PZOEngineBridge {
                                         tableRawset.invoke(pzoTable, "isEnginePresent", isPresentFunc);
                                         tableRawset.invoke(pzoTable, "isActive", isPresentFunc);
 
-                                        // isWindowActive
                                         Object isWindowActiveFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -348,7 +334,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isWindowActive", isWindowActiveFunc);
 
-                                        // getOptimizedRAM
                                         Object getRamFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -362,7 +347,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getOptimizedRAM", getRamFunc);
 
-                                        // getVersion
                                         Object getVersionFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -376,7 +360,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getVersion", getVersionFunc);
 
-                                        // getTelemetryText
                                         Object getTelemetryFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -390,7 +373,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getTelemetryText", getTelemetryFunc);
 
-                                        // openBrowser
                                         Object openBrowserFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -408,7 +390,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "openBrowser", openBrowserFunc);
 
-                                        // purgeRAM
                                         Object purgeRamFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -422,7 +403,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "purgeRAM", purgeRamFunc);
 
-                                        // getHeapUsedMB
                                         Object getHeapUsedFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -437,7 +417,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getHeapUsedMB", getHeapUsedFunc);
 
-                                        // getGlCallsFiltered
                                         Object getGlFilteredFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -452,7 +431,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getGlCallsFiltered", getGlFilteredFunc);
 
-                                        // openLogsFolder
                                         Object openLogsFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -466,7 +444,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "openLogsFolder", openLogsFunc);
 
-                                        // copyDiagnosticsToClipboard
                                         Object copyDiagFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -480,7 +457,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "copyDiagnosticsToClipboard", copyDiagFunc);
 
-                                        // getDiagnosticsReport
                                         Object getDiagReportFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -494,7 +470,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getDiagnosticsReport", getDiagReportFunc);
 
-                                        // isBetaOptIn
                                         Object isBetaFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -508,7 +483,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isBetaOptIn", isBetaFunc);
 
-                                        // getChannel
                                         Object getChannelFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -522,7 +496,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getChannel", getChannelFunc);
 
-                                        // getRenderTelemetry (Unstable channel live metrics)
                                         Object getRenderTelemetryFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -536,7 +509,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getRenderTelemetry", getRenderTelemetryFunc);
 
-                                        // isAVX2SpatialActive
                                         Object isAVX2SpatialFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -550,7 +522,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isAVX2SpatialActive", isAVX2SpatialFunc);
 
-                                        // getHordeZombiesTracked
                                         Object getHordeTrackedFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -564,7 +535,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getHordeZombiesTracked", getHordeTrackedFunc);
 
-                                        // getHordeCulledOffscreen
                                         Object getHordeCulledFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -578,7 +548,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getHordeCulledOffscreen", getHordeCulledFunc);
 
-                                        // getBoneTransformsSaved
                                         Object getBonesSavedFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -592,7 +561,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "getBoneTransformsSaved", getBonesSavedFunc);
 
-                                        // setBetaOptIn
                                         Object setBetaFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -612,7 +580,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "setBetaOptIn", setBetaFunc);
 
-                                        // checkForUpdates
                                         Object checkUpdateFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -635,7 +602,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "checkForUpdates", checkUpdateFunc);
 
-                                        // setJvmOption
                                         Object setJvmOptionFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -655,7 +621,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "setJvmOption", setJvmOptionFunc);
 
-                                        // setJvmIntOption
                                         Object setJvmIntFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -674,7 +639,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "setJvmIntOption", setJvmIntFunc);
 
-                                        // isMultithreadingNoticeAcknowledged
                                         Object isNoticeAckFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -688,7 +652,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isMultithreadingNoticeAcknowledged", isNoticeAckFunc);
 
-                                        // acknowledgeMultithreadingNotice
                                         Object ackNoticeFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -702,7 +665,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "acknowledgeMultithreadingNotice", ackNoticeFunc);
 
-                                        // openWorkshopPage
                                         Object openWorkshopFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -716,7 +678,6 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "openWorkshopPage", openWorkshopFunc);
 
-                                        // openGithubPage
                                         Object openGithubFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
                                             new Class<?>[]{javaFuncClass},
@@ -737,7 +698,6 @@ public class PZOEngineBridge {
                                     rawset.invoke(env, "PZOEngine", pzoTable);
                                     rawset.invoke(env, "PZOEngineBridge", pzoTable);
 
-                                    // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
                                     try {
                                         String luaCode =
                                             "local function addPZOBetaToggle()\n" +

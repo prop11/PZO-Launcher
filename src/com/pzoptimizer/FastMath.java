@@ -1,9 +1,5 @@
 package com.pzoptimizer;
 
-/**
- * Project Zomboid Build 42 - Zero-Allocation Fast Trigonometry & Distance Engine.
- * Precomputes sin/cos lookup tables and 65x65 tile grid distance squared matrices.
- */
 public class FastMath {
     private static final int SIN_BITS = 16;
     private static final int SIN_MASK = (1 << SIN_BITS) - 1;
@@ -51,9 +47,6 @@ public class FastMath {
         return sq * fastInvSqrt(sq);
     }
 
-    /**
-     * Instant L1-cache integer distance squared lookup for tile grids.
-     */
     public static int tileDistSq(int dx, int dy) {
         if (dx >= -OFFSET_RANGE && dx <= OFFSET_RANGE && dy >= -OFFSET_RANGE && dy <= OFFSET_RANGE) {
             return TILE_DIST_SQ[dx + OFFSET_RANGE][dy + OFFSET_RANGE];

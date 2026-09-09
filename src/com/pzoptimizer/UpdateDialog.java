@@ -7,10 +7,6 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Build 42 - Pre-Menu Native Interactive Update Prompt & Self-Updater.
- * Multi-Platform: Windows (WinForms), macOS (Cocoa/AppleScript), Linux & Steam Deck (Zenity/KDialog).
- */
 public class UpdateDialog {
     private static final String CONFIG_FILE = "pzo_config.json";
 
@@ -47,16 +43,11 @@ public class UpdateDialog {
         return false;
     }
 
-    /**
-     * Checks if a native governor library exists in the game folder and verifies whether its
-     * version matches the Java mod version. If missing, mismatched, or outdated, prompts the user to download.
-     */
     public static boolean checkAndPromptNativeMismatch(String dllDownloadUrl) {
         boolean filePresent = PZONative.isNativeFilePresent();
         String installedVersion = PZONative.getInstalledNativeVersion();
         String expectedVersion = UpdateChecker.CURRENT_VERSION;
 
-        // If file is present and versions match, native library is up-to-date and fully compatible
         if (filePresent && expectedVersion.equalsIgnoreCase(installedVersion)) {
             return false;
         }
@@ -185,7 +176,6 @@ public class UpdateDialog {
     }
 
     private static String showLinuxDialog(String latestVersion) {
-        // 1. Try Zenity (GNOME, Ubuntu, Mint, Pop!_OS)
         try {
             Process p = new ProcessBuilder("zenity", "--question",
                 "--title=PZO Engine - Update Available",
@@ -203,7 +193,6 @@ public class UpdateDialog {
             return "SKIP";
         } catch (Throwable ignored) {}
 
-        // 2. Try KDialog (Steam Deck / KDE Plasma default)
         try {
             Process p = new ProcessBuilder("kdialog",
                 "--title", "PZO Engine - Update Available",
@@ -376,7 +365,6 @@ public class UpdateDialog {
             File currentNative = new File(gameDir, nativeFileName);
             File newNative = new File(gameDir, nativeFileName + ".new");
 
-            // Build prioritized candidate URL list
             List<String> candidateUrls = new ArrayList<>();
             if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
                 candidateUrls.add(dllDownloadUrl);
@@ -426,7 +414,7 @@ public class UpdateDialog {
             long pid = ProcessHandle.current().pid();
             File win64Dll = new File(gameDir, "win64" + File.separator + nativeFileName);
 
-            // Stage ProjectZomboid64.json update if missing required 0.9.5 flags (such as -agentlib:pzo_native64)
+            // Stage configuration changes for replacement after the game exits.
             File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
             File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
             boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
@@ -494,7 +482,6 @@ public class UpdateDialog {
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
-                // Linux & Steam Deck
                 String linuxJsonUpdate = hasNewJson ? String.format(
                     " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
                     newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
@@ -547,7 +534,6 @@ public class UpdateDialog {
             String cleanVer = latestVersion != null ? latestVersion.trim() : UpdateChecker.CURRENT_VERSION;
             String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
 
-            // Handle Native Companion Library (.dll / .so / .dylib)
             String os = System.getProperty("os.name", "").toLowerCase();
             boolean isWin = os.contains("win");
             boolean isMac = os.contains("mac") || os.contains("darwin");
@@ -559,7 +545,7 @@ public class UpdateDialog {
             boolean nativeInstalled = PZONative.isNativeFilePresent() || currentNative.exists() || win64Dll.exists();
             boolean hasNewNative = false;
 
-            // Step 1: Download matching native companion library first if native governor is installed or supported
+            // Download the matching native library before the JAR.
             List<String> nativeCandidates = new ArrayList<>();
             if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
                 nativeCandidates.add(dllDownloadUrl);
@@ -588,7 +574,7 @@ public class UpdateDialog {
                 }
             }
 
-            // CRITICAL: If native governor is installed on user's system, we MUST NOT perform a partial update!
+            // Abort if the installed native library cannot be updated with the JAR.
             if (nativeInstalled && !hasNewNative) {
                 if (newNative.exists()) newNative.delete();
                 PZOLogger.error("Failed to download matching native library (" + nativeFileName + ") for version " + latestVersion + ". Aborting update to avoid library mismatch.");
@@ -596,7 +582,6 @@ public class UpdateDialog {
                 return;
             }
 
-            // Step 2: Download PZOptimEngine.jar
             List<String> jarCandidates = new ArrayList<>();
             if (downloadUrl != null && !downloadUrl.isEmpty() && !downloadUrl.contains("/releases/latest/")) {
                 jarCandidates.add(downloadUrl);
@@ -626,7 +611,7 @@ public class UpdateDialog {
 
             long pid = ProcessHandle.current().pid();
 
-            // Stage ProjectZomboid64.json update if missing required 0.9.5 flags (such as -agentlib:pzo_native64)
+            // Stage configuration changes for replacement after the game exits.
             File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
             File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
             boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
@@ -710,7 +695,6 @@ public class UpdateDialog {
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
-                // Linux & Steam Deck
                 String linuxJsonUpdate = hasNewJson ? String.format(
                     " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
                     newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()

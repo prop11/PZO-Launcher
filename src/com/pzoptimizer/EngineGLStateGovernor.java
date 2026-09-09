@@ -1,11 +1,5 @@
 package com.pzoptimizer;
 
-/**
- * PZO Deep Engine-Level OpenGL State Governor.
- * Shadows active OpenGL texture bindings, blend modes, alpha functions,
- * and shader programs in CPU L1 cache, eliminating thousands of redundant JNI driver calls per frame.
- * 100% thread-safe, deterministic, and cross-platform.
- */
 public final class EngineGLStateGovernor {
 
     private static volatile int activeTextureId = -1;
@@ -21,7 +15,7 @@ public final class EngineGLStateGovernor {
 
     public static boolean shouldBindTexture(int textureId) {
         if (textureId == activeTextureId) {
-            return false; // Skip redundant JNI bind
+            return false;
         }
         activeTextureId = textureId;
         return true;
@@ -29,7 +23,7 @@ public final class EngineGLStateGovernor {
 
     public static boolean shouldSetProgram(int programId) {
         if (programId == activeProgramId) {
-            return false; // Skip redundant shader use
+            return false;
         }
         activeProgramId = programId;
         return true;

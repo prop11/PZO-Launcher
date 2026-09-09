@@ -7,15 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Project Zomboid Build 42 - High-Performance Hybrid Map for KahluaTableImpl.
- * 
- * Stores contiguous 1-based integer keys (1..N) in a flat primitive Object[] array,
- * bypassing hash table bucket overhead, Node allocations, and Double boxing lookups.
- * Seamlessly falls back to LinkedHashMap for string, negative, or sparse non-integer keys.
- * 
- * Guarantees 100% binary, runtime, and save-file compatibility with KahluaTableImpl.
- */
+/** Stores contiguous positive integer keys in an array; other keys use LinkedHashMap. */
 public class FastLuaMap extends AbstractMap<Object, Object> {
 
     private Object[] arrayPart = new Object[16];

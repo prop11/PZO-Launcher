@@ -5,19 +5,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Dynamic Skeletal Rigging & Animation LOD Governor (Phase 3 SIMD Architecture).
- * 
- * In Build 42, animated 3D models compute 60+ skeletal bone matrix transformations
- * every frame for all active characters in the world regardless of screen visibility.
- * 
- * HordeAnimationLODGovernor dynamically assigns skeletal update fidelity:
- * - Local Players: Always 100% full 60+ FPS fidelity.
- * - Close Zombies (<= 12 tiles): Full multi-track skeletal skinning and blending.
- * - Horde Zombies (> 12 tiles): Uses SharedSkeleAnimationTrack optimization (doBlending = false),
- *   saving redundant 4x4 matrix multiplications with zero visual artifacts.
- * - Guarantees updateBones is always true for active models so zombies never freeze or float.
- */
 public final class HordeAnimationLODGovernor {
 
     private static volatile boolean active = false;
@@ -26,7 +13,6 @@ public final class HordeAnimationLODGovernor {
     public static final AtomicLong boneTransformsSaved = new AtomicLong(0);
     public static final AtomicLong activeModelsTracked = new AtomicLong(0);
 
-    // Cached Reflection Handles
     private static Field modelSlotsField = null;
     private static Field chrField = null;
     private static Field modelField = null;
@@ -90,8 +76,7 @@ public final class HordeAnimationLODGovernor {
     private static void governorLoop() {
         while (active) {
             try {
-                // If player is driving, roadside zombie skeletal LOD is irrelevant and CPU cycles
-                // must be 100% dedicated to chunk decompression and vehicle physics streaming.
+                // Skip the skeletal LOD sweep while driving.
                 if (VehicleTravelOptimizer.isPlayerDriving()) {
                     Thread.sleep(500);
                     continue;
@@ -138,18 +123,11 @@ public final class HordeAnimationLODGovernor {
                 Object animPlayer = animPlayerField.get(model);
                 if (animPlayer == null) continue;
 
-                // CRITICAL FIX: updateBones MUST always be true for any 3D skinned model.
-                // Setting updateBones = false bypasses bone matrix transforms and ragdoll/IK ground placement,
-                // which caused zombies to freeze in static bind-poses and float in the air as 2D sprites.
+                // Keep bone updates enabled: disabling them caused bind poses and incorrect ground placement.
                 updateBonesField.setBoolean(animPlayer, true);
 
-                // Note on doBlending:
-                // We intentionally do NOT force doBlending = false asynchronously from this background thread.
-                // In vanilla PZ (AnimationPlayer.determineCurrentSharedSkeleTrack()), forcing doBlending = false
-                // causes un-cached clips to invoke ModelTransformSampler synchronously on the main thread, baking
-                // 300 animation frames per track and causing massive multi-frame stutter when driving into towns.
-                // Project Zomboid natively and smoothly manages zombie animation blending falloff on the main thread
-                // via PerformanceSettings.numberZombiesBlended in ModelManager.sceneCullZombies().
+                // Leave doBlending to the main thread. Forcing it off can synchronously bake uncached clips
+                // through ModelTransformSampler in determineCurrentSharedSkeleTrack().
             }
         } catch (Throwable ignored) {}
     }

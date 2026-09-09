@@ -3,10 +3,6 @@ package com.pzoptimizer;
 import java.io.File;
 import java.nio.file.Files;
 
-/**
- * Project Zomboid Build 42 - Zero-Stall Disk I/O & Log Truncation Guard.
- * Cleans up runaway multi-gigabyte console.txt logs from previous modded sessions to keep startup instant.
- */
 public class LogRotationGuard {
     private static final long MAX_LOG_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
 
