@@ -1,17 +1,3 @@
-/*
- * Project Zomboid Optimiser (PZO) - Native Kernel & Hardware Governor
- * Multi-Platform: Windows x64, Linux (x86_64 / AArch64), macOS (Apple Silicon / Intel)
- *
- * Implements OS-level kernel governors:
- *  - Windows: 0.5ms Interrupt Timer Resolution Lock (NtSetTimerResolution + timeBeginPeriod)
- *  - Windows: Windows 11 Power Throttling / EcoQoS Complete Exemption (SetProcessInformation)
- *  - Windows: Windows Multimedia Class Scheduler Service (MMCSS "Games" profile via Avrt)
- *  - POSIX (Linux/macOS): High-resolution monotonic timers, real-time thread priority & mlockall
- *  - Cross-Platform CPU Hybrid Topology Detection (P-Cores vs E-Cores / Thread Affinity)
- *  - AVX2 Vectorized SIMD Batch Spatial & Distance Processor (zero-copy NIO, scalar fallback for ARM64)
- *  - Low-latency miniz tinfl RFC 1950 zlib / raw deflate decompression
- */
-
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -70,7 +56,6 @@ typedef void* HANDLE;
 #include "miniz_tinfl.c"
 
 #ifdef _WIN32
-// Dynamically resolved ntdll functions for high-precision sub-millisecond timer
 typedef LONG (NTAPI *pfnNtSetTimerResolution)(ULONG DesiredResolution, BOOLEAN SetResolution, PULONG CurrentResolution);
 typedef LONG (NTAPI *pfnNtQueryTimerResolution)(PULONG MinimumResolution, PULONG MaximumResolution, PULONG CurrentResolution);
 
@@ -88,7 +73,6 @@ static pfnSetProcessInformation g_SetProcessInformation = NULL;
 static HANDLE g_mmcssTaskHandle = NULL;
 #endif
 
-// CPU Topology & State Cache
 static DWORD_PTR g_pCoreAffinityMask = 0;
 static int g_physicalCores = 0;
 static int g_pCoresCount = 0;
@@ -97,7 +81,6 @@ static BOOL g_avx2Supported = FALSE;
 static BOOL g_timerLocked = FALSE;
 static ULONG g_activeTimerResolution100ns = 10000;
 
-// Check AVX2 CPUID
 static BOOL checkCpuAvx2Support(void) {
 #if defined(_WIN32)
     int cpuInfo[4] = {0};
@@ -122,7 +105,6 @@ static BOOL checkCpuAvx2Support(void) {
 #endif
 }
 
-// Query CPU Topology: distinguishes Performance Cores (P-Cores) from Efficiency Cores (E-Cores)
 static void detectCpuTopology(void) {
 #if defined(_WIN32)
     DWORD length = 0;
@@ -149,7 +131,7 @@ static void detectCpuTopology(void) {
     int totalPhysical = 0;
     int totalLogical = 0;
 
-    // Pass 1: find highest efficiency class and count cores
+    // Find the highest efficiency class before collecting its affinity mask.
     BYTE* ptr = (BYTE*)buffer;
     BYTE* end = ptr + length;
     while (ptr < end) {
@@ -173,7 +155,6 @@ static void detectCpuTopology(void) {
     g_physicalCores = totalPhysical;
     g_logicalProcessors = totalLogical;
 
-    // Pass 2: gather affinity mask for highest efficiency class (P-cores)
     DWORD_PTR pCoreMask = 0;
     int pCoreCount = 0;
 
@@ -225,7 +206,6 @@ static void detectCpuTopology(void) {
     }
     g_pCoreAffinityMask = (g_logicalProcessors >= 64) ? ~(DWORD_PTR)0 : (((DWORD_PTR)1 << g_logicalProcessors) - 1);
 #else
-    // Linux
     g_logicalProcessors = (int)sysconf(_SC_NPROCESSORS_ONLN);
     if (g_logicalProcessors <= 0) g_logicalProcessors = 4;
     g_physicalCores = g_logicalProcessors;
@@ -234,7 +214,6 @@ static void detectCpuTopology(void) {
 #endif
 }
 
-// High Precision Interrupt Timer Lock
 static BOOL setHighPrecisionTimer(BOOL enable) {
 #if defined(_WIN32)
     if (enable) {
@@ -269,13 +248,12 @@ static BOOL setHighPrecisionTimer(BOOL enable) {
     }
 #else
     (void)enable;
-    g_activeTimerResolution100ns = 10000; // Sub-millisecond on POSIX
+    g_activeTimerResolution100ns = 10000;
     g_timerLocked = TRUE;
     return TRUE;
 #endif
 }
 
-// Complete Windows 11 Power Throttling / EcoQoS Exemption
 static BOOL disablePowerThrottling(void) {
 #if defined(_WIN32)
     if (g_SetProcessInformation) {
@@ -297,7 +275,6 @@ static BOOL disablePowerThrottling(void) {
 #endif
 }
 
-// Multimedia Class Scheduler / Audio Profile
 #if defined(_WIN32)
 static BOOL setMMCSSProfile(const wchar_t* profile) {
     DWORD taskIndex = 0;
@@ -316,7 +293,6 @@ static BOOL setMMCSSProfile(const char* profile) {
 }
 #endif
 
-// Process Priority Governor
 static BOOL setProcessPriority(int level) {
 #if defined(_WIN32)
     DWORD pClass = ABOVE_NORMAL_PRIORITY_CLASS;
@@ -333,7 +309,6 @@ static BOOL setProcessPriority(int level) {
 #endif
 }
 
-// P-Core Affinity Binding for Current Thread
 static BOOL bindCurrentThreadToPCores(void) {
 #if defined(_WIN32)
     if (g_pCoreAffinityMask != 0) {
@@ -356,7 +331,6 @@ static BOOL bindCurrentThreadToPCores(void) {
 #endif
 }
 
-// Complete Calling Thread Optimization
 #if defined(_WIN32)
 static BOOL optimizeCallingThread(int priorityLevel, BOOL bindPCores, const wchar_t* mmcssProfile) {
     HANDLE hThread = GetCurrentThread();
@@ -403,7 +377,6 @@ static BOOL optimizeCallingThread(int priorityLevel, BOOL bindPCores, const char
 }
 #endif
 
-// Working Set & Physical RAM Locking
 static BOOL lockProcessWorkingSet(void) {
 #if defined(_WIN32)
     SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
@@ -419,8 +392,7 @@ static BOOL lockProcessWorkingSet(void) {
         maxSize = (total > (SIZE_T)4 * 1024 * 1024 * 1024) ? (total * 3 / 4) : total;
     }
 
-    // Use soft working set expansion (flag 0) to ensure Windows kernel memory manager
-    // never stalls application threads with hard paging quota suspensions.
+    // Request a soft working-set expansion rather than enforcing hard quotas.
     return SetProcessWorkingSetSizeEx(GetCurrentProcess(), minSize, maxSize, 0);
 #elif defined(MCL_CURRENT)
     return (mlockall(MCL_CURRENT) == 0);
@@ -434,7 +406,6 @@ static BOOL lockProcessWorkingSet(void) {
 #pragma GCC target("avx2")
 #endif
 
-// AVX2 Vectorized 2D Distance Calculation (Zero-copy, 8 floats per SIMD instruction)
 static int batchCalculateDistancesAVX2(const float* coords, int count, float ox, float oy, float* outDistances) {
     if (!coords || !outDistances || count <= 0) return 0;
 
@@ -475,7 +446,6 @@ static int batchCalculateDistancesAVX2(const float* coords, int count, float ox,
     return count;
 }
 
-// AVX2 Vectorized 2D Squared Distance Calculation (Zero-copy, 8 floats per SIMD instruction, no sqrt)
 static int batchCalculateDistancesSqAVX2(const float* coords, int count, float ox, float oy, float* outDistSq) {
     if (!coords || !outDistSq || count <= 0) return 0;
 
@@ -514,7 +484,6 @@ static int batchCalculateDistancesSqAVX2(const float* coords, int count, float o
     return count;
 }
 
-// AVX2 Vectorized Radial Proximity Culling
 static int batchCullRadialAVX2(const float* coords, int count, float ox, float oy, float maxRadiusSq, unsigned char* outMask) {
     if (!coords || !outMask || count <= 0) return 0;
 
@@ -564,7 +533,6 @@ static int batchCullRadialAVX2(const float* coords, int count, float ox, float o
     return insideCount;
 }
 
-// AVX2 Vectorized 2D AABB / Screen Viewport Culling
 static int batchCullAABBAVX2(const float* coords, int count, float minX, float minY, float maxX, float maxY, unsigned char* outMask) {
     if (!coords || !outMask || count <= 0) return 0;
 
@@ -615,7 +583,6 @@ static int batchCullAABBAVX2(const float* coords, int count, float minX, float m
     return insideCount;
 }
 
-// AVX2 Vectorized Multi-Tier Distance Classification
 static int batchClassifyTiersAVX2(const float* coords, int count, float ox, float oy,
                                   float t0Sq, float t1Sq, float t2Sq, unsigned char* outTiers) {
     if (!coords || !outTiers || count <= 0) return 0;
@@ -676,8 +643,7 @@ static int batchClassifyTiersAVX2(const float* coords, int count, float ox, floa
     return count;
 }
 
-// AVX2 Vectorized Field-of-View & Line-of-Sight Visibility Engine
-// Tests 8 entities per cycle for range, directional dot-product, and FOV cone.
+// Tests range, heading dot product, and field-of-view angle in batches of eight.
 static int batchCalculateFovAVX2(
     const float* coords, const float* headings, int count,
     float targetX, float targetY, float viewDistSq, float cosHalfFov, float closeRadiusSq,
@@ -765,7 +731,6 @@ static int batchCalculateFovAVX2(
     return visibleCount;
 }
 
-// AVX2 Vectorized Crowd Separation & Repulsion Vector Engine
 // For each entity i, computes accumulated steering repulsion away from nearby entities.
 static int batchCalculateRepulsionAVX2(
     const float* coords, int count, float separationRadius, float maxForce, float* outForces) {
@@ -872,10 +837,6 @@ static int batchCalculateRepulsionAVX2(
 #pragma GCC pop_options
 #endif
 
-// ============================================================================
-// JNI Exports for com.pzoptimizer.PZONative
-// ============================================================================
-
 JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_initNative(JNIEnv *env, jclass cls) {
     (void)env; (void)cls;
 
@@ -891,7 +852,6 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_initNative(JNIEnv *env
         g_SetProcessInformation = (pfnSetProcessInformation)GetProcAddress(hKernel32, "SetProcessInformation");
     }
 
-    // Set NVIDIA & GPU multi-threaded driver optimizations
     SetEnvironmentVariableW(L"__GL_THREADED_OPTIMIZATIONS", L"1");
     SetEnvironmentVariableW(L"__GL_YIELD", L"NOTHING");
 #else
@@ -1086,10 +1046,6 @@ JNIEXPORT jint JNICALL Java_com_pzoptimizer_PZONative_batchCalculateRepulsionAVX
         inCoords, (int)count, (float)separationRadius, (float)maxForce, outForces
     );
 }
-
-// ============================================================================
-// Phase 2: High-Speed SIMD Decompression & Win32/POSIX Chunk Stream Acceleration
-// ============================================================================
 
 static jint decompressBuffer(const unsigned char *src, size_t srcLen, unsigned char *dst, size_t dstCap) {
     if (!src || !dst || srcLen == 0 || dstCap == 0) return -1;
@@ -1477,10 +1433,6 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_isDriveSSDNative(JNIEn
 #endif
 }
 
-/* ========================================================================= */
-/* JVMTI Native Agent Bridge (ZombieBuddy Architecture Bypass for javaagent)  */
-/* ========================================================================= */
-
 #define PZO_JAR "PZOptimEngine.jar"
 #define PZO_AGENT_OPTIONS_MAX 2048
 
@@ -1511,12 +1463,10 @@ static void init_instrument_dll(void) {
     if (g_hInstrument) return;
 
 #ifdef _WIN32
-    // 1. Try relative jre64\\bin directory
     SetDllDirectoryA(".\\jre64\\bin");
     g_hInstrument = LoadLibraryA("instrument.dll");
     SetDllDirectoryA(NULL);
 
-    // 2. Direct path fallbacks
     if (!g_hInstrument) {
         g_hInstrument = LoadLibraryA("jre64\\bin\\instrument.dll");
     }

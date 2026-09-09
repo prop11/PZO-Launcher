@@ -1,7 +1,4 @@
 #!/bin/bash
-# ==============================================================================
-# Project Zomboid Build 42 - Config & Engine Optimizer (macOS & Linux)
-# ==============================================================================
 
 set -e
 
@@ -14,7 +11,6 @@ OS_TYPE="$(uname -s)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PZ_JAR=""
 
-# 1. Locate or Auto-Download PZOptimEngine.jar
 if [ -f "$SCRIPT_DIR/PZOptimEngine.jar" ]; then
     PZ_JAR="$SCRIPT_DIR/PZOptimEngine.jar"
 elif [ -f "$SCRIPT_DIR/dist/PZOptimEngine.jar" ]; then
@@ -49,7 +45,6 @@ fi
 
 echo "[+] Using engine package: $PZ_JAR"
 
-# 2. Detect Total RAM in GB
 TOTAL_RAM=8
 if [ "$OS_TYPE" = "Darwin" ]; then
     RAM_BYTES=$(sysctl -n hw.memsize 2>/dev/null || echo 8589934592)
@@ -73,7 +68,6 @@ fi
 RAM_MB=$((ALLOC_RAM * 1024))
 echo "[+] Detected $TOTAL_RAM GB System RAM -> Allocating $ALLOC_RAM GB (-Xmx${RAM_MB}m)"
 
-# Helper function to clean bridge files
 clean_lua_bridge_files() {
     LUA_DIR="$HOME/Zomboid/Lua"
     if [ -d "$LUA_DIR" ]; then
@@ -83,9 +77,6 @@ clean_lua_bridge_files() {
     rm -f "$HOME/Zomboid"/pzo_*
 }
 
-# ==============================================================================
-# macOS Native .app Bundle Installation
-# ==============================================================================
 if [ "$OS_TYPE" = "Darwin" ]; then
     echo "[*] Platform: macOS"
     POSSIBLE_APP_PATHS=(
@@ -124,7 +115,6 @@ if [ "$OS_TYPE" = "Darwin" ]; then
     INSTALLED_JAR="$JAVA_DIR/PZOptimEngine.jar"
     PLIST="$APP_BUNDLE/Contents/Info.plist"
 
-    # 3. Existing Installation Check (Update / Uninstall / Cancel)
     if [ -f "$INSTALLED_JAR" ]; then
         echo ""
         echo "[!] PZOptimEngine is already installed on macOS."
@@ -158,7 +148,6 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         esac
     fi
 
-    # 4. Check for ZombieBuddy conflict on macOS
     ZB_FOUND=0
     if [ -f "$APP_BUNDLE/Contents/Java/ZombieBuddy.jar" ] || [ -f "$APP_BUNDLE/Contents/MacOS/zbNative.dylib" ] || [ -f "$APP_BUNDLE/Contents/Java/zbNative.dylib" ] || [ -f "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/ZombieBuddy.jar" ]; then
         ZB_FOUND=1
@@ -175,7 +164,6 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
 
-    # Check for Zed Better FPS NG conflict / redundancy
     if [ -d "$HOME/Zomboid/mods/ZBBetterFPSNG" ] || [ -d "$SCRIPT_DIR/../../workshop/content/108600/3793137588" ]; then
         echo ""
         echo "[!] NOTICE: Zed Better FPS NG detected in Workshop/Mods!"
@@ -186,12 +174,10 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         echo ""
     fi
 
-    # 5. Install PZOptimEngine.jar to Contents/Java/
     mkdir -p "$JAVA_DIR"
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
-    # Install libpzo_native64.dylib if present
     for dylib_c in "$SCRIPT_DIR/libpzo_native64.dylib" "$SCRIPT_DIR/dist/libpzo_native64.dylib" "$SCRIPT_DIR/../dist/libpzo_native64.dylib" "$SCRIPT_DIR/native/libpzo_native64.dylib"; do
         if [ -f "$dylib_c" ]; then
             cp -f "$dylib_c" "$JAVA_DIR/libpzo_native64.dylib"
@@ -202,7 +188,6 @@ if [ "$OS_TYPE" = "Darwin" ]; then
         fi
     done
 
-    # 6. Patch Contents/Info.plist
     if [ ! -f "$PLIST" ]; then
         echo "[!] Error: Contents/Info.plist not found in bundle."
         exit 1
@@ -225,7 +210,6 @@ with open(plist_path, "rb") as f:
 # Use dot notation for macOS Java launcher compatibility
 target_class_dot = "com.pzoptimizer.PZOEntrypoint"
 
-# Update Main Class across all known macOS launcher schema keys
 for key in ["JVMMainClassName", "MainClass", "JVMEntrypoint"]:
     if key in pl:
         pl[key] = target_class_dot
@@ -243,7 +227,6 @@ if "JVMOptions" in pl and isinstance(pl["JVMOptions"], dict):
     if "MainClass" in pl["JVMOptions"]:
         pl["JVMOptions"]["MainClass"] = target_class_dot
 
-# Ensure PZOptimEngine.jar is in ClassPath
 for cp_key in ["JVMClassPath", "ClassPath"]:
     if cp_key in pl:
         if isinstance(pl[cp_key], list):
@@ -290,9 +273,6 @@ EOF
         echo "[+] Successfully re-signed ProjectZomboid.app"
     fi
 
-# ==============================================================================
-# Linux Steam Installation
-# ==============================================================================
 else
     echo "[*] Platform: Linux"
 
@@ -325,7 +305,6 @@ else
     INSTALLED_JAR="$PZ_DIR/PZOptimEngine.jar"
     JSON_FILE="$PZ_DIR/ProjectZomboid64.json"
 
-    # Existing Installation Check on Linux
     if [ -f "$INSTALLED_JAR" ]; then
         echo ""
         echo "[!] PZOptimEngine is already installed on Linux."
@@ -359,7 +338,6 @@ else
         esac
     fi
 
-    # Check for ZombieBuddy conflict on Linux
     if [ -f "$PZ_DIR/ZombieBuddy.jar" ] || [ -f "$PZ_DIR/zbNative.so" ] || [ -f "$PZ_DIR/zbNative.dylib" ] || [ -f "$PZ_DIR/zombiebuddy.json" ]; then
         echo ""
         echo "========================================================================"
@@ -371,7 +349,6 @@ else
         echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
     fi
 
-    # Check for Zed Better FPS NG conflict / redundancy
     if [ -d "$HOME/Zomboid/mods/ZBBetterFPSNG" ] || [ -d "$SCRIPT_DIR/../../workshop/content/108600/3793137588" ]; then
         echo ""
         echo "[!] NOTICE: Zed Better FPS NG detected in Workshop/Mods!"
@@ -382,11 +359,9 @@ else
         echo ""
     fi
 
-    # Copy JAR
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
-    # Install libpzo_native64.so if present
     for so_c in "$SCRIPT_DIR/libpzo_native64.so" "$SCRIPT_DIR/dist/libpzo_native64.so" "$SCRIPT_DIR/../dist/libpzo_native64.so" "$SCRIPT_DIR/native/libpzo_native64.so"; do
         if [ -f "$so_c" ]; then
             cp -f "$so_c" "$PZ_DIR/libpzo_native64.so"
@@ -403,7 +378,6 @@ else
         echo "[+] Backed up original JSON config -> ${JSON_FILE}.bak"
     fi
 
-    # Safely update JSON while preserving existing classpath and libraries using Python
     python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB"
 import sys, json, os
 
@@ -419,10 +393,8 @@ if os.path.exists(json_file):
     except Exception:
         data = {}
 
-# Set optimized main entrypoint
 data["mainClass"] = "com/pzoptimizer/PZOEntrypoint"
 
-# Preserve existing classpath and ensure PZOptimEngine.jar is present
 cp = data.get("classpath", [])
 if not isinstance(cp, list):
     cp = []
@@ -432,7 +404,6 @@ if "." not in cp:
     cp.insert(0, ".")
 data["classpath"] = cp
 
-# Filter and update vmArgs
 existing_args = data.get("vmArgs", [])
 if not isinstance(existing_args, list):
     existing_args = []
@@ -448,7 +419,6 @@ for arg in existing_args:
         not arg.startswith("-XX:G1ReservePercent") and
         not arg.startswith("-XX:+PerfDisableSharedMem")):
         
-        # Automatically sanitize Windows library path if running on Linux
         if arg.startswith("-Djava.library.path="):
             if "win64" in arg:
                 arg = "-Djava.library.path=linux64/:natives/:."
