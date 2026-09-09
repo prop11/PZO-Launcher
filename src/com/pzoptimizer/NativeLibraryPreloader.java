@@ -5,11 +5,6 @@ import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Build 42 - Asynchronous JNI Native Library Preloader.
- * Pre-touches native shared library binary pages into OS virtual memory cache
- * on Thread.MIN_PRIORITY, cutting initial world load freezes by 15-20%.
- */
 public class NativeLibraryPreloader {
     public static void startPreloadingAsync() {
         Thread t = new Thread(() -> {

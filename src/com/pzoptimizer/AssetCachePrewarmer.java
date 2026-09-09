@@ -5,10 +5,6 @@ import java.io.FileInputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
-/**
- * Non-blocking Background Texture & Asset Cache Pre-Warmer.
- * Reads texture pack headers into OS page cache at boot and immediately releases file handles.
- */
 public class AssetCachePrewarmer {
     public static void startPrewarmingAsync() {
         Thread prewarmer = new Thread(() -> {
@@ -20,7 +16,7 @@ public class AssetCachePrewarmer {
                 if (mediaDir.exists() && mediaDir.isDirectory()) {
                     File[] files = mediaDir.listFiles((dir, name) -> name.endsWith(".pack") || name.endsWith(".png") || name.endsWith(".tiles"));
                     if (files != null) {
-                        ByteBuffer buffer = ByteBuffer.allocate(131072); // 128KB direct sample
+                        ByteBuffer buffer = ByteBuffer.allocate(131072); // 128 KB sample
                         int count = 0;
                         for (File f : files) {
                             if (f.isFile() && f.canRead()) {

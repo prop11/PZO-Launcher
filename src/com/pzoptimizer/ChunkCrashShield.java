@@ -2,11 +2,6 @@ package com.pzoptimizer;
 
 import java.lang.reflect.Field;
 
-/**
- * Project Zomboid Build 42 - Corrupt Chunk & Savegame Recovery Shield.
- * Prevents game-ending crashes when encountering truncated, corrupted, or
- * invalid map chunk files (map_X_Y.bin) from crashed saves or removed map mods.
- */
 public class ChunkCrashShield {
     private static volatile int recoveredChunks = 0;
 
@@ -19,15 +14,7 @@ public class ChunkCrashShield {
         return recoveredChunks;
     }
 
-    /**
-     * Project Zomboid Build 42 - IsoChunkMap Parity & Coordinate Sanity Shield.
-     * Prevents fatal 'ArrayIndexOutOfBoundsException: Index 271 out of bounds for length 256'
-     * caused by even chunkGridWidth values (e.g. 16 instead of odd 13, 15, 17, 19).
-     * 
-     * In PZ's centered chunk grid (2*R + 1), width must always be odd.
-     * If an even width is detected or swap buffers are undersized, this guard
-     * corrects the grid parity and transparently expands swap buffers.
-     */
+    /** The centered chunk grid requires an odd width (2 * radius + 1) and matching swap-buffer capacity. */
     public static void enforceChunkGridSanity() {
         try {
             PopTemplateGuard.ensurePopulated();
@@ -37,9 +24,9 @@ public class ChunkCrashShield {
 
             if (width > 0) {
                 if (width % 2 != 0) {
-                    return; // Already valid odd grid parity (13x13, 11x11, 9x9) - do not touch!
+                    return;
                 }
-                int safeWidth = width + 1; // Force to safe odd number (e.g. 16 -> 17)
+                int safeWidth = width + 1;
                 widthField.setInt(null, safeWidth);
 
                 try {

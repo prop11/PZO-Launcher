@@ -16,15 +16,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Multi-Core Horde Governor (Pillar 2).
- * 
- * Accelerates large horde spatial proximity checks, frustum culling, and multi-tier
- * LOD classification by distributing 256-entity partitions across all available physical CPU cores
- * using 8-wide AVX2 SIMD vectorization.
- * 
- * Achieves sub-0.02ms sweep times across 3,000+ active zombies with ZERO heap allocation.
- */
 public final class MultiCoreHordeGovernor {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -34,14 +25,13 @@ public final class MultiCoreHordeGovernor {
     public static final int PARTITION_SIZE = 256;
     private static final int MAX_ENTITIES = SpatialBufferPool.MAX_ENTITIES;
 
-    // Telemetry & state snapshots
     public static final AtomicInteger lastTrackedZombieCount = new AtomicInteger(0);
     public static final AtomicInteger lastCulledOffscreenCount = new AtomicInteger(0);
     public static final AtomicInteger lastHibernatingCount = new AtomicInteger(0);
     public static final AtomicLong totalParallelSweeps = new AtomicLong(0);
     public static final AtomicLong totalSweepTimeNanos = new AtomicLong(0);
 
-    // Snapshot arrays for atomic lock-free reads by other game subsystems
+    // Shared result snapshots.
     private static final byte[] SNAPSHOT_TIERS = new byte[MAX_ENTITIES];
     private static final byte[] SNAPSHOT_MASK = new byte[MAX_ENTITIES];
     private static final float[] SNAPSHOT_DISTANCES = new float[MAX_ENTITIES];
@@ -50,7 +40,6 @@ public final class MultiCoreHordeGovernor {
     public static final AtomicInteger lastVisibleCount = new AtomicInteger(0);
     private static volatile int snapshotCount = 0;
 
-    // Thresholds
     public static final float TIER_CLOSE_SQ = 16.0f * 16.0f;     // 256 tiles^2  (LOD 0)
     public static final float TIER_MEDIUM_SQ = 32.0f * 32.0f;   // 1024 tiles^2 (LOD 1)
     public static final float TIER_FAR_SQ = 50.0f * 50.0f;      // 2500 tiles^2 (LOD 2)
@@ -62,7 +51,6 @@ public final class MultiCoreHordeGovernor {
     public static final float SEPARATION_RADIUS = 1.25f;         // 1.25 tiles crowd repulsion radius
     public static final float MAX_REPULSION_FORCE = 0.08f;       // Steering nudge clamp
 
-    // Cached Reflection Handles
     private static Field fieldX = null;
     private static Field fieldY = null;
     private static Method methodGetX = null;
@@ -235,7 +223,6 @@ public final class MultiCoreHordeGovernor {
             ByteBuffer fovBuf = SpatialBufferPool.getFovMaskBuffer();
             FloatBuffer repulsionBuf = SpatialBufferPool.getRepulsionBuffer();
 
-            // Populate coordinates and headings sequentially (fast memory write)
             coordBuf.rewind();
             headingBuf.rewind();
             for (int i = 0; i < count; i++) {
@@ -255,7 +242,6 @@ public final class MultiCoreHordeGovernor {
 
             long sweepStart = System.nanoTime();
 
-            // Parallel AVX2 Vectorized Computation across all CPU cores
             float minX = px - CAMERA_HALF_SPAN;
             float minY = py - CAMERA_HALF_SPAN;
             float maxX = px + CAMERA_HALF_SPAN;
@@ -263,13 +249,11 @@ public final class MultiCoreHordeGovernor {
 
             int numPartitions = (count + PARTITION_SIZE - 1) / PARTITION_SIZE;
             if (numPartitions <= 1 || PZOMultiCoreEngine.getExecutor() == null) {
-                // Single-partition scalar/AVX2
                 PZONative.calculateDistancesAVX2(coordBuf, count, px, py, distBuf);
                 PZONative.classifyTiersAVX2(coordBuf, count, px, py, TIER_CLOSE_SQ, TIER_MEDIUM_SQ, TIER_FAR_SQ, tiersBuf);
                 PZONative.cullAABBAVX2(coordBuf, count, minX, minY, maxX, maxY, maskBuf);
                 PZONative.calculateFovAVX2(coordBuf, headingBuf, count, px, py, FOV_DIST_SQ, COS_HALF_FOV, CLOSE_AWARE_SQ, fovBuf);
             } else {
-                // Multi-core parallel SIMD execution
                 List<CompletableFuture<Void>> futures = new ArrayList<>(numPartitions);
                 for (int p = 0; p < numPartitions; p++) {
                     final int startIdx = p * PARTITION_SIZE;
@@ -311,14 +295,13 @@ public final class MultiCoreHordeGovernor {
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             }
 
-            // SIMD Crowd Flocking & Separation Vector Accelerator across nearby entities
             if (count >= 2) {
                 PZONative.calculateRepulsionAVX2(coordBuf, count, SEPARATION_RADIUS, MAX_REPULSION_FORCE, repulsionBuf);
                 repulsionBuf.rewind();
                 repulsionBuf.get(SNAPSHOT_REPULSION, 0, count * 2);
             }
 
-            // Transfer directly into snapshot arrays for instant thread-safe lookups
+            // Copy results into the shared snapshot arrays.
             distBuf.rewind();
             distBuf.get(SNAPSHOT_DISTANCES, 0, count);
 
@@ -347,14 +330,13 @@ public final class MultiCoreHordeGovernor {
             lastHibernatingCount.set(hibernating);
             lastVisibleCount.set(visible);
 
-            // Synchronize with HordeSpatialCuller for zero-overhead legacy lookups
+            // Update the legacy HordeSpatialCuller snapshot.
             com.pzoptimizer.HordeSpatialCuller.syncFromMultiCore(count, culled, hibernating, SNAPSHOT_DISTANCES, SNAPSHOT_TIERS, SNAPSHOT_MASK);
 
             long sweepDuration = System.nanoTime() - sweepStart;
             totalParallelSweeps.incrementAndGet();
             totalSweepTimeNanos.addAndGet(sweepDuration);
 
-            // Multi-Core Skeletal Bone Skinning Governor: bypass off-screen bone matrix evaluations
             MultiCoreAnimationEngine.applyHordeAnimationGovernor(zombies, count, SNAPSHOT_MASK, SNAPSHOT_TIERS);
 
         } catch (Throwable ignored) {}

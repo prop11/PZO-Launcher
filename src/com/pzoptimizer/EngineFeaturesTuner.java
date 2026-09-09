@@ -3,28 +3,20 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * Project Zomboid Engine Features & Architecture Tuner.
- * Automatically unlocks 100% verified, rock-solid multi-threaded pathfinding, asynchronous lighting,
- * multi-threaded audio, 13x13 chunk streaming, and shared skeletal animation bone caches.
- */
 public class EngineFeaturesTuner {
 
     public static void initializeEngineFeatures() {
         try {
-            // 1. DebugOptions Multi-Threading & Engine Subsystems (Build 42)
             try {
                 Class<?> debugOptionsClass = Class.forName("zombie.debug.DebugOptions");
                 Field instanceField = debugOptionsClass.getField("instance");
                 Object debugOptionsInstance = instanceField.get(null);
 
                 if (debugOptionsInstance != null) {
-                    // A. Native Code Pathfinding & Navigation (100% thread-safe)
                     setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting)
                     // Keep threadAnimation = false to prevent experimental Kahlua Lua single-threaded VM crashes
                     // Keep threadAmbient = false, threadSound = false, threadWorld = false to prevent FMOD audio race conditions (e.g. DayZ Ambient Sound TimSort crash)
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
@@ -35,7 +27,6 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "threadGridStacks", true);
                     setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
-                    // C. Model Texture Size Limiter
                     try {
                         Field modelGroupField = debugOptionsClass.getField("model");
                         Object modelGroup = modelGroupField.get(debugOptionsInstance);
@@ -48,7 +39,6 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // D. FBO Chunk Baking for Corpses & Ground Items (Massive draw-call reduction)
                     try {
                         Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
                         Object fboGroup = fboGroupField.get(debugOptionsInstance);
@@ -58,7 +48,6 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // E. Persist thread-safe options to debug-options.ini
                     persistDebugOptionsFile();
 
                     PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Pathfinding Native, FBO Baking)");
@@ -67,7 +56,6 @@ public class EngineFeaturesTuner {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
             }
 
-            // 2. PerformanceSettings Core Defaults
             try {
                 Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
                 
@@ -88,7 +76,7 @@ public class EngineFeaturesTuner {
 
                 try {
                     Field lightFpsField = perfClass.getField("lightingFps");
-                    lightFpsField.setInt(null, 15); // Vanilla 15 FPS lighting updates (halves lighting CPU workload)
+                    lightFpsField.setInt(null, 15);
                 } catch (Throwable ignored) {}
 
                 try {
@@ -98,7 +86,7 @@ public class EngineFeaturesTuner {
 
                 try {
                     Field blendField = perfClass.getField("numberZombiesBlended");
-                    blendField.setInt(null, 16); // High-fidelity skeletal blending for 16 closest zombies
+                    blendField.setInt(null, 16);
                 } catch (Throwable ignored) {}
 
                 // Decoupled UI FBO rendering is left to display initialization to avoid premature TextureFBO probing.
@@ -107,19 +95,16 @@ public class EngineFeaturesTuner {
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (15 FPS Lighting | Skeletal Falloff)");
             } catch (Throwable ignored) {}
 
-            // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)
             try {
                 ChunkCrashShield.enforceChunkGridSanity();
             } catch (Throwable ignored) {}
 
-            // 3. Silence Non-Fatal DebugType Warning Spam during Chunk Loading (SpriteConfig, Entities, Objects)
             try {
                 Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
                 Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
                 @SuppressWarnings("rawtypes")
                 Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
 
-                // Set General, Entity, Sprite, Objects, Mod debug types to Error severity
                 String[] typesToSilence = new String[]{"General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker"};
                 for (String typeName : typesToSilence) {
                     try {

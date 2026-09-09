@@ -16,10 +16,6 @@ pause
 exit /b %errorlevel%
 
 # __START_POWERSHELL__
-# ==============================================================================
-# Project Zomboid Build 42 - Config & Engine Optimizer (PZO)
-# Native PowerShell Engine Installer & Uninstaller
-# ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.9.6)" -ForegroundColor Cyan
@@ -35,7 +31,6 @@ $ZomboidLuaDir     = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
 $PzoStatusFile     = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
 $ZomboidModsDir    = [System.IO.Path]::Combine($HOME, "Zomboid\mods")
 
-# Guard against game running
 $runningPZ = Get-Process -Name "ProjectZomboid64", "ProjectZomboid32" -ErrorAction SilentlyContinue
 if ($runningPZ) {
     Write-Host "`n[!] Warning: Project Zomboid is currently running." -ForegroundColor Yellow
@@ -51,9 +46,6 @@ if (-not (Test-Path -LiteralPath $ZomboidModsDir -ErrorAction SilentlyContinue))
     New-Item -ItemType Directory -Path $ZomboidModsDir -Force | Out-Null
 }
 
-# ==========================================
-# JSON TEMPLATES (Defined upfront - No BOM)
-# ==========================================
 $Json5OrLess = @"
 {
     "mainClass": "com/pzoptimizer/PZOEntrypoint",
@@ -347,7 +339,6 @@ $InstalledDllPath = [System.IO.Path]::Combine($InstallPath, $NativeDllName)
 $TargetFilePath   = [System.IO.Path]::Combine($InstallPath, $TargetFileName)
 $BackupDir        = [System.IO.Path]::Combine($InstallPath, $BackupFolder)
 
-# Locate Source Jar
 $candidateJarPaths = [System.Collections.Generic.List[string]]::new()
 if ($ScriptDir) {
     $candidateJarPaths.Add([System.IO.Path]::Combine($ScriptDir, $JarFileName))
@@ -376,7 +367,6 @@ if ($SourceJar) {
     }
 }
 
-# Locate Source Native DLL (pzo_native64.dll)
 $candidateDllPaths = [System.Collections.Generic.List[string]]::new()
 if ($ScriptDir) {
     $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, $NativeDllName))
@@ -406,9 +396,6 @@ if ($SourceDll) {
     }
 }
 
-# ==========================================
-# ZOMBIEBUDDY COEXISTENCE & PRESERVATION
-# ==========================================
 $zbNativeDll = [System.IO.Path]::Combine($InstallPath, "zbNative.dll")
 $zbNativeWin64 = [System.IO.Path]::Combine($InstallPath, "win64\zbNative.dll")
 $hasZbInJson = $false
@@ -425,7 +412,6 @@ if ($isZombieBuddyActive) {
     Write-Host "`n[+] ZombieBuddy detected! Coexistence mode enabled (preserving -agentlib:zbNative)." -ForegroundColor Green
 }
 
-# Check for Zed Better FPS NG conflict / redundancy
 $zbFpsWorkshop = [System.IO.Path]::Combine($InstallPath, "..\..\workshop\content\108600\3793137588")
 $zbFpsMods = [System.IO.Path]::Combine($env:USERPROFILE, "Zomboid\mods\ZBBetterFPSNG")
 if ((Test-Path -LiteralPath $zbFpsWorkshop) -or (Test-Path -LiteralPath $zbFpsMods)) {
@@ -481,12 +467,10 @@ function Apply-PZOConfiguration {
         $UseG1GC = $true
     }
 
-    # Inject native JVMTI agent bridge (-agentlib:pzo_native64) for bytecode instrumentation & ZombieBuddy coexistence
     if ($chosenJson -notmatch "pzo_native64") {
         $chosenJson = $chosenJson.Replace('"vmArgs": [', '"vmArgs": [' + "`n        " + '"-agentlib:pzo_native64",')
     }
 
-    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in vmArgs
     if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
         $chosenJson = $chosenJson.Replace('"vmArgs": [', '"vmArgs": [' + "`n        " + '"-agentlib:zbNative",')
     }
@@ -517,9 +501,6 @@ function Apply-PZOConfiguration {
     Write-Host "Generated Lua bridge status: $PzoStatusFile" -ForegroundColor Green
 }
 
-# ==========================================
-# EXISTING INSTALLATION CHECK (UPDATE / UNINSTALL)
-# ==========================================
 if (Test-Path $InstalledJarPath) {
     Write-Host "`n[!] PZOptimEngine is already installed." -ForegroundColor Yellow
     Write-Host "1) Update    - Overwrite PZOptimEngine.jar with the new version & refresh config [Default]"
@@ -582,14 +563,12 @@ if (Test-Path $InstalledJarPath) {
                 Write-Host "Removed: win64\$NativeDllName" -ForegroundColor Green
             }
 
-            # Purge all pzo_* bridge, telemetry, log and status files from ~/Zomboid/Lua/
             if (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue) {
                 Get-ChildItem -LiteralPath $ZomboidLuaDir -Filter "pzo_*" -File -ErrorAction SilentlyContinue | ForEach-Object {
                     Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
                     Write-Host "Removed: $($_.Name)" -ForegroundColor Green
                 }
             }
-            # Clean up any leftover pzo files in root Zomboid or game directories
             $extraPzoPaths = @(
                 [System.IO.Path]::Combine($HOME, "Zomboid\pzo_status.json"),
                 [System.IO.Path]::Combine($HOME, "Zomboid\pzo_telemetry.json"),
@@ -627,9 +606,6 @@ if (Test-Path $InstalledJarPath) {
     }
 }
 
-# ==========================================
-# FRESH INSTALLATION
-# ==========================================
 Write-Host "`nStarting fresh installation..." -ForegroundColor Cyan
 
 if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyContinue)) {

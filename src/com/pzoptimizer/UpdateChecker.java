@@ -11,11 +11,6 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * PZO Multi-Channel Update Checker.
- * Supports strict channel isolation between Stable (releases/latest) and Beta/Unstable (releases list).
- * 100% pure Java with zero external dependencies.
- */
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "0.9.6";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
@@ -85,7 +80,7 @@ public class UpdateChecker {
                     releases.add(json);
                 }
 
-                // Pass 1: Look for exact tag or version match
+                // Prefer an exact tag or version match.
                 for (String relJson : releases) {
                     if (extractJsonBooleanField(relJson, "draft")) continue;
                     String tag = extractJsonField(relJson, "tag_name");
@@ -104,7 +99,7 @@ public class UpdateChecker {
                     }
                 }
 
-                // Pass 2: Look for highest compatible release on the channel containing native asset
+                // Otherwise select the highest compatible release containing a native asset.
                 for (String relJson : releases) {
                     if (extractJsonBooleanField(relJson, "draft")) continue;
                     boolean isPrerelease = extractJsonBooleanField(relJson, "prerelease");
@@ -179,7 +174,6 @@ public class UpdateChecker {
             String selectedReleaseJson = null;
 
             if (json.startsWith("[")) {
-                // Parse array of releases and find the highest available version matching channel
                 List<String> releases = splitJsonArrayObjects(json);
                 String bestRelJson = null;
                 String bestVersion = null;
@@ -194,7 +188,6 @@ public class UpdateChecker {
                     boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
 
                     if (!betaOptIn) {
-                        // NORMAL (STABLE) USER: Strictly reject all prereleases and unstable/beta tagged builds
                         if (isPrerelease || hasUnstableTag) {
                             continue;
                         }
@@ -213,13 +206,11 @@ public class UpdateChecker {
                 }
                 selectedReleaseJson = bestRelJson;
             } else if (json.startsWith("{")) {
-                // Single release object (e.g. from /releases/latest)
                 boolean isPrerelease = extractJsonBooleanField(json, "prerelease");
                 String tag = extractJsonField(json, "tag_name");
                 String name = extractJsonField(json, "name");
                 boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
 
-                // Safety guard: If normal user somehow received an unstable release, reject it
                 if (!betaOptIn && (isPrerelease || hasUnstableTag)) {
                     writeStatus(false, CURRENT_VERSION, res.channel);
                     return res;
@@ -284,9 +275,6 @@ public class UpdateChecker {
         }
     }
 
-    /**
-     * Identifies tags or release titles denoting unstable/beta/preview builds.
-     */
     public static boolean isUnstableIdentifier(String text) {
         if (text == null || text.isEmpty()) return false;
         String lower = text.toLowerCase();

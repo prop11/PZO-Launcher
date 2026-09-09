@@ -5,12 +5,6 @@ import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.Statement;
 
-/**
- * Project Zomboid Build 42 - Zero-Stutter Chunk & Savegame I/O Accelerator.
- * Enhances background disk streaming for world save files (map_*.bin, zpop_*.bin)
- * and tunes SQLite databases (players.db, vehicles.db) with Write-Ahead Logging (WAL)
- * and 256MB memory-mapped I/O (mmap_size).
- */
 public class SaveGameStreamBooster {
     private static final int OPTIMAL_BUFFER_SIZE = 131072; // 128 KB high-throughput buffer
     private static volatile boolean dbTuned = false;
@@ -21,12 +15,10 @@ public class SaveGameStreamBooster {
 
     public static void tuneSaveEngine() {
         try {
-            // Tune standard I/O buffer properties
             System.setProperty("zomboid.io.buffersize", String.valueOf(OPTIMAL_BUFFER_SIZE));
             PopTemplateGuard.ensurePopulated();
         } catch (Throwable ignored) {}
 
-        // Launch background daemon to apply SQLite WAL mode and memory-mapping when database connections open
         startDbTuningDaemon();
     }
 
@@ -55,7 +47,6 @@ public class SaveGameStreamBooster {
     public static synchronized boolean tuneSqliteDatabases() {
         boolean tunedAny = false;
 
-        // 1. Tune VehiclesDB2
         try {
             Class<?> vdbClass = Class.forName("zombie.vehicles.VehiclesDB2");
             Field instField = vdbClass.getField("instance");
@@ -81,7 +72,6 @@ public class SaveGameStreamBooster {
             }
         } catch (Throwable ignored) {}
 
-        // 2. Tune PlayerDB
         try {
             Class<?> pdbClass = Class.forName("zombie.savefile.PlayerDB");
             Method getInst = pdbClass.getMethod("getInstance");

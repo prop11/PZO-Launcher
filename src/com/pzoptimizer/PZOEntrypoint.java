@@ -3,10 +3,6 @@ package com.pzoptimizer;
 import java.io.File;
 import java.lang.reflect.Method;
 
-/**
- * Project Zomboid Build 42 - Dedicated High-Performance Engine Optimizer & Wrapper.
- * Fully compatible with vanilla Project Zomboid and ZombieBuddy modding framework.
- */
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
@@ -30,12 +26,10 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
 
-        // Automatically inspect and migrate ProjectZomboid64.json if upgrading from older releases (e.g. 0.8.2 -> 0.9.5)
         try {
             ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
         } catch (Throwable ignored) {}
 
-        // 0. Native Kernel & Hardware Governor (pzo_native64.dll)
         boolean isNative = false;
         double timerMs = 15.6;
         try {
@@ -45,7 +39,6 @@ public class PZOEntrypoint {
             }
         } catch (Throwable ignored) {}
 
-        // Ensure critical Zomboid user directories exist & write live pzo_status.json across all discovered drives & paths
         try {
             TelemetryReporter.refreshDiscoveredDirectories(args);
             long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
@@ -56,10 +49,8 @@ public class PZOEntrypoint {
             PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB | Native: " + isNative + ")");
         } catch (Throwable ignored) {}
 
-        // HotSpot JIT & System Property Tuning
         HotSpotJITCompilerTuner.tuneRuntimeProperties();
 
-        // 1. Core Memory & Hardware Optimization Modules
         PZOEngineBridge.initialize();
         EngineFeaturesTuner.initializeEngineFeatures();
         EngineThreadGovernor.initialize();
@@ -105,7 +96,6 @@ public class PZOEntrypoint {
         DriverOptimizer.initialize();
         AssetCachePrewarmer.startPrewarmingAsync();
 
-        // 2. StreamBufferBooster & SaveGameStreamBooster (128KB chunk buffers & page-aligned direct NIO)
         try {
             StreamBufferBooster.applyStreamTweaks();
             SaveGameStreamBooster.tuneSaveEngine();
@@ -114,9 +104,6 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on StreamBufferBooster: " + t.getMessage());
         }
 
-
-
-        // 3. FastMath & VectorPool zero-allocation caches
         try {
             FastMath.sin(0.5f);
             VectorPool.get(0, 0);
@@ -125,7 +112,6 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on FastMath / VectorPool: " + t.getMessage());
         }
 
-        // 4. GLStateOptimizer & HordePhysicsOptimizer
         try {
             GLStateOptimizer.resetState();
             PZOLogger.success("GLStateOptimizer & HordePhysicsOptimizer ready");
@@ -133,14 +119,12 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on GLState / HordePhysics: " + t.getMessage());
         }
 
-        // 5. ResourceInterner string deduplication pool
         try {
             PZOLogger.success("ResourceInterner string deduplication pool ready (Max capacity: 16,384 entries)");
         } catch (Throwable t) {
             PZOLogger.warn("Non-fatal notice on ResourceInterner: " + t.getMessage());
         }
 
-        // 6. Pre-Menu Update Check & Interactive Prompt
         boolean fullUpdateHandled = false;
         String resolvedNativeUrl = null;
         try {
@@ -156,7 +140,6 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
 
-        // 6b. Native Governor DLL Version Verification
         if (!fullUpdateHandled) {
             try {
                 UpdateDialog.checkAndPromptNativeMismatch(resolvedNativeUrl);
@@ -165,12 +148,10 @@ public class PZOEntrypoint {
             }
         }
 
-        // 7. Balanced Game & Streaming Thread Priority
         try {
             Thread.currentThread().setPriority(Thread.NORM_PRIORITY);
         } catch (Throwable ignored) {}
 
-        // 8. Background Telemetry Loop
         Thread watchdog = new Thread(() -> {
             while (true) {
                 try {
@@ -187,7 +168,6 @@ public class PZOEntrypoint {
         watchdog.start();
         PZOLogger.success("PZO-B42-Telemetry monitoring started");
 
-        // 9. Discover and check ZombieBuddy / standalone Java mods
         try {
             boolean zbDetected = false;
             File currentDir = new File(".").getAbsoluteFile();
@@ -215,7 +195,6 @@ public class PZOEntrypoint {
             PZOLogger.warn("[PZO] Non-fatal notice on coexistence check: " + t.getMessage());
         }
 
-        // 10. Launch Project Zomboid Main Entrypoint
         PZOLogger.info("Handing execution over to Project Zomboid entrypoint (zombie.gameStates.MainScreenState)...");
         try {
             Class<?> mainClass = Class.forName("zombie.gameStates.MainScreenState");

@@ -13,12 +13,6 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * PZO Real-Time Frame-Time Profiler & Stutter Diagnostic Engine.
- * Measures nanosecond frame times, detects frame drops / micro-stutters,
- * and snapshots multi-subsystem engine metrics to identify the exact root cause.
- * 100% thread-safe, low-overhead, and cross-platform.
- */
 public final class FrameDropDiagnosticEngine {
 
     private static volatile boolean running = false;
@@ -42,10 +36,8 @@ public final class FrameDropDiagnosticEngine {
         if (running) return;
         running = true;
 
-        // Initialize baseline GC stats
         updateGcStats();
 
-        // Background file logger daemon
         Thread loggerThread = new Thread(() -> {
             PZOLogger.success("FrameDropDiagnosticEngine: Active (Real-Time Stutter Diagnostics & Root Cause Telemetry)");
 
@@ -65,9 +57,6 @@ public final class FrameDropDiagnosticEngine {
         loggerThread.start();
     }
 
-    /**
-     * Called on each rendered frame to compute frame time and detect stutter anomalies.
-     */
     public static void onFrameTick() {
         long now = System.nanoTime();
         long deltaNanos = now - lastFrameTimeNanos;
@@ -80,18 +69,15 @@ public final class FrameDropDiagnosticEngine {
 
         double frameTimeMs = deltaNanos / 1_000_000.0;
 
-        // Store rolling history
         frameTimeHistory[historyIndex] = frameTimeMs;
         historyIndex = (historyIndex + 1) % frameTimeHistory.length;
         totalFramesSampled++;
 
-        // Stutter detection threshold: >28ms (<35 FPS) or >1.8x average frame time
         double avgFrameTime = getAverageFrameTime();
         if (frameTimeMs > 28.0 && frameTimeMs > avgFrameTime * 1.65) {
             diagnoseFrameDrop(frameTimeMs, avgFrameTime);
         }
 
-        // Periodically update live telemetry file (every 60 frames)
         if (totalFramesSampled % 60 == 0) {
             updateLiveTelemetry(frameTimeMs, avgFrameTime);
         }
@@ -101,14 +87,13 @@ public final class FrameDropDiagnosticEngine {
         stutterCount++;
         lastStutterMs = frameTimeMs;
 
-        // 1. Check GC Pause Delta
         long gcCountBefore = lastGcCount;
         long gcTimeBefore = lastGcTimeMs;
         updateGcStats();
         long gcDeltaCount = lastGcCount - gcCountBefore;
         long gcDeltaTimeMs = lastGcTimeMs - gcTimeBefore;
 
-        // 2. Query Game State via reflection (100% crash-proof)
+        // Game classes may not be available during startup.
         boolean isDriving = false;
         float vehicleSpeed = 0.0f;
         float playerX = 0.0f, playerY = 0.0f;
@@ -141,7 +126,6 @@ public final class FrameDropDiagnosticEngine {
                 }
             }
 
-            // Query Cell entities
             Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");
             Field instField = worldClass.getField("instance");
             Object worldInst = instField.get(null);
@@ -155,7 +139,6 @@ public final class FrameDropDiagnosticEngine {
                 }
             }
 
-            // Query WorldStreamer queue
             Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
             Object wsInst = wsClass.getField("instance").get(null);
             if (wsInst != null) {
@@ -165,7 +148,6 @@ public final class FrameDropDiagnosticEngine {
                 if (q != null) wsQueueSize = q.size();
             }
 
-            // Query ChunkSaveWorker queue
             Class<?> cswClass = Class.forName("zombie.iso.ChunkSaveWorker");
             Object cswInst = cswClass.getField("instance").get(null);
             if (cswInst != null) {
@@ -174,7 +156,6 @@ public final class FrameDropDiagnosticEngine {
                 if (sq != null) saveQueueSize = sq.size();
             }
 
-            // Query IsoChunk.loadGridSquare ingestion queue
             Class<?> chunkClass = Class.forName("zombie.iso.IsoChunk");
             Field lgsField = chunkClass.getField("loadGridSquare");
             Object lgsObj = lgsField.get(null);
@@ -188,7 +169,6 @@ public final class FrameDropDiagnosticEngine {
         lastDiagnosedChunkX = chunkX;
         lastDiagnosedChunkY = chunkY;
 
-        // 3. Classify Root Cause
         String cause;
         if (gcDeltaTimeMs > 5) {
             cause = "GC_STW_PAUSE (" + gcDeltaTimeMs + "ms)";
@@ -212,7 +192,6 @@ public final class FrameDropDiagnosticEngine {
 
         lastStutterCause = cause;
 
-        // 4. Log Stutter Report
         String timestamp = DATE_FORMAT.format(new Date());
         String logEntry = String.format(
             "[%s] STUTTER: %.1f ms (Avg: %.1f ms | FPS: %.0f) -> ROOT CAUSE: [%s] | Pos: (%.0f, %.0f | Ch: %d,%d) | Driving: %b | Zombies: %d | WSQueue: %d | SaveQueue: %d | GC: %dms",
@@ -220,7 +199,6 @@ public final class FrameDropDiagnosticEngine {
         );
 
         pendingDiagnosticLogs.offer(logEntry);
-       // PZOLogger.warn(logEntry);
     }
 
     private static void updateGcStats() {
@@ -231,7 +209,7 @@ public final class FrameDropDiagnosticEngine {
             for (GarbageCollectorMXBean gc : gcs) {
                 String name = gc.getName();
                 if (name != null && name.contains("Cycles")) {
-                    // Ignore concurrent background cycles under ZGC (sub-millisecond STW pause)
+                    // Exclude concurrent background cycles from pause accounting.
                     continue;
                 }
                 long c = gc.getCollectionCount();
@@ -285,7 +263,6 @@ public final class FrameDropDiagnosticEngine {
         if (pendingDiagnosticLogs.isEmpty()) return;
 
         List<File> targetDirs = new ArrayList<>();
-        // Check discovered Zomboid directories
         String userHome = System.getProperty("user.home");
         if (userHome != null) {
             targetDirs.add(new File(userHome, "Zomboid" + File.separator + "Logs"));

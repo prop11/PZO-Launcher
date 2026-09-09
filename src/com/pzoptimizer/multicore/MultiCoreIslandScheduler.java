@@ -23,23 +23,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Island-Based Spatial Partitioning Simulation Scheduler (Pillar 4).
- * 
- * Re-architects MovingObjectUpdateScheduler from single-threaded sequential simulation
- * into non-interfering 32x32 tile spatial islands:
- * 
- * 1. Dual-Phase Checkerboard Partitioning:
- *    - Red Islands ((ix + iy) % 2 == 0) are separated from each other by at least 32 tiles.
- *    - Black Islands ((ix + iy) % 2 == 1) are separated from each other by at least 32 tiles.
- *    - Zero interaction overlap: Entities in different Red islands can NEVER touch or modify the same tiles!
- * 2. Parallel Multi-Core Execution:
- *    - Phase A: All Red islands execute preupdate(), frameStep(), update(), postupdate() across all CPU cores in parallel.
- *    - Phase B: All Black islands execute preupdate(), frameStep(), update(), postupdate() across all CPU cores in parallel.
- * 3. Boundary & Player Protection:
- *    - Entities within 2 tiles of an island boundary or within 12 tiles of players are reserved for the main simulation thread.
- * 4. Zero allocation, lock-free spatial simulation scaling across all performance cores.
- */
 public final class MultiCoreIslandScheduler {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -49,11 +32,9 @@ public final class MultiCoreIslandScheduler {
     public static final float SAFETY_MARGIN = 2.0f; // 2 tiles boundary buffer
     public static final float PLAYER_SAFETY_RADIUS_SQ = 12.0f * 12.0f; // 144 tiles^2
 
-    // Telemetry metrics
     public static final AtomicLong totalParallelUpdates = new AtomicLong(0);
     public static final AtomicInteger lastSimulatedIslands = new AtomicInteger(0);
 
-    // Spatial island partitions
     public static class IslandBucket {
         public final int ix;
         public final int iy;
@@ -68,11 +49,8 @@ public final class MultiCoreIslandScheduler {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        // NOTE: In Build 42, MovingObjectUpdateScheduler manages IsoGameCharacter.updateAlpha()
-        // and non-thread-safe IsoGridSquare.movingObjects lists. Parallelizing simulation across
-        // background worker threads causes alpha calculation skips (invisible zombies) and race
-        // conditions on square transfer. We preserve main-thread simulation for 100% visual fidelity
-        // and collision integrity.
+        // Keep simulation on the main thread: updateAlpha() and movingObjects mutations
+        // caused visibility failures and square-transfer races on worker threads.
         initialized.set(true);
         active = false;
         PZOLogger.info("[MultiCoreIslandScheduler] Preserving main-thread simulation for 100% zombie visibility & collision safety");
@@ -136,15 +114,10 @@ public final class MultiCoreIslandScheduler {
         }
     }
 
-    /**
-     * Enhanced List implementation that intercepts MovingObjectUpdateSchedulerUpdateBucket
-     * and executes Red and Black spatial islands in parallel across CPU cores.
-     */
     public static class IslandAwareBucketList extends ArrayList<IsoMovingObject> {
         private final UpdateSchedulerSimulationLevel simulationLevel;
         private final int frameMod;
 
-        // Partitioned Island Storage
         private final Map<Long, IslandBucket> redIslands = new HashMap<>();
         private final Map<Long, IslandBucket> blackIslands = new HashMap<>();
         private final List<IsoMovingObject> boundaryAndPlayerObjects = new ArrayList<>(64);
@@ -162,17 +135,15 @@ public final class MultiCoreIslandScheduler {
         public boolean add(IsoMovingObject obj) {
             if (obj == null) return false;
 
-            // 0. Non-thread-safe entities that execute Lua (Vehicles, Players) must ALWAYS run on main simulation thread
+            // Vehicles and players can execute Lua and must stay on the main simulation thread.
             if (obj instanceof BaseVehicle || obj instanceof IsoPlayer) {
                 boundaryAndPlayerObjects.add(obj);
                 return super.add(obj);
             }
 
-            // Classify into island or boundary/player bucket
             float x = obj.getX();
             float y = obj.getY();
 
-            // 1. Check player safety radius
             IsoPlayer player = IsoPlayer.getInstance();
             if (player != null) {
                 float dx = x - player.getX();
@@ -183,7 +154,6 @@ public final class MultiCoreIslandScheduler {
                 }
             }
 
-            // 2. Check island boundary safety margin
             int ix = (int) Math.floor(x / ISLAND_SIZE);
             int iy = (int) Math.floor(y / ISLAND_SIZE);
 
@@ -196,7 +166,6 @@ public final class MultiCoreIslandScheduler {
                 return super.add(obj);
             }
 
-            // 3. Classify into Red (Phase 0) or Black (Phase 1)
             long key = FastChunkKey.pack(ix, iy);
             int phase = (ix + iy) & 1;
 
@@ -215,7 +184,7 @@ public final class MultiCoreIslandScheduler {
             if (!parallelSweepExecuted && (!redIslands.isEmpty() || !blackIslands.isEmpty())) {
                 executeParallelSimulation();
                 parallelSweepExecuted = true;
-                // Return boundary objects count so the vanilla caller executes only the boundary entities!
+                // Expose only boundary entities to the vanilla caller.
                 return boundaryAndPlayerObjects.size();
             } else if (parallelSweepExecuted && !parallelPostUpdateExecuted && (!redIslands.isEmpty() || !blackIslands.isEmpty())) {
                 executeParallelPostUpdate();
@@ -250,7 +219,6 @@ public final class MultiCoreIslandScheduler {
             int totalSimulated = 0;
             lastSimulatedIslands.set(redIslands.size() + blackIslands.size());
 
-            // Phase A: Red Islands simulated in parallel across CPU cores
             if (!redIslands.isEmpty()) {
                 List<CompletableFuture<Void>> redFutures = new ArrayList<>(redIslands.size());
                 for (IslandBucket island : redIslands.values()) {
@@ -263,7 +231,6 @@ public final class MultiCoreIslandScheduler {
                 CompletableFuture.allOf(redFutures.toArray(new CompletableFuture[0])).join();
             }
 
-            // Phase B: Black Islands simulated in parallel across CPU cores
             if (!blackIslands.isEmpty()) {
                 List<CompletableFuture<Void>> blackFutures = new ArrayList<>(blackIslands.size());
                 for (IslandBucket island : blackIslands.values()) {
@@ -280,7 +247,6 @@ public final class MultiCoreIslandScheduler {
         }
 
         private void executeParallelPostUpdate() {
-            // Phase A: Red Islands postupdate in parallel
             if (!redIslands.isEmpty()) {
                 List<CompletableFuture<Void>> redFutures = new ArrayList<>(redIslands.size());
                 for (IslandBucket island : redIslands.values()) {
@@ -292,7 +258,6 @@ public final class MultiCoreIslandScheduler {
                 CompletableFuture.allOf(redFutures.toArray(new CompletableFuture[0])).join();
             }
 
-            // Phase B: Black Islands postupdate in parallel
             if (!blackIslands.isEmpty()) {
                 List<CompletableFuture<Void>> blackFutures = new ArrayList<>(blackIslands.size());
                 for (IslandBucket island : blackIslands.values()) {

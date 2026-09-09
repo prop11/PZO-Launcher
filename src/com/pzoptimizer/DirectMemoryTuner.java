@@ -1,10 +1,5 @@
 package com.pzoptimizer;
 
-/**
- * Direct NIO Off-Heap Memory & Buffer Pool Optimizer.
- * Enforces 512KB page-aligned native buffers to prevent off-heap fragmentation
- * during high-speed vehicle driving and texture streaming.
- */
 public class DirectMemoryTuner {
     public static void initialize() {
         try {

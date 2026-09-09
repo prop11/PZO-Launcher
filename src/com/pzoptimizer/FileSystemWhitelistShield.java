@@ -14,19 +14,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import sun.misc.Unsafe;
 
-/**
- * Project Zomboid Build 42 - FileSystem Whitelist & Secondary-Drive Protection Shield.
- * 
- * In Build 42, ZomboidFileSystem.validatePrefix(path) enforces an internal whitelist
- * of allowed base directories (allowedPrefixes). When Steam Workshop mods are installed
- * on a secondary drive (e.g. K:\SteamLibrary, D:\SteamLibrary), the vanilla engine can
- * fail to register these paths in time, or wipe them during ResetMods(), causing
- * validatePrefix to throw IllegalArgumentException and failing animation/model loading.
- * 
- * This shield intercepts allowedPrefixes via a permanent wrapped Supplier and runs
- * an active background watchdog to guarantee that all mounted drives and workshop
- * libraries are 100% permanently whitelisted.
- */
+/** Wraps allowedPrefixes so ResetMods() retains discovered Steam library roots. */
 public final class FileSystemWhitelistShield {
 
     private static volatile boolean initialized = false;
@@ -51,7 +39,6 @@ public final class FileSystemWhitelistShield {
         obtainUnsafe();
         collectAllSearchRoots();
 
-        // Continuous lifecycle daemon: maintains whitelist throughout game boot, main menu, and save loading
         Thread daemon = new Thread(() -> {
             while (true) {
                 try {
@@ -67,7 +54,6 @@ public final class FileSystemWhitelistShield {
     }
 
     private static void collectAllSearchRoots() {
-        // 1. All mounted drive roots (C:\, D:\, K:\, etc.)
         try {
             File[] roots = File.listRoots();
             if (roots != null) {
@@ -94,7 +80,6 @@ public final class FileSystemWhitelistShield {
                             }
                         }
 
-                        // Parse libraryfolders.vdf
                         File vdf1 = new File(root, "Program Files (x86)/Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
                         if (!vdf1.exists()) {
                             vdf1 = new File(root, "Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
@@ -107,7 +92,6 @@ public final class FileSystemWhitelistShield {
             }
         } catch (Throwable ignored) {}
 
-        // 2. User Zomboid directory
         try {
             String userHome = System.getProperty("user.home");
             File zomboidDir = new File(userHome, "Zomboid");
@@ -116,7 +100,6 @@ public final class FileSystemWhitelistShield {
             }
         } catch (Throwable ignored) {}
 
-        // 3. Current working directory / execution directory roots
         try {
             File cwd = new File(".").getAbsoluteFile();
             addRootPath(cwd);
@@ -182,7 +165,7 @@ public final class FileSystemWhitelistShield {
                 return false;
             }
 
-            // 1. Hook the ResettableLazyValue supplier permanently so resets NEVER drop discovered roots
+            // Reapply discovered roots when ResettableLazyValue recreates its value.
             Field allowedField = fsClass.getDeclaredField("allowedPrefixes");
             allowedField.setAccessible(true);
             Object lazy = allowedField.get(fsInstance);
@@ -232,9 +215,7 @@ public final class FileSystemWhitelistShield {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Unbreakable supplier wrapper: always ensures discovered secondary drive roots are included.
-     */
+    /** Adds discovered roots to the wrapped supplier result. */
     private static final class PZOShieldSupplier implements Supplier<List<Path>> {
         private final Supplier<List<Path>> delegate;
         private final Set<String> roots;

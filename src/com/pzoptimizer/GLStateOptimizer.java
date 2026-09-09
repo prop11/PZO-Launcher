@@ -2,10 +2,6 @@ package com.pzoptimizer;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Project Zomboid Build 42 - Advanced OpenGL & Shader State Optimizer.
- * Eliminates thousands of redundant GPU uniform, matrix, texture, alpha, and depth calls per frame.
- */
 public class GLStateOptimizer {
     public static volatile boolean enabled = true;
 
@@ -13,27 +9,22 @@ public class GLStateOptimizer {
         enabled = value;
     }
 
-    // Live Optimization Telemetry Counters
     public static final AtomicLong glCallsFiltered = new AtomicLong(0);
     public static final AtomicLong matricesSkipped = new AtomicLong(0);
     public static final AtomicLong uniformsSkipped = new AtomicLong(0);
 
-    // 1. Texture & Color Caches
     private static int currentTexture = -1;
     private static float currentR = -1f, currentG = -1f, currentB = -1f, currentA = -1f;
     private static int currentSrcBlend = -1, currentDstBlend = -1;
 
-    // 2. Alpha & Depth Caching (IndieGL hot loops)
     private static int lastAlphaFunc = -1;
     private static float lastAlphaRef = -1.0f;
     private static int lastDepthFunc = -1;
     private static int lastDepthMask = -1; // 0=false, 1=true
 
-    // 3. Chunk Depth Shader Uniform Caching (DefaultShader)
     private static int chunkDepthLoc = -2;
     private static float cachedChunkDepth = Float.NaN;
 
-    // 4. General Shader Uniform State Caching (256-entry uniform table)
     private static final int UNIFORM_TABLE_SIZE = 256;
     private static final float[] cachedUniform1f = new float[UNIFORM_TABLE_SIZE];
     private static final int[] cachedUniform1i = new int[UNIFORM_TABLE_SIZE];
@@ -42,7 +33,6 @@ public class GLStateOptimizer {
     private static final boolean[] uniform1iValid = new boolean[UNIFORM_TABLE_SIZE];
     private static final boolean[] uniform4fValid = new boolean[UNIFORM_TABLE_SIZE];
 
-    // 5. Skinned 3D Model Matrix Uniform Cache (1024-entry shader table)
     public static class ShaderMatrixState {
         public int uniformLoc = -2;
         public float[] lastMatrix = new float[16];
@@ -178,14 +168,13 @@ public class GLStateOptimizer {
             return true;
         }
 
-        // Fast float-by-float unrolled matrix comparison (Zero memory allocation)
         float[] last = state.lastMatrix;
         if (last[0] == newMatrix[0] && last[1] == newMatrix[1] && last[2] == newMatrix[2] && last[3] == newMatrix[3] &&
             last[4] == newMatrix[4] && last[5] == newMatrix[5] && last[6] == newMatrix[6] && last[7] == newMatrix[7] &&
             last[8] == newMatrix[8] && last[9] == newMatrix[9] && last[10] == newMatrix[10] && last[11] == newMatrix[11] &&
             last[12] == newMatrix[12] && last[13] == newMatrix[13] && last[14] == newMatrix[14] && last[15] == newMatrix[15]) {
             matricesSkipped.incrementAndGet();
-            return false; // Matrix matches cached state, skip redundant GPU upload
+            return false;
         }
 
         System.arraycopy(newMatrix, 0, state.lastMatrix, 0, 16);

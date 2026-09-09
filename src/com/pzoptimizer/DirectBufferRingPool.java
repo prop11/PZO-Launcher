@@ -4,10 +4,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * Zero-Fragmentation Native Direct NIO Buffer Ring Pool.
- * Pre-warms and pools 4KB page-aligned off-heap buffers for chunk decompression and texture streaming.
- */
 public class DirectBufferRingPool {
     private static final int BUFFER_SIZE = 131072; // 128KB direct native buffer
     private static final int POOL_SIZE = 16;
@@ -21,9 +17,6 @@ public class DirectBufferRingPool {
         }
     }
 
-    /**
-     * Acquire a clean, pre-allocated native direct byte buffer.
-     */
     public static ByteBuffer acquire() {
         ByteBuffer buf = pool.poll();
         if (buf == null) {
@@ -34,9 +27,6 @@ public class DirectBufferRingPool {
         return buf;
     }
 
-    /**
-     * Release a buffer back into the ring pool.
-     */
     public static void release(ByteBuffer buf) {
         if (buf != null && buf.isDirect() && buf.capacity() == BUFFER_SIZE) {
             buf.clear();

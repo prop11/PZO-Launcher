@@ -4,19 +4,6 @@ import java.io.File;
 import java.io.FileWriter;
 import java.util.Locale;
 
-/**
- * PZO Enhanced Rendering Telemetry & Performance Gain Monitor.
- * 
- * Tracks real-time metrics and estimated hardware resource savings across:
- * - Phase 3 SIMD AVX2 Batch Horde Spatial Culler (HordeSpatialCuller)
- * - 3D Dynamic Skeletal Bone Skinning Governor (HordeAnimationLODGovernor & ModelSkinningGovernor)
- * - 2D Screen-space Draw Call Culling (RenderFrustumCuller)
- * - 32-Level Subterranean Level Occlusion (ZOcclusionCuller)
- * - OpenGL JNI Driver State Filter (GLStateOptimizer)
- * 
- * Only active in Unstable / Beta channel builds.
- * Writes pzo_render_telemetry.json and feeds into live HUD / clipboard diagnostics.
- */
 public final class EnhancedRenderTelemetry {
 
     public static class MetricsSnapshot {
@@ -59,16 +46,11 @@ public final class EnhancedRenderTelemetry {
         snap.parallelSimulatedEntities = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
         snap.multiCoreWorkers = com.pzoptimizer.multicore.PZOMultiCoreEngine.getWorkerCount();
 
-        // Hardware cost weightings:
-        // ~0.0015 ms CPU time saved per culled draw call + state check
-        // ~0.0035 ms GPU raster/vertex time saved per subterranean tile
-        // ~0.0006 ms CPU SIMD time saved per 4x4 bone matrix multiplication
-        // ~0.0010 ms JNI driver switch time saved per redundant GL call
-        // ~0.0040 ms CPU time saved per throttled distant zombie AI / pathfind tick
+        // Assumed per-operation costs in milliseconds, not measured timings.
         snap.estimatedCpuMsSaved = (snap.drawsCulled * 0.0015) + (snap.boneTransformsSaved * 0.0006) + (snap.glCallsFiltered * 0.0010) + (snap.throttledTownZombies * 0.0040);
         snap.estimatedGpuMsSaved = (snap.drawsCulled * 0.0012) + (snap.subterraneanTilesCulled * 0.0035);
 
-        // Baseline frame budget 16.6ms (60 FPS); compute estimated efficiency dividend
+        // Compare the estimate with a fixed 16.6 ms frame budget.
         double frameSavings = Math.min(8.0, (snap.estimatedCpuMsSaved + snap.estimatedGpuMsSaved) / 1000.0);
         snap.estimatedFpsGainPercent = Math.min(75.0, (frameSavings / 16.6) * 100.0);
 

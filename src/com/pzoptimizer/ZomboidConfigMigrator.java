@@ -9,18 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Project Zomboid Build 42 - Configuration Migrator & Validator.
- * Automatically inspects and patches ProjectZomboid64.json (and Info.plist on macOS)
- * during in-game updates or early engine startup.
- *
- * Ensures backward compatibility when upgrading from older releases (such as 0.8.2) to 0.9.5+,
- * injecting required JVM 17/21+ arguments, the native JVMTI agent bridge (-agentlib:pzo_native64),
- * and B42 HotSpot performance tuning while strictly preserving custom user RAM allocations (-Xmx/-Xms)
- * and ZombieBuddy coexistence (-agentlib:zbNative).
- *
- * 100% pure Java with zero external dependencies.
- */
+/** Migrates launcher configuration while preserving custom heap sizes and agent entries. */
 public final class ZomboidConfigMigrator {
 
     public static final String TARGET_JSON_NAME = "ProjectZomboid64.json";
@@ -48,9 +37,6 @@ public final class ZomboidConfigMigrator {
         "-XX:+AlwaysPreTouch"
     };
 
-    /**
-     * Checks if the specified ProjectZomboid64.json requires migration to 0.9.5 standards.
-     */
     public static boolean isMigrationNeeded(File jsonFile) {
         if (jsonFile == null || !jsonFile.exists() || jsonFile.length() == 0) {
             return false;
@@ -66,13 +52,11 @@ public final class ZomboidConfigMigrator {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) parsed;
 
-            // Check mainClass
             Object mainClass = map.get("mainClass");
             if (mainClass == null || !TARGET_MAIN_CLASS.equals(mainClass.toString().trim())) {
                 return true;
             }
 
-            // Check classpath
             Object cpObj = map.get("classpath");
             if (!(cpObj instanceof List)) {
                 return true;
@@ -91,7 +75,6 @@ public final class ZomboidConfigMigrator {
                 return true;
             }
 
-            // Check vmArgs
             Object vmObj = map.get("vmArgs");
             if (!(vmObj instanceof List)) {
                 return true;
@@ -102,14 +85,12 @@ public final class ZomboidConfigMigrator {
                 if (item != null) vmStrings.add(item.toString().trim());
             }
 
-            // Check for critical missing flags
             for (String req : REQUIRED_VM_ARGS) {
                 if (!vmStrings.contains(req)) {
                     return true;
                 }
             }
 
-            // Check for library path
             boolean hasLibPath = false;
             String os = System.getProperty("os.name", "").toLowerCase();
             for (String arg : vmStrings) {
@@ -124,7 +105,6 @@ public final class ZomboidConfigMigrator {
                 return true;
             }
 
-            // Check if undesirable headless flag is still lingering
             for (String arg : vmStrings) {
                 if (arg.startsWith("-Djava.awt.headless")) {
                     return true;
@@ -138,9 +118,6 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /**
-     * Migrates the provided JSON string into the updated 0.9.5 configuration format.
-     */
     public static String migrateJsonContent(String originalJson, File gameDir) {
         Object parsed = JsonMini.parse(originalJson);
         if (!(parsed instanceof Map)) {
@@ -150,10 +127,8 @@ public final class ZomboidConfigMigrator {
         @SuppressWarnings("unchecked")
         Map<String, Object> root = (Map<String, Object>) parsed;
 
-        // 1. Set optimized entrypoint
         root.put("mainClass", TARGET_MAIN_CLASS);
 
-        // 2. Classpath normalization (preserve custom JARs, ensure PZOptimEngine.jar and . are present)
         List<String> cpList = new ArrayList<>();
         Object cpObj = root.get("classpath");
         if (cpObj instanceof List) {
@@ -180,7 +155,6 @@ public final class ZomboidConfigMigrator {
         }
         root.put("classpath", cpList);
 
-        // 3. vmArgs normalization & migration
         List<String> rawArgs = new ArrayList<>();
         Object vmObj = root.get("vmArgs");
         if (vmObj instanceof List) {
@@ -189,7 +163,6 @@ public final class ZomboidConfigMigrator {
             }
         }
 
-        // Detect ZombieBuddy active presence
         boolean zbActive = false;
         for (String arg : rawArgs) {
             if (arg.contains("zbNative") || arg.contains("ZombieBuddy")) {
@@ -207,7 +180,6 @@ public final class ZomboidConfigMigrator {
             }
         }
 
-        // Clean undesirable or superseded arguments
         List<String> userCleanArgs = new ArrayList<>();
         for (String arg : rawArgs) {
             if (arg.startsWith("-Djava.awt.headless")) continue; // PZO requires GUI/AWT
@@ -223,18 +195,15 @@ public final class ZomboidConfigMigrator {
 
         List<String> targetArgs = new ArrayList<>();
 
-        // 3a. Native agent bridges first
         targetArgs.add(TARGET_AGENTLIB);
         if (zbActive) {
             targetArgs.add("-agentlib:zbNative");
             PZOLogger.info("[ZomboidConfigMigrator] Preserved ZombieBuddy bridge (-agentlib:zbNative)");
         }
 
-        // 3b. JVM 17/21+ export & native access parameters
         targetArgs.add("--enable-native-access=ALL-UNNAMED");
         targetArgs.add("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED");
 
-        // 3c. Platform-specific native library search paths
         if (isWin) {
             targetArgs.add("-Djava.library.path=win64/;.;natives/");
         } else if (isLinux) {
@@ -243,7 +212,6 @@ public final class ZomboidConfigMigrator {
             targetArgs.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
         }
 
-        // 3d. User memory allocations (-Xms, -Xmx) and Steam args preserved
         boolean hasXms = false;
         boolean hasXmx = false;
         for (String arg : userCleanArgs) {
@@ -254,11 +222,9 @@ public final class ZomboidConfigMigrator {
             }
         }
 
-        // Default memory fallback if user config lacked heap sizing
         if (!hasXms) targetArgs.add(3, "-Xms2048m");
         if (!hasXmx) targetArgs.add(4, "-Xmx4096m");
 
-        // 3e. Inject all 0.9.5 performance flags if missing
         for (String pf : REQUIRED_VM_ARGS) {
             if (!targetArgs.contains(pf)) {
                 targetArgs.add(pf);
@@ -270,10 +236,7 @@ public final class ZomboidConfigMigrator {
         return JsonMini.format(root);
     }
 
-    /**
-     * Migrates the specified JSON file in place, saving a .bak copy of the original.
-     * Safe to call while the game is running (file handle is not locked by JVM/launcher).
-     */
+    /** Migrates the JSON file in place after saving a .bak copy. */
     public static boolean migrateFileInPlace(File jsonFile) {
         if (jsonFile == null || !jsonFile.exists()) return false;
         try {
@@ -297,11 +260,7 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /**
-     * Staging helper for auto-updaters (UpdateDialog):
-     * Writes the migrated configuration to ProjectZomboid64.json.new so that the
-     * updater script can atomically replace it when the game process terminates.
-     */
+    /** Stages ProjectZomboid64.json.new for the updater to replace after the game exits. */
     public static boolean prepareStagedUpdate(File gameDir) {
         if (gameDir == null) return false;
         try {
@@ -337,11 +296,6 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /**
-     * Startup verification:
-     * Called during early PZOEntrypoint boot. Inspects ProjectZomboid64.json in the
-     * working directory and immediately repairs it if it lacks required 0.9.5 flags.
-     */
     public static void checkAndMigrateCurrentInstallation(File gameDir) {
         try {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();
@@ -358,9 +312,6 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /**
-     * Lightweight recursive JSON parser and serializer with zero external dependencies.
-     */
     public static class JsonMini {
         public static Object parse(String json) {
             if (json == null) return null;

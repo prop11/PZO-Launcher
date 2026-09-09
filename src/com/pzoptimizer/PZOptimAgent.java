@@ -5,9 +5,6 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
 
-/**
- * Project Zomboid Build 42 - Runtime JVM Instrumentation Agent & Java Mod Loader.
- */
 public class PZOptimAgent {
     private static volatile Instrumentation instrumentationInstance = null;
 
@@ -53,7 +50,6 @@ public class PZOptimAgent {
 
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
-        // Automatically load and hook any ZombieBuddy / Java Workshop mods with full Instrumentation
         try {
             JavaModLoader.loadMods(inst);
         } catch (Throwable t) {
@@ -314,7 +310,6 @@ public class PZOptimAgent {
                     }
                 }
 
-                // class attributes
                 int classAttrCount = dis.readUnsignedShort();
                 dos.writeShort(classAttrCount);
                 for (int a = 0; a < classAttrCount; a++) {
@@ -408,7 +403,6 @@ public class PZOptimAgent {
                 byte[] copy = b.clone();
                 int patchedSites = 0;
 
-                // Loop reduction: calculateZExtentsForChunkMap (28,561 loop down to 169)
                 for (int k = pos; k < copy.length - 4; k++) {
                     if (copy[k] == 0x2A && copy[k + 1] == (byte) 0xB4 &&
                         copy[k + 2] == oldRefHi && copy[k + 3] == oldRefLo &&

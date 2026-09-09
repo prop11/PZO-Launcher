@@ -4,27 +4,11 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * PZO Frame-Budgeted Chunk Ingestion Pacer (Next-Gen Chunk Streaming Engine).
- * 
- * In Build 42 with 32 vertical levels (-16 to +16), each chunk contains 2,048 IsoGridSquare instances.
- * In vanilla PZ, when WorldStreamer finishes loading 6-12 chunks from disk, they are all dumped into
- * IsoChunk.loadGridSquare, and IsoChunkMap.processAllLoadGridSquare() drains the ENTIRE queue in a single frame,
- * forcing the main thread to instantiate and stitch 15,000+ squares at once. This produces massive 100-250ms freeze spikes.
- * 
- * ChunkIngestionPacer installs a time-sliced pacing governor onto IsoChunk.loadGridSquare:
- * - Enforces a strict frame budget (default 2.5 ms maximum or max 2 chunks per frame during gameplay).
- * - Leaves subsequent chunks in the thread-safe queue to be smoothly ingested over the next 1-2 frames.
- * - During loading screens and world generation (IngameState.loading == true), budget limits are bypassed
- *   for instantaneous game boot.
- * - Eliminates 100% of chunk integration hitches and locks frame pacing at steady 60/144 FPS.
- */
 public final class ChunkIngestionPacer {
 
     private static volatile boolean active = false;
     private static volatile boolean pacerInstalled = false;
 
-    // Time budget in nanoseconds (3.5 milliseconds = 3,500,000 ns for high-refresh 165Hz)
     public static final long FRAME_BUDGET_NANOS = 3_500_000L;
     public static final int MAX_CHUNKS_PER_FRAME = 3;
     private static volatile int maxCachedChunks = 1000;
@@ -135,18 +119,6 @@ public final class ChunkIngestionPacer {
 
     private static volatile int lastUnloadFrameCount = -1;
 
-    /**
-     * Smoothly paces the teardown of orphaned chunks from IsoChunkMap.SharedChunks.
-     * 
-     * In Build 42, crossing a chunk boundary at 120+ km/h leaves 13 trailing chunks outside the active grid.
-     * In vanilla PZ, IsoChunkMap synchronously removes, tears down squares/navmesh, and queues all 13 chunks in 1 frame (50-80ms freeze).
-     * With our bytecode patch on Up/Down/Left/Right, map shifting takes 0.005ms, leaving trailing chunks in SharedChunks.
-     * 
-     * processPendingUnloads enforces strict mutual exclusion:
-     * - If any chunk was ingested in this frame, unloads are skipped entirely to prevent frame-time stacking.
-     * - On slack frames with 0 ingestion, at most 1 orphaned chunk is unlinked under a 2.5ms ceiling.
-     * - Locks frametimes flat at 60+ FPS while driving.
-     */
     public static boolean isPlayerDriving() {
         return PacedConcurrentQueue.isPlayerDriving();
     }
@@ -154,9 +126,6 @@ public final class ChunkIngestionPacer {
     public static void processPendingUnloads() {
         if (isEngineLoading()) return;
         if (isPlayerDriving()) return; // Do not unload chunks while driving to avoid collision/mesh gaps
-
-        // Budgeted teardowns: Smoothly free at most 1-2 orphaned chunks per frame
-        // under a 1.5ms ceiling, preventing trailing chunk accumulation during vehicle travel.
 
         try {
             if (zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
@@ -175,7 +144,7 @@ public final class ChunkIngestionPacer {
             }
             lastUnloadFrameCount = currentFrame;
 
-            // Non-blocking tryLock: 0ms lock contention. If bSettingChunk is currently held, skip this tick.
+            // Skip this tick if another thread holds bSettingChunk.
             if (!zombie.iso.IsoChunkMap.bSettingChunk.tryLock()) {
                 return;
             }
@@ -215,7 +184,6 @@ public final class ChunkIngestionPacer {
                                     zombie.iso.ChunkSaveWorker.instance.Add(chunk);
                                 }
                             } catch (Throwable t) {
-                                // Safeguard individual chunk teardowns
                             }
                         }
                         unloadsThisFrame++;
@@ -358,8 +326,7 @@ public final class ChunkIngestionPacer {
                 }
             } catch (Throwable ignored) {}
 
-            // Monotonic frame-freeze watchdog: ONLY reset if > 500ms elapsed (game paused in debugger / external stall)
-            // Prevents the cascading reset bug where an external pause forces subsequent chunks into the same frame.
+            // Reset after a stall longer than 500 ms, not after ordinary frame delays.
             if (now - frameStartTime > 500_000_000L) {
                 frameStartTime = now;
                 chunksThisFrame = 0;
@@ -385,14 +352,9 @@ public final class ChunkIngestionPacer {
 
             long now = System.nanoTime();
 
-            // Precision monotonic frame boundary synchronization:
-            // Checks engine frame counter directly from IsoCamera.frameState.frameCount (0ns overhead)
             checkFrameBoundary(now);
 
-            // Balanced micro-task chunk pacing:
-            // When driving, never artificially throttle ingestion to 1-2 chunks; crossing chunk boundaries
-            // in Build 42 requires 13-26 chunks. We ingest dynamically up to 32 chunks under a 12.0 ms budget ceiling
-            // so vehicles never outrun chunk ingestion or drive into un-ingested missing floor tiles.
+            // Allow a larger ingestion budget while driving so the vehicle does not outrun loaded chunks.
             boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
             int maxChunks;

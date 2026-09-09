@@ -7,11 +7,6 @@ import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-/**
- * Project Zomboid Build 42 - Dedicated PZO Engine Logger.
- * Writes real-time initialization statuses, subsystem diagnostics, and crash traces
- * to %USERPROFILE%/Zomboid/Lua/pzo_engine.log and System.out.
- */
 public class PZOLogger {
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     private static File logFile = null;
@@ -31,7 +26,6 @@ public class PZOLogger {
             System.err.println("[PZO-LOGGER-ERR] Failed to initialize log file: " + e.getMessage());
         }
 
-        // Install Global Uncaught Exception Handler for crash capture
         try {
             Thread.UncaughtExceptionHandler defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
             Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {

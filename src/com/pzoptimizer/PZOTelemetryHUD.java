@@ -3,11 +3,6 @@ package com.pzoptimizer;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 
-/**
- * PZO Real-Time Telemetry & Diagnostic HUD Bridge.
- * Aggregates runtime engine health, frame time variance, GC pause overhead,
- * off-heap direct buffer allocation, SIMD AVX2 horde culler status, and chunk streaming rates.
- */
 public final class PZOTelemetryHUD {
 
     private static final MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();

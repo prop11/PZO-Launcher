@@ -3,14 +3,6 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * PZO Build 42 32-Level Vertical (Z-Index) Chunk Pre-caching Streamer.
- * Build 42 expands vertical world height from 8 levels to 32 levels (-16 to +16).
- * 
- * This streamer tracks player vertical velocity and staircase transitions,
- * predictively pre-warming vertical chunk slices and grid square lookups
- * to eliminate stair climbing and high-rise elevator hitching.
- */
 public final class VerticalChunkStreamer {
 
     private static volatile boolean active = false;
@@ -64,11 +56,9 @@ public final class VerticalChunkStreamer {
                 lastPlayerZ = currentZ;
                 lastZChangeTime = System.currentTimeMillis();
 
-                // Predictively warm adjacent vertical slices (currentZ + zDelta, currentZ + 2*zDelta)
                 int targetZ1 = currentZ + zDelta;
                 int targetZ2 = currentZ + (zDelta * 2);
 
-                // Ensure within Build 42 bounds (-16 to +16)
                 if (targetZ1 >= -16 && targetZ1 <= 16) {
                     prewarmVerticalLevel(player, targetZ1);
                 }
@@ -100,7 +90,6 @@ public final class VerticalChunkStreamer {
             int px = (int) ((Number) getX.invoke(player)).floatValue();
             int py = (int) ((Number) getY.invoke(player)).floatValue();
 
-            // Query grid squares in 5x5 column around player on target Z level
             Method getGridSquare = cell.getClass().getMethod("getGridSquare", int.class, int.class, int.class);
             for (int dx = -2; dx <= 2; dx++) {
                 for (int dy = -2; dy <= 2; dy++) {
