@@ -173,6 +173,14 @@ public final class MultiCoreAnimationEngine {
             zombie.core.skinnedmodel.animation.AnimationPlayer animPlayer = character.getAnimationPlayer();
             if (animPlayer == null) continue;
 
+            // Never bypass or freeze bones for dead, ragdolling, prone/downed, or highlighted entities.
+            // Bypassing ragdoll/dead entities triggers releaseRagdollController() destruction/recreation loops
+            // in Bullet Physics JNI, causing multi-second lag spikes. Bypassing highlighted entities breaks outlines.
+            if (character.isDead() || character.isRagdoll() || character.isOnFloor() || character.isOutlineHighlight()) {
+                animPlayer.updateBones = true;
+                continue;
+            }
+
             boolean culled = (i < cullMask.length && cullMask[i] == 0);
             if (culled) {
                 // Off-screen: completely bypass bone transform matrix computations
