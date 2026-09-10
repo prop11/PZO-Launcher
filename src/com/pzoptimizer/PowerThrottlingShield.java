@@ -24,19 +24,15 @@ public class PowerThrottlingShield {
 
     private static void applyWindowsQoS() {
         try {
-            // 0. Native kernel governor (EcoQoS exemption, 0.5ms timer, P-core binding)
             if (PZONative.isLoaded()) {
                 PZONative.bindCallingThreadToPCores();
             }
 
-            // 1. Keep JVM working set memory resident when minimized / backgrounded
             System.setProperty("sun.awt.keepWorkingSetOnMinimize", "true");
             System.setProperty("sun.awt.erasebackgroundonresize", "false");
 
-            // 2. High-performance multimedia scheduler and thread factory
             System.setProperty("java.util.concurrent.ForkJoinPool.common.threadFactory", "com.pzoptimizer.ThreadPoolTuner$NamedThreadFactory");
 
-            // 3. Thread group scheduling hints
             System.setProperty("sun.java2d.opengl", "true");
             System.setProperty("sun.java2d.d3d", "false");
 
@@ -46,7 +42,6 @@ public class PowerThrottlingShield {
 
     private static void applyMacQoS() {
         try {
-            // Disable macOS AppNap idle throttling on game loop
             System.setProperty("apple.awt.brushMetalLook", "false");
             System.setProperty("apple.awt.showGrowBox", "false");
             System.setProperty("apple.laf.useScreenMenuBar", "true");
@@ -56,7 +51,6 @@ public class PowerThrottlingShield {
 
     private static void applyLinuxQoS() {
         try {
-            // High-throughput thread scheduler hints for Linux & SteamOS
             System.setProperty("sun.net.useExclusiveBind", "true");
             System.setProperty("java.net.preferIPv4Stack", "true");
             PZOLogger.success("PowerThrottlingShield active (Linux / SteamOS throughput scheduler hints applied)");

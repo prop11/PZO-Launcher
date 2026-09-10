@@ -6,16 +6,7 @@ import java.util.Locale;
 
 /**
  * PZO Enhanced Rendering Telemetry & Performance Gain Monitor.
- * 
  * Tracks real-time metrics and estimated hardware resource savings across:
- * - Phase 3 SIMD AVX2 Batch Horde Spatial Culler (HordeSpatialCuller)
- * - 3D Dynamic Skeletal Bone Skinning Governor (HordeAnimationLODGovernor & ModelSkinningGovernor)
- * - 2D Screen-space Draw Call Culling (RenderFrustumCuller)
- * - 32-Level Subterranean Level Occlusion (ZOcclusionCuller)
- * - OpenGL JNI Driver State Filter (GLStateOptimizer)
- * 
- * Only active in Unstable / Beta channel builds.
- * Writes pzo_render_telemetry.json and feeds into live HUD / clipboard diagnostics.
  */
 public final class EnhancedRenderTelemetry {
 

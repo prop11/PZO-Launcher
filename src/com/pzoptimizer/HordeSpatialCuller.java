@@ -10,11 +10,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * PZO SIMD AVX2 Batch Horde Spatial Culler & Vectorized Entity Processor (Phase 3).
- * 
  * Vectorizes spatial proximity checks, camera frustum AABB culling, and multi-tier LOD classification
- * for 500 to 2,000+ active zombies in a single native SIMD pass.
- * 
- * Uses off-heap page-aligned direct NIO buffers from SpatialBufferPool with ZERO garbage collection overhead.
  */
 public final class HordeSpatialCuller {
 
@@ -28,7 +24,6 @@ public final class HordeSpatialCuller {
     public static final AtomicLong totalDistanceCalculations = new AtomicLong(0);
     public static final AtomicLong totalBoneTransformsSaved = new AtomicLong(0);
 
-    // Cached Reflection Handles
     private static Field fieldX = null;
     private static Field fieldY = null;
     private static Field fieldZ = null;
@@ -54,7 +49,6 @@ public final class HordeSpatialCuller {
     private static final float[] SNAPSHOT_DISTANCES = new float[MAX_SNAPSHOT];
     private static volatile int snapshotCount = 0;
 
-    // Thresholds
     public static final float TIER_CLOSE_SQ = 16.0f * 16.0f;     // 256 tiles^2  (LOD 0)
     public static final float TIER_MEDIUM_SQ = 32.0f * 32.0f;   // 1024 tiles^2 (LOD 1)
     public static final float TIER_FAR_SQ = 50.0f * 50.0f;      // 2500 tiles^2 (LOD 2)
@@ -169,7 +163,6 @@ public final class HordeSpatialCuller {
 
             if (playerGetInstMethod == null || worldInstField == null) return;
 
-            // 1. Discover local player
             Object player = playerGetInstMethod.invoke(null);
             if (player == null) {
                 lastTrackedZombieCount.set(0);
@@ -180,7 +173,6 @@ public final class HordeSpatialCuller {
             float px = getObjectX(player);
             float py = getObjectY(player);
 
-            // 2. Discover active zombie list from IsoWorld.instance.currentCell
             Object worldInst = worldInstField.get(null);
             if (worldInst == null) return;
 
@@ -208,7 +200,6 @@ public final class HordeSpatialCuller {
             ByteBuffer maskBuf = SpatialBufferPool.getCullMaskBuffer();
             ByteBuffer tiersBuf = SpatialBufferPool.getTiersBuffer();
 
-            // 3. Populate contiguous coordinate buffer
             coordBuf.rewind();
             for (int i = 0; i < count; i++) {
                 if (i >= zombies.size()) break;
@@ -224,7 +215,6 @@ public final class HordeSpatialCuller {
                 }
             }
 
-            // 4. Vectorized AVX2 Batch Calculations
             // Distance calculation
             PZONative.calculateDistancesAVX2(coordBuf, count, px, py, distBuf);
 
@@ -238,7 +228,6 @@ public final class HordeSpatialCuller {
             float maxY = py + CAMERA_HALF_SPAN;
             int insideAABB = PZONative.cullAABBAVX2(coordBuf, count, minX, minY, maxX, maxY, maskBuf);
 
-            // 5. Transfer to snapshot arrays for atomic thread-safe access
             distBuf.rewind();
             distBuf.get(SNAPSHOT_DISTANCES, 0, count);
 

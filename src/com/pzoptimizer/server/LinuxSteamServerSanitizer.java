@@ -9,8 +9,6 @@ import java.nio.file.StandardCopyOption;
 /**
  * Linux Dedicated Server Steam Native Library Sanitizer.
  * Automatically resolves SteamAPI_Init() failures on Indifferent Broccoli, Pterodactyl,
- * Docker, and Linux game server panels by pre-loading steamclient.so and ensuring
- * ~/.steam/sdk64/steamclient.so is populated.
  */
 public class LinuxSteamServerSanitizer {
 
@@ -50,7 +48,6 @@ public class LinuxSteamServerSanitizer {
             if (foundSteamclient != null) {
                 PZOServerLogger.info("[Linux Sanitizer] Located steamclient.so at: " + foundSteamclient.getAbsolutePath());
 
-                // 1. Pre-load steamclient.so into process memory so dlopen succeeds immediately
                 try {
                     System.load(foundSteamclient.getAbsolutePath());
                     PZOServerLogger.success("[Linux Sanitizer] Pre-loaded steamclient.so into JVM process memory");
@@ -58,7 +55,6 @@ public class LinuxSteamServerSanitizer {
                     PZOServerLogger.info("[Linux Sanitizer] System.load notice: " + t.getMessage());
                 }
 
-                // 2. Ensure ~/.steam/sdk64/steamclient.so exists (where Steam searches on Linux)
                 java.util.Set<Path> targetDirs = new java.util.LinkedHashSet<>();
                 if (userHome != null && !userHome.isEmpty()) {
                     targetDirs.add(Paths.get(userHome, ".steam", "sdk64"));

@@ -7,16 +7,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * PZO Dynamic Skeletal Rigging & Animation LOD Governor (Phase 3 SIMD Architecture).
- * 
  * In Build 42, animated 3D models compute 60+ skeletal bone matrix transformations
- * every frame for all active characters in the world regardless of screen visibility.
- * 
- * HordeAnimationLODGovernor dynamically assigns skeletal update fidelity:
- * - Local Players: Always 100% full 60+ FPS fidelity.
- * - Close Zombies (<= 12 tiles): Full multi-track skeletal skinning and blending.
- * - Horde Zombies (> 12 tiles): Uses SharedSkeleAnimationTrack optimization (doBlending = false),
- *   saving redundant 4x4 matrix multiplications with zero visual artifacts.
- * - Guarantees updateBones is always true for active models so zombies never freeze or float.
  */
 public final class HordeAnimationLODGovernor {
 
@@ -26,7 +17,6 @@ public final class HordeAnimationLODGovernor {
     public static final AtomicLong boneTransformsSaved = new AtomicLong(0);
     public static final AtomicLong activeModelsTracked = new AtomicLong(0);
 
-    // Cached Reflection Handles
     private static Field modelSlotsField = null;
     private static Field chrField = null;
     private static Field modelField = null;

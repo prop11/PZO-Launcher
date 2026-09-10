@@ -9,13 +9,11 @@ public class NettyBufferPooler {
         try {
             int cores = Math.max(2, Runtime.getRuntime().availableProcessors());
 
-            // 1. Direct memory buffer pooling for high-throughput packet serialization
             System.setProperty("io.netty.allocator.type", "pooled");
             System.setProperty("io.netty.allocator.numDirectArenas", String.valueOf(cores));
             System.setProperty("io.netty.allocator.numHeapArenas", String.valueOf(Math.max(1, cores / 2)));
             System.setProperty("io.netty.noPreferDirect", "false");
 
-            // 2. High-throughput datagram socket buffers for UDP / Steam networking
             System.setProperty("sun.net.maxDatagramSockets", "1024");
             System.setProperty("java.net.preferIPv4Stack", "true");
 

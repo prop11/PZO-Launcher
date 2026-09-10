@@ -6,10 +6,6 @@ import java.lang.reflect.Method;
 /**
  * PZO Build 42 32-Level Vertical (Z-Index) Chunk Pre-caching Streamer.
  * Build 42 expands vertical world height from 8 levels to 32 levels (-16 to +16).
- * 
- * This streamer tracks player vertical velocity and staircase transitions,
- * predictively pre-warming vertical chunk slices and grid square lookups
- * to eliminate stair climbing and high-rise elevator hitching.
  */
 public final class VerticalChunkStreamer {
 
