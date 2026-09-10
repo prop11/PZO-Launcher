@@ -6,24 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Project Zomboid Build 42 - Dedicated High-Performance Thread and Scheduler Governor.
- * 
  * Intercepts the engine's core execution pipelines:
- * 1. RenderThread (via RenderThread.queueInvokeOnRenderContext):
- *    - Elevates priority to THREAD_PRIORITY_HIGHEST (+2)
- *    - Binds affinity directly to physical Performance Cores (P-Cores)
- *    - Registers thread with Windows Multimedia Class Scheduler Service (MMCSS "Games")
- *    - Eliminates micro-stutter and frame-time variance during vehicle travel in dense towns
- * 
- * 2. MainThread (via MainThread.queueInvokeOnMainThread):
- *    - Elevates priority to THREAD_PRIORITY_ABOVE_NORMAL (+1)
- *    - Binds affinity to physical Performance Cores (P-Cores)
- *    - Registers with Windows MMCSS "Games"
- * 
- * 3. Working Set and Physical RAM Lock:
- *    - Invokes SetProcessWorkingSetSizeEx to prevent Windows memory trimming
- * 
- * 4. Asynchronous Subsystem Worker Affinity:
- *    - Ensures LightingThread, WorldStreamer, and PathfindNativeThread run with rock-solid scheduling
  */
 public class EngineThreadGovernor {
 
@@ -37,7 +20,6 @@ public class EngineThreadGovernor {
         }
 
         try {
-            // 1. Process-wide Working Set Lock and High Priority
             if (PZONative.isLoaded()) {
                 PZONative.lockProcessWorkingSet();
                 PZONative.setProcessPriority(2); // HIGH_PRIORITY_CLASS
@@ -49,7 +31,6 @@ public class EngineThreadGovernor {
             PZOLogger.warn("[EngineThreadGovernor] Process lock notice: " + t.getMessage());
         }
 
-        // 2. Launch asynchronous hooker daemon to catch RenderThread and MainThread upon engine boot
         Thread governorDaemon = new Thread(EngineThreadGovernor::governorLoop, "PZO-ThreadGovernor");
         governorDaemon.setDaemon(true);
         governorDaemon.setPriority(Thread.MIN_PRIORITY);

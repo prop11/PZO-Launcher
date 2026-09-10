@@ -7,8 +7,6 @@ import java.util.ArrayList;
 /**
  * PZO DirectBufferAllocator Governor & Zero-Stall Native VRAM Optimizer.
  * Periodically trims and compacts zombie.core.utils.DirectBufferAllocator's tracking list,
- * eliminating the expensive O(N) backward linear scan and array shift stalls during texture allocation.
- * 100% thread-safe, non-invasive, and zero crash risk.
  */
 public final class DirectBufferAllocatorGovernor {
 

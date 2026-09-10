@@ -6,10 +6,7 @@ import java.nio.FloatBuffer;
 
 /**
  * PZO Off-Heap Direct Spatial Buffer Pool (Phase 3 SIMD Acceleration).
- * 
  * Pre-allocates dedicated off-heap direct NIO buffers for up to 8,192 concurrent entities.
- * Eliminates all JVM heap allocation and garbage collection overhead during hot-loop
- * horde distance calculations, AABB culling, and LOD classification sweeps.
  */
 public final class SpatialBufferPool {
 
@@ -17,7 +14,6 @@ public final class SpatialBufferPool {
 
     private static volatile boolean initialized = false;
 
-    // Off-heap native memory buffers
     private static ByteBuffer rawCoordBuf;
     private static FloatBuffer coordBuffer;
 
@@ -39,32 +35,24 @@ public final class SpatialBufferPool {
         if (initialized) return;
 
         try {
-            // 8,192 entities * 2 coordinates (x,y) * 4 bytes/float = 65,536 bytes (64 KB)
             rawCoordBuf = ByteBuffer.allocateDirect(MAX_ENTITIES * 2 * Float.BYTES).order(ByteOrder.nativeOrder());
             coordBuffer = rawCoordBuf.asFloatBuffer();
 
-            // 8,192 entities * 4 bytes/float = 32,768 bytes (32 KB)
             rawDistanceBuf = ByteBuffer.allocateDirect(MAX_ENTITIES * Float.BYTES).order(ByteOrder.nativeOrder());
             distanceBuffer = rawDistanceBuf.asFloatBuffer();
 
-            // 8,192 entities * 4 bytes/float = 32,768 bytes (32 KB)
             rawDistSqBuf = ByteBuffer.allocateDirect(MAX_ENTITIES * Float.BYTES).order(ByteOrder.nativeOrder());
             distSqBuffer = rawDistSqBuf.asFloatBuffer();
 
-            // 8,192 entities * 1 byte = 8,192 bytes (8 KB)
             cullMaskBuffer = ByteBuffer.allocateDirect(MAX_ENTITIES).order(ByteOrder.nativeOrder());
 
-            // 8,192 entities * 1 byte = 8,192 bytes (8 KB)
             tiersBuffer = ByteBuffer.allocateDirect(MAX_ENTITIES).order(ByteOrder.nativeOrder());
 
-            // 8,192 entities * 2 heading unit vectors (hx, hy) * 4 bytes = 65,536 bytes (64 KB)
             rawHeadingBuf = ByteBuffer.allocateDirect(MAX_ENTITIES * 2 * Float.BYTES).order(ByteOrder.nativeOrder());
             headingBuffer = rawHeadingBuf.asFloatBuffer();
 
-            // 8,192 entities * 1 byte = 8,192 bytes (8 KB)
             fovMaskBuffer = ByteBuffer.allocateDirect(MAX_ENTITIES).order(ByteOrder.nativeOrder());
 
-            // 8,192 entities * 2 repulsion forces (fx, fy) * 4 bytes = 65,536 bytes (64 KB)
             rawRepulsionBuf = ByteBuffer.allocateDirect(MAX_ENTITIES * 2 * Float.BYTES).order(ByteOrder.nativeOrder());
             repulsionBuffer = rawRepulsionBuf.asFloatBuffer();
 

@@ -3,9 +3,6 @@ package com.pzoptimizer;
 /**
  * Project Zomboid Build 42 - Distant Horde AI & Spatial Staggering Engine (Phase 3).
  * Staggers expensive pathfinding and sensory checks for distant zombies (>32 tiles)
- * across interleaved frames to eliminate frame drops in high-density zombie towns.
- * 
- * Leverages HordeSpatialCuller's AVX2 multi-tier classification for zero-math O(1) checks.
  */
 public class HordeHibernationEngine {
     private static int frameCounter = 0;
@@ -32,7 +29,6 @@ public class HordeHibernationEngine {
         float dy = zombieY - playerY;
         float distSq = dx * dx + dy * dy;
 
-        // Close-range zombies (<35 tiles) always update every single frame (60 FPS)
         if (distSq < HIBERNATION_DISTANCE_SQ) {
             return true;
         }

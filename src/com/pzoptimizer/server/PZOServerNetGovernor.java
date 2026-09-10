@@ -5,10 +5,6 @@ import com.pzoptimizer.PZOLogger;
 /**
  * PZO Dedicated Server Network & Packet Pacing Governor.
  * Optimizes multiplayer network throughput, Netty direct byte buffer recycling,
- * and entity sync packet queue pacing on Build 42 dedicated servers.
- * 
- * Prevents network thread GC pauses and eliminates multiplayer vehicle rubberbanding
- * during high-speed map travel.
  */
 public final class PZOServerNetGovernor {
 

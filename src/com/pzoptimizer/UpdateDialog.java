@@ -185,7 +185,6 @@ public class UpdateDialog {
     }
 
     private static String showLinuxDialog(String latestVersion) {
-        // 1. Try Zenity (GNOME, Ubuntu, Mint, Pop!_OS)
         try {
             Process p = new ProcessBuilder("zenity", "--question",
                 "--title=PZO Engine - Update Available",
@@ -203,7 +202,6 @@ public class UpdateDialog {
             return "SKIP";
         } catch (Throwable ignored) {}
 
-        // 2. Try KDialog (Steam Deck / KDE Plasma default)
         try {
             Process p = new ProcessBuilder("kdialog",
                 "--title", "PZO Engine - Update Available",
@@ -376,7 +374,6 @@ public class UpdateDialog {
             File currentNative = new File(gameDir, nativeFileName);
             File newNative = new File(gameDir, nativeFileName + ".new");
 
-            // Build prioritized candidate URL list
             List<String> candidateUrls = new ArrayList<>();
             if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
                 candidateUrls.add(dllDownloadUrl);
@@ -426,7 +423,6 @@ public class UpdateDialog {
             long pid = ProcessHandle.current().pid();
             File win64Dll = new File(gameDir, "win64" + File.separator + nativeFileName);
 
-            // Stage ProjectZomboid64.json update if missing required 0.9.5 flags (such as -agentlib:pzo_native64)
             File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
             File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
             boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
@@ -494,7 +490,6 @@ public class UpdateDialog {
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
-                // Linux & Steam Deck
                 String linuxJsonUpdate = hasNewJson ? String.format(
                     " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
                     newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
@@ -547,7 +542,6 @@ public class UpdateDialog {
             String cleanVer = latestVersion != null ? latestVersion.trim() : UpdateChecker.CURRENT_VERSION;
             String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
 
-            // Handle Native Companion Library (.dll / .so / .dylib)
             String os = System.getProperty("os.name", "").toLowerCase();
             boolean isWin = os.contains("win");
             boolean isMac = os.contains("mac") || os.contains("darwin");
@@ -626,7 +620,6 @@ public class UpdateDialog {
 
             long pid = ProcessHandle.current().pid();
 
-            // Stage ProjectZomboid64.json update if missing required 0.9.5 flags (such as -agentlib:pzo_native64)
             File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
             File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
             boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
@@ -710,7 +703,6 @@ public class UpdateDialog {
                 );
                 new ProcessBuilder("bash", "-c", shUpdater).start();
             } else {
-                // Linux & Steam Deck
                 String linuxJsonUpdate = hasNewJson ? String.format(
                     " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
                     newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()

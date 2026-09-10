@@ -5,8 +5,6 @@ import java.lang.reflect.Method;
 /**
  * PZO Smart Generational Heap Cleaner & Zero-Pause GC Governor.
  * Monitors gameplay state and triggers concurrent memory compaction during safe idle windows
- * (standing still, looting, reading, paused) so GC cleanups NEVER interrupt driving or combat.
- * 100% thread-safe, low-overhead, and cross-platform on Windows, macOS, and Linux.
  */
 public final class GenerationalHeapCleaner {
 
@@ -22,7 +20,6 @@ public final class GenerationalHeapCleaner {
 
     private static boolean checkSafeMoment() {
         try {
-            // Check if IsoPlayer is valid and not driving at high speed
             Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
             Method getInstMethod = playerClass.getMethod("getInstance");
             Object player = getInstMethod.invoke(null);
@@ -32,7 +29,6 @@ public final class GenerationalHeapCleaner {
                 return true;
             }
 
-            // Check if player is in a vehicle moving fast
             try {
                 Method getVehicleMethod = playerClass.getMethod("getVehicle");
                 Object vehicle = getVehicleMethod.invoke(player);

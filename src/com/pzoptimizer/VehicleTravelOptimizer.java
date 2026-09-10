@@ -8,19 +8,7 @@ import sun.misc.Unsafe;
 
 /**
  * Project Zomboid Build 42 - Vehicle Travel & High-Speed Chunk Streaming Optimizer.
- * 
  * Solves the primary architectural root causes of vehicle stutter in Build 42:
- * 1. IsoChunkMap Fair-Lock Bottleneck:
- *    Vanilla PZ declares `public static final ReentrantLock bSettingChunk = new ReentrantLock(true);`.
- *    A fair lock enforces strict FIFO queueing across threads (MainThread, WorldStreamer, LightingThread).
- *    This causes extreme thread context switching and OS descheduling whenever chunks are stitched.
- *    VehicleTravelOptimizer reflectively replaces this with a non-fair atomic lock (10x-50x throughput).
- * 
- * 2. ChunkSaveWorker Main-Thread Hotsave Hitch:
- *    When driving fast, trailing chunks unload and enter ChunkSaveWorker.toSaveQueue.
- *    Whenever the save queue empties, ChunkSaveWorker invokes HotsaveAncilliarySystems() on the MAIN THREAD,
- *    freezing the game for 50-150ms to serialize the entire MetaGrid, World Map, Animals, and GameEntities.
- *    VehicleTravelOptimizer shields toSaveQueue so ancillary hotsaves are deferred during vehicle travel.
  */
 public final class VehicleTravelOptimizer {
 
@@ -38,7 +26,6 @@ public final class VehicleTravelOptimizer {
 
     public static final java.util.concurrent.atomic.AtomicLong throttledTownZombies = new java.util.concurrent.atomic.AtomicLong(0);
 
-    // Minimum cooldown between ancillary systems hotsaves (60 seconds)
     private static final long ANCILLARY_HOTSAVE_COOLDOWN_MS = 60_000L;
 
     public static synchronized void initialize() {
@@ -314,7 +301,6 @@ public final class VehicleTravelOptimizer {
             GovernedSimulationList governed = new GovernedSimulationList(fullBuckets[0], quarterBuckets, eighthBuckets);
             fullBuckets[0] = governed;
 
-            // Also shield HALF simulation bucket (index 1)
             @SuppressWarnings("unchecked")
             java.util.List<Object>[] halfBuckets = (java.util.List<Object>[]) bucketsField.get(simLevels[1]);
             if (halfBuckets != null) {
@@ -365,14 +351,12 @@ public final class VehicleTravelOptimizer {
                 float dy = zy - py;
                 float distSq = dx * dx + dy * dy;
 
-                // Close-range zombies (<= 20 tiles): Keep in FULL 60 FPS for responsive combat and vehicle bumper physics
                 if (distSq <= 400.0f) {
                     return super.add(obj);
                 }
 
                 int id = getObjectId(obj);
 
-                // Mid-range zombies (20 to 50 tiles): Redirect to QUARTER simulation (15 FPS updates interleaved)
                 if (distSq <= 2500.0f && quarterBuckets != null && quarterBuckets.length > 0) {
                     int slot = (id & 0x7FFFFFFF) % quarterBuckets.length;
                     quarterBuckets[slot].add(obj);
@@ -380,7 +364,6 @@ public final class VehicleTravelOptimizer {
                     return true;
                 }
 
-                // Distant town zombies (> 50 tiles): Redirect to EIGHTH simulation (7.5 FPS updates interleaved)
                 if (eighthBuckets != null && eighthBuckets.length > 0) {
                     int slot = (id & 0x7FFFFFFF) % eighthBuckets.length;
                     eighthBuckets[slot].add(obj);

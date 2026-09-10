@@ -5,29 +5,7 @@ import java.lang.reflect.Method;
 
 /**
  * Project Zomboid Build 42 - Rain & Weather Travel Performance Optimizer.
- * 
  * Forensically addresses the critical bottlenecks causing major hitching and stuttering
- * while driving in the rain:
- * 
- * 1. Lighting.SplitUpdate Capping:
- *    During rainstorms, thunder and lightning mark chunks dirty in LightingJNI.
- *    Vanilla PZ defaults Lighting.SplitUpdate to false, causing FBORenderCell.updateChunkLighting
- *    to recalculate lighting across ALL 169 chunks in a single frame.
- *    Setting Lighting.SplitUpdate = true caps this to 5 chunks per frame.
- * 
- * 2. Puddle Elevation Floor-Lock:
- *    Vanilla PZ options allow perfPuddles = 0 (All Levels).
- *    FBORenderCell.renderPuddles then scans all chunks across all 32 vertical levels (Z=0 to Z=31)
- *    and issues draw calls for each level.
- *    Restricting perfPuddles to 1 (Ground Floor Only) limits scanning strictly to Z=0,
- *    cutting 97% of redundant upper-floor chunk puddle traversal.
- * 
- * 3. WeatherFxMask Vehicle Bypass:
- *    When driving down roads at high speed, crossing 30-50 squares/sec, WeatherFxMask
- *    invalidates its cache constantly and runs rasterize.scanTriangle across the entire screen,
- *    scanning up to 30,000 mask entries down 32 levels, and performing 4 full-screen FBO render passes.
- *    While the player is driving, WeatherFxMask.maskingEnabled is bypassed so weather particles
- *    render directly without FBO churn, and restored when on foot.
  */
 public final class RainAndWeatherOptimizer {
 
