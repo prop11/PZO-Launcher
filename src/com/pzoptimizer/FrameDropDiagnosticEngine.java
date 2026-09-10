@@ -121,8 +121,20 @@ public final class FrameDropDiagnosticEngine {
 
         try {
             Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
-            Method getInstMethod = playerClass.getMethod("getInstance");
-            Object player = getInstMethod.invoke(null);
+            Object player = null;
+            try {
+                Method getInstMethod = playerClass.getMethod("getInstance");
+                player = getInstMethod.invoke(null);
+            } catch (Throwable ignored) {}
+            if (player == null) {
+                try {
+                    Field playersField = playerClass.getField("players");
+                    Object[] players = (Object[]) playersField.get(null);
+                    if (players != null && players.length > 0) {
+                        player = players[0];
+                    }
+                } catch (Throwable ignored) {}
+            }
 
             if (player != null) {
                 Method getX = playerClass.getMethod("getX");
@@ -149,11 +161,33 @@ public final class FrameDropDiagnosticEngine {
                 Field cellField = worldClass.getField("currentCell");
                 Object cell = cellField.get(worldInst);
                 if (cell != null) {
-                    Field zListField = cell.getClass().getField("ZombieList");
-                    List<?> zList = (List<?>) zListField.get(cell);
-                    if (zList != null) activeZombies = zList.size();
+                    try {
+                        Method getZombies = cell.getClass().getMethod("getZombieList");
+                        List<?> zList = (List<?>) getZombies.invoke(cell);
+                        if (zList != null) activeZombies = zList.size();
+                    } catch (Throwable t) {
+                        try {
+                            Field zListField = cell.getClass().getField("ZombieList");
+                            List<?> zList = (List<?>) zListField.get(cell);
+                            if (zList != null) activeZombies = zList.size();
+                        } catch (Throwable ignored) {}
+                    }
                 }
             }
+
+            // Query Dead Bodies (Corpses)
+            try {
+                Class<?> objIdTypeClass = Class.forName("zombie.network.id.ObjectIDType");
+                Field deadBodyField = objIdTypeClass.getField("DeadBody");
+                Object deadBodyType = deadBodyField.get(null);
+                if (deadBodyType != null) {
+                    Method getObjectsMethod = deadBodyType.getClass().getMethod("getObjects");
+                    Object objs = getObjectsMethod.invoke(deadBodyType);
+                    if (objs instanceof java.util.Collection) {
+                        activeCorpses = ((java.util.Collection<?>) objs).size();
+                    }
+                }
+            } catch (Throwable ignored) {}
 
             // Query WorldStreamer queue
             Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
@@ -204,6 +238,8 @@ public final class FrameDropDiagnosticEngine {
             cause = "VEHICLE_CHUNK_STREAMING (Speed: " + String.format("%.1f", vehicleSpeed) + " km/h, WS Queue: " + wsQueueSize + ")";
         } else if (saveQueueSize > 5) {
             cause = "DISK_AUTOSAVE_SPIKE (SaveQueue: " + saveQueueSize + " chunks)";
+        } else if (activeCorpses > 50) {
+            cause = "CORPSE_DENSITY_BURDEN (" + activeCorpses + " corpses)";
         } else if (activeZombies > 100) {
             cause = "HORDE_PHYSICS_DENSITY (" + activeZombies + " zombies)";
         } else {
@@ -215,8 +251,8 @@ public final class FrameDropDiagnosticEngine {
         // 4. Log Stutter Report
         String timestamp = DATE_FORMAT.format(new Date());
         String logEntry = String.format(
-            "[%s] STUTTER: %.1f ms (Avg: %.1f ms | FPS: %.0f) -> ROOT CAUSE: [%s] | Pos: (%.0f, %.0f | Ch: %d,%d) | Driving: %b | Zombies: %d | WSQueue: %d | SaveQueue: %d | GC: %dms",
-            timestamp, frameTimeMs, avgFrameTime, (1000.0 / Math.max(1.0, frameTimeMs)), cause, playerX, playerY, chunkX, chunkY, isDriving, activeZombies, wsQueueSize, saveQueueSize, gcDeltaTimeMs
+            "[%s] STUTTER: %.1f ms (Avg: %.1f ms | FPS: %.0f) -> ROOT CAUSE: [%s] | Pos: (%.0f, %.0f | Ch: %d,%d) | Driving: %b | Zombies: %d | Corpses: %d | WSQueue: %d | SaveQueue: %d | GC: %dms",
+            timestamp, frameTimeMs, avgFrameTime, (1000.0 / Math.max(1.0, frameTimeMs)), cause, playerX, playerY, chunkX, chunkY, isDriving, activeZombies, activeCorpses, wsQueueSize, saveQueueSize, gcDeltaTimeMs
         );
 
         pendingDiagnosticLogs.offer(logEntry);
