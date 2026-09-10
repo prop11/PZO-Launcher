@@ -70,6 +70,7 @@ public final class MultiCoreHordeGovernor {
     private static Method methodGetForwardX = null;
     private static Method methodGetForwardY = null;
     private static Method playerGetInstMethod = null;
+    private static Field playersArrayField = null;
     private static Field worldInstField = null;
     private static Field cellField = null;
     private static Method cellGetCellMethod = null;
@@ -106,7 +107,12 @@ public final class MultiCoreHordeGovernor {
             }
 
             Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
-            playerGetInstMethod = playerClass.getMethod("getInstance");
+            try {
+                playerGetInstMethod = playerClass.getMethod("getInstance");
+            } catch (Throwable ignored) {}
+            try {
+                playersArrayField = playerClass.getField("players");
+            } catch (Throwable ignored) {}
 
             Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");
             worldInstField = worldClass.getField("instance");
@@ -193,9 +199,23 @@ public final class MultiCoreHordeGovernor {
                 if (!reflectionResolved) return;
             }
 
-            if (playerGetInstMethod == null || worldInstField == null) return;
+            if (worldInstField == null) return;
 
-            Object player = playerGetInstMethod.invoke(null);
+            Object player = null;
+            if (playerGetInstMethod != null) {
+                try {
+                    player = playerGetInstMethod.invoke(null);
+                } catch (Throwable ignored) {}
+            }
+            if (player == null && playersArrayField != null) {
+                try {
+                    Object[] players = (Object[]) playersArrayField.get(null);
+                    if (players != null && players.length > 0) {
+                        player = players[0];
+                    }
+                } catch (Throwable ignored) {}
+            }
+
             if (player == null) {
                 lastTrackedZombieCount.set(0);
                 lastCulledOffscreenCount.set(0);
@@ -239,7 +259,10 @@ public final class MultiCoreHordeGovernor {
             coordBuf.rewind();
             headingBuf.rewind();
             for (int i = 0; i < count; i++) {
-                Object z = zombies.get(i);
+                Object z = null;
+                try {
+                    if (i < zombies.size()) z = zombies.get(i);
+                } catch (Throwable ignored) {}
                 if (z != null) {
                     coordBuf.put(i * 2, getObjectX(z));
                     coordBuf.put(i * 2 + 1, getObjectY(z));
