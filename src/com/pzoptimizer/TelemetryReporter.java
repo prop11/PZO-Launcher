@@ -152,6 +152,11 @@ public class TelemetryReporter {
             long gcTimeMs = 0;
             List<GarbageCollectorMXBean> gcs = ManagementFactory.getGarbageCollectorMXBeans();
             for (GarbageCollectorMXBean gc : gcs) {
+                String name = gc.getName();
+                if (name != null && name.contains("Cycles")) {
+                    // Ignore concurrent background cycles under ZGC (sub-millisecond STW pause)
+                    continue;
+                }
                 long c = gc.getCollectionCount();
                 if (c > 0) gcCount += c;
                 long t = gc.getCollectionTime();
