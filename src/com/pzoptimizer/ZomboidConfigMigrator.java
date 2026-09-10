@@ -12,14 +12,6 @@ import java.util.Map;
 /**
  * Project Zomboid Build 42 - Configuration Migrator & Validator.
  * Automatically inspects and patches ProjectZomboid64.json (and Info.plist on macOS)
- * during in-game updates or early engine startup.
- *
- * Ensures backward compatibility when upgrading from older releases (such as 0.8.2) to 0.9.5+,
- * injecting required JVM 17/21+ arguments, the native JVMTI agent bridge (-agentlib:pzo_native64),
- * and B42 HotSpot performance tuning while strictly preserving custom user RAM allocations (-Xmx/-Xms)
- * and ZombieBuddy coexistence (-agentlib:zbNative).
- *
- * 100% pure Java with zero external dependencies.
  */
 public final class ZomboidConfigMigrator {
 
@@ -66,13 +58,11 @@ public final class ZomboidConfigMigrator {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) parsed;
 
-            // Check mainClass
             Object mainClass = map.get("mainClass");
             if (mainClass == null || !TARGET_MAIN_CLASS.equals(mainClass.toString().trim())) {
                 return true;
             }
 
-            // Check classpath
             Object cpObj = map.get("classpath");
             if (!(cpObj instanceof List)) {
                 return true;
@@ -91,7 +81,6 @@ public final class ZomboidConfigMigrator {
                 return true;
             }
 
-            // Check vmArgs
             Object vmObj = map.get("vmArgs");
             if (!(vmObj instanceof List)) {
                 return true;
@@ -102,14 +91,12 @@ public final class ZomboidConfigMigrator {
                 if (item != null) vmStrings.add(item.toString().trim());
             }
 
-            // Check for critical missing flags
             for (String req : REQUIRED_VM_ARGS) {
                 if (!vmStrings.contains(req)) {
                     return true;
                 }
             }
 
-            // Check for library path
             boolean hasLibPath = false;
             String os = System.getProperty("os.name", "").toLowerCase();
             for (String arg : vmStrings) {
@@ -124,7 +111,6 @@ public final class ZomboidConfigMigrator {
                 return true;
             }
 
-            // Check if undesirable headless flag is still lingering
             for (String arg : vmStrings) {
                 if (arg.startsWith("-Djava.awt.headless")) {
                     return true;
@@ -150,10 +136,8 @@ public final class ZomboidConfigMigrator {
         @SuppressWarnings("unchecked")
         Map<String, Object> root = (Map<String, Object>) parsed;
 
-        // 1. Set optimized entrypoint
         root.put("mainClass", TARGET_MAIN_CLASS);
 
-        // 2. Classpath normalization (preserve custom JARs, ensure PZOptimEngine.jar and . are present)
         List<String> cpList = new ArrayList<>();
         Object cpObj = root.get("classpath");
         if (cpObj instanceof List) {
@@ -180,7 +164,6 @@ public final class ZomboidConfigMigrator {
         }
         root.put("classpath", cpList);
 
-        // 3. vmArgs normalization & migration
         List<String> rawArgs = new ArrayList<>();
         Object vmObj = root.get("vmArgs");
         if (vmObj instanceof List) {

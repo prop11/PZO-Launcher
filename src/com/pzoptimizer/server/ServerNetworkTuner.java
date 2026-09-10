@@ -9,13 +9,11 @@ public class ServerNetworkTuner {
         try {
             int cores = Math.max(4, Runtime.getRuntime().availableProcessors());
 
-            // 1. Off-heap Netty direct memory pooling for 10-64+ players
             System.setProperty("io.netty.allocator.type", "pooled");
             System.setProperty("io.netty.allocator.numDirectArenas", String.valueOf(cores));
             System.setProperty("io.netty.allocator.numHeapArenas", String.valueOf(Math.max(2, cores / 2)));
             System.setProperty("io.netty.noPreferDirect", "false");
 
-            // 2. High-capacity datagram sockets for RakNet UDP packet broadcasting
             System.setProperty("sun.net.maxDatagramSockets", "4096");
             System.setProperty("java.net.preferIPv4Stack", "true");
             System.setProperty("sun.net.useExclusiveBind", "true");

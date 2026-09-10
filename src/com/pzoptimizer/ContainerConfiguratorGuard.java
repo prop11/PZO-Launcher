@@ -10,20 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Project Zomboid Build 42 - Modded Container & ItemConfigurator Dynamic Registration Guard.
- * 
  * In Build 42, custom modded vehicles (KI5, DAMN, etc.) define custom container types
- * (e.g. CAM69Trunk, E150Trunk, CVPI92Trunk, KI5TRCSTrunk).
- * Vanilla ItemConfigurator only pre-registers standard vanilla strings during boot.
- * 
- * When ItemPickInfo.GetPickInfo() queries an unregistered container type, ItemConfigurator.GetIdForString()
- * returns -1, causing the engine to flood console.txt with:
- *   "ItemPickInfo -> cannot get ID for container: Type"
- * synchronously on the main render thread multiple times every single frame.
- * 
- * ContainerConfiguratorGuard wraps ItemConfigurator.STRING_INTEGER_HASH_MAP with an
- * auto-registering map via Unsafe. Any container queried is dynamically assigned a valid ID
- * on-the-fly, completely silencing log spam, eliminating synchronous disk I/O freezes,
- * and ensuring modded vehicle container looting operates correctly.
  */
 public final class ContainerConfiguratorGuard {
 
@@ -88,7 +75,6 @@ public final class ContainerConfiguratorGuard {
                 if (!installed) {
                     installGuard();
                 } else {
-                    // Check if Preprocess() overwrote the map
                     checkAndRehook();
                 }
 

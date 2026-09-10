@@ -18,22 +18,18 @@ public class GLStateOptimizer {
     public static final AtomicLong matricesSkipped = new AtomicLong(0);
     public static final AtomicLong uniformsSkipped = new AtomicLong(0);
 
-    // 1. Texture & Color Caches
     private static int currentTexture = -1;
     private static float currentR = -1f, currentG = -1f, currentB = -1f, currentA = -1f;
     private static int currentSrcBlend = -1, currentDstBlend = -1;
 
-    // 2. Alpha & Depth Caching (IndieGL hot loops)
     private static int lastAlphaFunc = -1;
     private static float lastAlphaRef = -1.0f;
     private static int lastDepthFunc = -1;
     private static int lastDepthMask = -1; // 0=false, 1=true
 
-    // 3. Chunk Depth Shader Uniform Caching (DefaultShader)
     private static int chunkDepthLoc = -2;
     private static float cachedChunkDepth = Float.NaN;
 
-    // 4. General Shader Uniform State Caching (256-entry uniform table)
     private static final int UNIFORM_TABLE_SIZE = 256;
     private static final float[] cachedUniform1f = new float[UNIFORM_TABLE_SIZE];
     private static final int[] cachedUniform1i = new int[UNIFORM_TABLE_SIZE];
@@ -42,7 +38,6 @@ public class GLStateOptimizer {
     private static final boolean[] uniform1iValid = new boolean[UNIFORM_TABLE_SIZE];
     private static final boolean[] uniform4fValid = new boolean[UNIFORM_TABLE_SIZE];
 
-    // 5. Skinned 3D Model Matrix Uniform Cache (1024-entry shader table)
     public static class ShaderMatrixState {
         public int uniformLoc = -2;
         public float[] lastMatrix = new float[16];

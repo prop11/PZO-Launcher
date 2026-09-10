@@ -44,7 +44,6 @@ public class PZOptimAgent {
             PZOLogger.warn("[PZO Agent] Notice on transformer registration: " + t.getMessage());
         }
 
-        // Early-boot properties that do not depend on LWJGL or game classes
         try {
             HotSpotJITCompilerTuner.tuneRuntimeProperties();
             PZOEngineBridge.initialize();
@@ -53,7 +52,6 @@ public class PZOptimAgent {
 
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
-        // Automatically load and hook any ZombieBuddy / Java Workshop mods with full Instrumentation
         try {
             JavaModLoader.loadMods(inst);
         } catch (Throwable t) {

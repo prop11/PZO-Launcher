@@ -85,7 +85,6 @@ public class UpdateChecker {
                     releases.add(json);
                 }
 
-                // Pass 1: Look for exact tag or version match
                 for (String relJson : releases) {
                     if (extractJsonBooleanField(relJson, "draft")) continue;
                     String tag = extractJsonField(relJson, "tag_name");
@@ -104,7 +103,6 @@ public class UpdateChecker {
                     }
                 }
 
-                // Pass 2: Look for highest compatible release on the channel containing native asset
                 for (String relJson : releases) {
                     if (extractJsonBooleanField(relJson, "draft")) continue;
                     boolean isPrerelease = extractJsonBooleanField(relJson, "prerelease");
@@ -151,7 +149,6 @@ public class UpdateChecker {
         res.channel = betaOptIn ? "Beta / Unstable" : "Stable";
 
         try {
-            // Beta opt-in queries the full releases list; Stable queries /releases/latest
             String apiUrl = betaOptIn ? GITHUB_ALL_RELEASES_API_URL : GITHUB_LATEST_API_URL;
             URL url = new URL(apiUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -179,7 +176,6 @@ public class UpdateChecker {
             String selectedReleaseJson = null;
 
             if (json.startsWith("[")) {
-                // Parse array of releases and find the highest available version matching channel
                 List<String> releases = splitJsonArrayObjects(json);
                 String bestRelJson = null;
                 String bestVersion = null;
@@ -194,7 +190,6 @@ public class UpdateChecker {
                     boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
 
                     if (!betaOptIn) {
-                        // NORMAL (STABLE) USER: Strictly reject all prereleases and unstable/beta tagged builds
                         if (isPrerelease || hasUnstableTag) {
                             continue;
                         }
@@ -213,13 +208,11 @@ public class UpdateChecker {
                 }
                 selectedReleaseJson = bestRelJson;
             } else if (json.startsWith("{")) {
-                // Single release object (e.g. from /releases/latest)
                 boolean isPrerelease = extractJsonBooleanField(json, "prerelease");
                 String tag = extractJsonField(json, "tag_name");
                 String name = extractJsonField(json, "name");
                 boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
 
-                // Safety guard: If normal user somehow received an unstable release, reject it
                 if (!betaOptIn && (isPrerelease || hasUnstableTag)) {
                     writeStatus(false, CURRENT_VERSION, res.channel);
                     return res;

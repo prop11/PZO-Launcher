@@ -16,8 +16,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 /**
  * PZO Real-Time Frame-Time Profiler & Stutter Diagnostic Engine.
  * Measures nanosecond frame times, detects frame drops / micro-stutters,
- * and snapshots multi-subsystem engine metrics to identify the exact root cause.
- * 100% thread-safe, low-overhead, and cross-platform.
  */
 public final class FrameDropDiagnosticEngine {
 
@@ -101,14 +99,12 @@ public final class FrameDropDiagnosticEngine {
         stutterCount++;
         lastStutterMs = frameTimeMs;
 
-        // 1. Check GC Pause Delta
         long gcCountBefore = lastGcCount;
         long gcTimeBefore = lastGcTimeMs;
         updateGcStats();
         long gcDeltaCount = lastGcCount - gcCountBefore;
         long gcDeltaTimeMs = lastGcTimeMs - gcTimeBefore;
 
-        // 2. Query Game State via reflection (100% crash-proof)
         boolean isDriving = false;
         float vehicleSpeed = 0.0f;
         float playerX = 0.0f, playerY = 0.0f;
@@ -222,7 +218,6 @@ public final class FrameDropDiagnosticEngine {
         lastDiagnosedChunkX = chunkX;
         lastDiagnosedChunkY = chunkY;
 
-        // 3. Classify Root Cause
         String cause;
         if (gcDeltaTimeMs > 5) {
             cause = "GC_STW_PAUSE (" + gcDeltaTimeMs + "ms)";
@@ -248,7 +243,6 @@ public final class FrameDropDiagnosticEngine {
 
         lastStutterCause = cause;
 
-        // 4. Log Stutter Report
         String timestamp = DATE_FORMAT.format(new Date());
         String logEntry = String.format(
             "[%s] STUTTER: %.1f ms (Avg: %.1f ms | FPS: %.0f) -> ROOT CAUSE: [%s] | Pos: (%.0f, %.0f | Ch: %d,%d) | Driving: %b | Zombies: %d | Corpses: %d | WSQueue: %d | SaveQueue: %d | GC: %dms",

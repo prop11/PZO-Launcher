@@ -6,23 +6,14 @@ import java.nio.ByteBuffer;
 /**
  * WorldStreamer Thread Priority & Chunk Bandwidth Booster.
  * Elevates the "World Streamer" and "Lighting" thread priorities so the OS never starves
- * disk and chunk decompression workers while the player is driving fast in vehicles.
- * 
- * Phase 2:
- * - Upgrades WorldStreamer.instance.decompressor to NativeInflater (SIMD AVX2 zlib inflate).
- * - Upgrades WorldStreamer.instance.readBuf from 1KB to 256KB (60x reduction in JNI loop transitions).
- * - Pre-allocates WorldStreamer.instance.inMemoryZip to 512KB (zero reallocation garbage).
- * - Upgrades IsoChunk.sliceBufferLoad from 64KB to 1MB (eliminates 100% disk buffer reallocations).
  */
 public class WorldStreamerBooster {
 
     private static volatile boolean streamBoosterInstalled = false;
 
     public static void startDaemon() {
-        // Start predictive vehicle trajectory streaming daemon
         VehicleTrajectoryStreamer.start();
 
-        // 0. Enforce IsoChunkMap parity once at boot
         try {
             ChunkCrashShield.enforceChunkGridSanity();
         } catch (Throwable ignored) {}
@@ -37,7 +28,6 @@ public class WorldStreamerBooster {
                     EngineFeaturesTuner.reapplyRuntimeTuning();
                     installStreamBooster();
 
-                    // 1. Maintain WorldStreamer thread at NORM_PRIORITY (prevents main-thread rendering preemption)
                     Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
                     Field instField = wsClass.getField("instance");
                     Object wsInstance = instField.get(null);
@@ -51,7 +41,6 @@ public class WorldStreamerBooster {
                         }
                     }
 
-                    // 2. Scan all thread groups and ensure background workers do not preempt gameplay
                     ThreadGroup rootGroup = Thread.currentThread().getThreadGroup();
                     while (rootGroup.getParent() != null) {
                         rootGroup = rootGroup.getParent();
@@ -94,7 +83,6 @@ public class WorldStreamerBooster {
             Object wsInstance = instField.get(null);
             if (wsInstance == null) return false;
 
-            // 1. Upgrade decompressor to NativeInflater (Multiplayer SIMD AVX2 acceleration) only if native DLL is loaded
             if (PZONative.isLoaded()) {
                 Field decompField = wsClass.getDeclaredField("decompressor");
                 decompField.setAccessible(true);
@@ -104,7 +92,6 @@ public class WorldStreamerBooster {
                 }
             }
 
-            // 2. Upgrade readBuf to 256 KB
             Field readBufField = wsClass.getDeclaredField("readBuf");
             readBufField.setAccessible(true);
             byte[] curReadBuf = (byte[]) readBufField.get(wsInstance);
@@ -112,7 +99,6 @@ public class WorldStreamerBooster {
                 setField(wsInstance, readBufField, new byte[262144]);
             }
 
-            // 3. Pre-allocate inMemoryZip to 512 KB
             Field zipField = wsClass.getDeclaredField("inMemoryZip");
             zipField.setAccessible(true);
             ByteBuffer curZip = (ByteBuffer) zipField.get(wsInstance);
@@ -124,7 +110,6 @@ public class WorldStreamerBooster {
             PZOLogger.success("[WorldStreamerBooster] High-Speed Stream Booster Armed: NativeInflater (256KB readBuf | 512KB zipBB)");
             return true;
         } catch (Throwable t) {
-            // WorldStreamer not yet initialized; will retry on next daemon cycle
             return false;
         }
     }

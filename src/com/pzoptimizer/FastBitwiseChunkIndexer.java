@@ -3,8 +3,6 @@ package com.pzoptimizer;
 /**
  * PZO 64-Bit Register Spatial Chunk & Meta-Grid Indexer.
  * Operates directly on 64-bit CPU machine registers in 1 instruction,
- * eliminating integer overflow bugs and HashMap coordinate hashing overhead.
- * 100% deterministic and cross-platform.
  */
 public final class FastBitwiseChunkIndexer {
 

@@ -7,11 +7,6 @@ import java.util.ArrayList;
 /**
  * PZO Dynamic Lighting & Frustum Shadow Culler.
  * In Build 42, dynamic light cones, room lights, and vehicle headlights
- * compute multi-pass shadow geometry even when entirely outside the camera's viewport.
- * 
- * This culler performs fast bounding box tests against the active IsoCamera frustum
- * and skips lighting draw calls for out-of-view light sources, saving significant
- * GPU shader cycles and CPU draw overhead in dense towns at night.
  */
 public final class DynamicLightingCuller {
 

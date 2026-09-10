@@ -6,18 +6,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * PZO Frame-Budgeted Chunk Ingestion Pacer (Next-Gen Chunk Streaming Engine).
- * 
  * In Build 42 with 32 vertical levels (-16 to +16), each chunk contains 2,048 IsoGridSquare instances.
- * In vanilla PZ, when WorldStreamer finishes loading 6-12 chunks from disk, they are all dumped into
- * IsoChunk.loadGridSquare, and IsoChunkMap.processAllLoadGridSquare() drains the ENTIRE queue in a single frame,
- * forcing the main thread to instantiate and stitch 15,000+ squares at once. This produces massive 100-250ms freeze spikes.
- * 
- * ChunkIngestionPacer installs a time-sliced pacing governor onto IsoChunk.loadGridSquare:
- * - Enforces a strict frame budget (default 2.5 ms maximum or max 2 chunks per frame during gameplay).
- * - Leaves subsequent chunks in the thread-safe queue to be smoothly ingested over the next 1-2 frames.
- * - During loading screens and world generation (IngameState.loading == true), budget limits are bypassed
- *   for instantaneous game boot.
- * - Eliminates 100% of chunk integration hitches and locks frame pacing at steady 60/144 FPS.
  */
 public final class ChunkIngestionPacer {
 
