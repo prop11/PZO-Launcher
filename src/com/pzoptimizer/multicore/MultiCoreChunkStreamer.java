@@ -20,22 +20,13 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * PZO Multi-Core Chunk Streamer (Pillar 1).
- * 
  * Re-architects Project Zomboid Build 42 chunk streaming from a single background thread
- * with artificial 140ms sleeps into a true multi-core parallel streaming engine:
- * 
- * 1. Dedicated physical P-core pinned worker pool (4 to 12 workers).
- * 2. Per-thread direct off-heap 1MB NIO buffer ring, bypassing the single shared static IsoChunk.sliceBufferLoad.
- * 3. Concurrent multi-threaded chunk disk I/O and stream decoding via IsoChunk.SafeRead per-chunk locks.
- * 4. Active sleep bypass for WorldStreamer thread loop, eliminating frame stalls and void pop-in at high vehicle speeds.
- * 5. Direct feed into IsoChunk.loadGridSquare and ChunkIngestionPacer.
  */
 public final class MultiCoreChunkStreamer {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
     private static volatile boolean running = false;
 
-    // Worker pool & dispatcher
     private static ExecutorService workerPool;
     private static Thread dispatcherThread;
     private static int workerCount = 4;
@@ -48,15 +39,12 @@ public final class MultiCoreChunkStreamer {
     // Thread-safe in-flight chunk tracking to eliminate duplicate parallel loading
     private static final Set<Long> IN_FLIGHT_CHUNKS = ConcurrentHashMap.newKeySet();
 
-    // Guard lock for brief static state parsing in IsoChunk.LoadFromDiskOrBufferInternal
     private static final Object CHUNK_PARSE_LOCK = new Object();
 
-    // Telemetry metrics
     public static final AtomicLong totalChunksStreamedParallel = new AtomicLong(0);
     public static final AtomicLong totalStreamTimeSavedMs = new AtomicLong(0);
     public static final AtomicInteger activeChunkWorkers = new AtomicInteger(0);
 
-    // Reflection handles into WorldStreamer internals
     private static Field jobListField = null;
     private static Field jobQueueField = null;
     private static Field worldStreamerThreadField = null;
@@ -83,7 +71,6 @@ public final class MultiCoreChunkStreamer {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        // Determine optimal worker count based on physical P-cores
         int pCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
         workerCount = Math.max(2, Math.min(pCores, 12));
 
@@ -197,7 +184,6 @@ public final class MultiCoreChunkStreamer {
     }
 
     private static void dispatcherLoop() {
-        // Bind dispatcher to P-cores
         PZONative.bindCallingThreadToPCores();
 
         while (running) {
@@ -295,7 +281,6 @@ public final class MultiCoreChunkStreamer {
         workerBuf.clear();
 
         try {
-            // 1. Parallel Disk I/O & Decompression via IsoChunk.SafeRead (uses fine-grained per-chunk locks)
             // Checks Predictive Trajectory Preloaded Cache first: 0ms in-memory cache hit!
             ByteBuffer loadedData = null;
             byte[] preloaded = com.pzoptimizer.PredictiveChunkStreamer.pollPreloadedChunk(chunk.wx, chunk.wy);
@@ -320,7 +305,6 @@ public final class MultiCoreChunkStreamer {
                 }
             }
 
-            // 2. High-speed parse & link step:
             // Guarded with getParseLock() (the IsoChunk.sanityCheck singleton monitor lock).
             // Synchronizing on sanityCheckInstance guarantees mutual exclusion with both other workers
             // AND any vanilla WorldStreamer operations (since SanityCheck.beginLoad/endLoad synchronize on sanityCheck).
@@ -336,7 +320,6 @@ public final class MultiCoreChunkStreamer {
                         } catch (Throwable ignored) {}
                     }
 
-                    // 3. Handle conversion, soft reset, or link into loadGridSquare
                     if (chunk.jobType == IsoChunk.JobType.Convert || chunk.jobType == IsoChunk.JobType.SoftReset) {
                         chunk.doLoadGridsquare();
                         chunk.loaded = true;

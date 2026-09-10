@@ -12,7 +12,6 @@ public class EngineFeaturesTuner {
 
     public static void initializeEngineFeatures() {
         try {
-            // 1. DebugOptions Multi-Threading & Engine Subsystems (Build 42)
             try {
                 Class<?> debugOptionsClass = Class.forName("zombie.debug.DebugOptions");
                 Field instanceField = debugOptionsClass.getField("instance");
@@ -67,7 +66,6 @@ public class EngineFeaturesTuner {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
             }
 
-            // 2. PerformanceSettings Core Defaults
             try {
                 Class<?> perfClass = Class.forName("zombie.core.PerformanceSettings");
                 
@@ -107,12 +105,10 @@ public class EngineFeaturesTuner {
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (15 FPS Lighting | Skeletal Falloff)");
             } catch (Throwable ignored) {}
 
-            // 3. Enforce IsoChunkMap Grid Parity (Prevent IndexOutOfBoundsException 271 / even chunkGridWidth)
             try {
                 ChunkCrashShield.enforceChunkGridSanity();
             } catch (Throwable ignored) {}
 
-            // 3. Silence Non-Fatal DebugType Warning Spam during Chunk Loading (SpriteConfig, Entities, Objects)
             try {
                 Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
                 Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");

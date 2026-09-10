@@ -4,15 +4,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * PZO Chunk Retention Ring & Hysteresis Shield (Next-Gen Chunk Streaming Engine).
- * 
  * In vanilla Build 42, crossing back and forth across a chunk boundary causes the engine to
- * immediately unload chunks behind the player, flush them to disk, and re-read them from disk
- * moments later when the player takes a step backward (boundary thrashing).
- * 
- * ChunkRetentionRing maintains a memory-backed LRU retention ring of recently active chunk coordinates:
- * - Retains recent chunks in memory for a 45-second hysteresis window.
- * - Prevents thrashing write-read cycles when looting buildings or fighting near chunk lines.
- * - 100% thread-safe with zero temporary heap allocations.
  */
 public final class ChunkRetentionRing {
 

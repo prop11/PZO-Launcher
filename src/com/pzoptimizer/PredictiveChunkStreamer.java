@@ -11,13 +11,7 @@ import java.util.Set;
 
 /**
  * PZO Universal Predictive Chunk Streamer (Next-Gen Chunk Streaming Engine).
- * 
  * Tracks player travel mode (driving, sprinting, walking) and proactively registers
- * upcoming chunk coordinates along the velocity vector into ChunkRetentionRing to prevent
- * boundary thrashing and hysteresis unloads.
- * 
- * Operates purely in-memory with zero file-handle locks, eliminating NTFS handle contention
- * with WorldStreamer and ChunkSaveWorker.
  */
 public final class PredictiveChunkStreamer {
 
@@ -77,7 +71,6 @@ public final class PredictiveChunkStreamer {
                         lastPrewarmClearTime = now;
                     }
 
-                    // 1. Discover active player via reflection
                     Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
                     Method getInstMethod = playerClass.getMethod("getInstance");
                     Object player = getInstMethod.invoke(null);
@@ -96,7 +89,6 @@ public final class PredictiveChunkStreamer {
                     int currentChunkY = (int) (py / 8.0f);
                     ChunkRetentionRing.touch(currentChunkX, currentChunkY);
 
-                    // 2. Check if player is operating a vehicle
                     Method getVehicleMethod = playerClass.getMethod("getVehicle");
                     Object vehicle = getVehicleMethod.invoke(player);
 
@@ -129,7 +121,6 @@ public final class PredictiveChunkStreamer {
             float dirX = 0.0f;
             float dirY = 0.0f;
 
-            // 1. Try JNI linear velocity vector first (pure physical trajectory, handles drifts and turns)
             try {
                 Field velField = vehicle.getClass().getField("jniLinearVelocity");
                 Object velObj = velField.get(vehicle);
@@ -143,7 +134,6 @@ public final class PredictiveChunkStreamer {
                 }
             } catch (Throwable ignored) {}
 
-            // 2. Fallback to vehicle forward vector with speed sign (handles reverses)
             if (dirX == 0.0f && dirY == 0.0f) {
                 try {
                     Method getForwardVectorMethod = vehicle.getClass().getMethod("getForwardVector", org.joml.Vector3f.class);
@@ -160,7 +150,6 @@ public final class PredictiveChunkStreamer {
                 } catch (Throwable ignored) {}
             }
 
-            // 3. Fallback to player facing direction
             if (dirX == 0.0f && dirY == 0.0f) {
                 try {
                     Class<?> playerClass = player.getClass();
@@ -173,7 +162,6 @@ public final class PredictiveChunkStreamer {
 
             if (dirX == 0.0f && dirY == 0.0f) return;
 
-            // Lateral normal vector (-dirY, dirX) to cover road curvature and lane turns
             float normX = -dirY;
             float normY = dirX;
 
@@ -192,7 +180,6 @@ public final class PredictiveChunkStreamer {
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);
 
-                // Pre-warm lateral cone (1 chunk left and right) on fast storage to cover curved turns
                 if (isFast) {
                     int lateralChunkX = (int) Math.signum(normX);
                     int lateralChunkY = (int) Math.signum(normY);
@@ -253,7 +240,6 @@ public final class PredictiveChunkStreamer {
         }
         PREWARMED_KEYS.add(key);
 
-        // Preload upcoming chunk data directly into memory cache ahead of vehicle arrival
         if (PRELOADED_CHUNKS.size() < MAX_PRELOADED_CHUNKS) {
             try {
                 if (zombie.iso.IsoChunk.FileExists(wx, wy)) {

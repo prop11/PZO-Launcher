@@ -5,14 +5,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * PZO Screen-Space Frustum Draw Culler (Build 42 Rendering Acceleration).
- * 
  * Intercepts 2D sprite draw calls before they enter SpriteRenderer command buffers.
- * If a sprite's screen-projected bounding box falls completely outside the active display viewport
- * (with a generous 64px safety bleed margin for tall trees and wall tops), the draw command is discarded.
- * 
- * - Only active in Unstable / Beta channel builds.
- * - Saves CPU command buffer memory and GPU rasterization bandwidth.
- * - 100% thread-safe with real-time atomic telemetry.
  */
 public final class RenderFrustumCuller {
 
@@ -30,7 +23,6 @@ public final class RenderFrustumCuller {
 
         updateScreenDimensions();
 
-        // Check if bounding box is completely outside viewport with bleed margin
         if ((x + width) < -BLEED_MARGIN || x > (screenWidth + BLEED_MARGIN)
                 || (y + height) < -BLEED_MARGIN || y > (screenHeight + BLEED_MARGIN)) {
             drawCallsCulled.incrementAndGet();

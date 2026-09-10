@@ -43,13 +43,11 @@ public class PZONative {
     private static synchronized void loadNativeLibrary() {
         if (loaded) return;
 
-        // 1. Try standard Java library path
         try {
             System.loadLibrary("pzo_native64");
             loaded = true;
             PZOLogger.success("[PZONative] Loaded " + NATIVE_LIB_FILENAME + " via System.loadLibrary");
         } catch (Throwable t1) {
-            // 2. Try direct paths relative to working directory or game root
             List<String> candidatePaths = new ArrayList<>();
             candidatePaths.add(NATIVE_LIB_FILENAME);
             candidatePaths.add(System.getProperty("user.dir") + File.separator + NATIVE_LIB_FILENAME);
@@ -104,25 +102,20 @@ public class PZONative {
         if (!initialized) return;
 
         try {
-            // 1. Completely exempt Project Zomboid from Windows 11 EcoQoS Power Throttling
             boolean powerShield = false;
             try { powerShield = disablePowerThrottling(); } catch (Throwable ignored) {}
 
-            // 2. Lock OS Interrupt Timer to 0.5ms high-precision
             boolean timerLock = false;
             try { timerLock = setHighPrecisionTimer(true); } catch (Throwable ignored) {}
 
-            // 3. Register Multimedia Class Scheduler (MMCSS) Games profile
             boolean mmcss = false;
             try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
 
-            // 4. Boost process priority to Above Normal / High and lock working set to physical RAM
             boolean prio = false;
             try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
             boolean wsLock = false;
             try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
 
-            // 5. Query hardware topology
             int physCores = 0;
             try { physCores = getPhysicalCores(); } catch (Throwable ignored) {}
             int pCores = 0;
@@ -386,9 +379,7 @@ public class PZONative {
         return count;
     }
 
-    // ========================================================================
     // Phase 2: High-Speed SIMD Decompression & Win32 Chunk Stream Acceleration
-    // ========================================================================
 
     public static int decompress(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff, int dstCap) {
         if (!isLoaded() || src == null || dst == null || srcLen <= 0 || dstCap <= 0) return -1;
@@ -495,9 +486,7 @@ public class PZONative {
         return "Unknown";
     }
 
-    // ========================================================================
     // Native JNI Declarations (Implemented in pzo_native.c)
-    // ========================================================================
     public static native String getNativeVersion();
     private static native boolean initNative();
     public static native boolean setHighPrecisionTimer(boolean enable);

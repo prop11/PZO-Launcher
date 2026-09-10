@@ -276,7 +276,6 @@ public class PZOEngineBridge {
                 try {
                     Class<?> lmClass = Class.forName("zombie.Lua.LuaManager");
 
-                    // 1. Try exposer if available
                     try {
                         Field exposerField = lmClass.getField("exposer");
                         Object exposer = exposerField.get(null);
@@ -286,7 +285,6 @@ public class PZOEngineBridge {
                         }
                     } catch (Throwable ignored) {}
 
-                    // 2. Bind directly into LuaManager.env
                     Field envField = lmClass.getField("env");
                     Object env = envField.get(null);
                     if (env != null) {

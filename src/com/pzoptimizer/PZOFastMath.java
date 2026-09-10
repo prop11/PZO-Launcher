@@ -3,8 +3,6 @@ package com.pzoptimizer;
 /**
  * PZO Fast Math & L1 Cache-Aligned Trigonometry Engine.
  * Provides single-cycle trigonometric functions, fast inverse square root,
- * and high-speed floating point calculations for physics, angles, and rendering.
- * 100% deterministic, thread-safe, and zero-allocation across Windows, macOS, and Linux.
  */
 public final class PZOFastMath {
 

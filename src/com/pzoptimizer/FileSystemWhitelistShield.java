@@ -16,16 +16,7 @@ import sun.misc.Unsafe;
 
 /**
  * Project Zomboid Build 42 - FileSystem Whitelist & Secondary-Drive Protection Shield.
- * 
  * In Build 42, ZomboidFileSystem.validatePrefix(path) enforces an internal whitelist
- * of allowed base directories (allowedPrefixes). When Steam Workshop mods are installed
- * on a secondary drive (e.g. K:\SteamLibrary, D:\SteamLibrary), the vanilla engine can
- * fail to register these paths in time, or wipe them during ResetMods(), causing
- * validatePrefix to throw IllegalArgumentException and failing animation/model loading.
- * 
- * This shield intercepts allowedPrefixes via a permanent wrapped Supplier and runs
- * an active background watchdog to guarantee that all mounted drives and workshop
- * libraries are 100% permanently whitelisted.
  */
 public final class FileSystemWhitelistShield {
 
@@ -67,7 +58,6 @@ public final class FileSystemWhitelistShield {
     }
 
     private static void collectAllSearchRoots() {
-        // 1. All mounted drive roots (C:\, D:\, K:\, etc.)
         try {
             File[] roots = File.listRoots();
             if (roots != null) {
@@ -107,7 +97,6 @@ public final class FileSystemWhitelistShield {
             }
         } catch (Throwable ignored) {}
 
-        // 2. User Zomboid directory
         try {
             String userHome = System.getProperty("user.home");
             File zomboidDir = new File(userHome, "Zomboid");
@@ -116,7 +105,6 @@ public final class FileSystemWhitelistShield {
             }
         } catch (Throwable ignored) {}
 
-        // 3. Current working directory / execution directory roots
         try {
             File cwd = new File(".").getAbsoluteFile();
             addRootPath(cwd);
@@ -182,7 +170,6 @@ public final class FileSystemWhitelistShield {
                 return false;
             }
 
-            // 1. Hook the ResettableLazyValue supplier permanently so resets NEVER drop discovered roots
             Field allowedField = fsClass.getDeclaredField("allowedPrefixes");
             allowedField.setAccessible(true);
             Object lazy = allowedField.get(fsInstance);
