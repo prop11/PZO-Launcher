@@ -1,6 +1,9 @@
 package com.pzoptimizer;
 
 import java.io.File;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -39,6 +42,65 @@ public final class ZomboidConfigMigrator {
         "-XX:+UseNUMA",
         "-XX:+AlwaysPreTouch"
     };
+
+    public static long parseHeapArgMb(String arg) {
+        if (arg == null || arg.length() <= 4) return -1;
+        try {
+            String val = arg.substring(4).trim().toLowerCase();
+            long mult = 1;
+            if (val.endsWith("g")) {
+                mult = 1024;
+                val = val.substring(0, val.length() - 1);
+            } else if (val.endsWith("m")) {
+                mult = 1;
+                val = val.substring(0, val.length() - 1);
+            } else if (val.endsWith("k")) {
+                return 1;
+            }
+            return Long.parseLong(val) * mult;
+        } catch (Throwable ignored) {
+            return -1;
+        }
+    }
+
+    public static int getRecommendedHeapMb() {
+        try {
+            OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
+            Method m = null;
+            try {
+                m = os.getClass().getMethod("getTotalMemorySize");
+            } catch (NoSuchMethodException e) {
+                try {
+                    m = os.getClass().getMethod("getTotalPhysicalMemorySize");
+                } catch (NoSuchMethodException ignored) {}
+            }
+            if (m != null) {
+                m.setAccessible(true);
+                Object val = m.invoke(os);
+                if (val instanceof Number) {
+                    long bytes = ((Number) val).longValue();
+                    double gb = bytes / (1024.0 * 1024.0 * 1024.0);
+                    if (gb >= 28.0) {
+                        return 12288;
+                    } else if (gb >= 14.0) {
+                        return 8192;
+                    } else if (gb >= 7.0) {
+                        return 6144;
+                    } else {
+                        return 4096;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return 6144;
+    }
+
+    public static int getRecommendedInitialHeapMb(int maxMb) {
+        if (maxMb >= 12288) return 6144;
+        if (maxMb >= 8192) return 4096;
+        if (maxMb >= 6144) return 3072;
+        return 2048;
+    }
 
     /**
      * Checks if the specified ProjectZomboid64.json requires migration to 0.9.5 standards.
@@ -114,6 +176,15 @@ public final class ZomboidConfigMigrator {
             for (String arg : vmStrings) {
                 if (arg.startsWith("-Djava.awt.headless")) {
                     return true;
+                }
+            }
+
+            for (String arg : vmStrings) {
+                if (arg.startsWith("-Xmx")) {
+                    long mb = parseHeapArgMb(arg);
+                    if (mb > 0 && mb <= 3072 && getRecommendedHeapMb() > 3072) {
+                        return true;
+                    }
                 }
             }
 
@@ -226,20 +297,36 @@ public final class ZomboidConfigMigrator {
             targetArgs.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
         }
 
-        // 3d. User memory allocations (-Xms, -Xmx) and Steam args preserved
+        // 3d. User memory allocations (-Xms, -Xmx) and Steam args preserved (with auto-upgrade from vanilla 3GB)
         boolean hasXms = false;
         boolean hasXmx = false;
+        int recMaxMb = getRecommendedHeapMb();
+        int recMsMb = getRecommendedInitialHeapMb(recMaxMb);
+
         for (String arg : userCleanArgs) {
-            if (arg.startsWith("-Xms")) hasXms = true;
-            if (arg.startsWith("-Xmx")) hasXmx = true;
+            if (arg.startsWith("-Xms")) {
+                hasXms = true;
+                long mb = parseHeapArgMb(arg);
+                if (mb > 0 && mb <= 1800 && recMsMb > 1800) {
+                    PZOLogger.info("[ZomboidConfigMigrator] Upgraded vanilla initial heap (" + mb + "MB -> " + recMsMb + "MB)");
+                    arg = "-Xms" + recMsMb + "m";
+                }
+            } else if (arg.startsWith("-Xmx")) {
+                hasXmx = true;
+                long mb = parseHeapArgMb(arg);
+                if (mb > 0 && mb <= 3072 && recMaxMb > 3072) {
+                    PZOLogger.info("[ZomboidConfigMigrator] Upgraded vanilla max heap (" + mb + "MB -> " + recMaxMb + "MB)");
+                    arg = "-Xmx" + recMaxMb + "m";
+                }
+            }
             if (!targetArgs.contains(arg)) {
                 targetArgs.add(arg);
             }
         }
 
         // Default memory fallback if user config lacked heap sizing
-        if (!hasXms) targetArgs.add(3, "-Xms2048m");
-        if (!hasXmx) targetArgs.add(4, "-Xmx4096m");
+        if (!hasXms) targetArgs.add(3, "-Xms" + recMsMb + "m");
+        if (!hasXmx) targetArgs.add(4, "-Xmx" + recMaxMb + "m");
 
         // 3e. Inject all 0.9.5 performance flags if missing
         for (String pf : REQUIRED_VM_ARGS) {

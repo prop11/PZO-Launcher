@@ -273,8 +273,8 @@ public class PZOEngineBridge {
 
         Thread bridgeHookThread = new Thread(() -> {
             boolean attached = false;
-            // Poll for LuaManager.env initialization during boot (up to 30 seconds)
-            for (int i = 0; i < 300; i++) {
+            // Poll for LuaManager.env initialization during boot (up to 2.5 minutes for heavy modpacks)
+            for (int i = 0; i < 600; i++) {
                 try {
                     Class<?> lmClass = Class.forName("zombie.Lua.LuaManager");
 
@@ -1080,7 +1080,6 @@ public class PZOEngineBridge {
                                             }
                                         }
 
-                                        startLuaEventGovernor();
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
                                     }
@@ -1097,7 +1096,7 @@ public class PZOEngineBridge {
                 } catch (Throwable ignored) {}
 
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(i < 30 ? 100 : 250);
                 } catch (InterruptedException ie) {
                     break;
                 }
@@ -1142,49 +1141,6 @@ public class PZOEngineBridge {
             }
         } catch (Throwable ignored) {}
     }
-
-    private static void startLuaEventGovernor() {
-        Thread govThread = new Thread(() -> {
-            while (true) {
-                try {
-                    Class<?> lemClass = Class.forName("zombie.Lua.LuaEventManager");
-                    Field evListField = lemClass.getField("EventList");
-                    java.util.ArrayList<?> evList = (java.util.ArrayList<?>) evListField.get(null);
-                    if (evList != null) {
-                        for (int i = 0; i < evList.size(); i++) {
-                            Object ev = evList.get(i);
-                            if (ev != null) {
-                                Field cbField = ev.getClass().getField("callbacks");
-                                java.util.ArrayList<?> cbList = (java.util.ArrayList<?>) cbField.get(ev);
-                                if (cbList != null) {
-                                    for (int j = 0; j < cbList.size(); j++) {
-                                        Object cb = cbList.get(j);
-                                        if (cb != null) {
-                                            try {
-                                                Field pField = cb.getClass().getField("prototype");
-                                                Object p = pField.get(cb);
-                                                if (p != null) {
-                                                    sanitizePrototype(p, "media/lua/shared/event_callback.lua");
-                                                }
-                                            } catch (Throwable ignored) {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Throwable ignored) {}
-
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException ie) {
-                    break;
-                }
-            }
-        }, "PZO-LuaEventRerouteGovernor");
-        govThread.setDaemon(true);
-        govThread.setPriority(Thread.MIN_PRIORITY);
-        govThread.start();
-    }
 }
+
 
