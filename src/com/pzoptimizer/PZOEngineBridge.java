@@ -240,6 +240,14 @@ public class PZOEngineBridge {
         } catch (Throwable ignored) {}
     }
 
+    public static boolean shouldThrottleDiskWrite(String filename, boolean append) {
+        return DiskIOPacer.shouldThrottle(filename, append);
+    }
+
+    public static Object getDummyFileWriter() {
+        return DiskIOPacer.getDummyFileWriter();
+    }
+
     private static String readLastLines(File file, int maxLines) {
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
             long fileLen = raf.length();
@@ -795,7 +803,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(490, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.7.2\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.7.3\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
@@ -1041,7 +1049,30 @@ public class PZOEngineBridge {
                                             "        modal:setX((scrW - modal:getWidth()) / 2)\n" +
                                             "        modal:setY((scrH - modal:getHeight()) / 2)\n" +
                                             "    end\n" +
-                                            "end)\n";
+                                            "end)\n" +
+                                            "if getFileWriter and not _G.pzoFileWriterHooked then\n" +
+                                            "    _G.pzoFileWriterHooked = true\n" +
+                                            "    local orig_gfw = getFileWriter\n" +
+                                            "    getFileWriter = function(filename, createIfNull, append)\n" +
+                                            "        if PZOEngineBridge and PZOEngineBridge.shouldThrottleDiskWrite and PZOEngineBridge.shouldThrottleDiskWrite(filename, append) then\n" +
+                                            "            local dummy = PZOEngineBridge.getDummyFileWriter()\n" +
+                                            "            if dummy then return dummy end\n" +
+                                            "        end\n" +
+                                            "        return orig_gfw(filename, createIfNull, append)\n" +
+                                            "    end\n" +
+                                            "end\n" +
+                                            "if getModFileWriter and not _G.pzoModFileWriterHooked then\n" +
+                                            "    _G.pzoModFileWriterHooked = true\n" +
+                                            "    local orig_gmfw = getModFileWriter\n" +
+                                            "    getModFileWriter = function(modId, filename, createIfNull, append)\n" +
+                                            "        local key = tostring(modId) .. '/' .. tostring(filename)\n" +
+                                            "        if PZOEngineBridge and PZOEngineBridge.shouldThrottleDiskWrite and PZOEngineBridge.shouldThrottleDiskWrite(key, append) then\n" +
+                                            "            local dummy = PZOEngineBridge.getDummyFileWriter()\n" +
+                                            "            if dummy then return dummy end\n" +
+                                            "        end\n" +
+                                            "        return orig_gmfw(modId, filename, createIfNull, append)\n" +
+                                            "    end\n" +
+                                            "end\n";
 
                                         Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));

@@ -110,24 +110,8 @@ public class EngineFeaturesTuner {
             } catch (Throwable ignored) {}
 
             try {
-                Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
-                Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
-                @SuppressWarnings("rawtypes")
-                Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
-
-                // Set General, Entity, Sprite, Objects, Mod debug types to Error severity
-                String[] typesToSilence = new String[]{"General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker"};
-                for (String typeName : typesToSilence) {
-                    try {
-                        Field typeField = debugTypeClass.getField(typeName);
-                        Object debugType = typeField.get(null);
-                        if (debugType != null) {
-                            Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
-                            setLogSeverity.invoke(debugType, errorSeverity);
-                        }
-                    } catch (Throwable ignored) {}
-                }
-                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load warning logs (SpriteConfig disk log stall eliminated)");
+                enforceSilencedLogTypes();
+                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load and worldgen warning logs (Zone, WorldGen, Foraging, Clothing stalls eliminated)");
             } catch (Throwable ignored) {}
 
         } catch (Throwable t) {
@@ -192,6 +176,32 @@ public class EngineFeaturesTuner {
                     if (fboGroup != null) {
                         setOptionValue(fboGroup, "corpsesInChunkTexture", true);
                         setOptionValue(fboGroup, "itemsInChunkTexture", true);
+                    }
+                } catch (Throwable ignored) {}
+            }
+            enforceSilencedLogTypes();
+        } catch (Throwable ignored) {}
+    }
+
+    public static void enforceSilencedLogTypes() {
+        try {
+            Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
+            Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
+            @SuppressWarnings("rawtypes")
+            Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
+
+            String[] typesToSilence = new String[]{
+                "General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker",
+                "Zone", "WorldGen", "Foraging", "MapLoading", "Clothing",
+                "Asset", "Script", "Recipe", "IsoRegion", "FileIO"
+            };
+            for (String typeName : typesToSilence) {
+                try {
+                    Field typeField = debugTypeClass.getField(typeName);
+                    Object debugType = typeField.get(null);
+                    if (debugType != null) {
+                        Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
+                        setLogSeverity.invoke(debugType, errorSeverity);
                     }
                 } catch (Throwable ignored) {}
             }

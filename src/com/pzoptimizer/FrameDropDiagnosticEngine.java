@@ -211,8 +211,8 @@ public final class FrameDropDiagnosticEngine {
             if (playerGetX != null && playerGetY != null) {
                 playerX = ((Number) playerGetX.invoke(player)).floatValue();
                 playerY = ((Number) playerGetY.invoke(player)).floatValue();
-                chunkX = (int) (playerX / 8.0f);
-                chunkY = (int) (playerY / 8.0f);
+                chunkX = (int) (playerX / 10.0f);
+                chunkY = (int) (playerY / 10.0f);
             }
 
             if (playerGetVehicle != null) {
@@ -282,9 +282,13 @@ public final class FrameDropDiagnosticEngine {
             }
         } else if (ingestionQueueSize > 0) {
             cause = "CHUNK_INGESTION_BACKLOG (" + ingestionQueueSize + " chunks remaining)";
-        } else if (isDriving && (Math.abs(vehicleSpeed) > 15.0f || wsQueueSize > 2)) {
-            cause = "VEHICLE_CHUNK_STREAMING (Speed: " + String.format("%.1f", vehicleSpeed) + " km/h, WS Queue: " + wsQueueSize + ")";
-        } else if (saveQueueSize > 5) {
+        } else if (wsQueueSize > 0) {
+            if (isDriving) {
+                cause = "VEHICLE_CHUNK_STREAMING (Speed: " + String.format("%.1f", vehicleSpeed) + " km/h, WS Queue: " + wsQueueSize + ")";
+            } else {
+                cause = "CHUNK_STREAMING_IO (WS Queue: " + wsQueueSize + " chunks)";
+            }
+        } else if (saveQueueSize > 0) {
             cause = "DISK_AUTOSAVE_SPIKE (SaveQueue: " + saveQueueSize + " chunks)";
         } else if (activeCorpses > 50) {
             cause = "CORPSE_DENSITY_BURDEN (" + activeCorpses + " corpses)";

@@ -123,7 +123,7 @@ public final class VehicleTravelOptimizer {
             long offset = unsafeInstance.objectFieldOffset(queueField);
             unsafeInstance.putObject(cswInstance, offset, shieldedQueue);
             saveShieldInstalled = true;
-            PZOLogger.success("[VehicleTravelOptimizer] ChunkSaveWorker Hotsave Shield installed (Eliminated 150ms ancillary save hitch while driving)");
+            PZOLogger.success("[VehicleTravelOptimizer] ChunkSaveWorker Hotsave Shield installed (Eliminated 150ms ancillary save hitch on foot & driving)");
             return true;
         } catch (Throwable t) {
             PZOLogger.warn("[VehicleTravelOptimizer] Save shield install notice: " + t.getMessage());
@@ -379,7 +379,7 @@ public final class VehicleTravelOptimizer {
     /**
      * Specialized ConcurrentLinkedQueue that monitors ChunkSaveWorker chunk drains.
      * Intercepts isEmpty() right after poll() to defer 150ms HotsaveAncilliarySystems()
-     * during active vehicle operation, while keeping saving=false and normal saves 100% functional.
+     * during active exploration and vehicle travel, while keeping saving=false and normal saves 100% functional.
      */
     public static final class ShieldedSaveQueue extends ConcurrentLinkedQueue<Object> {
         private static final long serialVersionUID = 4242L;
@@ -405,14 +405,12 @@ public final class VehicleTravelOptimizer {
             if (justPolled) {
                 justPolled = false;
                 // This call is from ChunkSaveWorker.Update() line 148 right after writing a chunk
-                if (isPlayerDriving()) {
-                    long now = System.currentTimeMillis();
-                    if (now - lastAncillaryHotsaveTime < ANCILLARY_HOTSAVE_COOLDOWN_MS) {
-                        // Defer 150ms HotsaveAncilliarySystems() freeze while operating vehicle!
-                        return false;
-                    }
-                    lastAncillaryHotsaveTime = now;
+                long now = System.currentTimeMillis();
+                if (now - lastAncillaryHotsaveTime < ANCILLARY_HOTSAVE_COOLDOWN_MS) {
+                    // Defer 150ms HotsaveAncilliarySystems() freeze on foot and while operating vehicle!
+                    return false;
                 }
+                lastAncillaryHotsaveTime = now;
             }
             return super.isEmpty();
         }
