@@ -36,21 +36,43 @@ public final class FrameDropDiagnosticEngine {
     private static final ConcurrentLinkedQueue<String> pendingDiagnosticLogs = new ConcurrentLinkedQueue<>();
     private static long lastDiskFlushTime = 0;
 
+    private static volatile String latestStatusJson = null;
+
+    private static boolean reflectionResolved = false;
+    private static Method playerGetX;
+    private static Method playerGetY;
+    private static Method playerGetVehicle;
+    private static Method vehicleGetSpeed;
+    private static Field isoPlayerPlayersField;
+    private static Field isoWorldInstanceField;
+    private static Field isoWorldCellField;
+    private static Method cellGetZombieList;
+    private static Object deadBodyObjType;
+    private static Method deadBodyGetObjects;
+    private static Field wsInstanceField;
+    private static Field wsMainThreadQField;
+    private static Field cswInstanceField;
+    private static Field cswToSaveQField;
+    private static Field lgsField;
+
     public static void initialize() {
         if (running) return;
         running = true;
 
-        // Initialize baseline GC stats
         updateGcStats();
 
-        // Background file logger daemon
         Thread loggerThread = new Thread(() -> {
             PZOLogger.success("FrameDropDiagnosticEngine: Active (Real-Time Stutter Diagnostics & Root Cause Telemetry)");
 
             while (running) {
                 try {
-                    Thread.sleep(1000); // Flush logs every second
+                    Thread.sleep(1000);
                     flushDiagnosticsToDisk();
+
+                    String statusJson = latestStatusJson;
+                    if (statusJson != null) {
+                        TelemetryReporter.writeStatusFile(statusJson);
+                    }
                 } catch (Throwable ignored) {
                     try { Thread.sleep(2000); } catch (Throwable ignored2) {}
                 }
@@ -63,6 +85,62 @@ public final class FrameDropDiagnosticEngine {
         loggerThread.start();
     }
 
+    private static void resolveReflection() {
+        if (reflectionResolved) return;
+        try {
+            Class<?> pClass = Class.forName("zombie.characters.IsoPlayer");
+            try { isoPlayerPlayersField = pClass.getField("players"); } catch (Throwable ignored) {}
+            try { playerGetX = pClass.getMethod("getX"); } catch (Throwable ignored) {}
+            try { playerGetY = pClass.getMethod("getY"); } catch (Throwable ignored) {}
+            try { playerGetVehicle = pClass.getMethod("getVehicle"); } catch (Throwable ignored) {}
+
+            try {
+                Class<?> vClass = Class.forName("zombie.vehicles.BaseVehicle");
+                vehicleGetSpeed = vClass.getMethod("getCurrentSpeedKmHour");
+            } catch (Throwable ignored) {}
+
+            try {
+                Class<?> wClass = Class.forName("zombie.iso.IsoWorld");
+                isoWorldInstanceField = wClass.getField("instance");
+                isoWorldCellField = wClass.getField("currentCell");
+            } catch (Throwable ignored) {}
+
+            try {
+                Class<?> cClass = Class.forName("zombie.iso.IsoCell");
+                try { cellGetZombieList = cClass.getMethod("getZombieList"); } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+
+            try {
+                Class<?> objIdClass = Class.forName("zombie.network.id.ObjectIDType");
+                Field dbField = objIdClass.getField("DeadBody");
+                deadBodyObjType = dbField.get(null);
+                if (deadBodyObjType != null) {
+                    deadBodyGetObjects = deadBodyObjType.getClass().getMethod("getObjects");
+                }
+            } catch (Throwable ignored) {}
+
+            try {
+                Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
+                wsInstanceField = wsClass.getField("instance");
+                wsMainThreadQField = wsClass.getDeclaredField("mainThreadRequestQueue");
+                wsMainThreadQField.setAccessible(true);
+            } catch (Throwable ignored) {}
+
+            try {
+                Class<?> cswClass = Class.forName("zombie.iso.ChunkSaveWorker");
+                cswInstanceField = cswClass.getField("instance");
+                cswToSaveQField = cswClass.getField("toSaveQueue");
+            } catch (Throwable ignored) {}
+
+            try {
+                Class<?> chunkClass = Class.forName("zombie.iso.IsoChunk");
+                lgsField = chunkClass.getField("loadGridSquare");
+            } catch (Throwable ignored) {}
+
+            reflectionResolved = true;
+        } catch (Throwable ignored) {}
+    }
+
     /**
      * Called on each rendered frame to compute frame time and detect stutter anomalies.
      */
@@ -72,30 +150,44 @@ public final class FrameDropDiagnosticEngine {
         lastFrameTimeNanos = now;
 
         if (deltaNanos <= 0 || deltaNanos > 2_000_000_000L) {
-            // First frame or pause menu resume anomaly
             return;
         }
 
         double frameTimeMs = deltaNanos / 1_000_000.0;
 
-        // Store rolling history
         frameTimeHistory[historyIndex] = frameTimeMs;
         historyIndex = (historyIndex + 1) % frameTimeHistory.length;
         totalFramesSampled++;
 
-        // Stutter detection threshold: >28ms (<35 FPS) or >1.8x average frame time
-        double avgFrameTime = getAverageFrameTime();
-        if (frameTimeMs > 28.0 && frameTimeMs > avgFrameTime * 1.65) {
-            diagnoseFrameDrop(frameTimeMs, avgFrameTime);
+        Object player = getActivePlayer();
+        if (player == null) {
+            return;
         }
 
-        // Periodically update live telemetry file (every 60 frames)
+        double avgFrameTime = getAverageFrameTime();
+        if (frameTimeMs > 28.0 && frameTimeMs > avgFrameTime * 1.65) {
+            diagnoseFrameDrop(player, frameTimeMs, avgFrameTime);
+        }
+
         if (totalFramesSampled % 60 == 0) {
             updateLiveTelemetry(frameTimeMs, avgFrameTime);
         }
     }
 
-    private static void diagnoseFrameDrop(double frameTimeMs, double avgFrameTime) {
+    private static Object getActivePlayer() {
+        try {
+            if (!reflectionResolved) resolveReflection();
+            if (isoPlayerPlayersField != null) {
+                Object[] players = (Object[]) isoPlayerPlayersField.get(null);
+                if (players != null && players.length > 0 && players[0] != null) {
+                    return players[0];
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static void diagnoseFrameDrop(Object player, double frameTimeMs, double avgFrameTime) {
         stutterCount++;
         lastStutterMs = frameTimeMs;
 
@@ -116,102 +208,63 @@ public final class FrameDropDiagnosticEngine {
         int ingestionQueueSize = 0;
 
         try {
-            Class<?> playerClass = Class.forName("zombie.characters.IsoPlayer");
-            Object player = null;
-            try {
-                Method getInstMethod = playerClass.getMethod("getInstance");
-                player = getInstMethod.invoke(null);
-            } catch (Throwable ignored) {}
-            if (player == null) {
-                try {
-                    Field playersField = playerClass.getField("players");
-                    Object[] players = (Object[]) playersField.get(null);
-                    if (players != null && players.length > 0) {
-                        player = players[0];
-                    }
-                } catch (Throwable ignored) {}
-            }
-
-            if (player != null) {
-                Method getX = playerClass.getMethod("getX");
-                Method getY = playerClass.getMethod("getY");
-                playerX = ((Number) getX.invoke(player)).floatValue();
-                playerY = ((Number) getY.invoke(player)).floatValue();
+            if (playerGetX != null && playerGetY != null) {
+                playerX = ((Number) playerGetX.invoke(player)).floatValue();
+                playerY = ((Number) playerGetY.invoke(player)).floatValue();
                 chunkX = (int) (playerX / 8.0f);
                 chunkY = (int) (playerY / 8.0f);
+            }
 
-                Method getVehicle = playerClass.getMethod("getVehicle");
-                Object vehicle = getVehicle.invoke(player);
+            if (playerGetVehicle != null) {
+                Object vehicle = playerGetVehicle.invoke(player);
                 if (vehicle != null) {
                     isDriving = true;
-                    Method getSpeed = vehicle.getClass().getMethod("getCurrentSpeedKmHour");
-                    vehicleSpeed = ((Number) getSpeed.invoke(vehicle)).floatValue();
+                    if (vehicleGetSpeed != null) {
+                        vehicleSpeed = ((Number) vehicleGetSpeed.invoke(vehicle)).floatValue();
+                    }
                 }
             }
 
-            // Query Cell entities
-            Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");
-            Field instField = worldClass.getField("instance");
-            Object worldInst = instField.get(null);
-            if (worldInst != null) {
-                Field cellField = worldClass.getField("currentCell");
-                Object cell = cellField.get(worldInst);
-                if (cell != null) {
-                    try {
-                        Method getZombies = cell.getClass().getMethod("getZombieList");
-                        List<?> zList = (List<?>) getZombies.invoke(cell);
+            if (isoWorldInstanceField != null && isoWorldCellField != null) {
+                Object worldInst = isoWorldInstanceField.get(null);
+                if (worldInst != null) {
+                    Object cell = isoWorldCellField.get(worldInst);
+                    if (cell != null && cellGetZombieList != null) {
+                        List<?> zList = (List<?>) cellGetZombieList.invoke(cell);
                         if (zList != null) activeZombies = zList.size();
-                    } catch (Throwable t) {
-                        try {
-                            Field zListField = cell.getClass().getField("ZombieList");
-                            List<?> zList = (List<?>) zListField.get(cell);
-                            if (zList != null) activeZombies = zList.size();
-                        } catch (Throwable ignored) {}
                     }
                 }
             }
 
-            // Query Dead Bodies (Corpses)
-            try {
-                Class<?> objIdTypeClass = Class.forName("zombie.network.id.ObjectIDType");
-                Field deadBodyField = objIdTypeClass.getField("DeadBody");
-                Object deadBodyType = deadBodyField.get(null);
-                if (deadBodyType != null) {
-                    Method getObjectsMethod = deadBodyType.getClass().getMethod("getObjects");
-                    Object objs = getObjectsMethod.invoke(deadBodyType);
-                    if (objs instanceof java.util.Collection) {
-                        activeCorpses = ((java.util.Collection<?>) objs).size();
-                    }
+            if (deadBodyObjType != null && deadBodyGetObjects != null) {
+                Object objs = deadBodyGetObjects.invoke(deadBodyObjType);
+                if (objs instanceof java.util.Collection) {
+                    activeCorpses = ((java.util.Collection<?>) objs).size();
                 }
-            } catch (Throwable ignored) {}
-
-            // Query WorldStreamer queue
-            Class<?> wsClass = Class.forName("zombie.iso.WorldStreamer");
-            Object wsInst = wsClass.getField("instance").get(null);
-            if (wsInst != null) {
-                Field reqQueueField = wsClass.getDeclaredField("mainThreadRequestQueue");
-                reqQueueField.setAccessible(true);
-                Queue<?> q = (Queue<?>) reqQueueField.get(wsInst);
-                if (q != null) wsQueueSize = q.size();
             }
 
-            // Query ChunkSaveWorker queue
-            Class<?> cswClass = Class.forName("zombie.iso.ChunkSaveWorker");
-            Object cswInst = cswClass.getField("instance").get(null);
-            if (cswInst != null) {
-                Field saveQField = cswClass.getField("toSaveQueue");
-                Queue<?> sq = (Queue<?>) saveQField.get(cswInst);
-                if (sq != null) saveQueueSize = sq.size();
+            if (wsInstanceField != null && wsMainThreadQField != null) {
+                Object wsInst = wsInstanceField.get(null);
+                if (wsInst != null) {
+                    Queue<?> q = (Queue<?>) wsMainThreadQField.get(wsInst);
+                    if (q != null) wsQueueSize = q.size();
+                }
             }
 
-            // Query IsoChunk.loadGridSquare ingestion queue
-            Class<?> chunkClass = Class.forName("zombie.iso.IsoChunk");
-            Field lgsField = chunkClass.getField("loadGridSquare");
-            Object lgsObj = lgsField.get(null);
-            if (lgsObj instanceof java.util.Collection) {
-                ingestionQueueSize = ((java.util.Collection<?>) lgsObj).size();
+            if (cswInstanceField != null && cswToSaveQField != null) {
+                Object cswInst = cswInstanceField.get(null);
+                if (cswInst != null) {
+                    Queue<?> sq = (Queue<?>) cswToSaveQField.get(cswInst);
+                    if (sq != null) saveQueueSize = sq.size();
+                }
             }
 
+            if (lgsField != null) {
+                Object lgsObj = lgsField.get(null);
+                if (lgsObj instanceof java.util.Collection) {
+                    ingestionQueueSize = ((java.util.Collection<?>) lgsObj).size();
+                }
+            }
         } catch (Throwable ignored) {}
 
         boolean chunkCrossing = (lastDiagnosedChunkX != Integer.MIN_VALUE) && (chunkX != lastDiagnosedChunkX || chunkY != lastDiagnosedChunkY);
@@ -250,7 +303,6 @@ public final class FrameDropDiagnosticEngine {
         );
 
         pendingDiagnosticLogs.offer(logEntry);
-       // PZOLogger.warn(logEntry);
     }
 
     private static void updateGcStats() {
@@ -261,7 +313,6 @@ public final class FrameDropDiagnosticEngine {
             for (GarbageCollectorMXBean gc : gcs) {
                 String name = gc.getName();
                 if (name != null && name.contains("Cycles")) {
-                    // Ignore concurrent background cycles under ZGC (sub-millisecond STW pause)
                     continue;
                 }
                 long c = gc.getCollectionCount();
@@ -301,13 +352,12 @@ public final class FrameDropDiagnosticEngine {
             double low1PercentMs = getPercentileFrameTime(0.99);
             double low01PercentMs = getPercentileFrameTime(0.999);
             double low1PercentFps = 1000.0 / Math.max(0.1, low1PercentMs);
+            int ramGb = PZOEngineBridge.getOptimizedRAM();
 
-            String json = String.format(
-                "{\"fps\": %.1f, \"avg_fps\": %.1f, \"frame_time_ms\": %.2f, \"low_1_pct_fps\": %.1f, \"low_1_pct_ms\": %.2f, \"low_01_pct_ms\": %.2f, \"stutter_count\": %d, \"last_stutter_ms\": %.1f, \"last_stutter_cause\": \"%s\"}",
-                fps, avgFps, currentFrameMs, low1PercentFps, low1PercentMs, low01PercentMs, stutterCount, lastStutterMs, lastStutterCause.replace("\"", "\\\"")
+            latestStatusJson = String.format(
+                "{\"optimized\": true, \"ram_gb\": %d, \"channel\": \"Stable\", \"fps\": %.1f, \"avg_fps\": %.1f, \"frame_time_ms\": %.2f, \"low_1_pct_fps\": %.1f, \"low_1_pct_ms\": %.2f, \"low_01_pct_ms\": %.2f, \"stutter_count\": %d, \"last_stutter_ms\": %.1f, \"last_stutter_cause\": \"%s\"}",
+                ramGb, fps, avgFps, currentFrameMs, low1PercentFps, low1PercentMs, low01PercentMs, stutterCount, lastStutterMs, lastStutterCause.replace("\"", "\\\"")
             );
-
-            TelemetryReporter.writeStatusFile(json);
         } catch (Throwable ignored) {}
     }
 
