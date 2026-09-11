@@ -776,22 +776,25 @@ public class PZOptimAgent {
                                 if (codeLen >= 18 && copy[cstart] == 0x24 && copy[cstart + 1] == 0x0D && copy[cstart + 2] == 0x6A && copy[cstart + 3] == 0x45) {
                                     byte hbHi = (byte) ((haveBloodRef >> 8) & 0xFF);
                                     byte hbLo = (byte) (haveBloodRef & 0xFF);
-                                    copy[cstart] = 0x2A; // aload_0
-                                    copy[cstart + 1] = (byte) 0xB6; // invokevirtual
-                                    copy[cstart + 2] = hbHi;
-                                    copy[cstart + 3] = hbLo;
-                                    copy[cstart + 4] = (byte) 0x99; // ifeq +14
-                                    copy[cstart + 5] = 0x00;
-                                    copy[cstart + 6] = 0x0E;
-                                    copy[cstart + 7] = (byte) 0xB1; // return
-                                    for (int pad = 8; pad < 18; pad++) {
-                                        copy[cstart + pad] = 0x00; // nop
+                                    copy[cstart] = 0x04;            // iconst_1
+                                    copy[cstart + 1] = 0x2A;        // aload_0
+                                    copy[cstart + 2] = (byte) 0xB6; // invokevirtual
+                                    copy[cstart + 3] = hbHi;
+                                    copy[cstart + 4] = hbLo;
+                                    copy[cstart + 5] = 0x64;        // isub (1 - haveBlood)
+                                    copy[cstart + 6] = 0x1B;        // iload_1 (range)
+                                    copy[cstart + 7] = 0x68;        // imul: range = (1 - haveBlood) * range
+                                    copy[cstart + 8] = 0x3C;        // istore_1
+                                    copy[cstart + 9] = 0x0C;        // fconst_1
+                                    copy[cstart + 10] = 0x45;       // fstore_2
+                                    for (int pad = 11; pad < 18; pad++) {
+                                        copy[cstart + pad] = 0x00;  // nop fallthrough to offset 18
                                     }
                                     patched++;
-                                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoGridSquare.splatBlood: Real-time blood stacking guard armed (0ms combat overdraw bypass)");
+                                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoGridSquare.splatBlood: Real-time blood stacking guard armed (branchless 0ms combat overdraw bypass)");
                                 }
                             } else if (!bytecodeBloodCap) {
-                                if (codeLen >= 18 && copy[cstart] == 0x2A && copy[cstart + 1] == (byte) 0xB6 && copy[cstart + 7] == (byte) 0xB1) {
+                                if (codeLen >= 18 && copy[cstart] == 0x04 && copy[cstart + 1] == 0x2A && copy[cstart + 2] == (byte) 0xB6) {
                                     byte[] origBytes = new byte[] {
                                         0x24, 0x0D, 0x6A, 0x45, 0x24, 0x13, 0x0A, (byte) 0x8E, 0x6A, 0x45, 0x24, 0x0C, (byte) 0x95, (byte) 0x9E, 0x00, 0x05, 0x0C, 0x45
                                     };
