@@ -25,6 +25,7 @@ public class WorldStreamerBooster {
                     ChunkIngestionPacer.upgradeChunkMapLock();
                     VehicleTravelOptimizer.checkAndMaintain();
                     RainAndWeatherOptimizer.checkAndMaintain();
+                    ContainerEventGovernor.checkAndMaintain();
                     EngineFeaturesTuner.reapplyRuntimeTuning();
                     installStreamBooster();
 
