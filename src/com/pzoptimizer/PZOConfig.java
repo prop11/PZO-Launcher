@@ -10,7 +10,7 @@ import java.nio.file.Files;
  */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
-    public static final String CURRENT_NOTICE_VERSION = "0.9.7";
+    public static final String CURRENT_NOTICE_VERSION = "0.9.7.2";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
     private static volatile boolean isolateConflictingFpsMods = true;
