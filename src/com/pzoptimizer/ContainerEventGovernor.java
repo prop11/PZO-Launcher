@@ -26,56 +26,15 @@ public final class ContainerEventGovernor {
     private static volatile GovernedEventMap governedMapRef = null;
 
     public static void initialize() {
-        if (!initialized.compareAndSet(false, true)) {
-            return;
-        }
-
-        obtainUnsafe();
-        installGovernor();
-
-        Thread daemon = new Thread(ContainerEventGovernor::daemonLoop, "PZO-ContainerEventGovernor");
-        daemon.setDaemon(true);
-        daemon.setPriority(Thread.MIN_PRIORITY);
-        daemon.start();
+        // Disabled: In Build 42, background thread Lua event triggering and OnContainerUpdate
+        // interception causes thread contention and drops events during multi-corpse combat drops.
     }
 
     public static synchronized boolean installGovernor() {
-        if (installed && governedMapRef != null) return true;
-        obtainUnsafe();
-        if (unsafeInstance == null) return false;
-
-        try {
-            Class<?> lemClass = LuaEventManager.class;
-            Field eventMapField = lemClass.getDeclaredField("EventMap");
-            eventMapField.setAccessible(true);
-
-            Object base = unsafeInstance.staticFieldBase(eventMapField);
-            long offset = unsafeInstance.staticFieldOffset(eventMapField);
-
-            @SuppressWarnings("unchecked")
-            HashMap<String, Event> existing = (HashMap<String, Event>) unsafeInstance.getObject(base, offset);
-            if (existing instanceof GovernedEventMap) {
-                governedMapRef = (GovernedEventMap) existing;
-                installed = true;
-                return true;
-            }
-
-            GovernedEventMap wrapped = new GovernedEventMap(existing);
-            unsafeInstance.putObject(base, offset, wrapped);
-            governedMapRef = wrapped;
-            installed = true;
-
-            PZOLogger.success("[ContainerEventGovernor] Armed: OnContainerUpdate Burst Coalescing & Door Stutter Defense");
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
+        return false;
     }
 
     public static void checkAndMaintain() {
-        if (!installed || governedMapRef == null) {
-            installGovernor();
-        }
     }
 
     private static void daemonLoop() {

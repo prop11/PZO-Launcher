@@ -604,16 +604,46 @@ if (Test-Path $InstalledJarPath) {
                 }
             }
 
+            # Restore original clean stock backup if available
+            $cleanBackup = $null
             if (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue) {
-                $latestBackup = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | 
-                                Sort-Object LastWriteTime -Descending | 
-                                Select-Object -First 1
+                $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Ascending
+                foreach ($bf in $bakFiles) {
+                    $txt = Get-Content -LiteralPath $bf.FullName -Raw -ErrorAction SilentlyContinue
+                    if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64")) {
+                        $cleanBackup = $bf
+                        break
+                    }
+                }
+            }
 
-                if ($latestBackup) {
-                    Copy-Item -Path $latestBackup.FullName -Destination $TargetFilePath -Force
-                    Write-Host "Restored configuration: $($latestBackup.Name) -> $TargetFileName" -ForegroundColor Green
-                } else {
-                    Write-Host "Notice: No backup found in $BackupFolder. Leaving existing $TargetFileName intact." -ForegroundColor Yellow
+            if ($cleanBackup) {
+                Copy-Item -Path $cleanBackup.FullName -Destination $TargetFilePath -Force
+                Write-Host "Restored original clean stock backup: $($cleanBackup.Name) -> $TargetFileName" -ForegroundColor Green
+            }
+
+            # Guaranteed sanitization: Ensure ProjectZomboid64.json contains no orphaned PZO entries
+            if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
+                $jsonRaw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
+                if ($jsonRaw -and (($jsonRaw -match "com/pzoptimizer") -or ($jsonRaw -match "pzo_native64") -or ($jsonRaw -match "PZOptimEngine\.jar"))) {
+                    $sanitized = $jsonRaw -replace '"mainClass"\s*:\s*"com/pzoptimizer/PZOEntrypoint"', '"mainClass": "zombie/gameStates/MainScreenState"'
+                    $sanitized = $sanitized -replace '\s*"PZOptimEngine\.jar",?', ''
+                    $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
+                    $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
+                    [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
+                    Write-Host "Sanitized $TargetFileName: Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
+                }
+            }
+
+            # Cleanses debug-options.ini to prevent FBO thrashing in vanilla
+            $debugOptFile = [System.IO.Path]::Combine($HOME, "Zomboid\debug-options.ini")
+            if (Test-Path -LiteralPath $debugOptFile -ErrorAction SilentlyContinue) {
+                $dbgContent = Get-Content -LiteralPath $debugOptFile -Raw -ErrorAction SilentlyContinue
+                if ($dbgContent) {
+                    $cleanedDbg = $dbgContent -replace "FBORenderChunk\.CorpsesInChunkTexture=true", "FBORenderChunk.CorpsesInChunkTexture=false"
+                    $cleanedDbg = $cleanedDbg -replace "FBORenderChunk\.ItemsInChunkTexture=true", "FBORenderChunk.ItemsInChunkTexture=false"
+                    [System.IO.File]::WriteAllText($debugOptFile, $cleanedDbg, [System.Text.Encoding]::ASCII)
+                    Write-Host "Cleansed: debug-options.ini (vanilla corpse & item rendering restored)" -ForegroundColor Green
                 }
             }
 
