@@ -124,78 +124,7 @@ public final class MultiCoreAnimationEngine {
      * Evaluates in parallel across dedicated P-Core worker threads.
      */
     public static void applyHordeAnimationGovernor(List<?> zombies, int count, byte[] cullMask, byte[] tiers) {
-        if (zombies == null || count <= 0 || cullMask == null) return;
-
-        long frame = frameCounter.incrementAndGet();
-        int workers = PZOMultiCoreEngine.getWorkerCount();
-        int batchSize = (count + workers - 1) / workers;
-        int numBatches = (count + batchSize - 1) / batchSize;
-
-        if (numBatches <= 1 || PZOMultiCoreEngine.getExecutor() == null) {
-            processHordeBatch(zombies, 0, count, cullMask, tiers, frame);
-        } else {
-            List<CompletableFuture<Void>> futures = new ArrayList<>(numBatches);
-            for (int b = 0; b < numBatches; b++) {
-                final int start = b * batchSize;
-                final int end = Math.min(count, start + batchSize);
-                if (start >= end) break;
-                futures.add(CompletableFuture.runAsync(() -> {
-                    processHordeBatch(zombies, start, end, cullMask, tiers, frame);
-                }, PZOMultiCoreEngine.getExecutor()));
-            }
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        }
-    }
-
-    private static void processHordeBatch(List<?> zombies, int start, int end, byte[] cullMask, byte[] tiers, long frame) {
-        long bypassed = 0;
-        for (int i = start; i < end; i++) {
-            if (i >= zombies.size()) break;
-            Object obj = zombies.get(i);
-            if (!(obj instanceof zombie.characters.IsoGameCharacter)) continue;
-            zombie.characters.IsoGameCharacter character = (zombie.characters.IsoGameCharacter) obj;
-
-            zombie.core.skinnedmodel.animation.AnimationPlayer animPlayer = character.getAnimationPlayer();
-            if (animPlayer == null) continue;
-
-            // Never bypass or freeze bones for dead, ragdolling, prone/downed, or highlighted entities.
-            // Bypassing ragdoll/dead entities triggers releaseRagdollController() destruction/recreation loops
-            // in Bullet Physics JNI, causing multi-second lag spikes. Bypassing highlighted entities breaks outlines.
-            if (character.isDead() || character.isRagdoll() || character.isOnFloor() || character.isOutlineHighlight()) {
-                animPlayer.updateBones = true;
-                continue;
-            }
-
-            boolean culled = (i < cullMask.length && cullMask[i] == 0);
-            if (culled) {
-                animPlayer.updateBones = false;
-                bypassed += 64;
-            } else {
-                byte tier = (tiers != null && i < tiers.length) ? tiers[i] : 0;
-                if (tier >= 3) {
-                    // Ultra-Distant entity (40+ tiles away): evaluate 1-in-4 frames (15 FPS keyframing)
-                    boolean updateThisFrame = ((frame + i) & 3) == 0;
-                    animPlayer.updateBones = updateThisFrame;
-                    if (!updateThisFrame) bypassed += 64;
-                } else if (tier == 2) {
-                    // Far entity (25-40 tiles away): evaluate 1-in-3 frames (20 FPS keyframing)
-                    boolean updateThisFrame = ((frame + i) % 3) == 0;
-                    animPlayer.updateBones = updateThisFrame;
-                    if (!updateThisFrame) bypassed += 64;
-                } else if (tier == 1) {
-                    // Mid entity (12-25 tiles away): evaluate alternate frames (30 FPS keyframing)
-                    boolean updateThisFrame = ((frame + i) & 1) == 0;
-                    animPlayer.updateBones = updateThisFrame;
-                    if (!updateThisFrame) bypassed += 64;
-                } else {
-                    // Close / combat entity (0-12 tiles): full 60 FPS animation fidelity
-                    animPlayer.updateBones = true;
-                }
-            }
-        }
-        if (bypassed > 0) {
-            totalBoneTransformsBypassed.addAndGet(bypassed);
-        }
+        // Skeletal bone updates and ragdoll physics are managed natively on the game engine thread
     }
 
     public static long getBoneTransformsBypassed() {

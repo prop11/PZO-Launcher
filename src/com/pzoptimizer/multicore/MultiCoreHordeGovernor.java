@@ -237,7 +237,21 @@ public final class MultiCoreHordeGovernor {
                 return;
             }
 
-            int count = Math.min(zombies.size(), MAX_ENTITIES);
+            Object[] zombieSnapshot;
+            try {
+                zombieSnapshot = zombies.toArray();
+            } catch (Throwable t) {
+                return;
+            }
+
+            int count = Math.min(zombieSnapshot.length, MAX_ENTITIES);
+            if (count == 0) {
+                lastTrackedZombieCount.set(0);
+                lastCulledOffscreenCount.set(0);
+                snapshotCount = 0;
+                return;
+            }
+
             FloatBuffer coordBuf = SpatialBufferPool.getCoordBuffer();
             FloatBuffer distBuf = SpatialBufferPool.getDistanceBuffer();
             ByteBuffer maskBuf = SpatialBufferPool.getCullMaskBuffer();
@@ -249,10 +263,7 @@ public final class MultiCoreHordeGovernor {
             coordBuf.rewind();
             headingBuf.rewind();
             for (int i = 0; i < count; i++) {
-                Object z = null;
-                try {
-                    if (i < zombies.size()) z = zombies.get(i);
-                } catch (Throwable ignored) {}
+                Object z = (i < zombieSnapshot.length) ? zombieSnapshot[i] : null;
                 if (z != null) {
                     coordBuf.put(i * 2, getObjectX(z));
                     coordBuf.put(i * 2 + 1, getObjectY(z));
@@ -365,8 +376,7 @@ public final class MultiCoreHordeGovernor {
             totalParallelSweeps.incrementAndGet();
             totalSweepTimeNanos.addAndGet(sweepDuration);
 
-            // Multi-Core Skeletal Bone Skinning Governor: bypass off-screen bone matrix evaluations
-            MultiCoreAnimationEngine.applyHordeAnimationGovernor(zombies, count, SNAPSHOT_MASK, SNAPSHOT_TIERS);
+
 
         } catch (Throwable ignored) {}
     }

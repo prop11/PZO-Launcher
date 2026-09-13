@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.9.5)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.9.7.4)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -81,6 +81,12 @@ clean_lua_bridge_files() {
         echo "[+] Purged all PZO bridge and telemetry files from ~/Zomboid/Lua/"
     fi
     rm -f "$HOME/Zomboid"/pzo_*
+    DEBUG_OPT="$HOME/Zomboid/debug-options.ini"
+    if [ -f "$DEBUG_OPT" ]; then
+        sed -i.bak 's/FBORenderChunk.CorpsesInChunkTexture=true/FBORenderChunk.CorpsesInChunkTexture=false/g' "$DEBUG_OPT" 2>/dev/null || true
+        sed -i.bak 's/FBORenderChunk.ItemsInChunkTexture=true/FBORenderChunk.ItemsInChunkTexture=false/g' "$DEBUG_OPT" 2>/dev/null || true
+        rm -f "${DEBUG_OPT}.bak"
+    fi
 }
 
 # ==============================================================================
@@ -355,6 +361,12 @@ else
                     cp -f "${JSON_FILE}.bak" "$JSON_FILE"
                     echo "[+] Restored original ProjectZomboid64.json from backup."
                 fi
+                if [ -f "$JSON_FILE" ]; then
+                    sed -i.bak 's|"com/pzoptimizer/PZOEntrypoint"|"zombie/gameStates/MainScreenState"|g' "$JSON_FILE" 2>/dev/null || true
+                    sed -i.bak '/PZOptimEngine.jar/d' "$JSON_FILE" 2>/dev/null || true
+                    sed -i.bak '/pzo_native64/d' "$JSON_FILE" 2>/dev/null || true
+                    rm -f "${JSON_FILE}.bak"
+                fi
                 clean_lua_bridge_files
                 echo "[+] Uninstallation complete! Restored to stock settings."
                 exit 0
@@ -492,7 +504,7 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.5-unstable\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.7.4\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 

@@ -15,11 +15,20 @@ import java.util.Set;
 public class TelemetryReporter {
     private static final Set<File> discoveredLuaDirs = Collections.synchronizedSet(new LinkedHashSet<>());
 
+    private static volatile long lastScanTime = 0;
+    private static final long SCAN_COOLDOWN_MS = 60_000L;
+
     static {
         refreshDiscoveredDirectories(null);
     }
 
     public static void refreshDiscoveredDirectories(String[] cliArgs) {
+        long now = System.currentTimeMillis();
+        if (!discoveredLuaDirs.isEmpty() && (now - lastScanTime < SCAN_COOLDOWN_MS) && cliArgs == null) {
+            return;
+        }
+        lastScanTime = now;
+
         try {
             if (cliArgs != null) {
                 for (int i = 0; i < cliArgs.length; i++) {

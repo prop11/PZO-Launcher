@@ -47,20 +47,21 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // D. FBO Chunk Baking for Corpses & Ground Items (Massive draw-call reduction)
+                    // Corpses and items in chunk texture FBO must remain false (vanilla default)
+                    // In Build 42, enabling them causes chunk FBO texture invalidation on every frame while bodies or items move.
                     try {
                         Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
                         Object fboGroup = fboGroupField.get(debugOptionsInstance);
                         if (fboGroup != null) {
-                            setOptionValue(fboGroup, "corpsesInChunkTexture", true);
-                            setOptionValue(fboGroup, "itemsInChunkTexture", true);
+                            setOptionValue(fboGroup, "corpsesInChunkTexture", false);
+                            setOptionValue(fboGroup, "itemsInChunkTexture", false);
                         }
                     } catch (Throwable ignored) {}
 
                     // E. Persist thread-safe options to debug-options.ini
                     persistDebugOptionsFile();
 
-                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Pathfinding Native, FBO Baking)");
+                    PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Pathfinding Native)");
                 }
             } catch (Throwable e) {
                 PZOLogger.info("EngineFeaturesTuner: B42 DebugOptions hook skipped: " + e.getMessage());
@@ -110,24 +111,8 @@ public class EngineFeaturesTuner {
             } catch (Throwable ignored) {}
 
             try {
-                Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
-                Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
-                @SuppressWarnings("rawtypes")
-                Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
-
-                // Set General, Entity, Sprite, Objects, Mod debug types to Error severity
-                String[] typesToSilence = new String[]{"General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker"};
-                for (String typeName : typesToSilence) {
-                    try {
-                        Field typeField = debugTypeClass.getField(typeName);
-                        Object debugType = typeField.get(null);
-                        if (debugType != null) {
-                            Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
-                            setLogSeverity.invoke(debugType, errorSeverity);
-                        }
-                    } catch (Throwable ignored) {}
-                }
-                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load warning logs (SpriteConfig disk log stall eliminated)");
+                enforceSilencedLogTypes();
+                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load and worldgen warning logs (Zone, WorldGen, Foraging, Clothing stalls eliminated)");
             } catch (Throwable ignored) {}
 
         } catch (Throwable t) {
@@ -163,8 +148,8 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
-                sb.append("FBORenderChunk.CorpsesInChunkTexture=true\n");
-                sb.append("FBORenderChunk.ItemsInChunkTexture=true\n");
+                sb.append("FBORenderChunk.CorpsesInChunkTexture=false\n");
+                sb.append("FBORenderChunk.ItemsInChunkTexture=false\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
                     fw.write(sb.toString());
                 }
@@ -190,8 +175,34 @@ public class EngineFeaturesTuner {
                     Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
                     Object fboGroup = fboGroupField.get(debugOptionsInstance);
                     if (fboGroup != null) {
-                        setOptionValue(fboGroup, "corpsesInChunkTexture", true);
-                        setOptionValue(fboGroup, "itemsInChunkTexture", true);
+                        setOptionValue(fboGroup, "corpsesInChunkTexture", false);
+                        setOptionValue(fboGroup, "itemsInChunkTexture", false);
+                    }
+                } catch (Throwable ignored) {}
+            }
+            enforceSilencedLogTypes();
+        } catch (Throwable ignored) {}
+    }
+
+    public static void enforceSilencedLogTypes() {
+        try {
+            Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
+            Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
+            @SuppressWarnings("rawtypes")
+            Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
+
+            String[] typesToSilence = new String[]{
+                "General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker",
+                "Zone", "WorldGen", "Foraging", "MapLoading", "Clothing",
+                "Asset", "Script", "Recipe", "IsoRegion", "FileIO"
+            };
+            for (String typeName : typesToSilence) {
+                try {
+                    Field typeField = debugTypeClass.getField(typeName);
+                    Object debugType = typeField.get(null);
+                    if (debugType != null) {
+                        Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
+                        setLogSeverity.invoke(debugType, errorSeverity);
                     }
                 } catch (Throwable ignored) {}
             }

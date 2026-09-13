@@ -29,6 +29,7 @@ public class PZOEntrypoint {
 
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
+        LogSpamShield.initialize();
 
         // Automatically inspect and migrate ProjectZomboid64.json if upgrading from older releases (e.g. 0.8.2 -> 0.9.5)
         try {
@@ -86,6 +87,8 @@ public class PZOEntrypoint {
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
         ContainerConfiguratorGuard.initialize();
+        ContainerEventGovernor.initialize();
+        DiskIOPacer.initialize();
         com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
         if (UnstableChannelGuard.isUnstableBuild()) {
             PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD AVX2 Batch Horde Spatial Culler & Skeletal LOD Armed");

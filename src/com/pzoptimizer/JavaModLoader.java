@@ -239,6 +239,27 @@ public class JavaModLoader {
         if (LOADED_MODS.contains(canonicalPath)) return;
         LOADED_MODS.add(canonicalPath);
 
+        Set<String> enabled = getEnabledModIds();
+        if (!enabled.isEmpty()) {
+            Set<String> modIds = findModIdsForJar(jarFile);
+            if (!modIds.isEmpty()) {
+                boolean anyEnabled = false;
+                for (String mid : modIds) {
+                    if (enabled.contains(mid) || enabled.contains(mid.toLowerCase()) ||
+                        mid.equalsIgnoreCase("MPOptimizer") || mid.equalsIgnoreCase("PZOptimEngine") ||
+                        mid.equalsIgnoreCase("ProjectZomboidOptimizer")) {
+                        anyEnabled = true;
+                        break;
+                    }
+                }
+                if (!anyEnabled) {
+                    PZOLogger.info(String.format("[JavaModLoader] Skipping disabled Java mod: %s (%s) - Mod is disabled in Project Zomboid Mod Manager",
+                        String.join(", ", modIds), jarFile.getName()));
+                    return;
+                }
+            }
+        }
+
         long sizeKB = Math.max(1, jarFile.length() / 1024);
         PZOLogger.info(String.format("[JavaModLoader] Inspecting Java mod: %s (%d KB) at %s", jarFile.getName(), sizeKB, jarFile.getPath()));
 
@@ -427,6 +448,119 @@ public class JavaModLoader {
             PZOLogger.warn(String.format("[JavaModLoader] Notice: Could not invoke entrypoint on %s (%s): %s", jarFile.getName(), className, t.getMessage()));
         }
         return false;
+    }
+
+    private static final Set<String> ENABLED_MOD_IDS = new HashSet<>();
+    private static volatile boolean enabledModsParsed = false;
+
+    private static synchronized Set<String> getEnabledModIds() {
+        if (enabledModsParsed) return ENABLED_MOD_IDS;
+        enabledModsParsed = true;
+
+        try {
+            String userHome = System.getProperty("user.home");
+            File defaultTxt = new File(userHome, "Zomboid" + File.separator + "mods" + File.separator + "default.txt");
+            parseModIdsFromFile(defaultTxt, ENABLED_MOD_IDS);
+        } catch (Throwable ignored) {}
+
+        try {
+            String userHome = System.getProperty("user.home");
+            File savesDir = new File(userHome, "Zomboid" + File.separator + "Saves");
+            if (savesDir.exists() && savesDir.isDirectory()) {
+                File latestModsTxt = findLatestSaveModsTxt(savesDir);
+                if (latestModsTxt != null) {
+                    parseModIdsFromFile(latestModsTxt, ENABLED_MOD_IDS);
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        return ENABLED_MOD_IDS;
+    }
+
+    private static void parseModIdsFromFile(File file, Set<String> destination) {
+        if (file == null || !file.exists() || !file.isFile()) return;
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("mod") && trimmed.contains("=")) {
+                    int eq = trimmed.indexOf('=');
+                    String id = trimmed.substring(eq + 1).trim();
+                    if (id.endsWith(",")) id = id.substring(0, id.length() - 1).trim();
+                    if (!id.isEmpty()) {
+                        destination.add(id);
+                        destination.add(id.toLowerCase());
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static File findLatestSaveModsTxt(File dir) {
+        File[] modes = dir.listFiles();
+        if (modes == null) return null;
+        File newest = null;
+        long newestTime = 0;
+        for (File mode : modes) {
+            if (!mode.isDirectory()) continue;
+            File[] saves = mode.listFiles();
+            if (saves == null) continue;
+            for (File save : saves) {
+                if (!save.isDirectory()) continue;
+                File modsTxt = new File(save, "mods.txt");
+                if (modsTxt.exists() && modsTxt.lastModified() > newestTime) {
+                    newest = modsTxt;
+                    newestTime = modsTxt.lastModified();
+                }
+            }
+        }
+        return newest;
+    }
+
+    private static Set<String> findModIdsForJar(File jarFile) {
+        Set<String> ids = new HashSet<>();
+        if (jarFile == null) return ids;
+
+        File curr = jarFile.getParentFile();
+        int levels = 0;
+        while (curr != null && levels < 5) {
+            File modInfo = new File(curr, "mod.info");
+            if (modInfo.exists() && modInfo.isFile()) {
+                parseModInfoId(modInfo, ids);
+            }
+            File modsSub = new File(curr, "mods");
+            if (modsSub.exists() && modsSub.isDirectory()) {
+                File[] children = modsSub.listFiles();
+                if (children != null) {
+                    for (File c : children) {
+                        if (c.isDirectory()) {
+                            File subModInfo = new File(c, "mod.info");
+                            if (subModInfo.exists() && subModInfo.isFile()) {
+                                parseModInfoId(subModInfo, ids);
+                            }
+                        }
+                    }
+                }
+            }
+            curr = curr.getParentFile();
+            levels++;
+        }
+        return ids;
+    }
+
+    private static void parseModInfoId(File modInfo, Set<String> ids) {
+        try (BufferedReader br = new BufferedReader(new FileReader(modInfo))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.toLowerCase().startsWith("id=")) {
+                    String id = trimmed.substring(3).trim();
+                    if (!id.isEmpty()) {
+                        ids.add(id);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static String getCanonicalPath(File f) {

@@ -150,6 +150,8 @@ public class PZOEngineBridge {
                 GLStateOptimizer.setEnabled(value);
             } else if ("JVM_StreamBufferBoost".equals(key)) {
                 ChunkBufferPool.setEnabled(value);
+            } else if ("JVM_BytecodeBloodCap".equals(key)) {
+                PZOptimAgent.setBytecodeBloodCap(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -238,6 +240,14 @@ public class PZOEngineBridge {
         } catch (Throwable ignored) {}
     }
 
+    public static boolean shouldThrottleDiskWrite(String filename, boolean append) {
+        return DiskIOPacer.shouldThrottle(filename, append);
+    }
+
+    public static Object getDummyFileWriter() {
+        return DiskIOPacer.getDummyFileWriter();
+    }
+
     private static String readLastLines(File file, int maxLines) {
         try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r")) {
             long fileLen = raf.length();
@@ -271,8 +281,8 @@ public class PZOEngineBridge {
 
         Thread bridgeHookThread = new Thread(() -> {
             boolean attached = false;
-            // Poll for LuaManager.env initialization during boot (up to 30 seconds)
-            for (int i = 0; i < 300; i++) {
+            // Poll for LuaManager.env initialization during boot (up to 2.5 minutes for heavy modpacks)
+            for (int i = 0; i < 600; i++) {
                 try {
                     Class<?> lmClass = Class.forName("zombie.Lua.LuaManager");
 
@@ -793,7 +803,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(490, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.7\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.7.4\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
@@ -1039,7 +1049,30 @@ public class PZOEngineBridge {
                                             "        modal:setX((scrW - modal:getWidth()) / 2)\n" +
                                             "        modal:setY((scrH - modal:getHeight()) / 2)\n" +
                                             "    end\n" +
-                                            "end)\n";
+                                            "end)\n" +
+                                            "if getFileWriter and not _G.pzoFileWriterHooked then\n" +
+                                            "    _G.pzoFileWriterHooked = true\n" +
+                                            "    local orig_gfw = getFileWriter\n" +
+                                            "    getFileWriter = function(filename, createIfNull, append)\n" +
+                                            "        if PZOEngineBridge and PZOEngineBridge.shouldThrottleDiskWrite and PZOEngineBridge.shouldThrottleDiskWrite(filename, append) then\n" +
+                                            "            local dummy = PZOEngineBridge.getDummyFileWriter()\n" +
+                                            "            if dummy then return dummy end\n" +
+                                            "        end\n" +
+                                            "        return orig_gfw(filename, createIfNull, append)\n" +
+                                            "    end\n" +
+                                            "end\n" +
+                                            "if getModFileWriter and not _G.pzoModFileWriterHooked then\n" +
+                                            "    _G.pzoModFileWriterHooked = true\n" +
+                                            "    local orig_gmfw = getModFileWriter\n" +
+                                            "    getModFileWriter = function(modId, filename, createIfNull, append)\n" +
+                                            "        local key = tostring(modId) .. '/' .. tostring(filename)\n" +
+                                            "        if PZOEngineBridge and PZOEngineBridge.shouldThrottleDiskWrite and PZOEngineBridge.shouldThrottleDiskWrite(key, append) then\n" +
+                                            "            local dummy = PZOEngineBridge.getDummyFileWriter()\n" +
+                                            "            if dummy then return dummy end\n" +
+                                            "        end\n" +
+                                            "        return orig_gmfw(modId, filename, createIfNull, append)\n" +
+                                            "    end\n" +
+                                            "end\n";
 
                                         Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
                                         Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
@@ -1078,7 +1111,6 @@ public class PZOEngineBridge {
                                             }
                                         }
 
-                                        startLuaEventGovernor();
                                     } catch (Throwable t) {
                                         PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
                                     }
@@ -1095,7 +1127,7 @@ public class PZOEngineBridge {
                 } catch (Throwable ignored) {}
 
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(i < 30 ? 100 : 250);
                 } catch (InterruptedException ie) {
                     break;
                 }
@@ -1140,49 +1172,6 @@ public class PZOEngineBridge {
             }
         } catch (Throwable ignored) {}
     }
-
-    private static void startLuaEventGovernor() {
-        Thread govThread = new Thread(() -> {
-            while (true) {
-                try {
-                    Class<?> lemClass = Class.forName("zombie.Lua.LuaEventManager");
-                    Field evListField = lemClass.getField("EventList");
-                    java.util.ArrayList<?> evList = (java.util.ArrayList<?>) evListField.get(null);
-                    if (evList != null) {
-                        for (int i = 0; i < evList.size(); i++) {
-                            Object ev = evList.get(i);
-                            if (ev != null) {
-                                Field cbField = ev.getClass().getField("callbacks");
-                                java.util.ArrayList<?> cbList = (java.util.ArrayList<?>) cbField.get(ev);
-                                if (cbList != null) {
-                                    for (int j = 0; j < cbList.size(); j++) {
-                                        Object cb = cbList.get(j);
-                                        if (cb != null) {
-                                            try {
-                                                Field pField = cb.getClass().getField("prototype");
-                                                Object p = pField.get(cb);
-                                                if (p != null) {
-                                                    sanitizePrototype(p, "media/lua/shared/event_callback.lua");
-                                                }
-                                            } catch (Throwable ignored) {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (Throwable ignored) {}
-
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException ie) {
-                    break;
-                }
-            }
-        }, "PZO-LuaEventRerouteGovernor");
-        govThread.setDaemon(true);
-        govThread.setPriority(Thread.MIN_PRIORITY);
-        govThread.start();
-    }
 }
+
 
