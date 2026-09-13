@@ -81,6 +81,12 @@ clean_lua_bridge_files() {
         echo "[+] Purged all PZO bridge and telemetry files from ~/Zomboid/Lua/"
     fi
     rm -f "$HOME/Zomboid"/pzo_*
+    DEBUG_OPT="$HOME/Zomboid/debug-options.ini"
+    if [ -f "$DEBUG_OPT" ]; then
+        sed -i.bak 's/FBORenderChunk.CorpsesInChunkTexture=true/FBORenderChunk.CorpsesInChunkTexture=false/g' "$DEBUG_OPT" 2>/dev/null || true
+        sed -i.bak 's/FBORenderChunk.ItemsInChunkTexture=true/FBORenderChunk.ItemsInChunkTexture=false/g' "$DEBUG_OPT" 2>/dev/null || true
+        rm -f "${DEBUG_OPT}.bak"
+    fi
 }
 
 # ==============================================================================
@@ -347,6 +353,12 @@ else
                 if [ -f "${JSON_FILE}.bak" ]; then
                     cp -f "${JSON_FILE}.bak" "$JSON_FILE"
                     echo "[+] Restored original ProjectZomboid64.json from backup."
+                fi
+                if [ -f "$JSON_FILE" ]; then
+                    sed -i.bak 's|"com/pzoptimizer/PZOEntrypoint"|"zombie/gameStates/MainScreenState"|g' "$JSON_FILE" 2>/dev/null || true
+                    sed -i.bak '/PZOptimEngine.jar/d' "$JSON_FILE" 2>/dev/null || true
+                    sed -i.bak '/pzo_native64/d' "$JSON_FILE" 2>/dev/null || true
+                    rm -f "${JSON_FILE}.bak"
                 fi
                 clean_lua_bridge_files
                 echo "[+] Uninstallation complete! Restored to stock settings."
