@@ -196,6 +196,9 @@ public final class ChunkIngestionPacer {
 
                     // An orphaned chunk is one no longer referenced by any active player IsoChunkMap
                     if (chunk.refs == null || chunk.refs.isEmpty()) {
+                        if (ChunkRetentionRing.isRetained(chunk.wx, chunk.wy)) {
+                            continue;
+                        }
                         iterator.remove();
                         if (chunk.loaded) {
                             try {
