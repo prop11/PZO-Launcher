@@ -17,11 +17,10 @@ public final class PredictiveChunkStreamer {
 
     private static volatile boolean running = false;
     private static Thread streamerThread = null;
-    private static final Set<Long> PREWARMED_KEYS = new HashSet<>(512);
-    private static final java.util.concurrent.ConcurrentHashMap<Long, byte[]> PRELOADED_CHUNKS = new java.util.concurrent.ConcurrentHashMap<>(128);
+    private static final Set<Long> PREWARMED_KEYS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static final ThreadLocal<byte[]> PREWARM_IO_BUFFER = ThreadLocal.withInitial(() -> new byte[65536]);
     private static final java.util.concurrent.atomic.AtomicLong preloadedCacheHits = new java.util.concurrent.atomic.AtomicLong(0);
     private static final java.util.concurrent.atomic.AtomicLong preloadedChunksFetched = new java.util.concurrent.atomic.AtomicLong(0);
-    private static final int MAX_PRELOADED_CHUNKS = 256;
     private static final float CHUNK_WIDTH = 8.0f;
 
     private static volatile long lastPrewarmClearTime = 0;
@@ -66,9 +65,6 @@ public final class PredictiveChunkStreamer {
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
                         PREWARMED_KEYS.clear();
-                        if (PRELOADED_CHUNKS.size() > MAX_PRELOADED_CHUNKS) {
-                            PRELOADED_CHUNKS.clear();
-                        }
                         lastPrewarmClearTime = now;
                     }
 
@@ -228,10 +224,6 @@ public final class PredictiveChunkStreamer {
         } catch (Throwable ignored) {}
     }
 
-    private static final ThreadLocal<ByteBuffer> PRELOAD_BUFFER = ThreadLocal.withInitial(() -> 
-        ByteBuffer.allocate(262144).order(ByteOrder.nativeOrder())
-    );
-
     public static void prewarmChunkDirect(int wx, int wy) {
         prewarmChunkInOSCache(wx, wy);
     }
@@ -240,31 +232,27 @@ public final class PredictiveChunkStreamer {
         long key = FastChunkKey.pack(wx, wy);
         ChunkRetentionRing.touch(wx, wy);
 
-        if (PREWARMED_KEYS.contains(key) || PRELOADED_CHUNKS.containsKey(key)) {
+        if (!PREWARMED_KEYS.add(key)) {
             return;
         }
-        PREWARMED_KEYS.add(key);
 
-        if (PRELOADED_CHUNKS.size() < MAX_PRELOADED_CHUNKS) {
-            try {
-                if (zombie.iso.IsoChunk.FileExists(wx, wy)) {
-                    ByteBuffer buf = PRELOAD_BUFFER.get();
-                    buf.clear();
-                    ByteBuffer readBuf = zombie.iso.IsoChunk.SafeRead(wx, wy, buf);
-                    if (readBuf != null && readBuf.hasRemaining()) {
-                        byte[] data = new byte[readBuf.remaining()];
-                        readBuf.get(data);
-                        PRELOADED_CHUNKS.put(key, data);
-                        preloadedChunksFetched.incrementAndGet();
-                    }
+        try {
+            File inFile = zombie.ChunkMapFilenames.instance.getFilename(wx, wy);
+            if (inFile == null) {
+                inFile = zombie.ZomboidFileSystem.instance.getFileInCurrentSave(wx + File.separator + wy + ".bin");
+            }
+            if (inFile != null && inFile.exists()) {
+                byte[] buf = PREWARM_IO_BUFFER.get();
+                try (FileInputStream fis = new FileInputStream(inFile)) {
+                    fis.read(buf);
+                    preloadedChunksFetched.incrementAndGet();
                 }
-            } catch (Throwable ignored) {}
-        }
+            }
+        } catch (Throwable ignored) {}
     }
 
     public static byte[] pollPreloadedChunk(int wx, int wy) {
-        long key = FastChunkKey.pack(wx, wy);
-        return PRELOADED_CHUNKS.remove(key);
+        return null;
     }
 
     public static void recordCacheHit() {
