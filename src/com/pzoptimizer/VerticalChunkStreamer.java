@@ -17,26 +17,7 @@ public final class VerticalChunkStreamer {
     public static void initialize() {
         if (active) return;
         active = true;
-
-        verticalThread = new Thread(() -> {
-            PZOLogger.success("VerticalChunkStreamer: Active (Build 42 32-Level Z-Index Predictive Pre-warming)");
-
-            while (active) {
-                try {
-                    trackVerticalTransitions();
-                } catch (Throwable ignored) {}
-
-                try {
-                    Thread.sleep(50); // 20 Hz tracking rate
-                } catch (InterruptedException ie) {
-                    break;
-                }
-            }
-        }, "PZO-VerticalChunkStreamer");
-
-        verticalThread.setDaemon(true);
-        verticalThread.setPriority(Thread.NORM_PRIORITY - 1);
-        verticalThread.start();
+        PZOLogger.success("VerticalChunkStreamer: Active (Build 42 32-Level Z-Index Integrated Mode)");
     }
 
     private static void trackVerticalTransitions() {

@@ -236,7 +236,6 @@ public final class MultiCoreIslandScheduler {
                 for (IslandBucket island : redIslands.values()) {
                     totalSimulated += island.objects.size();
                     redFutures.add(CompletableFuture.runAsync(() -> {
-                        PZONative.bindCallingThreadToPCores();
                         simulateIslandObjects(island.objects, simulationLevel, frameMod);
                     }, PZOMultiCoreEngine.getExecutor()));
                 }
@@ -249,7 +248,6 @@ public final class MultiCoreIslandScheduler {
                 for (IslandBucket island : blackIslands.values()) {
                     totalSimulated += island.objects.size();
                     blackFutures.add(CompletableFuture.runAsync(() -> {
-                        PZONative.bindCallingThreadToPCores();
                         simulateIslandObjects(island.objects, simulationLevel, frameMod);
                     }, PZOMultiCoreEngine.getExecutor()));
                 }
@@ -265,7 +263,6 @@ public final class MultiCoreIslandScheduler {
                 List<CompletableFuture<Void>> redFutures = new ArrayList<>(redIslands.size());
                 for (IslandBucket island : redIslands.values()) {
                     redFutures.add(CompletableFuture.runAsync(() -> {
-                        PZONative.bindCallingThreadToPCores();
                         postUpdateIslandObjects(island.objects, frameMod);
                     }, PZOMultiCoreEngine.getExecutor()));
                 }
@@ -277,7 +274,6 @@ public final class MultiCoreIslandScheduler {
                 List<CompletableFuture<Void>> blackFutures = new ArrayList<>(blackIslands.size());
                 for (IslandBucket island : blackIslands.values()) {
                     blackFutures.add(CompletableFuture.runAsync(() -> {
-                        PZONative.bindCallingThreadToPCores();
                         postUpdateIslandObjects(island.objects, frameMod);
                     }, PZOMultiCoreEngine.getExecutor()));
                 }

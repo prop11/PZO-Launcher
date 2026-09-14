@@ -211,8 +211,8 @@ public final class FrameDropDiagnosticEngine {
             if (playerGetX != null && playerGetY != null) {
                 playerX = ((Number) playerGetX.invoke(player)).floatValue();
                 playerY = ((Number) playerGetY.invoke(player)).floatValue();
-                chunkX = (int) (playerX / 10.0f);
-                chunkY = (int) (playerY / 10.0f);
+                chunkX = (int) Math.floor(playerX / 8.0f);
+                chunkY = (int) Math.floor(playerY / 8.0f);
             }
 
             if (playerGetVehicle != null) {
@@ -247,7 +247,7 @@ public final class FrameDropDiagnosticEngine {
                 Object wsInst = wsInstanceField.get(null);
                 if (wsInst != null) {
                     Queue<?> q = (Queue<?>) wsMainThreadQField.get(wsInst);
-                    if (q != null) wsQueueSize = q.size();
+                    if (q != null && !q.isEmpty()) wsQueueSize = q.size();
                 }
             }
 
@@ -255,14 +255,15 @@ public final class FrameDropDiagnosticEngine {
                 Object cswInst = cswInstanceField.get(null);
                 if (cswInst != null) {
                     Queue<?> sq = (Queue<?>) cswToSaveQField.get(cswInst);
-                    if (sq != null) saveQueueSize = sq.size();
+                    if (sq != null && !sq.isEmpty()) saveQueueSize = sq.size();
                 }
             }
 
             if (lgsField != null) {
                 Object lgsObj = lgsField.get(null);
                 if (lgsObj instanceof java.util.Collection) {
-                    ingestionQueueSize = ((java.util.Collection<?>) lgsObj).size();
+                    java.util.Collection<?> col = (java.util.Collection<?>) lgsObj;
+                    if (!col.isEmpty()) ingestionQueueSize = col.size();
                 }
             }
         } catch (Throwable ignored) {}
@@ -309,12 +310,14 @@ public final class FrameDropDiagnosticEngine {
         pendingDiagnosticLogs.offer(logEntry);
     }
 
+    private static final List<GarbageCollectorMXBean> GC_BEANS = ManagementFactory.getGarbageCollectorMXBeans();
+
     private static void updateGcStats() {
         try {
             long count = 0;
             long timeMs = 0;
-            List<GarbageCollectorMXBean> gcs = ManagementFactory.getGarbageCollectorMXBeans();
-            for (GarbageCollectorMXBean gc : gcs) {
+            for (int i = 0; i < GC_BEANS.size(); i++) {
+                GarbageCollectorMXBean gc = GC_BEANS.get(i);
                 String name = gc.getName();
                 if (name != null && name.contains("Cycles")) {
                     continue;

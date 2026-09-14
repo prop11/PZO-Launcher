@@ -26,12 +26,14 @@ public class EngineFeaturesTuner {
                     // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting)
                     // Keep threadAnimation = false to prevent experimental Kahlua Lua single-threaded VM crashes
                     // Keep threadAmbient = false, threadSound = false, threadWorld = false to prevent FMOD audio race conditions (e.g. DayZ Ambient Sound TimSort crash)
+                    // Keep threadLighting = false, threadGridStacks = false to eliminate RenderThread .join() stalls on PZForkJoinPool
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
-                    setOptionValue(debugOptionsInstance, "threadLighting", true);
+                    setOptionValue(debugOptionsInstance, "threadLighting", false);
+                    setOptionValue(debugOptionsInstance, "lightingSplitUpdate", false);
                     setOptionValue(debugOptionsInstance, "threadAmbient", false);
                     setOptionValue(debugOptionsInstance, "threadSound", false);
                     setOptionValue(debugOptionsInstance, "threadWorld", false);
-                    setOptionValue(debugOptionsInstance, "threadGridStacks", true);
+                    setOptionValue(debugOptionsInstance, "threadGridStacks", false);
                     setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
                     // C. Model Texture Size Limiter
@@ -140,14 +142,15 @@ public class EngineFeaturesTuner {
                 sb.append("VERSION=1\n");
                 sb.append("Threading.Pathfinding=true\n");
                 sb.append("Threading.Animation=false\n");
-                sb.append("Threading.Lighting=true\n");
+                sb.append("Threading.Lighting=false\n");
                 sb.append("Threading.Ambient=false\n");
                 sb.append("Threading.Sound=false\n");
                 sb.append("Threading.World=false\n");
-                sb.append("Threading.RecalculateGridStacks=true\n");
+                sb.append("Threading.RecalculateGridStacks=false\n");
                 sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
+                sb.append("Lighting.SplitUpdate=false\n");
                 sb.append("FBORenderChunk.CorpsesInChunkTexture=false\n");
                 sb.append("FBORenderChunk.ItemsInChunkTexture=false\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
@@ -163,11 +166,12 @@ public class EngineFeaturesTuner {
             Object debugOptionsInstance = debugOptionsClass.getField("instance").get(null);
             if (debugOptionsInstance != null) {
                 setOptionValue(debugOptionsInstance, "threadAnimation", false);
-                setOptionValue(debugOptionsInstance, "threadLighting", true);
+                setOptionValue(debugOptionsInstance, "threadLighting", false);
+                setOptionValue(debugOptionsInstance, "lightingSplitUpdate", false);
                 setOptionValue(debugOptionsInstance, "threadAmbient", false);
                 setOptionValue(debugOptionsInstance, "threadSound", false);
                 setOptionValue(debugOptionsInstance, "threadWorld", false);
-                setOptionValue(debugOptionsInstance, "threadGridStacks", true);
+                setOptionValue(debugOptionsInstance, "threadGridStacks", false);
                 setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                 setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
