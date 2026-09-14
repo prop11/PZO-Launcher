@@ -26,12 +26,13 @@ public class EngineFeaturesTuner {
                     // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting)
                     // Keep threadAnimation = false to prevent experimental Kahlua Lua single-threaded VM crashes
                     // Keep threadAmbient = false, threadSound = false, threadWorld = false to prevent FMOD audio race conditions (e.g. DayZ Ambient Sound TimSort crash)
+                    // Keep threadLighting = false, threadGridStacks = false to eliminate RenderThread .join() stalls on PZForkJoinPool
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
-                    setOptionValue(debugOptionsInstance, "threadLighting", true);
+                    setOptionValue(debugOptionsInstance, "threadLighting", false);
                     setOptionValue(debugOptionsInstance, "threadAmbient", false);
                     setOptionValue(debugOptionsInstance, "threadSound", false);
                     setOptionValue(debugOptionsInstance, "threadWorld", false);
-                    setOptionValue(debugOptionsInstance, "threadGridStacks", true);
+                    setOptionValue(debugOptionsInstance, "threadGridStacks", false);
                     setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
                     // C. Model Texture Size Limiter

@@ -184,8 +184,6 @@ public final class MultiCoreChunkStreamer {
     }
 
     private static void dispatcherLoop() {
-        PZONative.bindCallingThreadToPCores();
-
         while (running) {
             try {
                 WorldStreamer ws = WorldStreamer.instance;
@@ -224,9 +222,6 @@ public final class MultiCoreChunkStreamer {
             try {
                 long startTime = System.nanoTime();
                 try {
-                    // Ensure worker thread has P-Core affinity
-                    PZONative.bindCallingThreadToPCores();
-
                     processChunkParallel(chunk);
 
                     long durationMs = (System.nanoTime() - startTime) / 1_000_000L;

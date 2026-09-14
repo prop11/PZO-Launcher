@@ -22,7 +22,7 @@ public final class PredictiveChunkStreamer {
     private static final java.util.concurrent.atomic.AtomicLong preloadedCacheHits = new java.util.concurrent.atomic.AtomicLong(0);
     private static final java.util.concurrent.atomic.AtomicLong preloadedChunksFetched = new java.util.concurrent.atomic.AtomicLong(0);
     private static final int MAX_PRELOADED_CHUNKS = 256;
-    private static final float CHUNK_WIDTH = 10.0f;
+    private static final float CHUNK_WIDTH = 8.0f;
 
     private static volatile long lastPrewarmClearTime = 0;
     private static volatile Boolean isSolidState = null;
@@ -86,8 +86,8 @@ public final class PredictiveChunkStreamer {
                     float px = ((Number) getXMethod.invoke(player)).floatValue();
                     float py = ((Number) getYMethod.invoke(player)).floatValue();
 
-                    int currentChunkX = (int) (px / CHUNK_WIDTH);
-                    int currentChunkY = (int) (py / CHUNK_WIDTH);
+                    int currentChunkX = (int) Math.floor(px / CHUNK_WIDTH);
+                    int currentChunkY = (int) Math.floor(py / CHUNK_WIDTH);
                     for (int dx = -1; dx <= 1; dx++) {
                         for (int dy = -1; dy <= 1; dy++) {
                             ChunkRetentionRing.touch(currentChunkX + dx, currentChunkY + dy);
@@ -179,8 +179,8 @@ public final class PredictiveChunkStreamer {
                 float targetX = px + (dirX * lookaheadTiles * progress);
                 float targetY = py + (dirY * lookaheadTiles * progress);
 
-                int targetChunkX = (int) (targetX / CHUNK_WIDTH);
-                int targetChunkY = (int) (targetY / CHUNK_WIDTH);
+                int targetChunkX = (int) Math.floor(targetX / CHUNK_WIDTH);
+                int targetChunkY = (int) Math.floor(targetY / CHUNK_WIDTH);
 
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);
@@ -219,8 +219,8 @@ public final class PredictiveChunkStreamer {
                 float targetX = px + (dirX * lookaheadTiles * ((float) step / steps));
                 float targetY = py + (dirY * lookaheadTiles * ((float) step / steps));
 
-                int targetChunkX = (int) (targetX / CHUNK_WIDTH);
-                int targetChunkY = (int) (targetY / CHUNK_WIDTH);
+                int targetChunkX = (int) Math.floor(targetX / CHUNK_WIDTH);
+                int targetChunkY = (int) Math.floor(targetY / CHUNK_WIDTH);
 
                 prewarmChunkInOSCache(targetChunkX, targetChunkY);
                 ChunkRetentionRing.touch(targetChunkX, targetChunkY);

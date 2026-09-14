@@ -385,19 +385,54 @@ public final class VehicleTravelOptimizer {
         private static final long serialVersionUID = 4242L;
 
         private volatile boolean justPolled = false;
+        private final java.util.concurrent.atomic.AtomicInteger approximateSize = new java.util.concurrent.atomic.AtomicInteger(0);
 
         public ShieldedSaveQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
             if (existing != null && !existing.isEmpty()) {
                 this.addAll(existing);
+                this.approximateSize.set(existing.size());
             }
+        }
+
+        @Override
+        public boolean add(Object e) {
+            boolean added = super.add(e);
+            if (added) approximateSize.incrementAndGet();
+            return added;
+        }
+
+        @Override
+        public boolean offer(Object e) {
+            boolean offered = super.offer(e);
+            if (offered) approximateSize.incrementAndGet();
+            return offered;
         }
 
         @Override
         public Object poll() {
             Object item = super.poll();
             justPolled = (item != null);
+            if (item != null) approximateSize.decrementAndGet();
             return item;
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            boolean removed = super.remove(o);
+            if (removed) approximateSize.decrementAndGet();
+            return removed;
+        }
+
+        @Override
+        public void clear() {
+            super.clear();
+            approximateSize.set(0);
+        }
+
+        @Override
+        public int size() {
+            return Math.max(0, approximateSize.get());
         }
 
         @Override
@@ -412,7 +447,7 @@ public final class VehicleTravelOptimizer {
                 }
                 lastAncillaryHotsaveTime = now;
             }
-            return super.isEmpty();
+            return approximateSize.get() <= 0;
         }
     }
 }

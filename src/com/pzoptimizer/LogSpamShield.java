@@ -138,7 +138,6 @@ public final class LogSpamShield {
             String line = new String(rawBytes, StandardCharsets.UTF_8);
             if (line.isEmpty()) {
                 out.write('\n');
-                out.flush();
                 return;
             }
 
@@ -146,7 +145,6 @@ public final class LogSpamShield {
             if (line.contains("[PZO") || line.contains("[SUCCESS]") || line.contains("[WARN]")) {
                 out.write(rawBytes);
                 out.write('\n');
-                out.flush();
                 return;
             }
 
@@ -154,7 +152,6 @@ public final class LogSpamShield {
             if (payload.isEmpty()) {
                 out.write(rawBytes);
                 out.write('\n');
-                out.flush();
                 return;
             }
 
@@ -170,13 +167,19 @@ public final class LogSpamShield {
             if (tracker.count <= MAX_BURST_PER_WINDOW) {
                 out.write(rawBytes);
                 out.write('\n');
-                out.flush();
             } else {
                 tracker.suppressedTotal.incrementAndGet();
             }
 
             if (tracked.size() > MAX_CACHE_SIZE) {
                 tracked.entrySet().removeIf(e -> now - e.getValue().startTime > 5000L);
+            }
+        }
+
+        @Override
+        public void flush() throws IOException {
+            synchronized (lock) {
+                out.flush();
             }
         }
 

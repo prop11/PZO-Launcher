@@ -168,8 +168,6 @@ public final class MultiCoreHordeGovernor {
     }
 
     private static void governorLoop() {
-        PZONative.bindCallingThreadToPCores();
-
         while (active) {
             try {
                 boolean driving = VehicleTravelOptimizer.isPlayerDriving();
