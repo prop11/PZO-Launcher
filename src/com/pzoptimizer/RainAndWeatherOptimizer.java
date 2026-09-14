@@ -28,7 +28,9 @@ public final class RainAndWeatherOptimizer {
     }
 
     /**
-     * Caps chunk relighting during rain storms to 5 chunks/frame.
+     * Ensures lightingSplitUpdate remains disabled.
+     * When true, FBORenderCell caps chunk updates to 5 chunks/frame, causing flashlight flickering
+     * and preventing other players' flashlights in multiplayer from illuminating.
      */
     public static void applyLightingSplitUpdate() {
         try {
@@ -40,8 +42,7 @@ public final class RainAndWeatherOptimizer {
                 Object splitOption = splitField.get(debugOptions);
                 if (splitOption != null) {
                     Method setValueMethod = splitOption.getClass().getMethod("setValue", boolean.class);
-                    setValueMethod.invoke(splitOption, true);
-                    PZOLogger.success("[RainAndWeatherOptimizer] Lighting.SplitUpdate enabled (Storm lightning spikes smoothed)");
+                    setValueMethod.invoke(splitOption, false);
                 }
             }
         } catch (Throwable t) {
