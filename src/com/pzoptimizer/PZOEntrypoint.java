@@ -65,6 +65,7 @@ public class PZOEntrypoint {
         VehicleTravelOptimizer.initialize();
         FileSystemWhitelistShield.initialize();
         PopTemplateGuard.initialize();
+        PopmanGovernor.initialize();
         RainAndWeatherOptimizer.initialize();
         WorldStreamerBooster.startDaemon();
         PZOFastMath.initialize();
