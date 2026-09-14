@@ -67,6 +67,16 @@ def api_request(path, token, data=None, method=None):
             return json.loads(resp.read().decode("utf-8"))
         return resp.read()
 
+def get_latest_run_id(token):
+    try:
+        data = api_request("actions/runs?per_page=1", token)
+        runs = data.get("workflow_runs", [])
+        if runs:
+            return runs[0].get("id")
+    except Exception:
+        pass
+    return None
+
 def trigger_workflow(token, branch="main"):
     print(f"[*] Triggering GitHub Actions workflow '{WORKFLOW_FILE}' on branch '{branch}'...")
     payload = {"ref": branch}
@@ -78,7 +88,7 @@ def trigger_workflow(token, branch="main"):
         print(f"[!] Failed to trigger workflow: HTTP {e.code} - {e.reason}")
         return False
 
-def wait_for_completion(token, poll_interval=10, timeout=600):
+def wait_for_completion(token, poll_interval=10, timeout=600, previous_run_id=None):
     print("[*] Waiting for workflow execution to complete...")
     start_time = time.time()
     last_status = None
@@ -89,11 +99,19 @@ def wait_for_completion(token, poll_interval=10, timeout=600):
         try:
             data = api_request("actions/runs?per_page=5", token)
             runs = data.get("workflow_runs", [])
-            if runs:
-                latest = runs[0]
-                status = latest.get("status")
-                conclusion = latest.get("conclusion")
-                run_id = latest.get("id")
+            target_run = None
+            if previous_run_id is not None:
+                for r in runs:
+                    if r.get("id") != previous_run_id and r.get("id") > previous_run_id:
+                        target_run = r
+                        break
+            elif runs:
+                target_run = runs[0]
+
+            if target_run:
+                status = target_run.get("status")
+                conclusion = target_run.get("conclusion")
+                run_id = target_run.get("id")
 
                 if status != last_status:
                     print(f"[*] Run #{run_id}: status={status}, conclusion={conclusion}")
@@ -106,6 +124,10 @@ def wait_for_completion(token, poll_interval=10, timeout=600):
                     else:
                         print(f"[!] Run #{run_id} ended with conclusion: {conclusion}")
                         return None
+            else:
+                if last_status != "waiting_for_run":
+                    print("[*] Waiting for new workflow run to be registered on GitHub...")
+                    last_status = "waiting_for_run"
         except Exception as e:
             print(f"[-] Poll notice: {e}")
 
@@ -174,8 +196,9 @@ def main():
 
     run_id = None
     if trigger:
+        prev_id = get_latest_run_id(token)
         if trigger_workflow(token):
-            run_id = wait_for_completion(token)
+            run_id = wait_for_completion(token, previous_run_id=prev_id)
         else:
             sys.exit(1)
     elif wait:

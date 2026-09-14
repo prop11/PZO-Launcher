@@ -631,7 +631,7 @@ if (Test-Path $InstalledJarPath) {
                     $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
                     $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
                     [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
-                    Write-Host "Sanitized $TargetFileName: Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
+                    Write-Host "Sanitized $($TargetFileName): Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
                 }
             }
 
