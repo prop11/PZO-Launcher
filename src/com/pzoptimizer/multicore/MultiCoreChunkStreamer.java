@@ -276,19 +276,8 @@ public final class MultiCoreChunkStreamer {
         workerBuf.clear();
 
         try {
-            // Checks Predictive Trajectory Preloaded Cache first: 0ms in-memory cache hit!
             ByteBuffer loadedData = null;
-            byte[] preloaded = com.pzoptimizer.PredictiveChunkStreamer.pollPreloadedChunk(chunk.wx, chunk.wy);
-            if (preloaded != null) {
-                workerBuf.clear();
-                if (workerBuf.capacity() < preloaded.length) {
-                    workerBuf = ByteBuffer.allocate(preloaded.length + 65536);
-                }
-                workerBuf.put(preloaded);
-                workerBuf.flip();
-                loadedData = workerBuf;
-                com.pzoptimizer.PredictiveChunkStreamer.recordCacheHit();
-            } else if (IsoChunk.FileExists(chunk.wx, chunk.wy)) {
+            if (IsoChunk.FileExists(chunk.wx, chunk.wy)) {
                 try {
                     loadedData = IsoChunk.SafeRead(chunk.wx, chunk.wy, workerBuf);
                     if (loadedData != null) {
