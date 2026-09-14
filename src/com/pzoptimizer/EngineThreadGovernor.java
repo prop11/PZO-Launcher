@@ -174,6 +174,7 @@ public class EngineThreadGovernor {
                             lastFrameCount = fc;
                             ChunkIngestionPacer.onFrameBoundary(fc);
                             FrameDropDiagnosticEngine.onFrameTick();
+                            PopmanGovernor.onFrameBoundary(fc);
                         }
                     }
                 } catch (Throwable ignored) {}
