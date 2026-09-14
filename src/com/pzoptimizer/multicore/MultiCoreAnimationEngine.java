@@ -92,7 +92,6 @@ public final class MultiCoreAnimationEngine {
             if (start >= end) break;
 
             futures.add(CompletableFuture.runAsync(() -> {
-                PZONative.bindCallingThreadToPCores();
                 for (int i = start; i < end; i++) {
                     updateSlotDirect(slots.get(i), delta);
                 }
