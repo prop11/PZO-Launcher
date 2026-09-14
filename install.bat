@@ -22,7 +22,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.9.7.4)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.9.7.7)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -509,7 +509,7 @@ function Apply-PZOConfiguration {
         g1gc        = $UseG1GC
         pretouch    = $true
         zombiebuddy = $isZombieBuddyActive
-        version     = "0.9.7.4"
+        version     = "0.9.7.7"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
@@ -631,7 +631,7 @@ if (Test-Path $InstalledJarPath) {
                     $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
                     $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
                     [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
-                    Write-Host "Sanitized $TargetFileName: Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
+                    Write-Host "Sanitized $($TargetFileName): Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
                 }
             }
 
@@ -642,8 +642,10 @@ if (Test-Path $InstalledJarPath) {
                 if ($dbgContent) {
                     $cleanedDbg = $dbgContent -replace "FBORenderChunk\.CorpsesInChunkTexture=true", "FBORenderChunk.CorpsesInChunkTexture=false"
                     $cleanedDbg = $cleanedDbg -replace "FBORenderChunk\.ItemsInChunkTexture=true", "FBORenderChunk.ItemsInChunkTexture=false"
+                    $cleanedDbg = $cleanedDbg -replace "Lighting\.SplitUpdate=true", "Lighting.SplitUpdate=false"
+                    $cleanedDbg = $cleanedDbg -replace "Threading\.Lighting=true", "Threading.Lighting=false"
                     [System.IO.File]::WriteAllText($debugOptFile, $cleanedDbg, [System.Text.Encoding]::ASCII)
-                    Write-Host "Cleansed: debug-options.ini (vanilla corpse & item rendering restored)" -ForegroundColor Green
+                    Write-Host "Cleansed: debug-options.ini (vanilla rendering and lighting restored)" -ForegroundColor Green
                 }
             }
 

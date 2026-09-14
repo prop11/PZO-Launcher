@@ -308,6 +308,23 @@ public final class ChunkIngestionPacer {
             approximateSize.set(0);
         }
 
+        @Override
+        public int size() {
+            return Math.max(0, approximateSize.get());
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return approximateSize.get() <= 0;
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            boolean removed = super.remove(o);
+            if (removed) approximateSize.decrementAndGet();
+            return removed;
+        }
+
         public static boolean isPlayerDriving() {
             long now = System.currentTimeMillis();
             if (now - lastDrivingCheckTime < 100L) {

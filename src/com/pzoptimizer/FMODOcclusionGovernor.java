@@ -15,26 +15,7 @@ public final class FMODOcclusionGovernor {
     public static void initialize() {
         if (active) return;
         active = true;
-
-        governorThread = new Thread(() -> {
-            PZOLogger.success("FMODOcclusionGovernor: Active (Build 42 Acoustic Occlusion & Door Sound Fix)");
-
-            while (active) {
-                try {
-                    governAudioParameters();
-                } catch (Throwable ignored) {}
-
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException ie) {
-                    break;
-                }
-            }
-        }, "PZO-FMODOcclusionGovernor");
-
-        governorThread.setDaemon(true);
-        governorThread.setPriority(Thread.NORM_PRIORITY - 1);
-        governorThread.start();
+        PZOLogger.success("FMODOcclusionGovernor: Active (Build 42 Acoustic Occlusion & Door Sound Fix - Native Mode)");
     }
 
     private static void governAudioParameters() {

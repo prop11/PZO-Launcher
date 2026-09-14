@@ -184,8 +184,6 @@ public final class MultiCoreChunkStreamer {
     }
 
     private static void dispatcherLoop() {
-        PZONative.bindCallingThreadToPCores();
-
         while (running) {
             try {
                 WorldStreamer ws = WorldStreamer.instance;
@@ -224,9 +222,6 @@ public final class MultiCoreChunkStreamer {
             try {
                 long startTime = System.nanoTime();
                 try {
-                    // Ensure worker thread has P-Core affinity
-                    PZONative.bindCallingThreadToPCores();
-
                     processChunkParallel(chunk);
 
                     long durationMs = (System.nanoTime() - startTime) / 1_000_000L;
@@ -281,19 +276,8 @@ public final class MultiCoreChunkStreamer {
         workerBuf.clear();
 
         try {
-            // Checks Predictive Trajectory Preloaded Cache first: 0ms in-memory cache hit!
             ByteBuffer loadedData = null;
-            byte[] preloaded = com.pzoptimizer.PredictiveChunkStreamer.pollPreloadedChunk(chunk.wx, chunk.wy);
-            if (preloaded != null) {
-                workerBuf.clear();
-                if (workerBuf.capacity() < preloaded.length) {
-                    workerBuf = ByteBuffer.allocate(preloaded.length + 65536);
-                }
-                workerBuf.put(preloaded);
-                workerBuf.flip();
-                loadedData = workerBuf;
-                com.pzoptimizer.PredictiveChunkStreamer.recordCacheHit();
-            } else if (IsoChunk.FileExists(chunk.wx, chunk.wy)) {
+            if (IsoChunk.FileExists(chunk.wx, chunk.wy)) {
                 try {
                     loadedData = IsoChunk.SafeRead(chunk.wx, chunk.wy, workerBuf);
                     if (loadedData != null) {
