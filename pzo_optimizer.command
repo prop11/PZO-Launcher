@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.9.7.6)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.9.7.7)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -85,6 +85,8 @@ clean_lua_bridge_files() {
     if [ -f "$DEBUG_OPT" ]; then
         sed -i.bak 's/FBORenderChunk.CorpsesInChunkTexture=true/FBORenderChunk.CorpsesInChunkTexture=false/g' "$DEBUG_OPT" 2>/dev/null || true
         sed -i.bak 's/FBORenderChunk.ItemsInChunkTexture=true/FBORenderChunk.ItemsInChunkTexture=false/g' "$DEBUG_OPT" 2>/dev/null || true
+        sed -i.bak 's/Lighting.SplitUpdate=true/Lighting.SplitUpdate=false/g' "$DEBUG_OPT" 2>/dev/null || true
+        sed -i.bak 's/Threading.Lighting=true/Threading.Lighting=false/g' "$DEBUG_OPT" 2>/dev/null || true
         rm -f "${DEBUG_OPT}.bak"
     fi
 }
@@ -504,7 +506,7 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.7.6\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.7.7\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 fi
 

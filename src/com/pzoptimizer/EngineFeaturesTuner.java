@@ -29,6 +29,7 @@ public class EngineFeaturesTuner {
                     // Keep threadLighting = false, threadGridStacks = false to eliminate RenderThread .join() stalls on PZForkJoinPool
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
                     setOptionValue(debugOptionsInstance, "threadLighting", false);
+                    setOptionValue(debugOptionsInstance, "lightingSplitUpdate", false);
                     setOptionValue(debugOptionsInstance, "threadAmbient", false);
                     setOptionValue(debugOptionsInstance, "threadSound", false);
                     setOptionValue(debugOptionsInstance, "threadWorld", false);
@@ -149,6 +150,7 @@ public class EngineFeaturesTuner {
                 sb.append("Threading.ModelSlotInit=true\n");
                 sb.append("Pathfind.UseNativeCode=true\n");
                 sb.append("Pathfind.SmoothPlayerPath=true\n");
+                sb.append("Lighting.SplitUpdate=false\n");
                 sb.append("FBORenderChunk.CorpsesInChunkTexture=false\n");
                 sb.append("FBORenderChunk.ItemsInChunkTexture=false\n");
                 try (java.io.FileWriter fw = new java.io.FileWriter(debugOptFile, false)) {
@@ -165,6 +167,7 @@ public class EngineFeaturesTuner {
             if (debugOptionsInstance != null) {
                 setOptionValue(debugOptionsInstance, "threadAnimation", false);
                 setOptionValue(debugOptionsInstance, "threadLighting", false);
+                setOptionValue(debugOptionsInstance, "lightingSplitUpdate", false);
                 setOptionValue(debugOptionsInstance, "threadAmbient", false);
                 setOptionValue(debugOptionsInstance, "threadSound", false);
                 setOptionValue(debugOptionsInstance, "threadWorld", false);
