@@ -17,6 +17,7 @@ public final class ChunkIngestionPacer {
     public static final long FRAME_BUDGET_NANOS = 3_500_000L;
     public static final int MAX_CHUNKS_PER_FRAME = 3;
     private static volatile int maxCachedChunks = 1000;
+    private static volatile int chunkBudgetMs = 6;
 
     public static void setMaxCachedChunks(int max) {
         maxCachedChunks = Math.max(100, max);
@@ -24,6 +25,14 @@ public final class ChunkIngestionPacer {
 
     public static int getMaxCachedChunks() {
         return maxCachedChunks;
+    }
+
+    public static void setChunkBudgetMs(int ms) {
+        chunkBudgetMs = Math.max(1, Math.min(32, ms));
+    }
+
+    public static int getChunkBudgetMs() {
+        return chunkBudgetMs;
     }
 
     public static void initialize() {
@@ -407,12 +416,13 @@ public final class ChunkIngestionPacer {
             int maxChunks;
             long budgetNanos;
 
+            long baseBudgetNanos = chunkBudgetMs * 1_000_000L;
             if (driving) {
                 maxChunks = Math.max(32, backlog);
-                budgetNanos = 12_000_000L; // 12.0 ms budget ceiling
+                budgetNanos = Math.max(baseBudgetNanos * 2, 12_000_000L);
             } else {
                 maxChunks = (backlog > 8) ? 8 : 4;
-                budgetNanos = 6_000_000L; // 6.0 ms budget ceiling
+                budgetNanos = baseBudgetNanos;
             }
 
             if (chunksThisFrame > 0 && (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos)) {
