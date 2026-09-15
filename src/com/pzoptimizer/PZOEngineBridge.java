@@ -161,6 +161,8 @@ public class PZOEngineBridge {
         try {
             if ("JVM_ChunkCacheSize".equals(key)) {
                 ChunkIngestionPacer.setMaxCachedChunks(value);
+            } else if ("JVM_ChunkBudgetMs".equals(key)) {
+                ChunkIngestionPacer.setChunkBudgetMs(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
