@@ -2,7 +2,6 @@ package com.pzoptimizer;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.locks.ReentrantLock;
 import sun.misc.Unsafe;
 
@@ -14,7 +13,6 @@ public final class VehicleTravelOptimizer {
 
     private static volatile boolean initialized = false;
     private static volatile boolean unfairLockInstalled = false;
-    private static volatile boolean saveShieldInstalled = false;
     private static volatile boolean simulationGovernorInstalled = false;
 
     private static volatile Unsafe unsafeInstance = null;
@@ -22,11 +20,8 @@ public final class VehicleTravelOptimizer {
     private static volatile boolean playerIsDriving = false;
     private static volatile float playerX = 0.0f;
     private static volatile float playerY = 0.0f;
-    private static volatile long lastAncillaryHotsaveTime = 0;
 
     public static final java.util.concurrent.atomic.AtomicLong throttledTownZombies = new java.util.concurrent.atomic.AtomicLong(0);
-
-    private static final long ANCILLARY_HOTSAVE_COOLDOWN_MS = 60_000L;
 
     public static synchronized void initialize() {
         if (initialized) return;
@@ -34,16 +29,12 @@ public final class VehicleTravelOptimizer {
 
         obtainUnsafe();
         installUnfairChunkLock();
-        installSaveWorkerShield();
         installSimulationGovernor();
     }
 
     public static void checkAndMaintain() {
         if (!unfairLockInstalled) {
             installUnfairChunkLock();
-        }
-        if (!saveShieldInstalled) {
-            installSaveWorkerShield();
         }
         if (!simulationGovernorInstalled) {
             installSimulationGovernor();
@@ -96,40 +87,6 @@ public final class VehicleTravelOptimizer {
         return false;
     }
 
-    /**
-     * 2. Replaces ChunkSaveWorker.toSaveQueue with a shielded queue that defers main-thread
-     *    ancillary hotsaves while the player is operating a vehicle.
-     */
-    public static synchronized boolean installSaveWorkerShield() {
-        if (saveShieldInstalled) return true;
-        obtainUnsafe();
-        if (unsafeInstance == null) return false;
-
-        try {
-            Class<?> cswClass = Class.forName("zombie.iso.ChunkSaveWorker");
-            Field instField = cswClass.getField("instance");
-            Object cswInstance = instField.get(null);
-            if (cswInstance == null) return false;
-
-            Field queueField = cswClass.getField("toSaveQueue");
-            @SuppressWarnings("unchecked")
-            ConcurrentLinkedQueue<Object> existingQueue = (ConcurrentLinkedQueue<Object>) queueField.get(cswInstance);
-            if (existingQueue instanceof ShieldedSaveQueue) {
-                saveShieldInstalled = true;
-                return true;
-            }
-
-            ShieldedSaveQueue shieldedQueue = new ShieldedSaveQueue(existingQueue);
-            long offset = unsafeInstance.objectFieldOffset(queueField);
-            unsafeInstance.putObject(cswInstance, offset, shieldedQueue);
-            saveShieldInstalled = true;
-            PZOLogger.success("[VehicleTravelOptimizer] ChunkSaveWorker Hotsave Shield installed (Eliminated 150ms ancillary save hitch on foot & driving)");
-            return true;
-        } catch (Throwable t) {
-            PZOLogger.warn("[VehicleTravelOptimizer] Save shield install notice: " + t.getMessage());
-        }
-        return false;
-    }
 
     private static volatile Class<?> cachedPlayerClass = null;
     private static volatile Method cachedGetInstMethod = null;
@@ -373,81 +330,6 @@ public final class VehicleTravelOptimizer {
             }
 
             return super.add(obj);
-        }
-    }
-
-    /**
-     * Specialized ConcurrentLinkedQueue that monitors ChunkSaveWorker chunk drains.
-     * Intercepts isEmpty() right after poll() to defer 150ms HotsaveAncilliarySystems()
-     * during active exploration and vehicle travel, while keeping saving=false and normal saves 100% functional.
-     */
-    public static final class ShieldedSaveQueue extends ConcurrentLinkedQueue<Object> {
-        private static final long serialVersionUID = 4242L;
-
-        private volatile boolean justPolled = false;
-        private final java.util.concurrent.atomic.AtomicInteger approximateSize = new java.util.concurrent.atomic.AtomicInteger(0);
-
-        public ShieldedSaveQueue(ConcurrentLinkedQueue<Object> existing) {
-            super();
-            if (existing != null && !existing.isEmpty()) {
-                this.addAll(existing);
-                this.approximateSize.set(existing.size());
-            }
-        }
-
-        @Override
-        public boolean add(Object e) {
-            boolean added = super.add(e);
-            if (added) approximateSize.incrementAndGet();
-            return added;
-        }
-
-        @Override
-        public boolean offer(Object e) {
-            boolean offered = super.offer(e);
-            if (offered) approximateSize.incrementAndGet();
-            return offered;
-        }
-
-        @Override
-        public Object poll() {
-            Object item = super.poll();
-            justPolled = (item != null);
-            if (item != null) approximateSize.decrementAndGet();
-            return item;
-        }
-
-        @Override
-        public boolean remove(Object o) {
-            boolean removed = super.remove(o);
-            if (removed) approximateSize.decrementAndGet();
-            return removed;
-        }
-
-        @Override
-        public void clear() {
-            super.clear();
-            approximateSize.set(0);
-        }
-
-        @Override
-        public int size() {
-            return Math.max(0, approximateSize.get());
-        }
-
-        @Override
-        public boolean isEmpty() {
-            if (justPolled) {
-                justPolled = false;
-                // This call is from ChunkSaveWorker.Update() line 148 right after writing a chunk
-                long now = System.currentTimeMillis();
-                if (now - lastAncillaryHotsaveTime < ANCILLARY_HOTSAVE_COOLDOWN_MS) {
-                    // Defer 150ms HotsaveAncilliarySystems() freeze on foot and while operating vehicle!
-                    return false;
-                }
-                lastAncillaryHotsaveTime = now;
-            }
-            return approximateSize.get() <= 0;
         }
     }
 }
