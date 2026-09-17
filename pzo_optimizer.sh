@@ -97,9 +97,9 @@ clean_lua_bridge_files() {
 if [ "$OS_TYPE" = "Darwin" ]; then
     echo "[*] Platform: macOS"
     POSSIBLE_APP_PATHS=(
+        "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/Project Zomboid.app"
         "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/ProjectZomboid.app"
         "$HOME/Library/Application Support/Steam/steamapps/common/Project Zomboid/Project Zomboid.app"
-        "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/Project Zomboid.app"
         "$HOME/Library/Application Support/Steam/steamapps/common/Project Zomboid/ProjectZomboid.app"
     )
 
@@ -112,191 +112,233 @@ if [ "$OS_TYPE" = "Darwin" ]; then
     done
 
     if [ -z "$APP_BUNDLE" ]; then
-        echo "[-] Could not automatically locate ProjectZomboid.app."
-        read -p "Please drag & drop or enter path to ProjectZomboid.app: " APP_BUNDLE
+        echo "[-] Could not automatically locate Project Zomboid.app."
+        read -r -p "Drag & drop Project Zomboid.app here and press Enter: " APP_BUNDLE
     fi
 
-    APP_BUNDLE="${APP_BUNDLE#\'}"
-    APP_BUNDLE="${APP_BUNDLE%\'}"
-    APP_BUNDLE="${APP_BUNDLE#\"}"
-    APP_BUNDLE="${APP_BUNDLE%\"}"
+    APP_BUNDLE="${APP_BUNDLE%/}"
+    APP_BUNDLE="${APP_BUNDLE#\'}"; APP_BUNDLE="${APP_BUNDLE%\'}"
+    APP_BUNDLE="${APP_BUNDLE#\"}"; APP_BUNDLE="${APP_BUNDLE%\"}"
 
-    if [ ! -d "$APP_BUNDLE" ]; then
-        echo "[!] Error: Invalid .app directory: $APP_BUNDLE"
-        exit 1
-    fi
-
-    echo "[+] Found macOS App Bundle at: $APP_BUNDLE"
-
+    PLIST="$APP_BUNDLE/Contents/Info.plist"
     JAVA_DIR="$APP_BUNDLE/Contents/Java"
     INSTALLED_JAR="$JAVA_DIR/PZOptimEngine.jar"
-    PLIST="$APP_BUNDLE/Contents/Info.plist"
 
-    # 3. Existing Installation Check (Update / Uninstall / Cancel)
-    if [ -f "$INSTALLED_JAR" ]; then
+    if [ ! -f "$PLIST" ]; then
+        echo "[!] Invalid bundle (no Contents/Info.plist): $APP_BUNDLE"
+        exit 1
+    fi
+    echo "[+] Game bundle: $APP_BUNDLE"
+
+    MODE="install"
+    if [ -f "$INSTALLED_JAR" ] || [ -f "${PLIST}.bak" ]; then
         echo ""
-        echo "[!] PZOptimEngine is already installed on macOS."
-        echo "1) Update    - Overwrite PZOptimEngine.jar with the new version"
-        echo "2) Uninstall - Remove the mod and restore original Info.plist"
+        echo "1) Install / Repair  (re-apply a clean, safe configuration)"
+        echo "2) Uninstall         (restore the stock Info.plist)"
         echo "3) Cancel"
-        read -p "Enter choice (1, 2, or 3): " MENU_CHOICE
-
-        case "$MENU_CHOICE" in
-            1)
-                echo "[*] Updating PZOptimEngine.jar..."
-                cp -f "$PZ_JAR" "$INSTALLED_JAR"
-                echo "[+] Successfully updated PZOptimEngine.jar -> $INSTALLED_JAR"
-                exit 0
-                ;;
-            2)
-                echo "[*] Uninstalling PZOptimEngine..."
-                rm -f "$INSTALLED_JAR"
-                if [ -f "${PLIST}.bak" ]; then
-                    cp -f "${PLIST}.bak" "$PLIST"
-                    echo "[+] Restored original Info.plist from backup."
-                fi
-                clean_lua_bridge_files
-                echo "[+] Uninstallation complete! Restored to stock settings."
-                exit 0
-                ;;
-            *)
-                echo "[-] Cancelled."
-                exit 0
-                ;;
+        read -r -p "Choice: " CH
+        case "$CH" in
+            1) MODE="install" ;;
+            2) MODE="uninstall" ;;
+            *) echo "[-] Cancelled."; exit 0 ;;
         esac
     fi
 
-    # 4. Check for ZombieBuddy conflict on macOS
-    ZB_FOUND=0
-    if [ -f "$APP_BUNDLE/Contents/Java/ZombieBuddy.jar" ] || [ -f "$APP_BUNDLE/Contents/MacOS/zbNative.dylib" ] || [ -f "$APP_BUNDLE/Contents/Java/zbNative.dylib" ] || [ -f "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/ZombieBuddy.jar" ]; then
-        ZB_FOUND=1
-    fi
-
-    if [ "$ZB_FOUND" -eq 1 ]; then
-        echo ""
-        echo "========================================================================"
-        echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
-        echo "========================================================================"
-        echo "ZombieBuddy.jar and PZO Optimizer both manage the main Java entrypoint."
-        echo "PZO v0.8.0+ automatically runs your ZombieBuddy Workshop mods natively!"
-        echo ""
-        echo "[+] ZombieBuddy detected! Coexistence mode enabled." 
-    fi
-
-    # Check for Zed Better FPS NG conflict / redundancy
-    if [ -d "$HOME/Zomboid/mods/ZBBetterFPSNG" ] || [ -d "$SCRIPT_DIR/../../workshop/content/108600/3793137588" ]; then
-        echo ""
-        echo "[!] NOTICE: Zed Better FPS NG detected in Workshop/Mods!"
-        echo "    PZO natively includes hardware-level AVX2 culling, multi-core chunk streaming,"
-        echo "    and kernel thread scheduling that outperforms and replaces Java-level FPS mods."
-        echo "    ZombieBuddy itself and all other gameplay/Lua mods remain 100% compatible."
-        echo "    We recommend disabling Zed Better FPS NG to prevent duplicate hook overhead."
-        echo ""
-    fi
-
-    # 5. Install PZOptimEngine.jar to Contents/Java/
-    mkdir -p "$JAVA_DIR"
-    cp -f "$PZ_JAR" "$INSTALLED_JAR"
-    echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
-
-    # Install libpzo_native64.dylib if present
-    for dylib_c in "$SCRIPT_DIR/libpzo_native64.dylib" "$SCRIPT_DIR/dist/libpzo_native64.dylib" "$SCRIPT_DIR/../dist/libpzo_native64.dylib" "$SCRIPT_DIR/native/libpzo_native64.dylib"; do
-        if [ -f "$dylib_c" ]; then
-            cp -f "$dylib_c" "$JAVA_DIR/libpzo_native64.dylib"
-            mkdir -p "$APP_BUNDLE/Contents/MacOS"
-            cp -f "$dylib_c" "$APP_BUNDLE/Contents/MacOS/libpzo_native64.dylib"
-            echo "[+] Installed native companion: libpzo_native64.dylib"
-            break
+    resign_bundle() {
+        xattr -dr com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+        if codesign --force --sign - "$APP_BUNDLE" 2>/dev/null; then
+            echo "[+] Bundle re-signed (ad-hoc)."
+        elif codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null; then
+            echo "[+] Bundle re-signed (ad-hoc, deep)."
+        else
+            echo "[!] codesign failed. If the game is killed instantly on launch, run:"
+            echo "    codesign --force --deep --sign - \"$APP_BUNDLE\""
         fi
+        codesign --verify --deep "$APP_BUNDLE" 2>/dev/null \
+            && echo "[+] Signature verified." \
+            || echo "[!] Signature verification reported problems (usually still playable)."
+    }
+
+    if [ "$MODE" = "uninstall" ]; then
+        rm -f "$INSTALLED_JAR" "$JAVA_DIR/libpzo_native64.dylib" "$APP_BUNDLE/Contents/MacOS/libpzo_native64.dylib"
+        if [ -f "${PLIST}.bak" ]; then
+            cp -f "${PLIST}.bak" "$PLIST"
+            echo "[+] Stock Info.plist restored."
+        else
+            echo "[!] No Info.plist backup found - verify game files through Steam."
+        fi
+        clean_lua_bridge_files
+        resign_bundle
+        echo "[+] Uninstall complete."
+        exit 0
+    fi
+
+    LAUNCHER_BIN=""
+    for b in "$APP_BUNDLE/Contents/MacOS/JavaAppLauncher" "$APP_BUNDLE/Contents/MacOS"/*; do
+        [ -f "$b" ] && [ -x "$b" ] && LAUNCHER_BIN="$b" && break
     done
 
-    # 6. Patch Contents/Info.plist
-    if [ ! -f "$PLIST" ]; then
-        echo "[!] Error: Contents/Info.plist not found in bundle."
-        exit 1
+    APP_ARCH="unknown"
+    if [ -n "$LAUNCHER_BIN" ] && command -v lipo >/dev/null 2>&1; then
+        APP_ARCH="$(lipo -archs "$LAUNCHER_BIN" 2>/dev/null | tr ' ' ',')"
+    fi
+    echo "[+] Launcher architecture: ${APP_ARCH:-unknown}"
+
+    JAVA_BIN=""
+    for j in "$APP_BUNDLE/Contents/PlugIns"/*/Contents/Home/bin/java "$APP_BUNDLE/Contents/Home/bin/java"; do
+        [ -x "$j" ] && JAVA_BIN="$j" && break
+    done
+
+    JAVA_MAJOR=17
+    if [ -n "$JAVA_BIN" ]; then
+        RAW="$("$JAVA_BIN" -version 2>&1 | head -n1)"
+        V="$(echo "$RAW" | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p')"
+        [ -n "$V" ] && JAVA_MAJOR="$V"
+        echo "[+] Bundled runtime: $RAW  (major $JAVA_MAJOR)"
+    else
+        echo "[!] Bundled JRE not found - assuming Java $JAVA_MAJOR (conservative flags)."
     fi
 
-    if [ ! -f "${PLIST}.bak" ]; then
-        cp -f "$PLIST" "${PLIST}.bak"
-        echo "[+] Backed up original Info.plist -> ${PLIST}.bak"
+    mkdir -p "$JAVA_DIR"
+    cp -f "$PZ_JAR" "$INSTALLED_JAR"
+    echo "[+] Installed $INSTALLED_JAR"
+
+    DYLIB_SRC=""
+    for d in "$SCRIPT_DIR/libpzo_native64.dylib" "$SCRIPT_DIR/dist/libpzo_native64.dylib" "$SCRIPT_DIR/native/libpzo_native64.dylib"; do
+        [ -f "$d" ] && DYLIB_SRC="$d" && break
+    done
+
+    rm -f "$JAVA_DIR/libpzo_native64.dylib" "$APP_BUNDLE/Contents/MacOS/libpzo_native64.dylib"
+    if [ -n "$DYLIB_SRC" ]; then
+        DYLIB_ARCH="$(lipo -archs "$DYLIB_SRC" 2>/dev/null | tr ' ' ',')"
+        MATCH=0
+        case ",$APP_ARCH," in
+            *",arm64,"*) case ",$DYLIB_ARCH," in *",arm64,"*) MATCH=1 ;; esac ;;
+        esac
+        case ",$APP_ARCH," in
+            *",x86_64,"*) case ",$DYLIB_ARCH," in *",x86_64,"*) MATCH=1 ;; esac ;;
+        esac
+        if [ "$MATCH" -eq 1 ]; then
+            cp -f "$DYLIB_SRC" "$JAVA_DIR/libpzo_native64.dylib"
+            mkdir -p "$APP_BUNDLE/Contents/MacOS"
+            cp -f "$DYLIB_SRC" "$APP_BUNDLE/Contents/MacOS/libpzo_native64.dylib"
+            echo "[+] Native companion installed (dylib $DYLIB_ARCH)."
+        else
+            echo "[!] Skipping libpzo_native64.dylib: built for [$DYLIB_ARCH], the game runs as [$APP_ARCH]."
+            echo "    The Java engine works without it; only the native governor is disabled."
+        fi
     fi
 
-    python3 - << 'EOF' "$PLIST" "$RAM_MB"
-import plistlib, sys, os
+    [ -f "${PLIST}.bak" ] || { cp -f "$PLIST" "${PLIST}.bak"; echo "[+] Backed up stock Info.plist -> Info.plist.bak"; }
+    cp -f "$PLIST" "${PLIST}.pzo-prev"
 
-plist_path = sys.argv[1]
-ram_mb = sys.argv[2]
+    /usr/bin/python3 - "$PLIST" "${PLIST}.bak" "$RAM_MB" "$JAVA_MAJOR" "$INSTALLED_JAR" <<'PYEOF'
+import plistlib, sys
+
+plist_path, backup_path, ram_mb, java_major, jar_abs = sys.argv[1:6]
+java_major = int(java_major)
 
 with open(plist_path, "rb") as f:
     pl = plistlib.load(f)
+try:
+    with open(backup_path, "rb") as f:
+        stock = plistlib.load(f)
+except Exception:
+    stock = {}
 
-# Use dot notation for macOS Java launcher compatibility
-target_class_dot = "com.pzoptimizer.PZOEntrypoint"
+MAIN_KEYS = ["JVMMainClassName", "MainClass", "JVMEntrypoint"]
 
-# Update Main Class across all known macOS launcher schema keys
-for key in ["JVMMainClassName", "MainClass", "JVMEntrypoint"]:
-    if key in pl:
-        pl[key] = target_class_dot
+def repair_main_class(container, stock_container):
+    for k in MAIN_KEYS:
+        if k in container and "pzoptimizer" in str(container[k]).lower():
+            container[k] = stock_container.get(k, "zombie/gameStates/MainScreenState")
+            print("[+] Repaired %s -> %s" % (k, container[k]))
 
-if "Java" in pl and isinstance(pl["Java"], dict):
-    pl["Java"]["MainClass"] = target_class_dot
-    if "ClassPath" in pl["Java"]:
-        cp = pl["Java"]["ClassPath"]
-        if isinstance(cp, str) and "PZOptimEngine.jar" not in cp:
-            pl["Java"]["ClassPath"] = "PZOptimEngine.jar:" + cp
-        elif isinstance(cp, list) and not any("PZOptimEngine.jar" in x for x in cp):
-            pl["Java"]["ClassPath"] = ["PZOptimEngine.jar"] + cp
+repair_main_class(pl, stock)
+if isinstance(pl.get("Java"), dict):
+    repair_main_class(pl["Java"], stock.get("Java", {}) if isinstance(stock.get("Java"), dict) else {})
+if isinstance(pl.get("JVMOptions"), dict):
+    repair_main_class(pl["JVMOptions"], {})
 
-if "JVMOptions" in pl and isinstance(pl["JVMOptions"], dict):
-    if "MainClass" in pl["JVMOptions"]:
-        pl["JVMOptions"]["MainClass"] = target_class_dot
+for key in ("JVMClassPath", "ClassPath"):
+    for holder in (pl, pl.get("Java") if isinstance(pl.get("Java"), dict) else {}):
+        if key in holder:
+            v = holder[key]
+            if isinstance(v, list):
+                holder[key] = [x for x in v if "PZOptimEngine.jar" not in str(x)]
+            elif isinstance(v, str):
+                holder[key] = ":".join(p for p in v.split(":") if "PZOptimEngine.jar" not in p)
 
-# Ensure PZOptimEngine.jar is in ClassPath
-for cp_key in ["JVMClassPath", "ClassPath"]:
-    if cp_key in pl:
-        if isinstance(pl[cp_key], list):
-            if not any("PZOptimEngine.jar" in x for x in pl[cp_key]):
-                pl[cp_key] = ["PZOptimEngine.jar"] + pl[cp_key]
-        elif isinstance(pl[cp_key], str):
-            if "PZOptimEngine.jar" not in pl[cp_key]:
-                pl[cp_key] = "PZOptimEngine.jar:" + pl[cp_key]
+DROP_PREFIXES = (
+    "-Xmx", "-Xms",
+    "-agentlib:pzo_native64",
+    "-XX:+UseZGC", "-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZCollection",
+    "-XX:+UseG1GC", "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC",
+    "-XX:+AlwaysPreTouch", "-XX:+UseNUMA", "-XX:+UseSuperWord",
+    "-XX:+UnlockExperimentalVMOptions", "-XX:+UseCompactObjectHeaders",
+    "-XX:+PerfDisableSharedMem", "-XX:InitiatingHeapOccupancyPercent",
+    "-XX:G1ReservePercent", "-XX:MaxInlineLevel", "-XX:InlineSmallCode",
+    "--enable-native-access", "--add-exports=java.base/jdk.internal.misc",
+    "-Djava.awt.headless", "-Dzomboid.steam", "-Dpzo.",
+)
 
-jvm_args = [
-    "-javaagent:PZOptimEngine.jar",
-    f"-Xmx{ram_mb}m",
+def is_pzo_managed(a):
+    a = str(a)
+    if a.startswith("-javaagent:") and "PZOptimEngine.jar" in a:
+        return True
+    return any(a.startswith(p) for p in DROP_PREFIXES)
+
+args = [
+    "-javaagent:%s" % jar_abs,
+    "-Xmx%sm" % ram_mb,
     "-XX:+UseG1GC",
     "-XX:+PerfDisableSharedMem",
     "-XX:InitiatingHeapOccupancyPercent=45",
     "-XX:G1ReservePercent=15",
-    "-XX:+AlwaysPreTouch",
-    "--enable-native-access=ALL-UNNAMED",
-    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-    "-Dzomboid.steam=1"
+    "-XX:MaxInlineLevel=15",
+    "-XX:InlineSmallCode=2500",
+    "-Djava.awt.headless=true",
+    "-Dzomboid.steam=1",
 ]
+if java_major >= 17:
+    args.append("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED")
+if java_major >= 22:
+    args.append("--enable-native-access=ALL-UNNAMED")
+if java_major >= 24:
+    args += ["-XX:+UnlockExperimentalVMOptions", "-XX:+UseCompactObjectHeaders"]
 
-if "JVMOptions" in pl:
-    if isinstance(pl["JVMOptions"], list):
-        filtered = [arg for arg in pl["JVMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-XX:+UseG1GC") and not arg.startswith("-XX:+AlwaysPreTouch") and not arg.startswith("-Djava.awt.headless") and not arg.startswith("-javaagent:")]
-        pl["JVMOptions"] = filtered + jvm_args
-    elif isinstance(pl["JVMOptions"], dict):
-        pl["JVMOptions"]["Properties"] = pl["JVMOptions"].get("Properties", {})
-if "VMOptions" in pl:
-    if isinstance(pl["VMOptions"], list):
-        filtered = [arg for arg in pl["VMOptions"] if not arg.startswith("-Xmx") and not arg.startswith("-Djava.awt.headless") and not arg.startswith("-javaagent:")]
-        pl["VMOptions"] = filtered + jvm_args
+def patch_options(holder, key):
+    if key in holder and isinstance(holder[key], list):
+        holder[key] = [a for a in holder[key] if not is_pzo_managed(a)] + args
+        return True
+    return False
+
+patched = False
+for holder in (pl, pl.get("Java") if isinstance(pl.get("Java"), dict) else {}):
+    for key in ("JVMOptions", "VMOptions"):
+        patched = patch_options(holder, key) or patched
+
+if not patched:
+    pl["JVMOptions"] = args
+    print("[!] No existing JVMOptions array found - created one.")
 
 with open(plist_path, "wb") as f:
     plistlib.dump(pl, f)
-print("[+] Successfully updated Info.plist with ClassPath, Java Agent, Java 17 / B42 heap & entrypoint.")
-EOF
+print("[+] Info.plist patched (Java %d profile, heap %sm, stock entrypoint preserved)." % (java_major, ram_mb))
+PYEOF
 
-    # Re-sign the app bundle on macOS to prevent Gatekeeper/AMFI signature mismatch kills
-    if command -v codesign >/dev/null 2>&1; then
-        echo "[*] Re-signing ProjectZomboid.app with ad-hoc signature..."
-        codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
-        xattr -cr "$APP_BUNDLE" 2>/dev/null || true
-        echo "[+] Successfully re-signed ProjectZomboid.app"
+    if [ $? -ne 0 ]; then
+        echo "[!] Patching failed - rolling back Info.plist."
+        cp -f "${PLIST}.pzo-prev" "$PLIST"
+        exit 1
     fi
+
+    clean_lua_bridge_files
+    mkdir -p "$HOME/Zomboid/Lua" "$HOME/Zomboid/mods" "$HOME/Zomboid/db" "$HOME/Zomboid/Server"
+    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"0.9.8-unstable"}\n' "$ALLOC_RAM" \
+        > "$HOME/Zomboid/Lua/pzo_status.json"
+
+    resign_bundle
 
 # ==============================================================================
 # Linux Steam Installation
