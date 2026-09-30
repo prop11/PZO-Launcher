@@ -109,6 +109,38 @@ public class PZOEngineBridge {
         return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
     }
 
+    public static long getPlayerLosProbesSaved() {
+        return PlayerLosOptimizer.probesAccelerated.get();
+    }
+
+    public static long getVehicleSpatialRejections() {
+        return VehicleSpatialCuller.intersectionTestsSaved.get();
+    }
+
+    public static long getBuildingStoryScansSaved() {
+        return BuildingStoryGovernor.roomScansSaved.get();
+    }
+
+    public static long getUITicksStaggered() {
+        return UIFramePacingGovernor.ticksStaggered.get();
+    }
+
+    public static long getZoomTexturesRetained() {
+        return ZoomRetentionGovernor.texturesRetainedOnZoom.get();
+    }
+
+    public static long getGLPipelineStallsAvoided() {
+        return GLPipelineGovernor.pipelineStallsAvoided.get();
+    }
+
+    public static long getAudioPassesDampened() {
+        return AudioCadenceGovernor.parameterPassesDampened.get();
+    }
+
+    public static long getWorldMapLayoutsReused() {
+        return WorldMapPerformanceGovernor.layoutsReused.get();
+    }
+
     public static boolean isBetaOptIn() {
         return PZOConfig.isBetaOptIn();
     }
@@ -152,6 +184,26 @@ public class PZOEngineBridge {
                 ChunkBufferPool.setEnabled(value);
             } else if ("JVM_BytecodeBloodCap".equals(key)) {
                 PZOptimAgent.setBytecodeBloodCap(value);
+            } else if ("JVM_PlayerLosOptimizer".equals(key)) {
+                PlayerLosOptimizer.setActive(value);
+            } else if ("JVM_VehicleSpatialCuller".equals(key)) {
+                VehicleSpatialCuller.setActive(value);
+            } else if ("JVM_BuildingStoryGovernor".equals(key)) {
+                BuildingStoryGovernor.setActive(value);
+            } else if ("JVM_UIFramePacingGovernor".equals(key)) {
+                UIFramePacingGovernor.setActive(value);
+            } else if ("JVM_CameraDriveSmoother".equals(key)) {
+                CameraDriveSmoother.setActive(value);
+            } else if ("JVM_ZoomRetentionGovernor".equals(key)) {
+                ZoomRetentionGovernor.setActive(value);
+            } else if ("JVM_AudioCadenceGovernor".equals(key)) {
+                AudioCadenceGovernor.setActive(value);
+            } else if ("JVM_GLPipelineGovernor".equals(key)) {
+                GLPipelineGovernor.setActive(value);
+            } else if ("JVM_FastTextureDecompressor".equals(key)) {
+                FastTextureDecompressor.setActive(value);
+            } else if ("JVM_WorldMapGovernor".equals(key)) {
+                WorldMapPerformanceGovernor.setActive(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -247,7 +299,12 @@ public class PZOEngineBridge {
     }
 
     public static Object getDummyFileWriter() {
-        return DiskIOPacer.getDummyFileWriter();
+        try {
+            Method m = DiskIOPacer.class.getMethod("getDummyFileWriter");
+            return m.invoke(null);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static String readLastLines(File file, int maxLines) {
