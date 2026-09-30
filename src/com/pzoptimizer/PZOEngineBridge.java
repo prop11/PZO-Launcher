@@ -173,6 +173,14 @@ public class PZOEngineBridge {
         return WorldUpscalerGovernor.framesUpscaled.get();
     }
 
+    public static long getPackIndexHits() {
+        return TexturePackIndexGovernor.packHits.get();
+    }
+
+    public static long getPackIndexBytesSkipped() {
+        return TexturePackIndexGovernor.bytesSkipped.get();
+    }
+
     public static boolean isBetaOptIn() {
         return PZOConfig.isBetaOptIn();
     }
@@ -254,6 +262,8 @@ public class PZOEngineBridge {
                 WorldUpscalerGovernor.setActive(value);
             } else if ("JVM_FoliageWind".equals(key)) {
                 FoliageWindGovernor.setActive(value);
+            } else if ("JVM_TexturePackIndex".equals(key)) {
+                TexturePackIndexGovernor.setActive(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
