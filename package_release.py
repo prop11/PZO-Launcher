@@ -74,8 +74,8 @@ def main():
     if os.path.isfile(server_jar):
         shutil.copy2(server_jar, os.path.join(root_dir, "PZOServerEngine.jar"))
 
-    # Search locations for assets
-    search_dirs = [dist_dir, native_dir, root_dir]
+    # Search locations for assets (prefer workspace root and native source dirs over stale dist)
+    search_dirs = [root_dir, native_dir, dist_dir]
 
     # 2. Gather standalone binaries & scripts for dist/
     files_to_copy = [
