@@ -1,0 +1,149 @@
+name: Build PZO (JARs & Native Binaries)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - Unstable
+
+jobs:
+  build-jars:
+    name: Build JARs & Release Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Compile Java Sources
+        run: |
+          mkdir -p bin dist
+          javac -d bin -cp bin -sourcepath "" \
+            src/com/pzoptimizer/*.java \
+            src/com/pzoptimizer/server/*.java || true
+
+      - name: Package JARs and Release Archives
+        run: |
+          python3 package_release.py
+          ls -lh dist/
+
+      - name: Upload JAR Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pzo-jars
+          path: |
+            dist/PZOptimEngine.jar
+            dist/PZOServerEngine.jar
+
+      - name: Upload Distribution Packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: pzo-packages
+          path: |
+            dist/PZO-Optimizer-Windows.zip
+            dist/PZO_Optimizer_macOS_Linux.zip
+            dist/PZO-Server-Windows.zip
+            dist/PZO-Server-Linux.zip
+
+  build-windows-native:
+    name: Build Native (Windows x64 DLL)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compile pzo_native64.dll
+        shell: cmd
+        run: |
+          if not exist dist mkdir dist
+          cd native
+          cl.exe /O2 /LD /W3 /arch:AVX2 /I"%JAVA_HOME%\include" /I"%JAVA_HOME%\include\win32" pzo_native.c /Fe:..\dist\pzo_native64.dll /link /MACHINE:X64 winmm.lib avrt.lib
+          if errorlevel 1 exit /b 1
+
+      - name: Upload Windows Native Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pzo_native64-windows
+          path: dist/pzo_native64.dll
+
+  build-linux-native:
+    name: Build Native (Linux x86_64 SO)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Compile libpzo_native64.so
+        run: |
+          chmod +x native/build_native.sh
+          bash native/build_native.sh
+          ls -lh dist/libpzo_native64.so
+
+      - name: Upload Linux Native Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpzo_native64-linux
+          path: dist/libpzo_native64.so
+
+  build-macos-native:
+    name: Build Native (macOS Universal arm64/x86_64 DYLIB)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Compile libpzo_native64.dylib
+        run: |
+          chmod +x native/build_native.sh
+          bash native/build_native.sh
+          ls -lh dist/libpzo_native64.dylib
+
+      - name: Verify Universal Mach-O Architectures
+        run: |
+          lipo -info dist/libpzo_native64.dylib
+          ARCHS=$(lipo -archs dist/libpzo_native64.dylib)
+          echo "Architectures found: $ARCHS"
+          if [[ "$ARCHS" != *"x86_64"* ]] || [[ "$ARCHS" != *"arm64"* ]]; then
+            echo "Error: libpzo_native64.dylib is not a complete Universal binary"
+            exit 1
+          fi
+
+      - name: Upload macOS Native Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpzo_native64-macos
+          path: dist/libpzo_native64.dylib
