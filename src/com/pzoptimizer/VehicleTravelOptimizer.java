@@ -30,6 +30,7 @@ public final class VehicleTravelOptimizer {
         obtainUnsafe();
         installUnfairChunkLock();
         installSimulationGovernor();
+        VehicleMotionSmoother.initialize();
     }
 
     public static void checkAndMaintain() {

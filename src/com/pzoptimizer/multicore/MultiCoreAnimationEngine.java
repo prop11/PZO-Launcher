@@ -46,6 +46,11 @@ public final class MultiCoreAnimationEngine {
             return false;
         }
 
+        if (entityIndex >= com.pzoptimizer.ZombieLodGovernor.getMax3DModels()) {
+            totalBoneTransformsBypassed.addAndGet(64);
+            return false;
+        }
+
         if (!ModelSkinningGovernor.shouldSkinModel(screenX, screenY)) {
             totalBoneTransformsBypassed.addAndGet(64);
             return false;

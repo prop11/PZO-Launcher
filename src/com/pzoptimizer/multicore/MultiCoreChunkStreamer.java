@@ -145,7 +145,11 @@ public final class MultiCoreChunkStreamer {
         @Override
         public boolean offer(IsoChunk chunk) {
             if (chunk == null) return false;
-            return super.offer(chunk);
+            boolean enqueued = super.offer(chunk);
+            if (enqueued) {
+                com.pzoptimizer.StreamerWake.signal();
+            }
+            return enqueued;
         }
 
         @Override
@@ -177,7 +181,10 @@ public final class MultiCoreChunkStreamer {
 
             u.putObject(ws, offset, newQueue);
             queueHooked = true;
-            PZOLogger.success("[MultiCoreChunkStreamer] Successfully hooked WorldStreamer.jobQueue with zero-latency PZO direct dispatcher");
+            if (ws.worldStreamer != null) {
+                com.pzoptimizer.StreamerWake.register(ws.worldStreamer);
+            }
+            PZOLogger.success("[MultiCoreChunkStreamer] Successfully hooked WorldStreamer.jobQueue with zero-latency PZO direct dispatcher & StreamerWake");
         } catch (Throwable t) {
             PZOLogger.warn("[MultiCoreChunkStreamer] Notice on jobQueue hook: " + t.getMessage());
         }
