@@ -31,6 +31,7 @@ public final class VehicleTravelOptimizer {
         installUnfairChunkLock();
         installSimulationGovernor();
         VehicleMotionSmoother.initialize();
+        CameraDriveSmoother.setActive(true);
     }
 
     public static void checkAndMaintain() {

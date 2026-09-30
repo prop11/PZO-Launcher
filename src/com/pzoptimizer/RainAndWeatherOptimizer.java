@@ -18,7 +18,8 @@ public final class RainAndWeatherOptimizer {
         applyLightingSplitUpdate();
         applyPuddlesElevationCap();
         ensureWeatherMaskingRestored();
-        PZOLogger.success("[RainAndWeatherOptimizer] Rain & Weather Driving Governor initialized");
+        GLPipelineGovernor.setActive(true);
+        PZOLogger.success("[RainAndWeatherOptimizer] Rain & Weather Driving Governor initialized (Zero-Stall Shader Pipeline)");
     }
 
     public static void checkAndMaintain() {

@@ -157,9 +157,30 @@ public class EngineThreadGovernor {
     public static class MainThreadDiagnosticHook implements Runnable {
         private final Runnable target;
         private int lastFrameCount = -1;
+        private static Field fsField = null;
+        private static Field fcField = null;
+        private static Field cxField = null;
+        private static Field cyField = null;
+        private static boolean reflectionInit = false;
 
         public MainThreadDiagnosticHook(Runnable target) {
             this.target = target;
+        }
+
+        private static void ensureReflection() {
+            if (reflectionInit) return;
+            try {
+                Class<?> camClass = Class.forName("zombie.iso.IsoCamera");
+                fsField = camClass.getField("frameState");
+                Object sampleFs = fsField.get(null);
+                if (sampleFs != null) {
+                    Class<?> fsClass = sampleFs.getClass();
+                    fcField = fsClass.getField("frameCount");
+                    cxField = fsClass.getField("camCharacterX");
+                    cyField = fsClass.getField("camCharacterY");
+                }
+            } catch (Throwable ignored) {}
+            reflectionInit = true;
         }
 
         @Override
@@ -168,18 +189,32 @@ public class EngineThreadGovernor {
                 target.run();
             } finally {
                 try {
-                    if (zombie.iso.IsoCamera.frameState != null) {
-                        int fc = zombie.iso.IsoCamera.frameState.frameCount;
-                        if (fc != lastFrameCount) {
-                            lastFrameCount = fc;
-                            ChunkIngestionPacer.onFrameBoundary(fc);
-                            FrameDropDiagnosticEngine.onFrameTick();
-                            PopmanGovernor.onFrameBoundary(fc);
-                            int pcx = (int) (zombie.iso.IsoCamera.frameState.camCharacterX / 8.0f);
-                            int pcy = (int) (zombie.iso.IsoCamera.frameState.camCharacterY / 8.0f);
-                            ChunkBakeGovernor.onFrameBoundary(fc, pcx, pcy);
-                            UIRetainedOptimizer.onFrameBoundary();
-                            PZOUniformCache.reset();
+                    ensureReflection();
+                    if (fsField != null) {
+                        Object fs = fsField.get(null);
+                        if (fs != null) {
+                            if (fcField == null) {
+                                Class<?> fsClass = fs.getClass();
+                                fcField = fsClass.getField("frameCount");
+                                cxField = fsClass.getField("camCharacterX");
+                                cyField = fsClass.getField("camCharacterY");
+                            }
+                            int fc = fcField.getInt(fs);
+                            if (fc != lastFrameCount) {
+                                lastFrameCount = fc;
+                                ChunkIngestionPacer.onFrameBoundary(fc);
+                                FrameDropDiagnosticEngine.onFrameTick();
+                                PopmanGovernor.onFrameBoundary(fc);
+                                float cx = cxField != null ? cxField.getFloat(fs) : 0.0f;
+                                float cy = cyField != null ? cyField.getFloat(fs) : 0.0f;
+                                int pcx = (int) (cx / 8.0f);
+                                int pcy = (int) (cy / 8.0f);
+                                ChunkBakeGovernor.onFrameBoundary(fc, pcx, pcy);
+                                UIRetainedOptimizer.onFrameBoundary();
+                                PZOUniformCache.reset();
+                                UIFramePacingGovernor.onFrameBoundary(System.currentTimeMillis());
+                                AudioCadenceGovernor.isCadenceTickDue(fc);
+                            }
                         }
                     }
                 } catch (Throwable ignored) {}
