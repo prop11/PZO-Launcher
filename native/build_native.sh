@@ -55,21 +55,22 @@ if [ "$OS_NAME" = "Darwin" ]; then
     TARGET_LIB="libpzo_native64.dylib"
     JNI_MD_DIR="$JAVA_HOME/include/darwin"
     
-    echo "[*] Compiling $TARGET_LIB for macOS (Universal: arm64 + x86_64)..."
-    if $CC -O3 -dynamiclib -arch arm64 -arch x86_64 \
+    echo "[*] Compiling macOS arm64 slice (Apple Silicon scalar)..."
+    $CC -O3 -dynamiclib -arch arm64 \
         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
-        pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl 2>/dev/null; then
-        echo "[+] Universal macOS binary compiled successfully"
-    else
-        ARCH_FLAGS=""
-        if [ "$ARCH_NAME" = "x86_64" ]; then
-            ARCH_FLAGS="-mavx2"
-        fi
-        echo "[*] Compiling $TARGET_LIB for native arch ($ARCH_NAME)..."
-        $CC -O3 -dynamiclib $ARCH_FLAGS \
-            -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
-            pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl
-    fi
+        pzo_native.c -o "libpzo_native64_arm64.dylib" -lm -lpthread -ldl
+
+    echo "[*] Compiling macOS x86_64 slice (Intel / Rosetta AVX2)..."
+    $CC -O3 -dynamiclib -arch x86_64 -mavx2 \
+        -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
+        pzo_native.c -o "libpzo_native64_x86_64.dylib" -lm -lpthread -ldl
+
+    echo "[*] Combining slices into Universal Mach-O binary via lipo..."
+    lipo -create -output "$TARGET_LIB" "libpzo_native64_arm64.dylib" "libpzo_native64_x86_64.dylib"
+    rm -f "libpzo_native64_arm64.dylib" "libpzo_native64_x86_64.dylib"
+
+    echo "[+] Universal binary created successfully:"
+    lipo -info "$TARGET_LIB"
         
     cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
     echo "[+] Successfully built: $TARGET_LIB -> dist/$TARGET_LIB"

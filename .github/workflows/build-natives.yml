@@ -74,6 +74,17 @@ jobs:
           fi
           ls -lh dist/libpzo_native64.dylib
 
+      - name: Verify Universal Mach-O architectures
+        run: |
+          lipo -info dist/libpzo_native64.dylib
+          ARCHS=$(lipo -archs dist/libpzo_native64.dylib)
+          echo "Architectures found: $ARCHS"
+          if [[ "$ARCHS" != *"x86_64"* ]] || [[ "$ARCHS" != *"arm64"* ]]; then
+            echo "Error: libpzo_native64.dylib is not a complete Universal binary (missing x86_64 or arm64)"
+            exit 1
+          fi
+          echo "Verified Universal Mach-O binary (arm64 + x86_64 present)"
+
       - name: Upload macOS native artifact
         uses: actions/upload-artifact@v4
         with:
