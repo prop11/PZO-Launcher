@@ -175,6 +175,11 @@ public class EngineThreadGovernor {
                             ChunkIngestionPacer.onFrameBoundary(fc);
                             FrameDropDiagnosticEngine.onFrameTick();
                             PopmanGovernor.onFrameBoundary(fc);
+                            int pcx = (int) (zombie.iso.IsoCamera.frameState.camCharacterX / 8.0f);
+                            int pcy = (int) (zombie.iso.IsoCamera.frameState.camCharacterY / 8.0f);
+                            ChunkBakeGovernor.onFrameBoundary(fc, pcx, pcy);
+                            UIRetainedOptimizer.onFrameBoundary();
+                            PZOUniformCache.reset();
                         }
                     }
                 } catch (Throwable ignored) {}
