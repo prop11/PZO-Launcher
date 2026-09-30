@@ -141,6 +141,38 @@ public class PZOEngineBridge {
         return WorldMapPerformanceGovernor.layoutsReused.get();
     }
 
+    public static long getAnimCacheHits() {
+        return AnimationClipCache.cacheHits.get();
+    }
+
+    public static long getCursorFramesLatched() {
+        return CursorLateLatch.framesLatched.get();
+    }
+
+    public static long getFencesSynced() {
+        return LowLatencyPacingGovernor.fencesSynced.get();
+    }
+
+    public static int getDetectedMonitorHz() {
+        return VRRDisplayGovernor.getDetectedHz();
+    }
+
+    public static int getTargetVRRCap() {
+        return VRRDisplayGovernor.getTargetFrameCap();
+    }
+
+    public static long getTexturesCompressed() {
+        return TextureCompressionGovernor.texturesCompressed.get();
+    }
+
+    public static long getVramBytesSaved() {
+        return TextureCompressionGovernor.vramBytesSaved.get();
+    }
+
+    public static long getFramesUpscaled() {
+        return WorldUpscalerGovernor.framesUpscaled.get();
+    }
+
     public static boolean isBetaOptIn() {
         return PZOConfig.isBetaOptIn();
     }
@@ -204,6 +236,20 @@ public class PZOEngineBridge {
                 FastTextureDecompressor.setActive(value);
             } else if ("JVM_WorldMapGovernor".equals(key)) {
                 WorldMapPerformanceGovernor.setActive(value);
+            } else if ("JVM_AnimationClipCache".equals(key)) {
+                AnimationClipCache.setActive(value);
+            } else if ("JVM_CursorLateLatch".equals(key)) {
+                CursorLateLatch.setActive(value);
+            } else if ("JVM_LowLatency".equals(key)) {
+                LowLatencyPacingGovernor.setActive(value);
+            } else if ("JVM_VRRDisplayGovernor".equals(key)) {
+                VRRDisplayGovernor.setActive(value);
+            } else if ("JVM_TextureCompression".equals(key)) {
+                TextureCompressionGovernor.setActive(value);
+            } else if ("JVM_WorldUpscaler".equals(key)) {
+                WorldUpscalerGovernor.setActive(value);
+            } else if ("JVM_FoliageWind".equals(key)) {
+                FoliageWindGovernor.setActive(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -862,7 +908,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(490, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9-unstable\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.1-unstable\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
