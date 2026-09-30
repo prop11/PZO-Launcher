@@ -31,6 +31,10 @@ public class EngineThreadGovernor {
             PZOLogger.warn("[EngineThreadGovernor] Process lock notice: " + t.getMessage());
         }
 
+        try {
+            GCLauncherOptimizer.tuneLauncherGcIfBeneficial();
+        } catch (Throwable ignored) {}
+
         Thread governorDaemon = new Thread(EngineThreadGovernor::governorLoop, "PZO-ThreadGovernor");
         governorDaemon.setDaemon(true);
         governorDaemon.setPriority(Thread.MIN_PRIORITY);
@@ -214,6 +218,8 @@ public class EngineThreadGovernor {
                                 PZOUniformCache.reset();
                                 UIFramePacingGovernor.onFrameBoundary(System.currentTimeMillis());
                                 AudioCadenceGovernor.isCadenceTickDue(fc);
+                                LowLatencyPacingGovernor.onPostSwapRenderThread();
+                                VRRDisplayGovernor.detectMonitorRefreshRate();
                             }
                         }
                     }
