@@ -63,6 +63,7 @@ public class EngineThreadGovernor {
                 // Once primary threads are optimized and paced, relax polling to 5000ms
                 if (renderThreadOptimized && mainThreadOptimized && mainThreadPacerHooked) {
                     backoffMs = 5000;
+                    TexturePackIndexGovernor.saveDirtyIndices();
                 } else {
                     backoffMs = Math.min(backoffMs + 200, 1000);
                 }
