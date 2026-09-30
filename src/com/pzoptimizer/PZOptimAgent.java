@@ -45,6 +45,7 @@ public class PZOptimAgent {
 
         try {
             HotSpotJITCompilerTuner.tuneRuntimeProperties();
+            WorldUpscalerGovernor.checkLaunchParams(null);
             PZOEngineBridge.initialize();
             HighPrecisionTimer.initialize();
         } catch (Throwable ignored) {}

@@ -185,6 +185,10 @@ public class PZOEngineBridge {
         return PZOConfig.isMultithreadingNoticeAcknowledged();
     }
 
+    public static boolean isWorldUpscalerActive() {
+        return WorldUpscalerGovernor.isActive();
+    }
+
     public static void acknowledgeMultithreadingNotice() {
         PZOConfig.setMultithreadingNoticeAcknowledged(true);
     }
@@ -801,6 +805,20 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isMultithreadingNoticeAcknowledged", isNoticeAckFunc);
 
+                                        // isWorldUpscalerActive
+                                        Object isWorldUpscalerActiveFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(WorldUpscalerGovernor.isActive()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isWorldUpscalerActive", isWorldUpscalerActiveFunc);
+
                                         // acknowledgeMultithreadingNotice
                                         Object ackNoticeFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
@@ -904,15 +922,19 @@ public class PZOEngineBridge {
                                             "    MainScreen.instance.pzoNoticeShown = true\n" +
                                             "    local scrW = getCore():getScreenWidth()\n" +
                                             "    local scrH = getCore():getScreenHeight()\n" +
-                                            "    local modalW = math.min(740, scrW - 40)\n" +
-                                            "    local modalH = math.min(490, scrH - 60)\n" +
+                                            "    local modalW = math.min(760, scrW - 40)\n" +
+                                            "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
                                             "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.1-unstable\"\n" +
+                                            "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
+                                            "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
                                             "        \"PZO's parallel multi-threaded engine is active. Multi-core chunk streaming, background island simulation, and native kernel acceleration are distributing workload across your CPU cores to maximize framerates and eliminate stutters. <LINE> <LINE> \" ..\n" +
+                                            "        \"<RGB:0.2,0.85,1.0> AMD FSR 1.0 Super Resolution:\" .. fsrStatus .. \" <LINE> \" ..\n" +
+                                            "        \"<RGB:0.85,0.85,0.85> To boost framerates on 1440p/4K displays or handhelds (Steam Deck, ROG Ally), launch Project Zomboid with the launch parameter: <RGB:0.3,1.0,0.5> -pzo_fsr <RGB:0.85,0.85,0.85> (set via Steam -> Properties -> Launch Options). This renders the 3D world at 75% scale and upscales it via edge-adaptive FSR while keeping UI and text at full native clarity! <LINE> <LINE> \" ..\n" +
                                             "        \"<RGB:1.0,0.85,0.3> Issues or Feedback: <LINE> \" ..\n" +
                                             "        \"<RGB:0.85,0.85,0.85> If you experience any issues, crashes, or compatibility glitches, please report them on our <RGB:0.4,0.8,1.0> GitHub <RGB:0.85,0.85,0.85> or the <RGB:0.4,0.8,1.0> Steam Workshop <RGB:0.85,0.85,0.85> page so we can resolve them quickly. <LINE> <LINE> \" ..\n" +
                                             "        \"<RGB:0.3,1.0,0.5> Enjoying the Performance? <LINE> \" ..\n" +

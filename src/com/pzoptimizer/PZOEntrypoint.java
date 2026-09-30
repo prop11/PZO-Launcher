@@ -30,6 +30,7 @@ public class PZOEntrypoint {
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
         LogSpamShield.initialize();
+        WorldUpscalerGovernor.checkLaunchParams(args);
 
         // Automatically inspect and migrate ProjectZomboid64.json if upgrading from older releases (e.g. 0.8.2 -> 0.9.5)
         try {
