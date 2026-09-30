@@ -18,7 +18,7 @@ import urllib.error
 
 REPO_OWNER = "prop11"
 REPO_NAME = "PZO-Launcher"
-WORKFLOW_FILE = "build-natives.yml"
+WORKFLOW_FILE = "build.yml"
 
 class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
     """Prevents re-sending the GitHub Bearer token to Azure Blob storage on redirect."""
@@ -194,10 +194,21 @@ def main():
     trigger = "--trigger" in sys.argv
     wait = "--wait" in sys.argv or trigger
 
+    branch = None
+    for arg in sys.argv:
+        if arg.startswith("--branch="):
+            branch = arg.split("=", 1)[1]
+    if not branch:
+        try:
+            res = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root_dir, capture_output=True, text=True, check=True)
+            branch = res.stdout.strip()
+        except Exception:
+            branch = "main"
+
     run_id = None
     if trigger:
         prev_id = get_latest_run_id(token)
-        if trigger_workflow(token):
+        if trigger_workflow(token, branch=branch):
             run_id = wait_for_completion(token, previous_run_id=prev_id)
         else:
             sys.exit(1)
