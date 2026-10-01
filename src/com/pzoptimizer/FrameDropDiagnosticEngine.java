@@ -153,6 +153,8 @@ public final class FrameDropDiagnosticEngine {
             return;
         }
 
+        ZombieLodGovernor.recordFrameStep(deltaNanos);
+
         double frameTimeMs = deltaNanos / 1_000_000.0;
 
         frameTimeHistory[historyIndex] = frameTimeMs;

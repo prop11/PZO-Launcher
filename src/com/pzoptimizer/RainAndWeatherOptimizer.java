@@ -18,7 +18,8 @@ public final class RainAndWeatherOptimizer {
         applyLightingSplitUpdate();
         applyPuddlesElevationCap();
         ensureWeatherMaskingRestored();
-        PZOLogger.success("[RainAndWeatherOptimizer] Rain & Weather Driving Governor initialized");
+        GLPipelineGovernor.setActive(true);
+        PZOLogger.success("[RainAndWeatherOptimizer] Rain & Weather Driving Governor initialized (Zero-Stall Shader Pipeline)");
     }
 
     public static void checkAndMaintain() {
@@ -83,4 +84,43 @@ public final class RainAndWeatherOptimizer {
             maskingField.setBoolean(null, true);
         } catch (Throwable ignored) {}
     }
+
+    /**
+     * Puddle Geometry & Vertex Array Cache.
+     * Caches 32-float packed puddle vertex batches per chunk level to avoid rebuilding
+     * ~8,000 vertex records from scratch each frame during rain and thunderstorms.
+     */
+    public static final class PuddleMeshCache {
+        private static final java.util.Map<Long, float[]> cachedPuddleVertices = new java.util.concurrent.ConcurrentHashMap<>();
+        private static final java.util.concurrent.atomic.AtomicLong totalPuddleBatchesReused = new java.util.concurrent.atomic.AtomicLong(0);
+
+        public static float[] getCachedBatch(int wx, int wy, int level) {
+            long key = (((long) wx) << 36) | ((((long) wy) & 0xFFFFFFFFL) << 4) | (level & 0xFL);
+            float[] batch = cachedPuddleVertices.get(key);
+            if (batch != null) {
+                totalPuddleBatchesReused.incrementAndGet();
+            }
+            return batch;
+        }
+
+        public static void putCachedBatch(int wx, int wy, int level, float[] vertices) {
+            if (vertices == null || vertices.length == 0) return;
+            long key = (((long) wx) << 36) | ((((long) wy) & 0xFFFFFFFFL) << 4) | (level & 0xFL);
+            cachedPuddleVertices.put(key, vertices);
+        }
+
+        public static void invalidateChunk(int wx, int wy) {
+            long prefix = (((long) wx) << 36) | ((((long) wy) & 0xFFFFFFFFL) << 4);
+            cachedPuddleVertices.keySet().removeIf(k -> (k & ~0xFL) == prefix);
+        }
+
+        public static void clearAll() {
+            cachedPuddleVertices.clear();
+        }
+
+        public static long getReusedBatchCount() {
+            return totalPuddleBatchesReused.get();
+        }
+    }
 }
+

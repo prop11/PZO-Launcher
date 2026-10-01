@@ -109,6 +109,78 @@ public class PZOEngineBridge {
         return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
     }
 
+    public static long getPlayerLosProbesSaved() {
+        return PlayerLosOptimizer.probesAccelerated.get();
+    }
+
+    public static long getVehicleSpatialRejections() {
+        return VehicleSpatialCuller.intersectionTestsSaved.get();
+    }
+
+    public static long getBuildingStoryScansSaved() {
+        return BuildingStoryGovernor.roomScansSaved.get();
+    }
+
+    public static long getUITicksStaggered() {
+        return UIFramePacingGovernor.ticksStaggered.get();
+    }
+
+    public static long getZoomTexturesRetained() {
+        return ZoomRetentionGovernor.texturesRetainedOnZoom.get();
+    }
+
+    public static long getGLPipelineStallsAvoided() {
+        return GLPipelineGovernor.pipelineStallsAvoided.get();
+    }
+
+    public static long getAudioPassesDampened() {
+        return AudioCadenceGovernor.parameterPassesDampened.get();
+    }
+
+    public static long getWorldMapLayoutsReused() {
+        return WorldMapPerformanceGovernor.layoutsReused.get();
+    }
+
+    public static long getAnimCacheHits() {
+        return AnimationClipCache.cacheHits.get();
+    }
+
+    public static long getCursorFramesLatched() {
+        return CursorLateLatch.framesLatched.get();
+    }
+
+    public static long getFencesSynced() {
+        return LowLatencyPacingGovernor.fencesSynced.get();
+    }
+
+    public static int getDetectedMonitorHz() {
+        return VRRDisplayGovernor.getDetectedHz();
+    }
+
+    public static int getTargetVRRCap() {
+        return VRRDisplayGovernor.getTargetFrameCap();
+    }
+
+    public static long getTexturesCompressed() {
+        return TextureCompressionGovernor.texturesCompressed.get();
+    }
+
+    public static long getVramBytesSaved() {
+        return TextureCompressionGovernor.vramBytesSaved.get();
+    }
+
+    public static long getFramesUpscaled() {
+        return WorldUpscalerGovernor.framesUpscaled.get();
+    }
+
+    public static long getPackIndexHits() {
+        return TexturePackIndexGovernor.packHits.get();
+    }
+
+    public static long getPackIndexBytesSkipped() {
+        return TexturePackIndexGovernor.bytesSkipped.get();
+    }
+
     public static boolean isBetaOptIn() {
         return PZOConfig.isBetaOptIn();
     }
@@ -119,6 +191,10 @@ public class PZOEngineBridge {
 
     public static boolean isMultithreadingNoticeAcknowledged() {
         return PZOConfig.isMultithreadingNoticeAcknowledged();
+    }
+
+    public static boolean isWorldUpscalerActive() {
+        return WorldUpscalerGovernor.isActive();
     }
 
     public static void acknowledgeMultithreadingNotice() {
@@ -152,6 +228,42 @@ public class PZOEngineBridge {
                 ChunkBufferPool.setEnabled(value);
             } else if ("JVM_BytecodeBloodCap".equals(key)) {
                 PZOptimAgent.setBytecodeBloodCap(value);
+            } else if ("JVM_PlayerLosOptimizer".equals(key)) {
+                PlayerLosOptimizer.setActive(value);
+            } else if ("JVM_VehicleSpatialCuller".equals(key)) {
+                VehicleSpatialCuller.setActive(value);
+            } else if ("JVM_BuildingStoryGovernor".equals(key)) {
+                BuildingStoryGovernor.setActive(value);
+            } else if ("JVM_UIFramePacingGovernor".equals(key)) {
+                UIFramePacingGovernor.setActive(value);
+            } else if ("JVM_CameraDriveSmoother".equals(key)) {
+                CameraDriveSmoother.setActive(value);
+            } else if ("JVM_ZoomRetentionGovernor".equals(key)) {
+                ZoomRetentionGovernor.setActive(value);
+            } else if ("JVM_AudioCadenceGovernor".equals(key)) {
+                AudioCadenceGovernor.setActive(value);
+            } else if ("JVM_GLPipelineGovernor".equals(key)) {
+                GLPipelineGovernor.setActive(value);
+            } else if ("JVM_FastTextureDecompressor".equals(key)) {
+                FastTextureDecompressor.setActive(value);
+            } else if ("JVM_WorldMapGovernor".equals(key)) {
+                WorldMapPerformanceGovernor.setActive(value);
+            } else if ("JVM_AnimationClipCache".equals(key)) {
+                AnimationClipCache.setActive(value);
+            } else if ("JVM_CursorLateLatch".equals(key)) {
+                CursorLateLatch.setActive(value);
+            } else if ("JVM_LowLatency".equals(key)) {
+                LowLatencyPacingGovernor.setActive(value);
+            } else if ("JVM_VRRDisplayGovernor".equals(key)) {
+                VRRDisplayGovernor.setActive(value);
+            } else if ("JVM_TextureCompression".equals(key)) {
+                TextureCompressionGovernor.setActive(value);
+            } else if ("JVM_WorldUpscaler".equals(key)) {
+                WorldUpscalerGovernor.setActive(value);
+            } else if ("JVM_FoliageWind".equals(key)) {
+                FoliageWindGovernor.setActive(value);
+            } else if ("JVM_TexturePackIndex".equals(key)) {
+                TexturePackIndexGovernor.setActive(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -247,7 +359,12 @@ public class PZOEngineBridge {
     }
 
     public static Object getDummyFileWriter() {
-        return DiskIOPacer.getDummyFileWriter();
+        try {
+            Method m = DiskIOPacer.class.getMethod("getDummyFileWriter");
+            return m.invoke(null);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static String readLastLines(File file, int maxLines) {
@@ -698,6 +815,20 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isMultithreadingNoticeAcknowledged", isNoticeAckFunc);
 
+                                        // isWorldUpscalerActive
+                                        Object isWorldUpscalerActiveFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(WorldUpscalerGovernor.isActive()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isWorldUpscalerActive", isWorldUpscalerActiveFunc);
+
                                         // acknowledgeMultithreadingNotice
                                         Object ackNoticeFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
@@ -801,15 +932,19 @@ public class PZOEngineBridge {
                                             "    MainScreen.instance.pzoNoticeShown = true\n" +
                                             "    local scrW = getCore():getScreenWidth()\n" +
                                             "    local scrH = getCore():getScreenHeight()\n" +
-                                            "    local modalW = math.min(740, scrW - 40)\n" +
-                                            "    local modalH = math.min(490, scrH - 60)\n" +
+                                            "    local modalW = math.min(760, scrW - 40)\n" +
+                                            "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.8\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.2\"\n" +
+                                            "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
+                                            "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                             "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
                                             "        \"<LEFT> <SIZE:small> <RGB:0.9,0.9,0.9> \" ..\n" +
                                             "        \"PZO's parallel multi-threaded engine is active. Multi-core chunk streaming, background island simulation, and native kernel acceleration are distributing workload across your CPU cores to maximize framerates and eliminate stutters. <LINE> <LINE> \" ..\n" +
+                                            "        \"<RGB:0.2,0.85,1.0> AMD FSR 1.0 Super Resolution:\" .. fsrStatus .. \" <LINE> \" ..\n" +
+                                            "        \"<RGB:0.85,0.85,0.85> To boost framerates on 1440p/4K displays or handhelds (Steam Deck, ROG Ally), launch Project Zomboid with the launch parameter: <RGB:0.3,1.0,0.5> -pzo_fsr <RGB:0.85,0.85,0.85> (set via Steam -> Properties -> Launch Options). This renders the 3D world at 75% scale and upscales it via edge-adaptive FSR while keeping UI and text at full native clarity! <LINE> <LINE> \" ..\n" +
                                             "        \"<RGB:1.0,0.85,0.3> Issues or Feedback: <LINE> \" ..\n" +
                                             "        \"<RGB:0.85,0.85,0.85> If you experience any issues, crashes, or compatibility glitches, please report them on our <RGB:0.4,0.8,1.0> GitHub <RGB:0.85,0.85,0.85> or the <RGB:0.4,0.8,1.0> Steam Workshop <RGB:0.85,0.85,0.85> page so we can resolve them quickly. <LINE> <LINE> \" ..\n" +
                                             "        \"<RGB:0.3,1.0,0.5> Enjoying the Performance? <LINE> \" ..\n" +

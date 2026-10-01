@@ -6,13 +6,33 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.9.8)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.9.9.2)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
 OS_TYPE="$(uname -s)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PZ_JAR=""
+
+# If running without a terminal in Linux desktop environment (e.g. Steam Deck Dolphin double-click),
+# relaunch in Konsole/terminal so user can see output and interact with prompts.
+if [ "$OS_TYPE" != "Darwin" ] && [ ! -t 0 ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    if command -v konsole >/dev/null 2>&1; then
+        exec konsole -e bash "$0" "$@"
+    elif command -v xterm >/dev/null 2>&1; then
+        exec xterm -e bash "$0" "$@"
+    fi
+fi
+
+# Steam Deck / sudo fallback: if run under sudo, map HOME back to original user
+if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+    USER_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || eval echo "~$SUDO_USER")
+    if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
+        echo "[*] Notice: Running under sudo for user '$SUDO_USER'."
+        echo "    Aligning target environment to user home: $USER_HOME"
+        HOME="$USER_HOME"
+    fi
+fi
 
 # 1. Locate or Auto-Download PZOptimEngine.jar
 if [ -f "$SCRIPT_DIR/PZOptimEngine.jar" ]; then
@@ -335,7 +355,7 @@ PYEOF
 
     clean_lua_bridge_files
     mkdir -p "$HOME/Zomboid/Lua" "$HOME/Zomboid/mods" "$HOME/Zomboid/db" "$HOME/Zomboid/Server"
-    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"0.9.8"}\n' "$ALLOC_RAM" \
+    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"0.9.9.2"}\n' "$ALLOC_RAM" \
         > "$HOME/Zomboid/Lua/pzo_status.json"
 
     resign_bundle
@@ -347,22 +367,69 @@ else
     echo "[*] Platform: Linux"
 
     POSSIBLE_PATHS=(
+        "$HOME/.local/share/Steam/steamapps/common/ProjectZomboid/projectzomboid"
         "$HOME/.local/share/Steam/steamapps/common/ProjectZomboid"
+        "$HOME/.steam/steam/steamapps/common/ProjectZomboid/projectzomboid"
         "$HOME/.steam/steam/steamapps/common/ProjectZomboid"
+        "$HOME/.steam/root/steamapps/common/ProjectZomboid/projectzomboid"
         "$HOME/.steam/root/steamapps/common/ProjectZomboid"
+        "/run/media/mmcblk0p1/steamapps/common/ProjectZomboid/projectzomboid"
+        "/run/media/mmcblk0p1/steamapps/common/ProjectZomboid"
+        "/run/media/deck"/*/steamapps/common/ProjectZomboid/projectzomboid
+        "/run/media/deck"/*/steamapps/common/ProjectZomboid
+        "/run/media"/*/*/steamapps/common/ProjectZomboid/projectzomboid
+        "/run/media"/*/*/steamapps/common/ProjectZomboid
+        "/media"/*/*/steamapps/common/ProjectZomboid/projectzomboid
+        "/media"/*/*/steamapps/common/ProjectZomboid
     )
+
+    for vdf in "$HOME/.local/share/Steam/steamapps/libraryfolders.vdf" \
+               "$HOME/.steam/root/steamapps/libraryfolders.vdf" \
+               "$HOME/.steam/steam/steamapps/libraryfolders.vdf" \
+               "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"; do
+        if [ -f "$vdf" ]; then
+            while IFS= read -r lib; do
+                POSSIBLE_PATHS+=(
+                    "$lib/steamapps/common/ProjectZomboid/projectzomboid"
+                    "$lib/steamapps/common/ProjectZomboid"
+                )
+            done < <(sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"/\1/p' "$vdf")
+        fi
+    done
 
     PZ_DIR=""
     for path in "${POSSIBLE_PATHS[@]}"; do
         if [ -d "$path" ]; then
-            PZ_DIR="$path"
-            break
+            if [ -f "$path/ProjectZomboid64.json" ] || [ -f "$path/projectzomboid.jar" ]; then
+                PZ_DIR="$path"
+                break
+            elif [ -d "$path/projectzomboid" ] && { [ -f "$path/projectzomboid/ProjectZomboid64.json" ] || [ -f "$path/projectzomboid/projectzomboid.jar" ]; }; then
+                PZ_DIR="$path/projectzomboid"
+                break
+            fi
         fi
     done
 
     if [ -z "$PZ_DIR" ]; then
+        for path in "${POSSIBLE_PATHS[@]}"; do
+            if [ -d "$path" ]; then
+                if [ -d "$path/projectzomboid" ]; then
+                    PZ_DIR="$path/projectzomboid"
+                else
+                    PZ_DIR="$path"
+                fi
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$PZ_DIR" ]; then
         echo "[-] Could not automatically locate Project Zomboid."
         read -p "Please enter the full path to your Project Zomboid installation: " PZ_DIR
+    fi
+
+    if [ -d "$PZ_DIR/projectzomboid" ] && { [ -f "$PZ_DIR/projectzomboid/ProjectZomboid64.json" ] || [ -f "$PZ_DIR/projectzomboid/projectzomboid.jar" ]; }; then
+        PZ_DIR="$PZ_DIR/projectzomboid"
     fi
 
     if [ ! -d "$PZ_DIR" ]; then
@@ -443,12 +510,17 @@ else
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
     # Install libpzo_native64.so if present
+    HAS_NATIVE_SO=0
     for so_c in "$SCRIPT_DIR/libpzo_native64.so" "$SCRIPT_DIR/dist/libpzo_native64.so" "$SCRIPT_DIR/../dist/libpzo_native64.so" "$SCRIPT_DIR/native/libpzo_native64.so"; do
         if [ -f "$so_c" ]; then
             cp -f "$so_c" "$PZ_DIR/libpzo_native64.so"
-            if [ -d "$PZ_DIR/linux64" ]; then
-                cp -f "$so_c" "$PZ_DIR/linux64/libpzo_native64.so"
+            mkdir -p "$PZ_DIR/linux64" "$PZ_DIR/natives" 2>/dev/null || true
+            cp -f "$so_c" "$PZ_DIR/linux64/libpzo_native64.so" 2>/dev/null || true
+            cp -f "$so_c" "$PZ_DIR/natives/libpzo_native64.so" 2>/dev/null || true
+            if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
+                cp -f "$so_c" "$(dirname "$PZ_DIR")/libpzo_native64.so" 2>/dev/null || true
             fi
+            HAS_NATIVE_SO=1
             echo "[+] Installed native companion: libpzo_native64.so"
             break
         fi
@@ -460,12 +532,13 @@ else
     fi
 
     # Safely update JSON while preserving existing classpath and libraries using Python
-    python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB"
+    python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB" "$HAS_NATIVE_SO"
 import sys, json, os
 
 json_file = sys.argv[1]
 alloc_ram = sys.argv[2]
 ram_mb = sys.argv[3]
+has_native = (len(sys.argv) > 4 and sys.argv[4] == "1")
 
 data = {}
 if os.path.exists(json_file):
@@ -498,6 +571,7 @@ has_lib_path = False
 for arg in existing_args:
     if (not arg.startswith("-Xmx") and 
         not arg.startswith("-Xms") and 
+        not arg.startswith("-agentlib:pzo_native64") and
         not arg.startswith("-XX:+UseG1GC") and 
         not arg.startswith("-XX:+AlwaysPreTouch") and
         not arg.startswith("-XX:InitiatingHeapOccupancyPercent") and
@@ -515,7 +589,6 @@ if not has_lib_path:
     filtered_args.append("-Djava.library.path=linux64/:natives/:.")
 
 pzo_args = [
-    "-agentlib:pzo_native64",
     f"-Xmx{ram_mb}m",
     "-XX:+UseG1GC",
     "-XX:+PerfDisableSharedMem",
@@ -531,6 +604,8 @@ pzo_args = [
     "--enable-native-access=ALL-UNNAMED",
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 ]
+if has_native:
+    pzo_args.insert(0, "-agentlib:pzo_native64")
 
 data["vmArgs"] = filtered_args + pzo_args
 
@@ -541,8 +616,23 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.8\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.9.2\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
+
+    # Also sync to Proton prefix if it exists on Steam Deck
+    for pfx in "$HOME/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
+               "$HOME/.steam/steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"; do
+        if [ -d "$pfx" ]; then
+            mkdir -p "$pfx/Lua"
+            cp -f "$HOME/Zomboid/Lua/pzo_status.json" "$pfx/Lua/pzo_status.json" 2>/dev/null || true
+            echo "[+] Synced Lua bridge status to Proton prefix: $pfx/Lua/pzo_status.json"
+        fi
+    done
+
+    # Restore correct ownership if executed under sudo on Linux / Steam Deck
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        chown -R "$SUDO_USER:$SUDO_USER" "$HOME/Zomboid" "$PZ_DIR/PZOptimEngine.jar" "$PZ_DIR/ProjectZomboid64.json"* "$PZ_DIR/libpzo_native64.so"* 2>/dev/null || true
+    fi
 fi
 
 echo ""
@@ -551,3 +641,8 @@ echo " [SUCCESS] Project Zomboid Build 42 is Optimized & Ready!"
 echo " Allocated Heap: $ALLOC_RAM GB ($RAM_MB MB)"
 echo " Simply launch Project Zomboid normally through Steam."
 echo "================================================================="
+
+if [ -t 0 ]; then
+    echo ""
+    read -r -p "Press [Enter] to exit..." dummy 2>/dev/null || true
+fi
