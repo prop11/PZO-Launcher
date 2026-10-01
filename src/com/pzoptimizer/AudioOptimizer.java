@@ -20,4 +20,8 @@ public class AudioOptimizer {
     public static void onVoiceEnd() {}
     public static void onFireVoiceStart() {}
     public static void onFireVoiceEnd() {}
+
+    public static boolean isParameterUpkeepDue(int frameCount) {
+        return AudioCadenceGovernor.isCadenceTickDue(frameCount);
+    }
 }

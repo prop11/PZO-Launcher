@@ -45,6 +45,7 @@ public class PZOptimAgent {
 
         try {
             HotSpotJITCompilerTuner.tuneRuntimeProperties();
+            WorldUpscalerGovernor.checkLaunchParams(null);
             PZOEngineBridge.initialize();
             HighPrecisionTimer.initialize();
         } catch (Throwable ignored) {}
@@ -114,6 +115,9 @@ public class PZOptimAgent {
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);
+            }
+            if ("zombie/fileSystem/TexturePackDevice".equals(className) && classfileBuffer != null) {
+                return patchTexturePackDevice(classfileBuffer);
             }
             return null;
         }
@@ -1028,6 +1032,118 @@ public class PZOptimAgent {
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during FBORenderLevels bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private byte[] patchTexturePackDevice(byte[] b) {
+            try {
+                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
+                int pos = 10;
+
+                int[] tagOffsets = new int[cpCount];
+                int[] tags = new int[cpCount];
+                String[] utf8Strings = new String[cpCount];
+
+                int i = 1;
+                while (i < cpCount) {
+                    int tag = b[pos] & 0xFF;
+                    tags[i] = tag;
+                    tagOffsets[i] = pos;
+                    pos++;
+                    if (tag == 1) { // Utf8
+                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
+                        pos += 2;
+                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
+                        pos += len;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        pos += 2;
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18 || tag == 3 || tag == 4) {
+                        pos += 4;
+                    } else if (tag == 5 || tag == 6) {
+                        pos += 8;
+                        i++;
+                    } else if (tag == 15) {
+                        pos += 3;
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                int targetMethodRef = -1;
+                int targetNat = -1;
+
+                for (int k = 1; k < cpCount; k++) {
+                    if (tags[k] == 10) { // Methodref
+                        int p = tagOffsets[k] + 1;
+                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) { // NameAndType
+                            int ntp = tagOffsets[ntIdx] + 1;
+                            int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
+                            int dIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
+                            String name = (nIdx > 0 && nIdx < cpCount) ? utf8Strings[nIdx] : null;
+                            String desc = (dIdx > 0 && dIdx < cpCount) ? utf8Strings[dIdx] : null;
+                            if ("readIntByte".equals(name) && "(Ljava/io/InputStream;)I".equals(desc)) {
+                                targetMethodRef = k;
+                                targetNat = ntIdx;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (targetMethodRef == -1 || targetNat == -1) return null;
+
+                byte oldHi = (byte) ((targetMethodRef >> 8) & 0xFF);
+                byte oldLo = (byte) (targetMethodRef & 0xFF);
+
+                byte[] utf8Bytes = "com/pzoptimizer/TexturePackIndexGovernor".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                ByteArrayOutputStream baos = new ByteArrayOutputStream(b.length + 64);
+                DataOutputStream dos = new DataOutputStream(baos);
+
+                dos.write(b, 0, 8); // Magic, minor, major
+                dos.writeShort(cpCount + 3); // New cpCount
+                dos.write(b, 10, pos - 10); // Original constant pool
+
+                // Entry 1: Utf8
+                dos.writeByte(1);
+                dos.writeShort(utf8Bytes.length);
+                dos.write(utf8Bytes);
+
+                // Entry 2: Class
+                dos.writeByte(7);
+                dos.writeShort(cpCount);
+
+                // Entry 3: Methodref
+                dos.writeByte(10);
+                dos.writeShort(cpCount + 1);
+                dos.writeShort(targetNat);
+
+                int newMethodRef = cpCount + 2;
+                byte newHi = (byte) ((newMethodRef >> 8) & 0xFF);
+                byte newLo = (byte) (newMethodRef & 0xFF);
+
+                byte[] rest = new byte[b.length - pos];
+                System.arraycopy(b, pos, rest, 0, rest.length);
+
+                int patched = 0;
+                for (int k = 0; k < rest.length - 2; k++) {
+                    if (rest[k] == (byte) 0xB8 && rest[k + 1] == oldHi && rest[k + 2] == oldLo) {
+                        rest[k + 1] = newHi;
+                        rest[k + 2] = newLo;
+                        patched++;
+                    }
+                }
+
+                if (patched == 0) return null;
+
+                dos.write(rest);
+                dos.flush();
+                PZOLogger.success(String.format("[PZO Agent] Bytecode-patched TexturePackDevice.readPage: TexturePackIndexGovernor page-seek acceleration armed (%d call sites)", patched));
+                return baos.toByteArray();
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during TexturePackDevice bytecode transform: " + t.getMessage());
             }
             return null;
         }
