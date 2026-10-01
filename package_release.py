@@ -99,13 +99,22 @@ def main():
         else:
             print(f"[-] Optional asset not found (skipped): {fname}")
 
+    def add_file_to_archive(zf, fp, arcname):
+        zinfo = zipfile.ZipInfo.from_file(fp, arcname)
+        if arcname.endswith((".sh", ".command", ".so", ".dylib")):
+            zinfo.external_attr = 0o100755 << 16
+        else:
+            zinfo.external_attr = 0o100644 << 16
+        with open(fp, "rb") as f:
+            zf.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
+
     # 3. Package PZO-Optimizer-Windows.zip
     win_zip = os.path.join(dist_dir, "PZO-Optimizer-Windows.zip")
     with zipfile.ZipFile(win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in ["install.bat", "PZOptimEngine.jar", "pzo_native64.dll", "README.md"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
-                zf.write(fp, f)
+                add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO-Optimizer-Windows.zip ({os.path.getsize(win_zip):,} bytes)")
 
     # 4. Package PZO_Optimizer_macOS_Linux.zip
@@ -114,7 +123,7 @@ def main():
         for f in ["pzo_optimizer.sh", "pzo_optimizer.command", "PZOptimEngine.jar", "README.md", "libpzo_native64.so", "libpzo_native64.dylib"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
-                zf.write(fp, f)
+                add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO_Optimizer_macOS_Linux.zip ({os.path.getsize(mac_linux_zip):,} bytes)")
 
     # 5. Package PZO-Server-Windows.zip
@@ -123,7 +132,7 @@ def main():
         for f in ["PZOServerEngine.jar", "README_SERVER.md", "pzo_native64.dll"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
-                zf.write(fp, f)
+                add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO-Server-Windows.zip ({os.path.getsize(srv_win_zip):,} bytes)")
 
     # 6. Package PZO-Server-Linux.zip
@@ -132,7 +141,7 @@ def main():
         for f in ["PZOServerEngine.jar", "README_SERVER.md", "libpzo_native64.so"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
-                zf.write(fp, f)
+                add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO-Server-Linux.zip ({os.path.getsize(srv_linux_zip):,} bytes)")
 
     print("\n================================================================================")
