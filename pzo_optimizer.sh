@@ -14,6 +14,16 @@ OS_TYPE="$(uname -s)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PZ_JAR=""
 
+# Steam Deck / sudo fallback: if run under sudo, map HOME back to original user
+if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+    USER_HOME=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6 || eval echo "~$SUDO_USER")
+    if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
+        echo "[*] Notice: Running under sudo for user '$SUDO_USER'."
+        echo "    Aligning target environment to user home: $USER_HOME"
+        HOME="$USER_HOME"
+    fi
+fi
+
 # 1. Locate or Auto-Download PZOptimEngine.jar
 if [ -f "$SCRIPT_DIR/PZOptimEngine.jar" ]; then
     PZ_JAR="$SCRIPT_DIR/PZOptimEngine.jar"
@@ -350,6 +360,10 @@ else
         "$HOME/.local/share/Steam/steamapps/common/ProjectZomboid"
         "$HOME/.steam/steam/steamapps/common/ProjectZomboid"
         "$HOME/.steam/root/steamapps/common/ProjectZomboid"
+        "/run/media/mmcblk0p1/steamapps/common/ProjectZomboid"
+        "/run/media/deck"/*/steamapps/common/ProjectZomboid
+        "/run/media"/*/*/steamapps/common/ProjectZomboid
+        "/media"/*/*/steamapps/common/ProjectZomboid
     )
 
     PZ_DIR=""
@@ -543,6 +557,11 @@ EOF
     mkdir -p "$HOME/Zomboid/Lua"
     echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.9.2-unstable\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
+
+    # Restore correct ownership if executed under sudo on Linux / Steam Deck
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        chown -R "$SUDO_USER:$SUDO_USER" "$HOME/Zomboid" "$PZ_DIR/PZOptimEngine.jar" "$PZ_DIR/ProjectZomboid64.json"* "$PZ_DIR/libpzo_native64.so"* 2>/dev/null || true
+    fi
 fi
 
 echo ""
