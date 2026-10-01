@@ -161,17 +161,26 @@ def download_artifacts_for_run(token, run_id, root_dir):
                 extracted_bytes = zf.read(item)
                 target_filename = os.path.basename(item)
 
-                native_path = os.path.join(native_dir, target_filename)
-                with open(native_path, "wb") as f:
-                    f.write(extracted_bytes)
-                print(f"[+] Saved: native/{target_filename} ({len(extracted_bytes):,} bytes)")
+                if target_filename.endswith((".dll", ".so", ".dylib")):
+                    native_path = os.path.join(native_dir, target_filename)
+                    with open(native_path, "wb") as f:
+                        f.write(extracted_bytes)
+                    print(f"[+] Saved: native/{target_filename} ({len(extracted_bytes):,} bytes)")
 
-                dist_path = os.path.join(dist_dir, target_filename)
-                with open(dist_path, "wb") as f:
-                    f.write(extracted_bytes)
-                print(f"[+] Saved: dist/{target_filename} ({len(extracted_bytes):,} bytes)")
-
-                downloaded += 1
+                    dist_path = os.path.join(dist_dir, target_filename)
+                    with open(dist_path, "wb") as f:
+                        f.write(extracted_bytes)
+                    print(f"[+] Saved: dist/{target_filename} ({len(extracted_bytes):,} bytes)")
+                    downloaded += 1
+                elif target_filename.endswith(".jar"):
+                    dist_path = os.path.join(dist_dir, target_filename)
+                    with open(dist_path, "wb") as f:
+                        f.write(extracted_bytes)
+                    root_path = os.path.join(root_dir, target_filename)
+                    with open(root_path, "wb") as f:
+                        f.write(extracted_bytes)
+                    print(f"[+] Saved: dist/{target_filename} and {target_filename} ({len(extracted_bytes):,} bytes)")
+                    downloaded += 1
 
     return downloaded > 0
 

@@ -61,6 +61,15 @@ public class UpdateDialog {
             return false;
         }
 
+        // Safeguard: If base semantic versions match (e.g. 0.9.9.2 and 0.9.9.2-unstable), they share identical ABI
+        if (filePresent && installedVersion != null && !installedVersion.isEmpty()) {
+            String cleanExpected = expectedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
+            String cleanInstalled = installedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
+            if (!cleanExpected.isEmpty() && cleanExpected.equalsIgnoreCase(cleanInstalled)) {
+                return false;
+            }
+        }
+
         String ignoreKey = "native_" + expectedVersion;
         if (isVersionIgnored(ignoreKey)) {
             return false;

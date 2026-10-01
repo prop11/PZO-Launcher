@@ -52,6 +52,23 @@ public class PZONative {
             candidatePaths.add(NATIVE_LIB_FILENAME);
             candidatePaths.add(System.getProperty("user.dir") + File.separator + NATIVE_LIB_FILENAME);
 
+            try {
+                File jarFile = new File(PZONative.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+                if (jarFile.isFile() && jarFile.getParentFile() != null) {
+                    File p = jarFile.getParentFile();
+                    candidatePaths.add(new File(p, NATIVE_LIB_FILENAME).getAbsolutePath());
+                    if (IS_WINDOWS) {
+                        candidatePaths.add(new File(p, "win64" + File.separator + NATIVE_LIB_FILENAME).getAbsolutePath());
+                    } else if (IS_LINUX) {
+                        candidatePaths.add(new File(p, "linux64" + File.separator + NATIVE_LIB_FILENAME).getAbsolutePath());
+                        candidatePaths.add(new File(p, "natives" + File.separator + NATIVE_LIB_FILENAME).getAbsolutePath());
+                    } else if (IS_MAC) {
+                        candidatePaths.add(new File(p, "ProjectZomboid.app/Contents/MacOS/" + NATIVE_LIB_FILENAME).getAbsolutePath());
+                        candidatePaths.add(new File(p, "ProjectZomboid.app/Contents/Java/" + NATIVE_LIB_FILENAME).getAbsolutePath());
+                    }
+                }
+            } catch (Throwable ignored) {}
+
             if (IS_WINDOWS) {
                 candidatePaths.add("win64" + File.separator + NATIVE_LIB_FILENAME);
                 candidatePaths.add("K:/SteamLibrary/steamapps/common/ProjectZomboid/" + NATIVE_LIB_FILENAME);
