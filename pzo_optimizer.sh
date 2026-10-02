@@ -6,7 +6,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v0.9.9.2)"
+echo " Project Zomboid Build 42 Engine Optimizer (v0.9.9.3)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -355,7 +355,7 @@ PYEOF
 
     clean_lua_bridge_files
     mkdir -p "$HOME/Zomboid/Lua" "$HOME/Zomboid/mods" "$HOME/Zomboid/db" "$HOME/Zomboid/Server"
-    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"0.9.9.2"}\n' "$ALLOC_RAM" \
+    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"0.9.9.3"}\n' "$ALLOC_RAM" \
         > "$HOME/Zomboid/Lua/pzo_status.json"
 
     resign_bundle
@@ -616,7 +616,7 @@ print("[+] Successfully updated ProjectZomboid64.json preserving all game librar
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.9.2\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.9.3\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 
     # Also sync to Proton prefix if it exists on Steam Deck
