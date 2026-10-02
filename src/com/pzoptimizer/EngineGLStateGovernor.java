@@ -14,6 +14,7 @@ public final class EngineGLStateGovernor {
 
     public static void initialize() {
         reset();
+        PersistentVBOGovernor.initReflection();
         PZOLogger.success("EngineGLStateGovernor: OpenGL L1 Shadow-State Register Matrix Armed");
     }
 

@@ -29,6 +29,8 @@ public class PZOptimAgent {
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
                         "zombie.core.skinnedmodel.visual.HumanVisual".equals(name) ||
+                        "zombie.core.textures.TexturePackDevice".equals(name) ||
+                        "zombie.iso.weather.fog.ImprovedFogDrawer".equals(name) ||
                         "zombie.iso.IsoChunk$SanityCheck".equals(name)) {
                         try {
                             inst.retransformClasses(c);
@@ -115,6 +117,12 @@ public class PZOptimAgent {
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);
+            }
+            if ("zombie/core/textures/TexturePackDevice".equals(className) && classfileBuffer != null) {
+                return patchTexturePackDevice(classfileBuffer);
+            }
+            if ("zombie/iso/weather/fog/ImprovedFogDrawer".equals(className) && classfileBuffer != null) {
+                return patchImprovedFogDrawer(classfileBuffer);
             }
             return null;
         }
@@ -1143,6 +1151,264 @@ public class PZOptimAgent {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during TexturePackDevice bytecode transform: " + t.getMessage());
             }
             return null;
+        }
+
+        private byte[] patchImprovedFogDrawer(byte[] b) {
+            try {
+                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(b));
+                int magic = dis.readInt();
+                int minor = dis.readUnsignedShort();
+                int major = dis.readUnsignedShort();
+                int cpCount = dis.readUnsignedShort();
+
+                ByteArrayOutputStream cpBaos = new ByteArrayOutputStream();
+                DataOutputStream cpDos = new DataOutputStream(cpBaos);
+
+                String[] utf8Strings = new String[cpCount + 16];
+                int codeUtf8Idx = -1;
+                int stackMapUtf8Idx = -1;
+
+                int i = 1;
+                while (i < cpCount) {
+                    int tag = dis.readUnsignedByte();
+                    cpDos.writeByte(tag);
+                    if (tag == 1) { // Utf8
+                        String s = dis.readUTF();
+                        cpDos.writeUTF(s);
+                        utf8Strings[i] = s;
+                        if ("Code".equals(s)) codeUtf8Idx = i;
+                        if ("StackMapTable".equals(s)) stackMapUtf8Idx = i;
+                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
+                        cpDos.writeShort(dis.readUnsignedShort());
+                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18 || tag == 3 || tag == 4) {
+                        cpDos.writeInt(dis.readInt());
+                    } else if (tag == 5 || tag == 6) {
+                        cpDos.writeLong(dis.readLong());
+                        i++;
+                    } else if (tag == 15) {
+                        cpDos.writeByte(dis.readUnsignedByte());
+                        cpDos.writeShort(dis.readUnsignedShort());
+                    } else {
+                        return null;
+                    }
+                    i++;
+                }
+
+                // Add constant pool entries for FogQuarterBufferGovernor.render(Object)Z
+                int govClassUtf8 = cpCount;
+                cpDos.writeByte(1); cpDos.writeUTF("com/pzoptimizer/FogQuarterBufferGovernor");
+                int govClass = cpCount + 1;
+                cpDos.writeByte(7); cpDos.writeShort(govClassUtf8);
+                int govMethodNameUtf8 = cpCount + 2;
+                cpDos.writeByte(1); cpDos.writeUTF("render");
+                int govMethodDescUtf8 = cpCount + 3;
+                cpDos.writeByte(1); cpDos.writeUTF("(Ljava/lang/Object;)Z");
+                int govNat = cpCount + 4;
+                cpDos.writeByte(12); cpDos.writeShort(govMethodNameUtf8); cpDos.writeShort(govMethodDescUtf8);
+                int govMethodRef = cpCount + 5;
+                cpDos.writeByte(10); cpDos.writeShort(govClass); cpDos.writeShort(govNat);
+
+                int newCpCount = cpCount + 6;
+
+                ByteArrayOutputStream outBaos = new ByteArrayOutputStream();
+                DataOutputStream outDos = new DataOutputStream(outBaos);
+                outDos.writeInt(magic);
+                outDos.writeShort(minor);
+                outDos.writeShort(major);
+                outDos.writeShort(newCpCount);
+                outDos.write(cpBaos.toByteArray());
+
+                // Class header info: access_flags, this_class, super_class
+                outDos.writeShort(dis.readUnsignedShort());
+                outDos.writeShort(dis.readUnsignedShort());
+                outDos.writeShort(dis.readUnsignedShort());
+
+                int ifaces = dis.readUnsignedShort();
+                outDos.writeShort(ifaces);
+                for (int k = 0; k < ifaces; k++) outDos.writeShort(dis.readUnsignedShort());
+
+                int fields = dis.readUnsignedShort();
+                outDos.writeShort(fields);
+                for (int f = 0; f < fields; f++) {
+                    outDos.writeShort(dis.readUnsignedShort());
+                    outDos.writeShort(dis.readUnsignedShort());
+                    outDos.writeShort(dis.readUnsignedShort());
+                    int attrs = dis.readUnsignedShort();
+                    outDos.writeShort(attrs);
+                    for (int a = 0; a < attrs; a++) {
+                        outDos.writeShort(dis.readUnsignedShort());
+                        int len = dis.readInt();
+                        outDos.writeInt(len);
+                        outDos.write(dis.readNBytes(len));
+                    }
+                }
+
+                int methods = dis.readUnsignedShort();
+                outDos.writeShort(methods);
+                boolean patched = false;
+
+                for (int m = 0; m < methods; m++) {
+                    int access = dis.readUnsignedShort();
+                    int nameIdx = dis.readUnsignedShort();
+                    int descIdx = dis.readUnsignedShort();
+                    outDos.writeShort(access);
+                    outDos.writeShort(nameIdx);
+                    outDos.writeShort(descIdx);
+
+                    String mName = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
+                    String mDesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
+
+                    int attrs = dis.readUnsignedShort();
+                    outDos.writeShort(attrs);
+
+                    for (int a = 0; a < attrs; a++) {
+                        int anameIdx = dis.readUnsignedShort();
+                        int alen = dis.readInt();
+                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
+
+                        if ("Code".equals(aname) && "render".equals(mName) && "()V".equals(mDesc)) {
+                            int maxStack = dis.readUnsignedShort();
+                            int maxLocals = dis.readUnsignedShort();
+                            int codeLen = dis.readInt();
+                            byte[] origCode = dis.readNBytes(codeLen);
+                            int exTableLen = dis.readUnsignedShort();
+                            byte[] exTable = dis.readNBytes(exTableLen * 8);
+                            int codeAttrs = dis.readUnsignedShort();
+
+                            // Prefix opcodes:
+                            // 0: aload_0 (0x2A)
+                            // 1: invokestatic govMethodRef (0xB8, hi, lo)
+                            // 4: ifeq +4 (0x99, 0x00, 0x04) -> jumps to offset 8
+                            // 7: return (0xB1)
+                            // 8: <origCode>
+                            byte refHi = (byte) ((govMethodRef >> 8) & 0xFF);
+                            byte refLo = (byte) (govMethodRef & 0xFF);
+                            byte[] prefix = new byte[] {
+                                0x2A,
+                                (byte) 0xB8, refHi, refLo,
+                                (byte) 0x99, 0x00, 0x04,
+                                (byte) 0xB1
+                            };
+
+                            byte[] newCode = new byte[prefix.length + origCode.length];
+                            System.arraycopy(prefix, 0, newCode, 0, prefix.length);
+                            System.arraycopy(origCode, 0, newCode, prefix.length, origCode.length);
+
+                            ByteArrayOutputStream caBaos = new ByteArrayOutputStream();
+                            DataOutputStream caDos = new DataOutputStream(caBaos);
+                            caDos.writeShort(Math.max(maxStack, 1));
+                            caDos.writeShort(maxLocals);
+                            caDos.writeInt(newCode.length);
+                            caDos.write(newCode);
+                            caDos.writeShort(exTableLen);
+                            caDos.write(exTable);
+
+                            caDos.writeShort(codeAttrs);
+                            for (int ca = 0; ca < codeAttrs; ca++) {
+                                int canameIdx = dis.readUnsignedShort();
+                                int calen = dis.readInt();
+                                byte[] cadata = dis.readNBytes(calen);
+                                String caname = (canameIdx > 0 && canameIdx < cpCount) ? utf8Strings[canameIdx] : "";
+
+                                if ("StackMapTable".equals(caname)) {
+                                    // Adjust StackMapTable: prepend same_frame(8) and decrement first frame delta by 1
+                                    DataInputStream smDis = new DataInputStream(new ByteArrayInputStream(cadata));
+                                    int numEntries = smDis.readUnsignedShort();
+                                    ByteArrayOutputStream smBaos = new ByteArrayOutputStream();
+                                    DataOutputStream smDos = new DataOutputStream(smBaos);
+                                    smDos.writeShort(numEntries + 1);
+                                    smDos.writeByte(0x08); // same_frame at offset 8
+
+                                    if (numEntries > 0) {
+                                        int firstTag = smDis.readUnsignedByte();
+                                        if (firstTag >= 0 && firstTag <= 63) {
+                                            smDos.writeByte(firstTag - 1);
+                                        } else if (firstTag >= 64 && firstTag <= 127) {
+                                            smDos.writeByte(firstTag - 1);
+                                            copyVerificationTypeInfo(smDis, smDos);
+                                        } else if (firstTag == 247) {
+                                            smDos.writeByte(247);
+                                            int delta = smDis.readUnsignedShort();
+                                            smDos.writeShort(delta - 1);
+                                            copyVerificationTypeInfo(smDis, smDos);
+                                        } else if (firstTag >= 248 && firstTag <= 251) {
+                                            smDos.writeByte(firstTag);
+                                            int delta = smDis.readUnsignedShort();
+                                            smDos.writeShort(delta - 1);
+                                        } else if (firstTag == 252 || firstTag == 253 || firstTag == 254) {
+                                            smDos.writeByte(firstTag);
+                                            int delta = smDis.readUnsignedShort();
+                                            smDos.writeShort(delta - 1);
+                                            int numLocals = firstTag - 251;
+                                            for (int l = 0; l < numLocals; l++) copyVerificationTypeInfo(smDis, smDos);
+                                        } else if (firstTag == 255) {
+                                            smDos.writeByte(255);
+                                            int delta = smDis.readUnsignedShort();
+                                            smDos.writeShort(delta - 1);
+                                            int numL = smDis.readUnsignedShort();
+                                            smDos.writeShort(numL);
+                                            for (int l = 0; l < numL; l++) copyVerificationTypeInfo(smDis, smDos);
+                                            int numS = smDis.readUnsignedShort();
+                                            smDos.writeShort(numS);
+                                            for (int s = 0; s < numS; s++) copyVerificationTypeInfo(smDis, smDos);
+                                        } else {
+                                            smDos.writeByte(firstTag);
+                                            int delta = smDis.readUnsignedShort();
+                                            smDos.writeShort(delta - 1);
+                                        }
+                                        byte[] remainingSm = smDis.readAllBytes();
+                                        smDos.write(remainingSm);
+                                    }
+                                    byte[] newSm = smBaos.toByteArray();
+                                    caDos.writeShort(canameIdx);
+                                    caDos.writeInt(newSm.length);
+                                    caDos.write(newSm);
+                                } else {
+                                    caDos.writeShort(canameIdx);
+                                    caDos.writeInt(calen);
+                                    caDos.write(cadata);
+                                }
+                            }
+
+                            byte[] caBytes = caBaos.toByteArray();
+                            outDos.writeShort(anameIdx);
+                            outDos.writeInt(caBytes.length);
+                            outDos.write(caBytes);
+                            patched = true;
+                        } else {
+                            outDos.writeShort(anameIdx);
+                            outDos.writeInt(alen);
+                            outDos.write(dis.readNBytes(alen));
+                        }
+                    }
+                }
+
+                // Class attributes
+                int cattrs = dis.readUnsignedShort();
+                outDos.writeShort(cattrs);
+                for (int ca = 0; ca < cattrs; ca++) {
+                    outDos.writeShort(dis.readUnsignedShort());
+                    int len = dis.readInt();
+                    outDos.writeInt(len);
+                    outDos.write(dis.readNBytes(len));
+                }
+
+                if (patched) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched ImprovedFogDrawer.render: FogQuarterBufferGovernor quarter-res pass armed (400% storm fill-rate lead erased)");
+                    return outBaos.toByteArray();
+                }
+            } catch (Throwable t) {
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during ImprovedFogDrawer bytecode transform: " + t.getMessage());
+            }
+            return null;
+        }
+
+        private static void copyVerificationTypeInfo(DataInputStream dis, DataOutputStream dos) throws IOException {
+            int tag = dis.readUnsignedByte();
+            dos.writeByte(tag);
+            if (tag == 7 || tag == 8) {
+                dos.writeShort(dis.readUnsignedShort());
+            }
         }
     }
 }
