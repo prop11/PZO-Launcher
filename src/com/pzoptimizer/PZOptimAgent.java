@@ -116,9 +116,6 @@ public class PZOptimAgent {
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);
             }
-            if ("zombie/fileSystem/TexturePackDevice".equals(className) && classfileBuffer != null) {
-                return patchTexturePackDevice(classfileBuffer);
-            }
             return null;
         }
 

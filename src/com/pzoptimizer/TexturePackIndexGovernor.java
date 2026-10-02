@@ -26,7 +26,7 @@ import sun.misc.Unsafe;
  */
 public final class TexturePackIndexGovernor {
 
-    private static volatile boolean active = true;
+    private static volatile boolean active = false;
     private static final int MAGIC = 0x505A5449; // "PZTI" - PZO Texture Index
     private static final int TARGET_TERMINATOR = -559038737; // 0xDEADBEEF
 
