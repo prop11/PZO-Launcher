@@ -220,6 +220,34 @@ public class PZOEngineBridge {
         } catch (Throwable ignored) {}
     }
 
+    public static boolean isFogQuarterBufferActive() {
+        return FogQuarterBufferGovernor.isActive();
+    }
+
+    public static long getFogQuarterBufferFrames() {
+        return FogQuarterBufferGovernor.fogFramesDrawn.get();
+    }
+
+    public static long getFogQuarterBufferRects() {
+        return FogQuarterBufferGovernor.fogRectanglesDrawn.get();
+    }
+
+    public static long getFogQuarterBufferSaved() {
+        return FogQuarterBufferGovernor.drawCallsSaved.get();
+    }
+
+    public static boolean isPersistentVBOActive() {
+        return PersistentVBOGovernor.isActive();
+    }
+
+    public static boolean isPersistentVBOSupported() {
+        return PersistentVBOGovernor.isSupported();
+    }
+
+    public static long getPersistentVBOBytesMapped() {
+        return PersistentVBOGovernor.totalBytesMapped.get();
+    }
+
     public static void setJvmOption(String key, boolean value) {
         try {
             if ("JVM_GLStateOptimizer".equals(key)) {
@@ -264,6 +292,10 @@ public class PZOEngineBridge {
                 FoliageWindGovernor.setActive(value);
             } else if ("JVM_TexturePackIndex".equals(key)) {
                 TexturePackIndexGovernor.setActive(value);
+            } else if ("JVM_FogQuarterBuffer".equals(key)) {
+                FogQuarterBufferGovernor.setActive(value);
+            } else if ("JVM_PersistentVBO".equals(key)) {
+                PersistentVBOGovernor.setActive(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
