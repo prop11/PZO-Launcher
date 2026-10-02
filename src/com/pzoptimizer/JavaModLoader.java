@@ -4,10 +4,12 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.lang.instrument.Instrumentation;
+import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -30,6 +32,28 @@ public class JavaModLoader {
     private static int successCount = 0;
     private static int errorCount = 0;
     private static volatile boolean conflictingFpsModDetected = false;
+
+    public static boolean isZombieBuddyPresent() {
+        try {
+            File currentDir = new File(".").getAbsoluteFile();
+            File zbJar = new File(currentDir, "ZombieBuddy.jar");
+            File zbDll1 = new File(currentDir, "win64/zbNative.dll");
+            File zbDll2 = new File(currentDir, "zbNative.dll");
+            File zbSo1 = new File(currentDir, "linux64/zbNative.so");
+            File zbSo2 = new File(currentDir, "zbNative.so");
+            File zbDylib = new File(currentDir, "zbNative.dylib");
+            if (zbJar.exists() || zbDll1.exists() || zbDll2.exists() || zbSo1.exists() || zbSo2.exists() || zbDylib.exists()) {
+                return true;
+            }
+            List<String> vmArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
+            for (String arg : vmArgs) {
+                if (arg != null && (arg.contains("zbNative") || arg.contains("ZombieBuddy"))) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
 
     public static boolean isConflictingFpsModDetected() {
         return conflictingFpsModDetected;
@@ -56,6 +80,11 @@ public class JavaModLoader {
     public static void loadMods(Instrumentation inst) {
         PZOLogger.info("--------------------------------------------------------------------------------");
         PZOLogger.info("[JavaModLoader] Scanning all Steam libraries & mod directories for Java/ZombieBuddy mods...");
+        boolean zbPresent = isZombieBuddyPresent();
+        if (zbPresent) {
+            PZOLogger.info("[JavaModLoader] ZombieBuddy framework detected in installation (-agentlib:zbNative / ZombieBuddy.jar).");
+            PZOLogger.info("[JavaModLoader] Preserving PZO primary optimizer priority while delegating @Patch mods to ZombieBuddy runtime.");
+        }
         List<File> candidateJars = findJavaModJars();
 
         if (candidateJars.isEmpty()) {
@@ -233,35 +262,64 @@ public class JavaModLoader {
         }
     }
 
+    public static class ModMetadata {
+        public final Set<String> modIds = new HashSet<>();
+        public String javaPkgName = null;
+        public boolean requiresZombieBuddy = false;
+        public boolean isZombieBuddyMod = false;
+    }
+
     private static void loadSingleMod(File jarFile, Instrumentation inst) {
         String canonicalPath = getCanonicalPath(jarFile);
 
         if (LOADED_MODS.contains(canonicalPath)) return;
         LOADED_MODS.add(canonicalPath);
 
+        ModMetadata meta = findModMetadataForJar(jarFile);
+
+        // 1. Check if disabled in Project Zomboid Mod Manager (default.txt)
         Set<String> enabled = getEnabledModIds();
-        if (!enabled.isEmpty()) {
-            Set<String> modIds = findModIdsForJar(jarFile);
-            if (!modIds.isEmpty()) {
-                boolean anyEnabled = false;
-                for (String mid : modIds) {
-                    if (enabled.contains(mid) || enabled.contains(mid.toLowerCase()) ||
-                        mid.equalsIgnoreCase("MPOptimizer") || mid.equalsIgnoreCase("PZOptimEngine") ||
-                        mid.equalsIgnoreCase("ProjectZomboidOptimizer")) {
-                        anyEnabled = true;
-                        break;
-                    }
+        if (!enabled.isEmpty() && !meta.modIds.isEmpty()) {
+            boolean anyEnabled = false;
+            for (String mid : meta.modIds) {
+                if (enabled.contains(mid) || enabled.contains(mid.toLowerCase()) ||
+                    mid.equalsIgnoreCase("MPOptimizer") || mid.equalsIgnoreCase("PZOptimEngine") ||
+                    mid.equalsIgnoreCase("ProjectZomboidOptimizer")) {
+                    anyEnabled = true;
+                    break;
                 }
-                if (!anyEnabled) {
-                    PZOLogger.info(String.format("[JavaModLoader] Skipping disabled Java mod: %s (%s) - Mod is disabled in Project Zomboid Mod Manager",
-                        String.join(", ", modIds), jarFile.getName()));
-                    return;
-                }
+            }
+            if (!anyEnabled) {
+                PZOLogger.info(String.format("[JavaModLoader] Skipping disabled Java mod: %s (%s) - Mod is disabled in Project Zomboid Mod Manager",
+                    String.join(", ", meta.modIds), jarFile.getName()));
+                return;
+            }
+        }
+
+        // 2. Coexistence check: If this is a ZombieBuddy mod
+        boolean zbPresent = isZombieBuddyPresent();
+        if (meta.isZombieBuddyMod || meta.javaPkgName != null || meta.requiresZombieBuddy) {
+            if (zbPresent) {
+                // Defer to ZombieBuddy runtime agent:
+                // Prevents premature class definition, allows ZombieBuddy's own @Patch ByteBuddy engine
+                // to instrument target game classes upon ZomboidFileSystem.loadMods execution.
+                successCount++;
+                PZOLogger.info(String.format("[JavaModLoader] [COEXISTENCE] Deferring '%s' (%s) to ZombieBuddy runtime agent (javaPkgName: %s)",
+                    jarFile.getName(),
+                    meta.modIds.isEmpty() ? "unspecified-id" : String.join(", ", meta.modIds),
+                    meta.javaPkgName != null ? meta.javaPkgName : "detected"));
+                return;
+            } else {
+                PZOLogger.warn(String.format("[JavaModLoader] [NOTICE] Mod '%s' requires ZombieBuddy framework (javaPkgName: %s), but ZombieBuddy is not installed.",
+                    jarFile.getName(), meta.javaPkgName != null ? meta.javaPkgName : "unknown"));
+                successCount++;
+                PZOLogger.info(String.format("[JavaModLoader] Added %s to classpath (ZombieBuddy prerequisite missing)", jarFile.getName()));
+                return;
             }
         }
 
         long sizeKB = Math.max(1, jarFile.length() / 1024);
-        PZOLogger.info(String.format("[JavaModLoader] Inspecting Java mod: %s (%d KB) at %s", jarFile.getName(), sizeKB, jarFile.getPath()));
+        PZOLogger.info(String.format("[JavaModLoader] Inspecting standalone Java mod: %s (%d KB) at %s", jarFile.getName(), sizeKB, jarFile.getPath()));
 
         try (JarFile jar = new JarFile(jarFile)) {
             if (inst != null) {
@@ -281,7 +339,6 @@ public class JavaModLoader {
                     agentClass = attrs.getValue("Premain-Class");
                     if (agentClass == null) agentClass = attrs.getValue("Agent-Class");
                     if (agentClass == null) agentClass = attrs.getValue("Main-Class");
-                    if (agentClass == null) agentClass = attrs.getValue("ZBPatch-Class");
                     if (agentClass == null) agentClass = attrs.getValue("Plugin-Class");
                 }
             }
@@ -322,7 +379,8 @@ public class JavaModLoader {
                 hooked = invokeEntrypoint(jarFile, agentClass.trim(), inst);
             }
 
-            if (!hooked) {
+            if (!hooked && manifest != null && manifest.getMainAttributes() != null) {
+                // Only inspect classes if manifest declared a plugin/agent entrypoint
                 Enumeration<JarEntry> entries = jar.entries();
                 List<String> candidateClasses = new ArrayList<>();
                 while (entries.hasMoreElements()) {
@@ -334,22 +392,10 @@ public class JavaModLoader {
                     }
                 }
 
-                // Prioritize Main, Plugin, Agent, Patch
+                // Prioritize Plugin, Agent
                 for (String className : candidateClasses) {
-                    if (className.toLowerCase().endsWith(".main") ||
-                        className.toLowerCase().contains("plugin") ||
-                        className.toLowerCase().contains("agent") ||
-                        className.toLowerCase().contains("patch") ||
-                        className.toLowerCase().contains("optim")) {
-                        if (invokeEntrypoint(jarFile, className, inst)) {
-                            hooked = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!hooked) {
-                    for (String className : candidateClasses) {
+                    if (className.toLowerCase().contains("plugin") ||
+                        className.toLowerCase().contains("agent")) {
                         if (invokeEntrypoint(jarFile, className, inst)) {
                             hooked = true;
                             break;
@@ -460,36 +506,44 @@ public class JavaModLoader {
         try {
             String userHome = System.getProperty("user.home");
             File defaultTxt = new File(userHome, "Zomboid" + File.separator + "mods" + File.separator + "default.txt");
-            parseModIdsFromFile(defaultTxt, ENABLED_MOD_IDS);
-        } catch (Throwable ignored) {}
-
-        try {
-            String userHome = System.getProperty("user.home");
-            File savesDir = new File(userHome, "Zomboid" + File.separator + "Saves");
-            if (savesDir.exists() && savesDir.isDirectory()) {
-                File latestModsTxt = findLatestSaveModsTxt(savesDir);
-                if (latestModsTxt != null) {
-                    parseModIdsFromFile(latestModsTxt, ENABLED_MOD_IDS);
-                }
+            if (defaultTxt.exists() && defaultTxt.isFile()) {
+                parseModIdsFromFile(defaultTxt, ENABLED_MOD_IDS);
             }
         } catch (Throwable ignored) {}
+
+        // Only fall back to latest savegame if default.txt was not found or had no enabled mods
+        if (ENABLED_MOD_IDS.isEmpty()) {
+            try {
+                String userHome = System.getProperty("user.home");
+                File savesDir = new File(userHome, "Zomboid" + File.separator + "Saves");
+                if (savesDir.exists() && savesDir.isDirectory()) {
+                    File latestModsTxt = findLatestSaveModsTxt(savesDir);
+                    if (latestModsTxt != null) {
+                        parseModIdsFromFile(latestModsTxt, ENABLED_MOD_IDS);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
 
         return ENABLED_MOD_IDS;
     }
 
     private static void parseModIdsFromFile(File file, Set<String> destination) {
         if (file == null || !file.exists() || !file.isFile()) return;
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(file, StandardCharsets.UTF_8))) {
             String line;
             while ((line = br.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.startsWith("mod") && trimmed.contains("=")) {
-                    int eq = trimmed.indexOf('=');
-                    String id = trimmed.substring(eq + 1).trim();
-                    if (id.endsWith(",")) id = id.substring(0, id.length() - 1).trim();
-                    if (!id.isEmpty()) {
-                        destination.add(id);
-                        destination.add(id.toLowerCase());
+                String trimmed = line.replace("\uFEFF", "").trim();
+                int eq = trimmed.indexOf('=');
+                if (eq != -1) {
+                    String key = trimmed.substring(0, eq).trim();
+                    if (key.equalsIgnoreCase("mod")) {
+                        String id = trimmed.substring(eq + 1).trim();
+                        if (id.endsWith(",")) id = id.substring(0, id.length() - 1).trim();
+                        if (!id.isEmpty()) {
+                            destination.add(id);
+                            destination.add(id.toLowerCase());
+                        }
                     }
                 }
             }
@@ -517,17 +571,29 @@ public class JavaModLoader {
         return newest;
     }
 
-    private static Set<String> findModIdsForJar(File jarFile) {
-        Set<String> ids = new HashSet<>();
-        if (jarFile == null) return ids;
+    private static ModMetadata findModMetadataForJar(File jarFile) {
+        ModMetadata meta = new ModMetadata();
+        if (jarFile == null) return meta;
 
         File curr = jarFile.getParentFile();
         int levels = 0;
-        while (curr != null && levels < 5) {
+        while (curr != null && levels < 6) {
+            // Check direct mod.info
             File modInfo = new File(curr, "mod.info");
             if (modInfo.exists() && modInfo.isFile()) {
-                parseModInfoId(modInfo, ids);
+                parseModInfoFile(modInfo, meta);
             }
+            // Check Build 42 subfolder mod.info
+            File b42Info = new File(curr, "42" + File.separator + "mod.info");
+            if (b42Info.exists() && b42Info.isFile()) {
+                parseModInfoFile(b42Info, meta);
+            }
+            // Check common subfolder mod.info
+            File commonInfo = new File(curr, "common" + File.separator + "mod.info");
+            if (commonInfo.exists() && commonInfo.isFile()) {
+                parseModInfoFile(commonInfo, meta);
+            }
+
             File modsSub = new File(curr, "mods");
             if (modsSub.exists() && modsSub.isDirectory()) {
                 File[] children = modsSub.listFiles();
@@ -536,7 +602,15 @@ public class JavaModLoader {
                         if (c.isDirectory()) {
                             File subModInfo = new File(c, "mod.info");
                             if (subModInfo.exists() && subModInfo.isFile()) {
-                                parseModInfoId(subModInfo, ids);
+                                parseModInfoFile(subModInfo, meta);
+                            }
+                            File sub42 = new File(c, "42" + File.separator + "mod.info");
+                            if (sub42.exists() && sub42.isFile()) {
+                                parseModInfoFile(sub42, meta);
+                            }
+                            File subCommon = new File(c, "common" + File.separator + "mod.info");
+                            if (subCommon.exists() && subCommon.isFile()) {
+                                parseModInfoFile(subCommon, meta);
                             }
                         }
                     }
@@ -545,18 +619,56 @@ public class JavaModLoader {
             curr = curr.getParentFile();
             levels++;
         }
-        return ids;
+
+        // Secondary check inside the JAR itself for ZombieBuddy signature
+        if (!meta.isZombieBuddyMod) {
+            try (JarFile jar = new JarFile(jarFile)) {
+                Enumeration<JarEntry> entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    String en = entries.nextElement().getName();
+                    if (en.contains("me/zed_0xff/zombie_buddy") ||
+                        en.contains("zb_better_fps") ||
+                        en.contains("/zb/") ||
+                        en.startsWith("zb/") ||
+                        en.endsWith("ZB.class") ||
+                        en.contains("ZombieBuddy")) {
+                        meta.isZombieBuddyMod = true;
+                        break;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        return meta;
     }
 
-    private static void parseModInfoId(File modInfo, Set<String> ids) {
-        try (BufferedReader br = new BufferedReader(new FileReader(modInfo))) {
+    private static void parseModInfoFile(File modInfoFile, ModMetadata meta) {
+        if (modInfoFile == null || !modInfoFile.exists() || !modInfoFile.isFile()) return;
+        try (BufferedReader br = new BufferedReader(new FileReader(modInfoFile, StandardCharsets.UTF_8))) {
             String line;
             while ((line = br.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.toLowerCase().startsWith("id=")) {
-                    String id = trimmed.substring(3).trim();
-                    if (!id.isEmpty()) {
-                        ids.add(id);
+                String trimmed = line.replace("\uFEFF", "").trim();
+                int eq = trimmed.indexOf('=');
+                if (eq != -1) {
+                    String key = trimmed.substring(0, eq).trim().toLowerCase();
+                    String val = trimmed.substring(eq + 1).trim();
+                    if (val.endsWith(",")) val = val.substring(0, val.length() - 1).trim();
+                    if (!val.isEmpty()) {
+                        if (key.equals("id")) {
+                            meta.modIds.add(val);
+                            meta.modIds.add(val.toLowerCase());
+                        } else if (key.equals("javapkgname")) {
+                            meta.javaPkgName = val;
+                            meta.isZombieBuddyMod = true;
+                        } else if (key.equals("require")) {
+                            if (val.toLowerCase().contains("zombiebuddy")) {
+                                meta.requiresZombieBuddy = true;
+                                meta.isZombieBuddyMod = true;
+                            }
+                        } else if (key.equals("zbversionmin") || key.equals("zbversionmax")) {
+                            meta.requiresZombieBuddy = true;
+                            meta.isZombieBuddyMod = true;
+                        }
                     }
                 }
             }
