@@ -1,4 +1,13 @@
-# Project Zomboid Optimizer (PZO)
+<div align="center">
+
+# Multi-Threading for Project Zomboid is Here!
+
+### Project Zomboid Optimizer (PZO)
+**Parallel entity culling • AVX2 SIMD math • Persistent VBOs • Zero-stutter chunk streaming**
+
+</div>
+
+---
 
 A lightweight JVM runtime agent (`-javaagent`) and native AVX2 SIMD acceleration engine for **Project Zomboid (Build 42 & Build 41)** across **Windows, Linux / Steam Deck, macOS, and Dedicated Servers**.
 
