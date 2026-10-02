@@ -2,7 +2,7 @@
 
 High-performance native engine optimizer, breakthrough multi-core spatial architecture, and zero-stutter runtime for **Project Zomboid (Build 42 & Build 41)** across **Windows, Linux / Steam Deck, macOS, and Dedicated Servers**.
 
-Not a simple Lua script: **PZO** is a non-destructive runtime JVM instrumentation agent (`-javaagent`) and native C++ AVX2 SIMD acceleration engine that forensically eliminates the deepest architectural bottlenecks in Project Zomboid—without corrupting game files, breaking multiplayer checksums, or locking your installation to fragile single-commit bytecode hacks.
+Not a simple Lua script: **PZO** is a non-destructive runtime JVM instrumentation agent (`-javaagent`) and native C++ AVX2 SIMD acceleration engine that forensically eliminates the deepest architectural bottlenecks in Project Zomboid—without modifying game files on disk, breaking multiplayer checksums, or requiring manual file reinstalls on game updates.
 
 | | |
 |---|---|
@@ -13,26 +13,24 @@ Not a simple Lua script: **PZO** is a non-destructive runtime JVM instrumentatio
 
 ---
 
-## 🥊 Setting the Record Straight: PZO Core vs. PZ_Optimization
+## 🤝 Engineering Overview: PZO Core & PZ_Optimization
 
-In their README, the authors of *PZ_Optimization* (`xD3I/PZ_Optimization`) benchmarked an early version of PZO before our breakthrough native multi-core engine was armed, attempting to claim superiority based on a fragile approach that shadows raw `.class` files.
-
-Let's address the engineering reality directly:
+The community has seen great innovation in Project Zomboid performance recently, notably *PZ_Optimization* (`xD3I/PZ_Optimization`), which demonstrated clever render concepts like offscreen quarter-resolution fog rendering. Because community discussions frequently compare the two projects, here is an objective engineering comparison of the architectural approaches and trade-offs:
 
 | Architectural Metric | PZ_Optimization (`xD3I/PZ_Optimization`) | PZO Core (`prop11/PZO-Launcher`) |
 |---|---|---|
-| **Multi-Threading Architecture** | ❌ **Broken on Worker Threads**. Tried un-gated worker state updates (`entityUpdateParallel`), causing rampant `Lua code called from the wrong thread` crashes due to Kahlua's single-threaded VM. Left **disabled by default**. | ✅ **True P-Core AVX2 SIMD Multi-Threading**. Distributes spatial partition sweeps, frustum culling, FOV awareness cones, and repulsion vectors across dedicated worker threads without corrupting Lua VM state. |
-| **Game Update Resilience** | ❌ **Breaks Every Game Patch**. Overwrites 41–100 raw decompiled `.class` files locked to a single commit (`4a0e9546ec`). A single 2MB game update bricks the installation. | ✅ **Patch-Proof JVM Agent (`-javaagent`)**. Dynamically instruments target bytecode at runtime. Survives game patches and updates seamlessly across Build 42 and Build 41. |
-| **Game File Integrity** | ❌ Overwrites and shadows raw `.class` files directly in your game installation. | ✅ **Zero Game File Mutation**. Leaves `projectzomboid.jar` and game files 100% stock and uncorrupted. |
-| **Stability & Decompiler Glitches** | ❌ Plagued by Vineflower decompiler artifacts: broken car spawns, infinite recursion in `CanSee`, and broken animal/fish schooling. | ✅ **Rock-Solid Stability**. Operates through clean reflection, Unsafe, and tested JVM bytecode transformations with zero decompiler corruption. |
-| **Weather & Storm Rendering** | ✅ Quarter-res fog buffer (shadowed drawer override). | ✅ **Single-Pass Quarter-Res Buffering (`FogQuarterBufferGovernor`)**. Batches all rectangles into **1 GPU draw call** with hardware bilinear composite. 400% storm speedup matched and stabilized. |
-| **Line-Of-Sight (LOS) Scaling** | ⚠️ Replaced stack in shadowed player class. | ✅ **$O(1)$ Thread-Local Hash Mirror (`PlayerLosOptimizer`)**. Eliminates the $O(N^2)$ `lastSpotted.contains` cascade without modifying player classes. |
-| **Dedicated Server Support** | ❌ **Client-Only**. Explicitly warns: *"Do not install on a dedicated server"*. Unexercised on server nodes. | ✅ **Full Dedicated Server Engine (`PZOServerEngine.jar`)**. Multi-core pathfinding, off-heap networking, and zero-lag SQLite world save buffers for host panels (G-Portal, Nitrado, Pterodactyl). |
-| **Version Compatibility** | ❌ Locked to Build 42.21 only. | ✅ **Universal Support for all Build 42 updates & Build 41.78+**. |
+| **Multi-Threading Architecture** | ⚠️ Worker-thread entity updates are disabled by default due to thread-safety limits in PZ's single-threaded Kahlua Lua VM. | ✅ **Thread-Safe Multi-Core Acceleration**. Offloads pure spatial partition sweeps, frustum culling, FOV awareness cones, and vector math to dedicated worker threads, safely keeping Lua VM state transitions on the main thread. |
+| **Delivery & Game Update Resilience** | Class Shadowing: Places recompiled `.class` files into the game directory. Tied to specific game builds (e.g. Build 42.21), requiring recompiled classes when game updates release. | ✅ **Dynamic Runtime Agent (`-javaagent`)**. In-memory bytecode instrumentation and native hooks leave stock game files completely untouched. Automatically adapts across Build 42 revisions and Build 41. |
+| **Game File Integrity** | Shadows `.class` files directly into the local game installation folder. | ✅ **Zero Game File Mutation**. Leaves `projectzomboid.jar` and game files 100% stock and uncorrupted. |
+| **Decompilation & Stability** | Directly decompiles and recompiles source classes, which can occasionally risk subtle decompiler discrepancies across complex engine subsystems. | ✅ **Non-Invasive Instrumentation**. Operates via dynamic bytecode hooks, clean reflection, and lightweight native helpers with zero decompiler side effects. |
+| **Weather & Storm Rendering** | ✅ Quarter-resolution fog buffer via replaced fog drawer class. | ✅ **Single-Pass Quarter-Res Buffering (`FogQuarterBufferGovernor`)**. Batches fog geometry into a single GPU draw call with hardware bilinear composite and dynamic toggle support. |
+| **Line-Of-Sight (LOS) Scaling** | Optimizes visibility tracking in shadowed player class directly. | ✅ **$O(1)$ Thread-Local Hash Mirror (`PlayerLosOptimizer`)**. Eliminates the $O(N^2)$ `contains` search overhead without modifying stock player classes. |
+| **Dedicated Server Support** | Client-focused; dedicated server deployment is discouraged. | ✅ **Full Dedicated Server Engine (`PZOServerEngine.jar`)**. Multi-core pathfinding, off-heap networking, and zero-lag SQLite world save buffers for host panels (G-Portal, Nitrado, Pterodactyl). |
+| **Platform & Version Compatibility** | Targeted primarily for Build 42.21 on Windows. | ✅ **Universal Support for all Build 42 updates & Build 41.78+** across Windows, Linux / Steam Deck, and macOS. |
 
 ---
 
-## 📊 Benchmark Results: Where Players Actually Care
+## 📊 Benchmark Metrics: High-Density & Stress Testing
 
 Measured on uncapped, high-load routes (1440p / 4K, maximum zoom):
 
