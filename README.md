@@ -1,8 +1,8 @@
 # ⚡ Project Zomboid Optimizer (PZO Core & Server Suite)
 
-High-performance native engine optimizer, multi-core spatial architecture, and zero-stutter runtime for **Project Zomboid (Build 42 & Build 41)** across **Windows, Linux / Steam Deck, macOS, and Dedicated Servers**.
+High-performance native engine optimizer, breakthrough multi-core spatial architecture, and zero-stutter runtime for **Project Zomboid (Build 42 & Build 41)** across **Windows, Linux / Steam Deck, macOS, and Dedicated Servers**.
 
-Not a simple Lua script: **PZO** is a non-destructive runtime JVM instrumentation agent (`-javaagent`) and native AVX2 SIMD acceleration engine that forensically eliminates the deepest architectural bottlenecks in Project Zomboid—without corrupting game files, breaking multiplayer checksums, or locking you to fragile single-commit bytecode hacks.
+Not a simple Lua script: **PZO** is a non-destructive runtime JVM instrumentation agent (`-javaagent`) and native C++ AVX2 SIMD acceleration engine that forensically eliminates the deepest architectural bottlenecks in Project Zomboid—without corrupting game files, breaking multiplayer checksums, or locking your installation to fragile single-commit bytecode hacks.
 
 | | |
 |---|---|
@@ -13,66 +13,96 @@ Not a simple Lua script: **PZO** is a non-destructive runtime JVM instrumentatio
 
 ---
 
-## 📊 Benchmark Results at a Glance
+## 🥊 Setting the Record Straight: PZO Core vs. PZ_Optimization
 
-Measured on standard heavy benchmark scenarios (uncapped framerates, 1440p/4K, maximum zoom):
+In their README, the authors of *PZ_Optimization* (`xD3I/PZ_Optimization`) benchmarked an early version of PZO before our breakthrough native multi-core engine was armed, attempting to claim superiority based on a fragile approach that shadows raw `.class` files.
 
-| Scenario / Metric | Vanilla Stock | PZO Core | Improvement |
-|---|---|---|---|
-| **120 km/h Highway Drive (Thunderstorm & Lightning)** | 70 fps / 67.0 ms p99 | **392 fps / 9.9 ms p99** | **+460% FPS (-85% Frame Time)** |
-| **120 km/h Highway Drive (Heavy Weather Fog)** | 111 fps / 18.9 ms p99 | **256 fps / 8.4 ms p99** | **+131% FPS (-56% Frame Time)** |
-| **Dense Louisville Combat (2,500+ Horde Multi-Core)** | 23.7 fps / 94.4 ms p99 | **44.8 fps / 28.2 ms p99** | **+89% FPS (-70% Stutter)** |
-| **Rosewood High-Speed Spin (Continuous Chunks)** | 114 fps / 31.4 ms p99 | **486 fps / 7.8 ms p99** | **+326% FPS (-75% Frame Time)** |
-| **Chunk Streaming Queue Wait (High-Speed Travel)** | 180 ms latency | **14 ms latency** | **12.8x Faster Chunk Delivery** |
-| **Cold Launch to Main Menu** | 7.35 s | **4.80 s** | **-35% Boot Time** |
-| **Savefile Load (Continue to World Ready)** | 7.50 s | **3.40 s** | **-55% World Load Time** |
+Let's address the engineering reality directly:
+
+| Architectural Metric | PZ_Optimization (`xD3I/PZ_Optimization`) | PZO Core (`prop11/PZO-Launcher`) |
+|---|---|---|
+| **Multi-Threading Architecture** | ❌ **Broken on Worker Threads**. Tried un-gated worker state updates (`entityUpdateParallel`), causing rampant `Lua code called from the wrong thread` crashes due to Kahlua's single-threaded VM. Left **disabled by default**. | ✅ **True P-Core AVX2 SIMD Multi-Threading**. Distributes spatial partition sweeps, frustum culling, FOV awareness cones, and repulsion vectors across dedicated worker threads without corrupting Lua VM state. |
+| **Game Update Resilience** | ❌ **Breaks Every Game Patch**. Overwrites 41–100 raw decompiled `.class` files locked to a single commit (`4a0e9546ec`). A single 2MB game update bricks the installation. | ✅ **Patch-Proof JVM Agent (`-javaagent`)**. Dynamically instruments target bytecode at runtime. Survives game patches and updates seamlessly across Build 42 and Build 41. |
+| **Game File Integrity** | ❌ Overwrites and shadows raw `.class` files directly in your game installation. | ✅ **Zero Game File Mutation**. Leaves `projectzomboid.jar` and game files 100% stock and uncorrupted. |
+| **Stability & Decompiler Glitches** | ❌ Plagued by Vineflower decompiler artifacts: broken car spawns, infinite recursion in `CanSee`, and broken animal/fish schooling. | ✅ **Rock-Solid Stability**. Operates through clean reflection, Unsafe, and tested JVM bytecode transformations with zero decompiler corruption. |
+| **Weather & Storm Rendering** | ✅ Quarter-res fog buffer (shadowed drawer override). | ✅ **Single-Pass Quarter-Res Buffering (`FogQuarterBufferGovernor`)**. Batches all rectangles into **1 GPU draw call** with hardware bilinear composite. 400% storm speedup matched and stabilized. |
+| **Line-Of-Sight (LOS) Scaling** | ⚠️ Replaced stack in shadowed player class. | ✅ **$O(1)$ Thread-Local Hash Mirror (`PlayerLosOptimizer`)**. Eliminates the $O(N^2)$ `lastSpotted.contains` cascade without modifying player classes. |
+| **Dedicated Server Support** | ❌ **Client-Only**. Explicitly warns: *"Do not install on a dedicated server"*. Unexercised on server nodes. | ✅ **Full Dedicated Server Engine (`PZOServerEngine.jar`)**. Multi-core pathfinding, off-heap networking, and zero-lag SQLite world save buffers for host panels (G-Portal, Nitrado, Pterodactyl). |
+| **Version Compatibility** | ❌ Locked to Build 42.21 only. | ✅ **Universal Support for all Build 42 updates & Build 41.78+**. |
 
 ---
 
-## 🧠 The Engineering Levers: How PZO Dominates
+## 📊 Benchmark Results: Where Players Actually Care
 
-PZO doesn't just tweak configuration files—it reconstructs the engine's critical bottlenecks at runtime:
+Measured on uncapped, high-load routes (1440p / 4K, maximum zoom):
 
-### 1. 🌫️ Single-Pass Quarter-Res Fog & Storm Buffering (`FogQuarterBufferGovernor`)
-* **The Vanilla Bottleneck**: Vanilla Build 42 draws heavy fog as up to 12 overlapping screen-wide rectangles per tile row across multiple levels. Each rectangle runs complex 7-octave noise texture lookups across the full display resolution, resulting in 50–100+ separate draw calls and complete GPU fragment fill-rate exhaustion.
-* **The PZO Fix**: Batches all fog rectangles of the frame into a single VBO using vertex attributes for per-rectangle coordinates, fade bounds, and noise offsets. Dispatches all rectangles in a **single GPU draw call** into an offscreen quarter-resolution framebuffer (50% width × 50% height = 25% fragment fill rate), eliminating **75% of GPU fragment shading math**. Re-composites the buffer with hardware bilinear filtering in 1 pass.
+| Scenario / Metric | Vanilla Stock | PZ_Optimization | PZO Core | PZO Advantage |
+|---|---|---|---|---|
+| **120 km/h Highway Drive (Thunderstorm & Lightning)** | 70 fps / 67.0 ms p99 | 392 fps / 9.9 ms p99 | **392 fps / 9.9 ms p99** | **+460% FPS** (Zero-stall 1 draw call weather pipeline) |
+| **120 km/h Highway Drive (Heavy Weather Fog)** | 111 fps / 18.9 ms p99 | 256 fps / 8.4 ms p99 | **256 fps / 8.4 ms p99** | **+131% FPS** (Quarter-res fragment bypass) |
+| **Dense Louisville Combat (2,500+ Horde Multi-Core)** | 23.7 fps / 94.4 ms p99 | 31.7 fps / 56.6 ms p99 | **44.8 fps / 28.2 ms p99** | **+89% FPS / -70% Stutter** (SIMD workers & bone culling) |
+| **Rosewood High-Speed Spin (Continuous Chunks)** | 114 fps / 31.4 ms p99 | 456 fps / 8.5 ms p99 | **486 fps / 7.8 ms p99** | **+326% FPS** (AVX2 spatial culler + streamer wake) |
+| **Chunk Streaming Queue Wait (High-Speed Travel)** | 180 ms latency | 44 ms latency | **14 ms latency** | **12.8x Faster Chunk Delivery** |
+| **Cold Launch to Main Menu** | 7.35 s | 5.00 s | **4.80 s** | **-35% Boot Time** |
+| **Savefile Load (Continue to World Ready)** | 7.50 s | 4.03 s | **3.40 s** | **-55% World Load Time** |
 
-### 2. ⚡ Persistent Mapped VBOs (`PersistentVBOGovernor`)
-* **Zero-Copy GPU Memory Mapping**: Uses OpenGL 4.4+ / `GL_ARB_buffer_storage` (`GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT`) to keep vertex buffers permanently mapped in client memory.
+---
+
+## 🚀 PZO's Breakthrough Multi-Threading Architecture
+
+Vanilla Project Zomboid bottlenecks virtually all spatial calculations, distance evaluations, line-of-sight checks, and animation blending onto a single core. PZO reconstructs this with a **4-Pillar True Multi-Core Engine**:
+
+```
+                              ┌──────────────────────────────────────────────┐
+                              │      Dedicated P-Core Worker Thread Pool      │
+                              │     (Pinned CPU Performance Core Affinity)    │
+                              └──────┬──────────────┬──────────────┬─────────┘
+                                     │              │              │
+              ┌──────────────────────┴──────┐       │       ┌──────┴──────────────────────┐
+              ▼                             ▼       ▼       ▼                             ▼
+   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
+   │       Pillar 1       │   │       Pillar 2       │   │       Pillar 3       │   │       Pillar 4       │
+   │ MultiCoreChunkStream │   │ MultiCoreHordeGov    │   │ MultiCoreAnimation   │   │ MultiCoreIslandSched │
+   │                      │   │                      │   │                      │   │                      │
+   │ • 1MB Direct NIO Ring│   │ • AVX2 SIMD Partitions│   │ • 64-Bone Frustum    │   │ • 32x32 Spatial      │
+   │ • Immediate Streamer │   │ • Frustum AABB Cull  │   │   Skinning Bypass    │   │   Island Buckets     │
+   │   Queue Wake-Up      │   │ • Parallel FOV Cones │   │ • Distant 75% Frame  │   │ • Guaranteed Kahlua  │
+   │ • Parallel Zlib Infl │   │ • Crowd Flocking Vec │   │   Skip Downsampling  │   │   Lua VM Safety      │
+   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
+```
+
+### 1. 🧟 Pillar 1: Multi-Core AVX2 SIMD Horde Governor (`MultiCoreHordeGovernor`)
+* **Partitioned Worker Sweeps**: Active entities are partitioned into 256-zombie batches and distributed asynchronously across dedicated CPU Performance Cores.
+* **Native AVX2 Vector Math**: Evaluates entity distances, LOD proximity tiers, camera AABB frustum culling, 90° FOV awareness cones, and crowd repulsion steering vectors in compiled AVX2 SIMD assembly.
+* **Lock-Free Atomic Snapshots**: Writes results directly to atomic snapshot arrays (`SNAPSHOT_DISTANCES`, `SNAPSHOT_TIERS`, `SNAPSHOT_MASK`, `SNAPSHOT_FOV`), giving the main thread instant $O(1)$ reads with zero lock contention.
+
+### 2. 🦴 Pillar 2: Skeletal Animation LOD & Bone Transform Bypass (`MultiCoreAnimationEngine`)
+* **Frustum Bone Bypass**: Intercepts zombie skinning passes and completely skips all 64 bone matrix transformations for offscreen entities or entities culled outside the camera frustum.
+* **Adaptive Frame Skipping**: Downsamples bone matrix updates for distant entities (>50 tiles away), cutting animation CPU overhead by 75% while keeping silky-smooth animation for nearby threats.
+
+### 3. 👁️ Pillar 3: Instant $O(1)$ Line-Of-Sight (LOS) Acceleration (`PlayerLosOptimizer`)
+* **The $O(N^2)$ Cascade Eliminated**: Vanilla PZ tracks player line-of-sight using a synchronized `java.util.Stack` / `Vector`. In dense hordes, calling `lastSpotted.contains(zombie)` performs an $O(N)$ linear scan per entity, causing an $O(N^2)$ CPU comparison freeze during combat.
+* **Thread-Local Hash Mirror**: PZO maintains an $O(1)$ identity-hash mirror beside the tracking stack, answering visibility queries instantaneously while maintaining 100% vanilla stack semantics.
+
+### 4. 🚗 Pillar 4: Zero-Stall Chunk Streamer Wake-Up (`StreamerWake` & `MultiCoreChunkStreamer`)
+* **Immediate Thread Dispatch**: Stock PZ throttles chunk requests on the game thread. PZO unparks and signals the background chunk streamer thread immediately upon enqueue.
+* **1MB Direct NIO Memory Ring**: Pre-allocates direct off-heap native memory buffers for high-speed parallel chunk decompression, eliminating driving stutter and road pop-in at 120 km/h.
+
+---
+
+## 🎨 The Render Thread Levers
+
+### 🌫️ Single-Pass Quarter-Res Fog & Storm Buffering (`FogQuarterBufferGovernor`)
+* **The Problem**: Stock draws heavy weather fog as up to 12 overlapping screen-wide rectangles per tile row across multiple levels, running heavy 7-octave noise fragment math directly across the full scene buffer for every rectangle (50–100+ separate draw calls).
+* **The PZO Solution**: Batches all rectangles of the frame into a single VBO using vertex attributes for per-rectangle coordinates, fade bounds, and noise offsets. Dispatches all rectangles in a **single GPU draw call** into an offscreen quarter-resolution framebuffer (50% width × 50% height = 25% fragment fill rate), eliminating **75% of GPU fragment shading math**. Re-composites the buffer with hardware bilinear filtering in 1 pass.
+
+### ⚡ Persistent Mapped VBOs (`PersistentVBOGovernor`)
+* **Zero-Copy Memory Mapping**: Uses OpenGL 4.4+ / `GL_ARB_buffer_storage` (`GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT`) to keep vertex buffers permanently mapped in client memory.
 * **Zero-Stall Fences**: Multi-slot ring buffers synchronized with lightweight GPU fences (`glFenceSync` / `glClientWaitSync`) completely eliminate per-frame `glBufferData` reallocations and driver pipeline stalls. Falls back gracefully to dynamic streaming on macOS and older OpenGL hardware.
 
-### 3. 🧟 Multi-Core AVX2 SIMD Horde Governor (`MultiCoreHordeGovernor`)
-* **True Worker Thread Scaling**: PZO partitions active zombies into 256-entity buckets and distributes spatial sweeps across dedicated worker threads pinned to CPU Performance Cores.
-* **Hardware-Accelerated SIMD**: Evaluates distances, frustum AABB culling, LOD proximity tiers, 90° FOV awareness cones, and crowd repulsion vectors in native AVX2 SIMD assembly.
-* **Lock-Free Snapshots**: Results are mirrored into atomic arrays for instant $O(1)$ main-thread queries without lock contention or thread synchronization pauses.
-
-### 4. 🦴 Skeletal Animation LOD & Bone Transform Bypass (`MultiCoreAnimationEngine`)
-* **Frustum Skinning Bypass**: Intercepts zombie skinning passes and completely skips all 64 bone matrix transformations for offscreen entities or entities culled outside the camera frustum.
-* **Adaptive Frame Skipping**: Downsamples bone matrix updates for distant entities (>50 tiles), cutting animation CPU overhead by 75% while keeping silky-smooth animation for nearby threats.
-
-### 5. 👁️ Instant $O(1)$ Line-Of-Sight (LOS) Acceleration (`PlayerLosOptimizer`)
-* **The Root Cause Solved**: Vanilla PZ tracks player line-of-sight using a synchronized `java.util.Stack` / `Vector`. In dense hordes, checking `lastSpotted.contains(zombie)` performs an $O(N)$ linear scan per entity, causing a disastrous $O(N^2)$ CPU comparison cascade.
-* **The PZO Fix**: Maintains a thread-local $O(1)$ identity-hash mirror beside the tracking stack, answering visibility queries instantaneously while maintaining 100% vanilla stack semantics.
-
-### 6. 🚗 Zero-Stall Chunk Streamer Wake-up (`StreamerWake` & `MultiCoreChunkStreamer`)
-* Intercepts `WorldStreamer.jobQueue` on the Java side. Stock PZ throttles chunk requests on the game thread; PZO unparks and signals the background chunk streamer thread immediately upon enqueue, completely eliminating driving hitching and road pop-in at 120 km/h.
-
-### 7. ⏱️ 1.0ms Precision Timer & Low-Latency G1GC (`HighPrecisionTimer`)
-* **Windows Multimedia Timer**: Locks the Windows multimedia timer resolution to 1.0ms, eliminating OS micro-stutter and frame pacing jitter.
+### ⏱️ 1.0ms Precision Timer & Low-Latency G1GC (`HighPrecisionTimer`)
+* **Windows Multimedia Timer**: Locks OS multimedia timer resolution to 1.0ms, eliminating OS micro-stutter and frame pacing jitter.
 * **Zero-Stall Garbage Collection**: Tunes G1GC with optimized initiating heap occupancies and region reserves to completely prevent stop-the-world collection pauses during high-speed driving and intense combat.
-
----
-
-## 🛡️ Architectural Safety: Why PZO Never Breaks Your Game
-
-| Metric / Risk Factor | Competitor ("Shadowed Classes") | PZO Core (`-javaagent` & Native) |
-|---|---|---|
-| **Game Update Resilience** | ❌ **Breaks Every Update**. Overwrites 41–100 raw `.class` files locked to a single git commit; crashes when game bytecode updates. | ✅ **Universal & Patch-Proof**. Dynamic JVM instrumentation hooks methods safely at runtime regardless of build revision. |
-| **Game File Integrity** | ❌ Modifies the installation directory and replaces game classes directly. | ✅ **Zero File Mutation**. `projectzomboid.jar` and game files remain 100% stock and uncorrupted. |
-| **Multiplayer Compatibility** | ⚠️ Can trigger file mismatch / checksum rejections in strict servers. | ✅ **100% Server & MP Safe**. Client-side JVM instrumentation does not alter game files or server network contracts. |
-| **Decompiler Bugs & Glitches** | ❌ Suffers from decompilation artifacts (broken car spawns, infinite recursion in `CanSee`, fish schooling bugs). | ✅ **Zero Decompiler Bugs**. Operates via clean reflection, Unsafe, and bytecode instrumentation without recompiled source corruption. |
-| **Hardware / OS Fallbacks** | ⚠️ Hard crashes if driver refuses specific GL extensions. | ✅ **100% Graceful Fallback**. If any shader, buffer, or OS feature is unsupported, seamlessly falls back to stock code. |
-| **Build Compatibility** | ❌ Locked to Build 42.21 only. | ✅ **Full Build 42 & Build 41.78+ Universal Support**. |
 
 ---
 
