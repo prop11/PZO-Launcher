@@ -66,7 +66,7 @@ public final class StreamerWake {
 
     /**
      * Instantly unparks the WorldStreamer thread when work is available.
-     * Also issues a gentle interrupt if the streamer is blocked in vanilla Thread.sleep(140L).
+     * Uses LockSupport.unpark without thread interruption to protect active NIO file channels.
      */
     public static void signal() {
         if (!active) return;
@@ -75,9 +75,6 @@ public final class StreamerWake {
         Thread t = streamerThread;
         if (t != null && t.isAlive()) {
             LockSupport.unpark(t);
-            try {
-                t.interrupt();
-            } catch (Throwable ignored) {}
         }
     }
 }

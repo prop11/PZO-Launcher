@@ -5,6 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 /**
  * CPU Core-Aware JVM Garbage Collector Optimizer.
  * Project Zomboid Build 42 launches by default with the Z Garbage Collector (`-XX:+UseZGC`).
@@ -51,20 +55,67 @@ public final class GCLauncherOptimizer {
             }
 
             String content = Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8);
+            Object parsed = ZomboidConfigMigrator.JsonMini.parse(content);
+            if (!(parsed instanceof Map)) {
+                return;
+            }
 
-            // If machine has <= 8 cores, G1GC offers superior throughput for multi-core PZO
+            @SuppressWarnings("unchecked")
+            Map<String, Object> root = (Map<String, Object>) parsed;
+            Object vmObj = root.get("vmArgs");
+            if (!(vmObj instanceof List)) {
+                return;
+            }
+
+            @SuppressWarnings("unchecked")
+            List<?> rawList = (List<?>) vmObj;
+            List<String> vmArgs = new ArrayList<>();
+            boolean changed = false;
             boolean wantG1 = cores <= 8;
 
-            if (wantG1 && content.contains("-XX:+UseZGC")) {
+            for (Object item : rawList) {
+                if (item == null) continue;
+                String s = item.toString().trim();
+                if (s.contains("UseCompactObjectHeaders")) {
+                    changed = true;
+                    continue; // Strip invalid flag
+                }
+                if (s.contains(" ")) {
+                    // Split corrupted arguments with spaces
+                    String[] tokens = s.split("\\s+");
+                    for (String tok : tokens) {
+                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
+                            vmArgs.add(tok);
+                        }
+                    }
+                    changed = true;
+                    continue;
+                }
+                if (wantG1 && "-XX:+UseZGC".equals(s)) {
+                    changed = true;
+                    if (!vmArgs.contains("-XX:+UseG1GC")) {
+                        vmArgs.add("-XX:+UseG1GC");
+                    }
+                    if (!vmArgs.contains("-XX:MaxGCPauseMillis=16")) {
+                        vmArgs.add("-XX:MaxGCPauseMillis=16");
+                    }
+                    continue;
+                }
+                if (!vmArgs.contains(s)) {
+                    vmArgs.add(s);
+                }
+            }
+
+            if (changed) {
                 File backupFile = new File(gameDir, BACKUP_FILENAME);
                 if (!backupFile.exists()) {
                     Files.copy(jsonFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 }
-
-                String updated = content.replace("-XX:+UseZGC", "-XX:+UseG1GC -XX:MaxGCPauseMillis=16");
-                Files.writeString(jsonFile.toPath(), updated, StandardCharsets.UTF_8);
+                root.put("vmArgs", vmArgs);
+                String formatted = ZomboidConfigMigrator.JsonMini.format(root);
+                Files.writeString(jsonFile.toPath(), formatted, StandardCharsets.UTF_8);
                 tunedApplied = true;
-                PZOLogger.success("[GCLauncherOptimizer] Auto-tuned launcher to G1GC (Preserved CPU cores for PZO Multi-Core on " + cores + "-core system)");
+                PZOLogger.success("[GCLauncherOptimizer] Auto-tuned launcher JVM args (Sanitized flags, preserved CPU cores for PZO Multi-Core on " + cores + "-core system)");
             }
         } catch (Throwable t) {
             PZOLogger.info("[GCLauncherOptimizer] GC auto-tune notice: " + t.getMessage());

@@ -57,12 +57,30 @@ public final class LowLatencyPacingGovernor {
         reflexSleepActive = value;
     }
 
+    private static boolean isGLContextCurrent() {
+        try {
+            Class<?> displayCls = Class.forName("org.lwjglx.opengl.Display");
+            Method isCurrent = displayCls.getMethod("isCurrent");
+            return (boolean) isCurrent.invoke(null);
+        } catch (Throwable t1) {
+            try {
+                Class<?> glfwCls = Class.forName("org.lwjgl.glfw.GLFW");
+                Method getCtx = glfwCls.getMethod("glfwGetCurrentContext");
+                Object ctx = getCtx.invoke(null);
+                if (ctx instanceof Number) {
+                    return ((Number) ctx).longValue() != 0L;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
     /**
      * Called on the render thread immediately after buffer swap.
      * Inserts an OpenGL sync fence and waits until the GPU has drained older queued frames.
      */
     public static void onPostSwapRenderThread() {
-        if (!active) return;
+        if (!active || !isGLContextCurrent()) return;
         initSyncReflection();
 
         try {

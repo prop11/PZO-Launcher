@@ -22,7 +22,7 @@ exit /b %errorlevel%
 # ==============================================================================
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.9.9.3)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v0.9.9.4)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -74,7 +74,6 @@ $Json5OrLess = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UnlockExperimentalVMOptions",
-        "-XX:+UseCompactObjectHeaders",
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
@@ -116,7 +115,6 @@ $Json6To12 = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UnlockExperimentalVMOptions",
-        "-XX:+UseCompactObjectHeaders",
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
@@ -160,7 +158,6 @@ $Json13To20 = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UnlockExperimentalVMOptions",
-        "-XX:+UseCompactObjectHeaders",
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
@@ -204,7 +201,6 @@ $JsonAbove20 = @"
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UnlockExperimentalVMOptions",
-        "-XX:+UseCompactObjectHeaders",
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
@@ -509,7 +505,7 @@ function Apply-PZOConfiguration {
         g1gc        = $UseG1GC
         pretouch    = $true
         zombiebuddy = $isZombieBuddyActive
-        version     = "0.9.9.3"
+        version     = "0.9.9.4"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
