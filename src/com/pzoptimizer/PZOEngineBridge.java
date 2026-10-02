@@ -936,7 +936,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.3\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.4\"\n" +
                                             "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                             "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +

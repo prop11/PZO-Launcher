@@ -35,7 +35,6 @@ public final class ZomboidConfigMigrator {
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
         "-XX:+UnlockExperimentalVMOptions",
-        "-XX:+UseCompactObjectHeaders",
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
@@ -180,6 +179,12 @@ public final class ZomboidConfigMigrator {
             }
 
             for (String arg : vmStrings) {
+                if (arg.contains("UseCompactObjectHeaders") || arg.contains(" ")) {
+                    return true;
+                }
+            }
+
+            for (String arg : vmStrings) {
                 if (arg.startsWith("-Xmx")) {
                     long mb = parseHeapArgMb(arg);
                     if (mb > 0 && mb <= 3072 && getRecommendedHeapMb() > 3072) {
@@ -264,11 +269,27 @@ public final class ZomboidConfigMigrator {
         // Clean undesirable or superseded arguments
         List<String> userCleanArgs = new ArrayList<>();
         for (String arg : rawArgs) {
+            if (arg == null || arg.trim().isEmpty()) continue;
+            arg = arg.trim();
             if (arg.startsWith("-Djava.awt.headless")) continue; // PZO requires GUI/AWT
             if (arg.startsWith("-Djava.library.path=")) continue; // will normalize below
             if (arg.equals(TARGET_AGENTLIB)) continue; // will place deterministically
             if (arg.contains("zbNative")) continue; // will preserve deterministically
-            userCleanArgs.add(arg);
+            if (arg.contains("UseCompactObjectHeaders")) continue; // Incompatible with Java 17
+
+            // Repair corrupted space-separated args (e.g. "-XX:+UseG1GC -XX:MaxGCPauseMillis=16")
+            if (arg.contains(" ")) {
+                String[] tokens = arg.split("\\s+");
+                for (String tok : tokens) {
+                    if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !userCleanArgs.contains(tok)) {
+                        userCleanArgs.add(tok);
+                    }
+                }
+                continue;
+            }
+            if (!userCleanArgs.contains(arg)) {
+                userCleanArgs.add(arg);
+            }
         }
 
         String os = System.getProperty("os.name", "").toLowerCase();
@@ -417,10 +438,10 @@ public final class ZomboidConfigMigrator {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();
             File jsonFile = new File(gameDir, TARGET_JSON_NAME);
             if (jsonFile.exists() && isMigrationNeeded(jsonFile)) {
-                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 0.9.9.3 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
+                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 0.9.9.4 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
                 boolean ok = migrateFileInPlace(jsonFile);
                 if (ok) {
-                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v0.9.9.3 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
+                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v0.9.9.4 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
                 }
             }
         } catch (Throwable t) {

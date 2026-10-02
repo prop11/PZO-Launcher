@@ -61,7 +61,7 @@ public class UpdateDialog {
             return false;
         }
 
-        // Safeguard: If base semantic versions match (e.g. 0.9.9.3 and 0.9.9.3-unstable), they share identical ABI
+        // Safeguard: If base semantic versions match (e.g. 0.9.9.4 and 0.9.9.4-unstable), they share identical ABI
         if (filePresent && installedVersion != null && !installedVersion.isEmpty()) {
             String cleanExpected = expectedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
             String cleanInstalled = installedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();

@@ -56,7 +56,6 @@ Open `ProjectZomboid64.json` in your host's File Manager:
     "-Djava.security.egd=file:/dev/urandom",
     "-XX:+UseZGC",
     "-XX:-OmitStackTraceInFastThrow",
-    "-XX:+UseCompactObjectHeaders",
     "-XX:+UseStringDeduplication",
     "-XX:+PerfDisableSharedMem",
     "-XX:+DisableExplicitGC",
