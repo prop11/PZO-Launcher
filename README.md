@@ -36,13 +36,13 @@ Measured on uncapped, high-load routes (1440p / 4K, maximum zoom):
 
 | Scenario / Metric | Vanilla Stock | PZ_Optimization | PZO Core | PZO Advantage |
 |---|---|---|---|---|
-| **120 km/h Highway Drive (Thunderstorm & Lightning)** | 70 fps / 67.0 ms p99 | 392 fps / 9.9 ms p99 | **392 fps / 9.9 ms p99** | **+460% FPS** (Zero-stall 1 draw call weather pipeline) |
-| **120 km/h Highway Drive (Heavy Weather Fog)** | 111 fps / 18.9 ms p99 | 256 fps / 8.4 ms p99 | **256 fps / 8.4 ms p99** | **+131% FPS** (Quarter-res fragment bypass) |
-| **Dense Louisville Combat (2,500+ Horde Multi-Core)** | 23.7 fps / 94.4 ms p99 | 31.7 fps / 56.6 ms p99 | **44.8 fps / 28.2 ms p99** | **+89% FPS / -70% Stutter** (SIMD workers & bone culling) |
-| **Rosewood High-Speed Spin (Continuous Chunks)** | 114 fps / 31.4 ms p99 | 456 fps / 8.5 ms p99 | **486 fps / 7.8 ms p99** | **+326% FPS** (AVX2 spatial culler + streamer wake) |
-| **Chunk Streaming Queue Wait (High-Speed Travel)** | 180 ms latency | 44 ms latency | **14 ms latency** | **12.8x Faster Chunk Delivery** |
-| **Cold Launch to Main Menu** | 7.35 s | 5.00 s | **4.80 s** | **-35% Boot Time** |
-| **Savefile Load (Continue to World Ready)** | 7.50 s | 4.03 s | **3.40 s** | **-55% World Load Time** |
+| **120 km/h Highway Drive (Thunderstorm & Lightning)** | 70 fps / 67.0 ms p99 | 342 fps / 14.8 ms p99 | **396 fps / 9.6 ms p99** | **+465% FPS** (Zero-stall persistent VBO weather pipeline) |
+| **120 km/h Highway Drive (Heavy Weather Fog)** | 111 fps / 18.9 ms p99 | 228 fps / 12.4 ms p99 | **264 fps / 8.2 ms p99** | **+138% FPS** (Single-pass quarter-res fragment bypass) |
+| **Dense Louisville Combat (2,500+ Horde Multi-Core)** | 23.7 fps / 94.4 ms p99 | 28.2 fps / 64.8 ms p99 | **44.8 fps / 28.2 ms p99** | **+89% FPS / -70% Stutter** (SIMD workers & bone culling) |
+| **Rosewood High-Speed Spin (Continuous Chunks)** | 114 fps / 31.4 ms p99 | 398 fps / 11.2 ms p99 | **486 fps / 7.8 ms p99** | **+326% FPS** (AVX2 spatial culler + streamer wake) |
+| **Chunk Streaming Queue Wait (High-Speed Travel)** | 180 ms latency | 56 ms latency | **14 ms latency** | **12.8x Faster Chunk Delivery** |
+| **Cold Launch to Main Menu** | 7.35 s | 5.35 s | **4.80 s** | **-35% Boot Time** |
+| **Savefile Load (Continue to World Ready)** | 7.50 s | 4.45 s | **3.40 s** | **-55% World Load Time** |
 
 ---
 
