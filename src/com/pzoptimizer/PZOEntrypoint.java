@@ -107,6 +107,9 @@ public class PZOEntrypoint {
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
         AssetCachePrewarmer.startPrewarmingAsync();
+        // Pre-touch native libs into page cache & disable LWJGL vertex array bounds checks
+        NativeLibraryPreloader.startPreloadingAsync();
+        SpriteBatchOptimizer.apply();
 
         try {
             StreamBufferBooster.applyStreamTweaks();

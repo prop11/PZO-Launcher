@@ -61,6 +61,7 @@ public class PZOServerEntrypoint {
         com.pzoptimizer.EngineFramePacer.initialize();
         com.pzoptimizer.NativeDirectMemoryPool.initialize();
         com.pzoptimizer.FastBitwiseChunkIndexer.initialize();
+        com.pzoptimizer.NativeLibraryPreloader.startPreloadingAsync();
 
         com.pzoptimizer.PZOEngineBridge.initialize();
         ServerNetworkTuner.apply();
