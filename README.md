@@ -16,6 +16,7 @@ Instead of replacing game files on disk or relying on decompiled class overrides
 | | |
 |---|---|
 | **Steam Workshop** | [Project Zomboid Optimiser (Item 3787481250)](https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250) |
+| **Wiki & Guides** | [Official PZO Wiki](https://github.com/prop11/PZO-Launcher/wiki) • [Manual Linux Guide](https://github.com/prop11/PZO-Launcher/wiki/Manual-Linux-Installation) |
 | **Releases** | [github.com/prop11/PZO-Launcher/releases](https://github.com/prop11/PZO-Launcher/releases) (`Install.bat`, `pzo_optimizer.sh`, `pzo_optimizer.command`, `PZOptimEngine.jar`) |
 | **Supported Versions** | **Build 42 (all revisions) & Build 41.78+** on Windows 10/11, Linux (Proton & Native), Steam Deck (SteamOS), macOS (Apple Silicon & Intel) |
 | **Multiplayer & VAC** | **Safe** — In-memory bytecode instrumentation leaves all game files stock. Dedicated server engine included. |
@@ -128,6 +129,7 @@ Stock Project Zomboid runs almost all spatial math, visibility calculations, and
    chmod +x pzo_optimizer.sh && ./pzo_optimizer.sh
    ```
 3. Launch Project Zomboid normally through Steam.
+*(Prefer manual setup? See the [Manual Linux Installation Guide](https://github.com/prop11/PZO-Launcher/wiki/Manual-Linux-Installation)).*
 
 ### macOS (Apple Silicon & Intel)
 1. Download **`PZO_Optimizer_macOS_Linux.zip`** from [GitHub Releases](https://github.com/prop11/PZO-Launcher/releases).
