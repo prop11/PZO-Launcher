@@ -158,4 +158,8 @@ public final class PZOConfig {
         if (!luaDir.exists()) luaDir.mkdirs();
         return new File(luaDir, CONFIG_FILE);
     }
+
+    public static boolean isMobileZomdroid() {
+        return EngineGLStateGovernor.isMobileGLEnvironment();
+    }
 }
