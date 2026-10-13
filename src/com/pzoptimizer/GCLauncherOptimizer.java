@@ -71,7 +71,27 @@ public final class GCLauncherOptimizer {
             List<?> rawList = (List<?>) vmObj;
             List<String> vmArgs = new ArrayList<>();
             boolean changed = false;
-            boolean wantG1 = cores <= 8;
+            double totalRamGb = 16.0;
+            try {
+                java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+                java.lang.reflect.Method m = null;
+                try {
+                    m = osBean.getClass().getMethod("getTotalMemorySize");
+                } catch (NoSuchMethodException e) {
+                    try {
+                        m = osBean.getClass().getMethod("getTotalPhysicalMemorySize");
+                    } catch (NoSuchMethodException ignored) {}
+                }
+                if (m != null) {
+                    m.setAccessible(true);
+                    Object val = m.invoke(osBean);
+                    if (val instanceof Number) {
+                        totalRamGb = ((Number) val).doubleValue() / (1024.0 * 1024.0 * 1024.0);
+                    }
+                }
+            } catch (Throwable ignored) {}
+
+            boolean wantG1 = cores <= 8 || totalRamGb < 20.0;
 
             for (Object item : rawList) {
                 if (item == null) continue;
@@ -106,6 +126,41 @@ public final class GCLauncherOptimizer {
                 }
             }
 
+            // Also inspect windows platform-specific blocks if present
+            Object winObj = root.get("windows");
+            if (winObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> winMap = (Map<String, Object>) winObj;
+                for (Map.Entry<String, Object> entry : winMap.entrySet()) {
+                    if (entry.getValue() instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> verMap = (Map<String, Object>) entry.getValue();
+                        Object verVmObj = verMap.get("vmArgs");
+                        if (verVmObj instanceof List) {
+                            List<?> verRawList = (List<?>) verVmObj;
+                            List<String> verArgs = new ArrayList<>();
+                            boolean verChanged = false;
+                            for (Object vItem : verRawList) {
+                                if (vItem == null) continue;
+                                String vs = vItem.toString().trim();
+                                if (wantG1 && "-XX:+UseZGC".equals(vs)) {
+                                    verChanged = true;
+                                    if (!verArgs.contains("-XX:+UseG1GC")) {
+                                        verArgs.add("-XX:+UseG1GC");
+                                    }
+                                    continue;
+                                }
+                                verArgs.add(vs);
+                            }
+                            if (verChanged) {
+                                verMap.put("vmArgs", verArgs);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+
             if (changed) {
                 File backupFile = new File(gameDir, BACKUP_FILENAME);
                 if (!backupFile.exists()) {
@@ -115,7 +170,7 @@ public final class GCLauncherOptimizer {
                 String formatted = ZomboidConfigMigrator.JsonMini.format(root);
                 Files.writeString(jsonFile.toPath(), formatted, StandardCharsets.UTF_8);
                 tunedApplied = true;
-                PZOLogger.success("[GCLauncherOptimizer] Auto-tuned launcher JVM args (Sanitized flags, preserved CPU cores for PZO Multi-Core on " + cores + "-core system)");
+                PZOLogger.success("[GCLauncherOptimizer] Auto-tuned launcher JVM args (Enforced G1GC on " + String.format("%.1f", totalRamGb) + "GB RAM / " + cores + "-core system)");
             }
         } catch (Throwable t) {
             PZOLogger.info("[GCLauncherOptimizer] GC auto-tune notice: " + t.getMessage());

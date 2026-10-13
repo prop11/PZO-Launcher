@@ -88,7 +88,9 @@ $Json5OrLess = @"
         },
         "10.0.17134": {
             "vmArgs": [
-                "-XX:+UseZGC"
+                "-XX:+UseG1GC",
+                "-XX:InitiatingHeapOccupancyPercent=45",
+                "-XX:G1ReservePercent=15"
             ]
         }
     }
@@ -129,8 +131,9 @@ $Json6To12 = @"
         },
         "10.0.17134": {
             "vmArgs": [
-                "-XX:+UseZGC",
-                "-XX:ZAllocationSpikeTolerance=5",
+                "-XX:+UseG1GC",
+                "-XX:InitiatingHeapOccupancyPercent=45",
+                "-XX:G1ReservePercent=15",
                 "-XX:+UseStringDeduplication"
             ]
         }
@@ -138,7 +141,51 @@ $Json6To12 = @"
 }
 "@
 
-$Json13To20 = @"
+$Json13To20_G1GC = @"
+{
+    "mainClass": "com/pzoptimizer/PZOEntrypoint",
+    "classpath": [
+        ".",
+        "PZOptimEngine.jar",
+        "projectzomboid.jar"
+    ],
+    "vmArgs": [
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "-Xms4096m",
+        "-Xmx8192m",
+        "-Dzomboid.steam=1",
+        "-Dzomboid.znetlog=1",
+        "-Djava.library.path=win64/;.",
+        "-XX:-CreateCoredumpOnCrash",
+        "-XX:-OmitStackTraceInFastThrow",
+        "-XX:+PerfDisableSharedMem",
+        "-XX:+UnlockExperimentalVMOptions",
+        "-XX:+UseSuperWord",
+        "-XX:MaxInlineLevel=15",
+        "-XX:InlineSmallCode=2500",
+        "-XX:+UseNUMA",
+        "-XX:+AlwaysPreTouch"
+    ],
+    "windows": {
+        "6.1": {
+            "vmArgs": [
+                "-XX:+UseG1GC"
+            ]
+        },
+        "10.0.17134": {
+            "vmArgs": [
+                "-XX:+UseG1GC",
+                "-XX:InitiatingHeapOccupancyPercent=45",
+                "-XX:G1ReservePercent=15",
+                "-XX:+UseStringDeduplication"
+            ]
+        }
+    }
+}
+"@
+
+$Json13To20_ZGC = @"
 {
     "mainClass": "com/pzoptimizer/PZOEntrypoint",
     "classpath": [
@@ -180,6 +227,8 @@ $Json13To20 = @"
     }
 }
 "@
+
+$Json13To20 = $Json13To20_G1GC
 
 $JsonAbove20 = @"
 {
@@ -447,6 +496,21 @@ function Apply-PZOConfiguration {
     if ($TotalRamGB -lt 4) { $TotalRamGB = 8 }
     Write-Host "Detected System RAM: $TotalRamGB GB" -ForegroundColor Yellow
 
+    # Detect Available Free Physical RAM for commit safety check
+    $FreeRamGB = 0
+    try {
+        $FreeRamKB = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).FreePhysicalMemory
+        $FreeRamGB = [Math]::Round($FreeRamKB / 1MB, 1)
+    } catch {
+        try {
+            $FreeRamKB = (Get-WmiObject Win32_OperatingSystem).FreePhysicalMemory
+            $FreeRamGB = [Math]::Round($FreeRamKB / 1MB, 1)
+        } catch {}
+    }
+    if ($FreeRamGB -gt 0) {
+        Write-Host "Available Free RAM: $FreeRamGB GB" -ForegroundColor Gray
+    }
+
     if (-not (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue)) {
         New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
     }
@@ -457,24 +521,51 @@ function Apply-PZOConfiguration {
         Write-Host "Backed up original $TargetFileName -> $BackupFolder" -ForegroundColor Gray
     }
 
-    $UseG1GC = $false
+    # Minimum system RAM required for ZGC (Java 17 without compressed OOPs requires >= 20GB system RAM
+    # to avoid pre-touch virtual memory commit failure and immediate JVM exit on startup).
+    $ZgcMinRamThresholdGB = 20
+
+    $UseG1GC = $true
     $chosenJson = ""
     if ($TotalRamGB -le 5) {
-        Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m)" -ForegroundColor Green
+        Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m | G1GC)" -ForegroundColor Green
+        Write-Host "    [!] Low RAM detected ($TotalRamGB GB): Enforcing G1GC with Compressed OOPs (ZGC disabled to prevent OOM)." -ForegroundColor Cyan
         $chosenJson = $Json5OrLess
+        $UseG1GC = $true
     }
     elseif ($TotalRamGB -ge 6 -and $TotalRamGB -le 12) {
-        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m)" -ForegroundColor Green
+        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m | G1GC)" -ForegroundColor Green
+        Write-Host "    [!] RAM ($TotalRamGB GB) is below ZGC safety threshold ($($ZgcMinRamThresholdGB) GB)." -ForegroundColor Yellow
+        Write-Host "    [+] Falling back to G1GC (-XX:+UseG1GC) for launch stability and lower memory overhead." -ForegroundColor Green
         $chosenJson = $Json6To12
+        $UseG1GC = $true
     }
     elseif ($TotalRamGB -ge 13 -and $TotalRamGB -le 20) {
         Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 4096m - 8192m)" -ForegroundColor Green
-        $chosenJson = $Json13To20
+        if ($TotalRamGB -lt $ZgcMinRamThresholdGB -or ($FreeRamGB -gt 0 -and $FreeRamGB -lt 10)) {
+            Write-Host "    [!] System RAM ($TotalRamGB GB, Free: $FreeRamGB GB) is below ZGC safety threshold ($($ZgcMinRamThresholdGB) GB)." -ForegroundColor Yellow
+            Write-Host "    [+] Falling back to G1GC (-XX:+UseG1GC) with Compressed OOPs to prevent JVM launch crashes." -ForegroundColor Green
+            $chosenJson = $Json13To20_G1GC
+            $UseG1GC = $true
+        } else {
+            Write-Host "    [+] Adequate RAM detected ($TotalRamGB GB) -> Applying ZGC profile." -ForegroundColor Green
+            $chosenJson = $Json13To20_ZGC
+            $UseG1GC = $false
+        }
     }
     else {
+        # > 20 GB RAM
         Write-Host "Applying profile: > 20 GB RAM (Heap: 8192m - 16384m)" -ForegroundColor Green
-        $chosenJson = $JsonAbove20
-        $UseG1GC = $true
+        if ($FreeRamGB -gt 0 -and $FreeRamGB -lt 12) {
+            Write-Host "    [!] Available free RAM is constrained ($FreeRamGB GB free). Falling back to G1GC to prevent PreTouch commit failure." -ForegroundColor Yellow
+            $chosenJson = $JsonAbove20 -replace "-XX:\+UseZGC", "-XX:+UseG1GC"
+            $chosenJson = $chosenJson -replace "-XX:ZAllocationSpikeTolerance=5", "-XX:InitiatingHeapOccupancyPercent=45"
+            $UseG1GC = $true
+        } else {
+            Write-Host "    [+] Abundant RAM detected ($TotalRamGB GB >= $($ZgcMinRamThresholdGB) GB) -> Applying ZGC ultra-low latency profile." -ForegroundColor Green
+            $chosenJson = $JsonAbove20
+            $UseG1GC = $false
+        }
     }
 
     # Inject native JVMTI agent bridge (-agentlib:pzo_native64) for bytecode instrumentation & ZombieBuddy coexistence
