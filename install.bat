@@ -568,10 +568,8 @@ function Apply-PZOConfiguration {
         }
     }
 
-    # Inject native JVMTI agent bridge (-agentlib:pzo_native64) for bytecode instrumentation & ZombieBuddy coexistence
-    if ($chosenJson -notmatch "pzo_native64") {
-        $chosenJson = $chosenJson.Replace('"vmArgs": [', '"vmArgs": [' + "`n        " + '"-agentlib:pzo_native64",')
-    }
+    # Strip legacy -agentlib:pzo_native64 to prevent HotSpot pre-window JVMTI initialization aborts
+    $chosenJson = $chosenJson -replace '\s*"-agentlib:pzo_native64",?', ''
 
     # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in vmArgs
     if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
