@@ -526,6 +526,14 @@ else
         fi
     done
 
+    if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
+        PARENT_DIR="$(dirname "$PZ_DIR")"
+        if [ -f "$PARENT_DIR/ProjectZomboid64.json" ] || [ -f "$PARENT_DIR/projectzomboid.sh" ]; then
+            cp -f "$PZ_JAR" "$PARENT_DIR/PZOptimEngine.jar" 2>/dev/null || true
+            echo "[+] Mirrored PZOptimEngine.jar to parent Steam directory: $PARENT_DIR"
+        fi
+    fi
+
     if [ -f "$JSON_FILE" ] && [ ! -f "${JSON_FILE}.bak" ]; then
         cp -f "$JSON_FILE" "${JSON_FILE}.bak"
         echo "[+] Backed up original JSON config -> ${JSON_FILE}.bak"
@@ -566,24 +574,41 @@ existing_args = data.get("vmArgs", [])
 if not isinstance(existing_args, list):
     existing_args = []
 
+DROP_PREFIXES = (
+    "-Xmx", "-Xms",
+    "-agentlib:pzo_native64",
+    "-XX:+UseZGC", "-XX:-UseZGC", "-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZCollection", "-XX:ZAllocationSpikeTolerance",
+    "-XX:+UseG1GC", "-XX:-UseG1GC", "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC",
+    "-XX:+AlwaysPreTouch", "-XX:-AlwaysPreTouch",
+    "-XX:+UseNUMA", "-XX:-UseNUMA",
+    "-XX:+UseSuperWord", "-XX:-UseSuperWord",
+    "-XX:+UnlockExperimentalVMOptions", "-XX:+UseCompactObjectHeaders",
+    "-XX:+PerfDisableSharedMem",
+    "-XX:InitiatingHeapOccupancyPercent",
+    "-XX:G1ReservePercent",
+    "-XX:MaxInlineLevel",
+    "-XX:InlineSmallCode",
+    "--enable-native-access",
+    "--add-exports=java.base/jdk.internal.misc",
+    "-Djava.awt.headless",
+)
+
 filtered_args = []
 has_lib_path = False
 for arg in existing_args:
-    if (not arg.startswith("-Xmx") and 
-        not arg.startswith("-Xms") and 
-        not arg.startswith("-agentlib:pzo_native64") and
-        not arg.startswith("-XX:+UseG1GC") and 
-        not arg.startswith("-XX:+AlwaysPreTouch") and
-        not arg.startswith("-XX:InitiatingHeapOccupancyPercent") and
-        not arg.startswith("-XX:G1ReservePercent") and
-        not arg.startswith("-XX:+PerfDisableSharedMem")):
-        
-        # Automatically sanitize Windows library path if running on Linux
-        if arg.startswith("-Djava.library.path="):
-            if "win64" in arg:
-                arg = "-Djava.library.path=linux64/:natives/:."
-            has_lib_path = True
-        filtered_args.append(arg)
+    arg_str = str(arg).strip()
+    if not arg_str:
+        continue
+    if any(arg_str.startswith(p) for p in DROP_PREFIXES):
+        continue
+    if "pzo_native64" in arg_str:
+        continue
+    # Automatically sanitize Windows library path if running on Linux
+    if arg_str.startswith("-Djava.library.path="):
+        if "win64" in arg_str:
+            arg_str = "-Djava.library.path=linux64/:natives/:."
+        has_lib_path = True
+    filtered_args.append(arg_str)
 
 if not has_lib_path:
     filtered_args.append("-Djava.library.path=linux64/:natives/:.")
@@ -603,8 +628,6 @@ pzo_args = [
     "--enable-native-access=ALL-UNNAMED",
     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 ]
-if has_native:
-    pzo_args.insert(0, "-agentlib:pzo_native64")
 
 data["vmArgs"] = filtered_args + pzo_args
 

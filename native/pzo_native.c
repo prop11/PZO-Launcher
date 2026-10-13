@@ -1544,6 +1544,18 @@ static void init_instrument_dll(void) {
         g_hInstrument = dlopen("jre/lib/libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
     }
     if (!g_hInstrument) {
+        g_hInstrument = dlopen("jre64/lib/libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_hInstrument) {
+        g_hInstrument = dlopen("jre64/lib/server/libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_hInstrument) {
+        g_hInstrument = dlopen("projectzomboid/jre64/lib/libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_hInstrument) {
+        g_hInstrument = dlopen("../jre64/lib/libinstrument.so", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_hInstrument) {
         return;
     }
     g_pAgent_OnAttach = (jint (JNICALL *)(JavaVM*, char*, void*))dlsym(g_hInstrument, "Agent_OnAttach");
@@ -1580,18 +1592,18 @@ static int build_pzo_agent_options(const char* tail, char* out, int outSize) {
 }
 
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
-    write_pzo_console("[PZONative] JVMTI Agent_OnLoad: Initializing PZO Instrumentation Bridge via instrument.dll...\n");
+    write_pzo_console("[PZONative] JVMTI Agent_OnLoad: Safe PZO Instrumentation Bridge\n");
     if (g_hInstrument == NULL) {
         init_instrument_dll();
     }
     if (!g_pAgent_OnLoad) {
-        write_pzo_console("[PZONative] Error: Could not resolve Agent_OnLoad in instrument.dll\n");
-        return -1;
+        write_pzo_console("[PZONative] Notice: instrument.dll not hooked, bypassing Agent_OnLoad without error.\n");
+        return 0; // JNI_OK - Never abort the JVM!
     }
 
     char agentOptions[PZO_AGENT_OPTIONS_MAX];
     if (!build_pzo_agent_options(options, agentOptions, sizeof(agentOptions))) {
-        return -1;
+        return 0; // JNI_OK - Never abort the JVM!
     }
 
     jint res = g_pAgent_OnLoad(vm, agentOptions, reserved);
@@ -1599,10 +1611,10 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
         write_pzo_console("[PZONative] JVMTI Agent_OnLoad: PZOptimEngine.jar successfully attached as instrumentation agent!\n");
     } else {
         char msg[128];
-        snprintf(msg, sizeof(msg), "[PZONative] Warning: instrument.dll Agent_OnLoad returned %d\n", res);
+        snprintf(msg, sizeof(msg), "[PZONative] Notice: instrument.dll Agent_OnLoad returned %d (bypassing without abort)\n", res);
         write_pzo_console(msg);
     }
-    return res;
+    return 0; // ALWAYS return JNI_OK (0) so HotSpot never terminates VM initialization
 }
 
 JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options, void *reserved) {
@@ -1610,15 +1622,16 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options, void *reserved)
         init_instrument_dll();
     }
     if (!g_pAgent_OnAttach) {
-        return -1;
+        return 0;
     }
 
     char agentOptions[PZO_AGENT_OPTIONS_MAX];
     if (!build_pzo_agent_options(options, agentOptions, sizeof(agentOptions))) {
-        return -1;
+        return 0;
     }
 
-    return g_pAgent_OnAttach(vm, agentOptions, reserved);
+    g_pAgent_OnAttach(vm, agentOptions, reserved);
+    return 0;
 }
 
 JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm) {

@@ -19,12 +19,29 @@ if [ -z "$JAVA_HOME" ]; then
             JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null || true)"
         fi
     fi
+    if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME/include" ]; then
+        for cand in /usr/lib/jvm/java-*-openjdk*/ /usr/lib/jvm/default-java/; do
+            if [ -d "${cand}include" ]; then
+                JAVA_HOME="${cand%/}"
+                break
+            fi
+        done
+    fi
     if [ -z "$JAVA_HOME" ]; then
         JAVA_BIN="$(command -v java 2>/dev/null || true)"
         if [ -n "$JAVA_BIN" ]; then
             JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$JAVA_BIN" 2>/dev/null || echo "$JAVA_BIN")")")"
         fi
     fi
+fi
+
+if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME/include" ]; then
+    for cand in /usr/lib/jvm/java-*-openjdk*/; do
+        if [ -d "${cand}include" ]; then
+            JAVA_HOME="${cand%/}"
+            break
+        fi
+    done
 fi
 
 if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME/include" ]; then
@@ -79,18 +96,30 @@ elif [ "$OS_NAME" = "Linux" ]; then
     TARGET_LIB="libpzo_native64.so"
     JNI_MD_DIR="$JAVA_HOME/include/linux"
     
-    ARCH_FLAGS=""
-    if [ "$ARCH_NAME" = "x86_64" ]; then
-        ARCH_FLAGS="-mavx2"
+    COMPILER="$CC"
+    if [ "$ARCH_NAME" != "x86_64" ] && command -v x86_64-linux-gnu-gcc >/dev/null 2>&1; then
+        COMPILER="x86_64-linux-gnu-gcc"
+        echo "[+] Cross-compiling for x86_64 using $COMPILER"
     fi
+
+    ARCH_FLAGS="-mavx2"
     
-    echo "[*] Compiling $TARGET_LIB for Linux ($ARCH_NAME)..."
-    $CC -O3 -shared -fPIC $ARCH_FLAGS \
+    echo "[*] Compiling $TARGET_LIB for Linux (x86_64 AVX2)..."
+    $COMPILER -O3 -shared -fPIC $ARCH_FLAGS \
         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
         pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl
         
     cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
     echo "[+] Successfully built: $TARGET_LIB -> dist/$TARGET_LIB"
+
+    if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+        echo "[*] Cross-compiling pzo_native64.dll for Windows (x86_64 AVX2)..."
+        x86_64-w64-mingw32-gcc -O3 -shared -mavx2 \
+            -I"$JAVA_HOME/include" -I"$SCRIPT_DIR/win32" \
+            pzo_native.c -o "pzo_native64.dll" -lpsapi -lwinmm -lavrt
+        cp -f "pzo_native64.dll" "$SCRIPT_DIR/../dist/pzo_native64.dll"
+        echo "[+] Successfully built: pzo_native64.dll -> dist/pzo_native64.dll"
+    fi
 
 else
     echo "[!] Unsupported OS: $OS_NAME. Use build_native.bat on Windows."
