@@ -559,14 +559,17 @@ if os.path.exists(json_file):
 # Set optimized main entrypoint
 data["mainClass"] = "com/pzoptimizer/PZOEntrypoint"
 
-# Preserve existing classpath and ensure PZOptimEngine.jar is present
+# Preserve existing classpath and ensure PZOptimEngine.jar and projectzomboid.jar are present
 cp = data.get("classpath", [])
 if not isinstance(cp, list):
     cp = []
-if "PZOptimEngine.jar" not in cp:
-    cp.insert(0, "PZOptimEngine.jar")
 if "." not in cp:
     cp.insert(0, ".")
+if "PZOptimEngine.jar" not in cp:
+    dot_idx = cp.index(".")
+    cp.insert(dot_idx + 1, "PZOptimEngine.jar")
+if "projectzomboid.jar" not in cp:
+    cp.append("projectzomboid.jar")
 data["classpath"] = cp
 
 # Filter and update vmArgs
@@ -614,6 +617,7 @@ if not has_lib_path:
     filtered_args.append("-Djava.library.path=linux64/:natives/:.")
 
 pzo_args = [
+    "-agentlib:pzo_native64",
     f"-Xmx{ram_mb}m",
     "-XX:+UseG1GC",
     "-XX:+PerfDisableSharedMem",
@@ -637,6 +641,23 @@ with open(json_file, 'w', encoding='utf-8') as f:
 print("[+] Successfully updated ProjectZomboid64.json preserving all game libraries.")
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
+
+    if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
+        PARENT_DIR="$(dirname "$PZ_DIR")"
+        if [ -f "$PARENT_DIR/ProjectZomboid64.json" ]; then
+            cp -f "$JSON_FILE" "$PARENT_DIR/ProjectZomboid64.json" 2>/dev/null || true
+            echo "[+] Synced ProjectZomboid64.json to parent Steam directory: $PARENT_DIR"
+        fi
+    fi
+    if [ -d "$PZ_DIR/projectzomboid" ]; then
+        cp -f "$PZ_JAR" "$PZ_DIR/projectzomboid/PZOptimEngine.jar" 2>/dev/null || true
+        cp -f "$JSON_FILE" "$PZ_DIR/projectzomboid/ProjectZomboid64.json" 2>/dev/null || true
+        mkdir -p "$PZ_DIR/projectzomboid/linux64" "$PZ_DIR/projectzomboid/natives" 2>/dev/null || true
+        cp -f "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/projectzomboid/libpzo_native64.so" 2>/dev/null || true
+        cp -f "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/projectzomboid/linux64/libpzo_native64.so" 2>/dev/null || true
+        cp -f "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/projectzomboid/natives/libpzo_native64.so" 2>/dev/null || true
+        echo "[+] Synced engine and configs to projectzomboid subfolder."
+    fi
     mkdir -p "$HOME/Zomboid/Lua"
     echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.9.5\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
