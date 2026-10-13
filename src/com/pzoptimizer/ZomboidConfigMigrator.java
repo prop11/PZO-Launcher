@@ -28,6 +28,7 @@ public final class ZomboidConfigMigrator {
     }
 
     private static final String[] REQUIRED_VM_ARGS = {
+        TARGET_AGENTLIB,
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-XX:-CreateCoredumpOnCrash",
@@ -178,7 +179,7 @@ public final class ZomboidConfigMigrator {
             }
 
             for (String arg : vmStrings) {
-                if (arg.contains("UseCompactObjectHeaders") || arg.contains(" ") || arg.contains("pzo_native64")) {
+                if (arg.contains("UseCompactObjectHeaders") || arg.contains(" ")) {
                     return true;
                 }
             }
@@ -297,7 +298,8 @@ public final class ZomboidConfigMigrator {
 
         List<String> targetArgs = new ArrayList<>();
 
-        // 3a. Native agent bridges: preserve third-party agents (e.g. ZombieBuddy) seamlessly
+        // 3a. Native agent bridges: PZO native governor and third-party agents (e.g. ZombieBuddy) seamlessly
+        targetArgs.add(TARGET_AGENTLIB);
         if (zbActive) {
             targetArgs.add("-agentlib:zbNative");
             PZOLogger.info("[ZomboidConfigMigrator] Preserved ZombieBuddy bridge (-agentlib:zbNative)");
