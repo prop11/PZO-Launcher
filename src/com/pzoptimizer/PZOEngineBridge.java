@@ -57,6 +57,10 @@ public class PZOEngineBridge {
         return true;
     }
 
+    public static boolean isZomdroid() {
+        return EngineGLStateGovernor.isMobileGLEnvironment();
+    }
+
     public static boolean isNativeGovernorActive() {
         return PZONative.isLoaded();
     }
