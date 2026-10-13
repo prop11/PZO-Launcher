@@ -96,15 +96,15 @@ public final class GCLauncherOptimizer {
             for (Object item : rawList) {
                 if (item == null) continue;
                 String s = item.toString().trim();
-                if (s.contains("UseCompactObjectHeaders") || s.contains("pzo_native64")) {
+                if (s.contains("UseCompactObjectHeaders")) {
                     changed = true;
-                    continue; // Strip invalid or legacy flags
+                    continue; // Strip invalid flag
                 }
                 if (s.contains(" ")) {
                     // Split corrupted arguments with spaces
                     String[] tokens = s.split("\\s+");
                     for (String tok : tokens) {
-                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !tok.contains("pzo_native64") && !vmArgs.contains(tok)) {
+                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
                             vmArgs.add(tok);
                         }
                     }
@@ -126,6 +126,11 @@ public final class GCLauncherOptimizer {
                 }
             }
 
+            if (!vmArgs.contains(ZomboidConfigMigrator.TARGET_AGENTLIB)) {
+                vmArgs.add(0, ZomboidConfigMigrator.TARGET_AGENTLIB);
+                changed = true;
+            }
+
             // Also inspect windows platform-specific blocks if present
             Object winObj = root.get("windows");
             if (winObj instanceof Map) {
@@ -143,7 +148,7 @@ public final class GCLauncherOptimizer {
                             for (Object vItem : verRawList) {
                                 if (vItem == null) continue;
                                 String vs = vItem.toString().trim();
-                                if (vs.contains("pzo_native64") || vs.contains("UseCompactObjectHeaders")) {
+                                if (vs.contains("pzo_native64") || vs.contains("UseCompactObjectHeaders") || vs.contains("zbNative")) {
                                     verChanged = true;
                                     continue;
                                 }
