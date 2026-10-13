@@ -28,7 +28,6 @@ public final class ZomboidConfigMigrator {
     }
 
     private static final String[] REQUIRED_VM_ARGS = {
-        TARGET_AGENTLIB,
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-XX:-CreateCoredumpOnCrash",
@@ -179,7 +178,7 @@ public final class ZomboidConfigMigrator {
             }
 
             for (String arg : vmStrings) {
-                if (arg.contains("UseCompactObjectHeaders") || arg.contains(" ")) {
+                if (arg.contains("UseCompactObjectHeaders") || arg.contains(" ") || arg.contains("pzo_native64")) {
                     return true;
                 }
             }
@@ -273,7 +272,7 @@ public final class ZomboidConfigMigrator {
             arg = arg.trim();
             if (arg.startsWith("-Djava.awt.headless")) continue; // PZO requires GUI/AWT
             if (arg.startsWith("-Djava.library.path=")) continue; // will normalize below
-            if (arg.equals(TARGET_AGENTLIB)) continue; // will place deterministically
+            if (arg.equals(TARGET_AGENTLIB) || arg.contains("pzo_native64")) continue; // Strip legacy agentlib
             if (arg.contains("zbNative")) continue; // will preserve deterministically
             if (arg.contains("UseCompactObjectHeaders")) continue; // Incompatible with Java 17
 
@@ -281,7 +280,7 @@ public final class ZomboidConfigMigrator {
             if (arg.contains(" ")) {
                 String[] tokens = arg.split("\\s+");
                 for (String tok : tokens) {
-                    if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !userCleanArgs.contains(tok)) {
+                    if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !tok.contains("pzo_native64") && !userCleanArgs.contains(tok)) {
                         userCleanArgs.add(tok);
                     }
                 }
@@ -298,8 +297,7 @@ public final class ZomboidConfigMigrator {
 
         List<String> targetArgs = new ArrayList<>();
 
-        // 3a. Native agent bridges first
-        targetArgs.add(TARGET_AGENTLIB);
+        // 3a. Native agent bridges: preserve third-party agents (e.g. ZombieBuddy) seamlessly
         if (zbActive) {
             targetArgs.add("-agentlib:zbNative");
             PZOLogger.info("[ZomboidConfigMigrator] Preserved ZombieBuddy bridge (-agentlib:zbNative)");
