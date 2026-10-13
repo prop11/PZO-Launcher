@@ -63,6 +63,7 @@ $Json5OrLess = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-agentlib:pzo_native64",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms2048m",
@@ -106,6 +107,7 @@ $Json6To12 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-agentlib:pzo_native64",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms3072m",
@@ -150,6 +152,7 @@ $Json13To20_G1GC = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-agentlib:pzo_native64",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -194,6 +197,7 @@ $Json13To20_ZGC = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-agentlib:pzo_native64",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -239,6 +243,7 @@ $JsonAbove20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
+        "-agentlib:pzo_native64",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms8192m",
@@ -568,12 +573,15 @@ function Apply-PZOConfiguration {
         }
     }
 
-    # Strip legacy -agentlib:pzo_native64 to prevent HotSpot pre-window JVMTI initialization aborts
-    $chosenJson = $chosenJson -replace '\s*"-agentlib:pzo_native64",?', ''
-
-    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in vmArgs
+    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside -agentlib:pzo_native64
     if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
-        $chosenJson = $chosenJson.Replace('"vmArgs": [', '"vmArgs": [' + "`n        " + '"-agentlib:zbNative",')
+        $chosenJson = $chosenJson.Replace('"-agentlib:pzo_native64",', '"-agentlib:zbNative",' + "`n        " + '"-agentlib:pzo_native64",')
+    }
+
+    # If ZombieBuddy.jar exists in game directory, preserve it in classpath alongside PZOptimEngine.jar
+    $zbJarPath = [System.IO.Path]::Combine($InstallPath, "ZombieBuddy.jar")
+    if ((Test-Path -LiteralPath $zbJarPath) -and ($chosenJson -notmatch "ZombieBuddy\.jar")) {
+        $chosenJson = $chosenJson.Replace('"projectzomboid.jar"', '"ZombieBuddy.jar",' + "`n        " + '"projectzomboid.jar"')
     }
 
     Write-JsonNoBOM $TargetFilePath $chosenJson
