@@ -96,15 +96,15 @@ public final class GCLauncherOptimizer {
             for (Object item : rawList) {
                 if (item == null) continue;
                 String s = item.toString().trim();
-                if (s.contains("UseCompactObjectHeaders")) {
+                if (s.contains("UseCompactObjectHeaders") || s.contains("pzo_native64")) {
                     changed = true;
-                    continue; // Strip invalid flag
+                    continue; // Strip invalid or legacy flags
                 }
                 if (s.contains(" ")) {
                     // Split corrupted arguments with spaces
                     String[] tokens = s.split("\\s+");
                     for (String tok : tokens) {
-                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
+                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !tok.contains("pzo_native64") && !vmArgs.contains(tok)) {
                             vmArgs.add(tok);
                         }
                     }
@@ -143,6 +143,10 @@ public final class GCLauncherOptimizer {
                             for (Object vItem : verRawList) {
                                 if (vItem == null) continue;
                                 String vs = vItem.toString().trim();
+                                if (vs.contains("pzo_native64") || vs.contains("UseCompactObjectHeaders")) {
+                                    verChanged = true;
+                                    continue;
+                                }
                                 if (wantG1 && "-XX:+UseZGC".equals(vs)) {
                                     verChanged = true;
                                     if (!verArgs.contains("-XX:+UseG1GC")) {
