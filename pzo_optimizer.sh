@@ -109,6 +109,21 @@ clean_lua_bridge_files() {
         sed -i.bak 's/Threading.Lighting=true/Threading.Lighting=false/g' "$DEBUG_OPT" 2>/dev/null || true
         rm -f "${DEBUG_OPT}.bak"
     fi
+    # Also clean Proton prefix bridge files
+    for pfx in "$HOME/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
+               "$HOME/.steam/steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
+               "$HOME/.steam/root/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
+               "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
+               "/run/media/mmcblk0p1/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
+               "/run/media/deck"/*/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid \
+               "/run/media"/*/*/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid \
+               "/media"/*/*/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid; do
+        if [ -d "$pfx/Lua" ]; then
+            rm -f "$pfx/Lua"/pzo_* "$pfx/Lua/pzo_status.json" "$pfx/Lua/pzo_update.json" "$pfx/Lua/pzo_telemetry.json" "$pfx/Lua/pzo_engine.log"
+            rm -f "$pfx"/pzo_*
+            echo "[+] Purged PZO bridge files from Proton prefix: $pfx/Lua/"
+        fi
+    done
 }
 
 # ==============================================================================
@@ -460,7 +475,11 @@ else
                 ;;
             2)
                 echo "[*] Uninstalling PZOptimEngine..."
-                rm -f "$INSTALLED_JAR"
+                rm -f "$INSTALLED_JAR" "$PZ_DIR/pzo_native64.dll" "$PZ_DIR/win64/pzo_native64.dll" "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/linux64/libpzo_native64.so" "$PZ_DIR/natives/libpzo_native64.so"
+                if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
+                    PARENT_DIR="$(dirname "$PZ_DIR")"
+                    rm -f "$PARENT_DIR/PZOptimEngine.jar" "$PARENT_DIR/pzo_native64.dll" "$PARENT_DIR/win64/pzo_native64.dll" "$PARENT_DIR/libpzo_native64.so" "$PARENT_DIR/linux64/libpzo_native64.so"
+                fi
                 if [ -f "${JSON_FILE}.bak" ]; then
                     cp -f "${JSON_FILE}.bak" "$JSON_FILE"
                     echo "[+] Restored original ProjectZomboid64.json from backup."
@@ -482,8 +501,21 @@ else
         esac
     fi
 
-    # Check for ZombieBuddy conflict on Linux
-    if [ -f "$PZ_DIR/ZombieBuddy.jar" ] || [ -f "$PZ_DIR/zbNative.so" ] || [ -f "$PZ_DIR/zbNative.dylib" ] || [ -f "$PZ_DIR/zombiebuddy.json" ]; then
+    # Detect whether the game is running as Windows depot via Proton / Wine or Native Linux
+    IS_PROTON=0
+    if [ -f "$PZ_DIR/ProjectZomboid64.exe" ] || [ -d "$PZ_DIR/win64" ] || [ -f "$(dirname "$PZ_DIR")/ProjectZomboid64.exe" ] || [ -d "$(dirname "$PZ_DIR")/win64" ]; then
+        IS_PROTON=1
+        echo "[+] Environment Detected: Windows Depot under Steam Deck Proton / Wine"
+        echo "    Using Windows binaries (pzo_native64.dll) and win64/ library paths."
+    else
+        echo "[+] Environment Detected: Native Linux"
+        echo "    Using Linux binaries (libpzo_native64.so) and linux64/ library paths."
+    fi
+
+    # Check for ZombieBuddy conflict / coexistence
+    IS_ZB_ACTIVE=0
+    if [ -f "$PZ_DIR/ZombieBuddy.jar" ] || [ -f "$PZ_DIR/win64/zbNative.dll" ] || [ -f "$PZ_DIR/zbNative.dll" ] || [ -f "$PZ_DIR/zbNative.so" ] || [ -f "$PZ_DIR/zbNative.dylib" ] || [ -f "$PZ_DIR/zombiebuddy.json" ] || [ -f "$(dirname "$PZ_DIR")/ZombieBuddy.jar" ]; then
+        IS_ZB_ACTIVE=1
         echo ""
         echo "========================================================================"
         echo "[!] CONFLICT DETECTED: ZombieBuddy is currently installed"
@@ -509,26 +541,77 @@ else
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
-    # Install libpzo_native64.so if present
-    HAS_NATIVE_SO=0
-    for so_c in "$SCRIPT_DIR/libpzo_native64.so" "$SCRIPT_DIR/dist/libpzo_native64.so" "$SCRIPT_DIR/../dist/libpzo_native64.so" "$SCRIPT_DIR/native/libpzo_native64.so"; do
-        if [ -f "$so_c" ]; then
-            cp -f "$so_c" "$PZ_DIR/libpzo_native64.so"
-            mkdir -p "$PZ_DIR/linux64" "$PZ_DIR/natives" 2>/dev/null || true
-            cp -f "$so_c" "$PZ_DIR/linux64/libpzo_native64.so" 2>/dev/null || true
-            cp -f "$so_c" "$PZ_DIR/natives/libpzo_native64.so" 2>/dev/null || true
-            if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
-                cp -f "$so_c" "$(dirname "$PZ_DIR")/libpzo_native64.so" 2>/dev/null || true
-            fi
-            HAS_NATIVE_SO=1
-            echo "[+] Installed native companion: libpzo_native64.so"
+    # Install companion native libraries:
+    # 1. Windows / Proton companion: pzo_native64.dll
+    DLL_SRC=""
+    for d_c in "$SCRIPT_DIR/pzo_native64.dll" "$SCRIPT_DIR/dist/pzo_native64.dll" "$SCRIPT_DIR/../dist/pzo_native64.dll" "$SCRIPT_DIR/native/pzo_native64.dll" "$PWD/pzo_native64.dll"; do
+        if [ -f "$d_c" ]; then
+            DLL_SRC="$d_c"
             break
         fi
     done
 
+    if [ -z "$DLL_SRC" ] && [ "$IS_PROTON" -eq 1 ]; then
+        echo "[*] Downloading pzo_native64.dll from GitHub Releases for Proton..."
+        TARGET_DLL="$SCRIPT_DIR/pzo_native64.dll"
+        DLL_URL="https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL -A "PZO-Installer" "$DLL_URL" -o "$TARGET_DLL" || true
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q -U "PZO-Installer" "$DLL_URL" -O "$TARGET_DLL" || true
+        fi
+        [ -f "$TARGET_DLL" ] && DLL_SRC="$TARGET_DLL"
+    fi
+
+    if [ -n "$DLL_SRC" ]; then
+        cp -f "$DLL_SRC" "$PZ_DIR/pzo_native64.dll"
+        mkdir -p "$PZ_DIR/win64" 2>/dev/null || true
+        cp -f "$DLL_SRC" "$PZ_DIR/win64/pzo_native64.dll" 2>/dev/null || true
+        if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
+            cp -f "$DLL_SRC" "$(dirname "$PZ_DIR")/pzo_native64.dll" 2>/dev/null || true
+            mkdir -p "$(dirname "$PZ_DIR")/win64" 2>/dev/null || true
+            cp -f "$DLL_SRC" "$(dirname "$PZ_DIR")/win64/pzo_native64.dll" 2>/dev/null || true
+        fi
+        echo "[+] Installed Windows / Proton native companion: pzo_native64.dll"
+    fi
+
+    # 2. Linux native companion: libpzo_native64.so
+    SO_SRC=""
+    for so_c in "$SCRIPT_DIR/libpzo_native64.so" "$SCRIPT_DIR/dist/libpzo_native64.so" "$SCRIPT_DIR/../dist/libpzo_native64.so" "$SCRIPT_DIR/native/libpzo_native64.so" "$PWD/libpzo_native64.so"; do
+        if [ -f "$so_c" ]; then
+            SO_SRC="$so_c"
+            break
+        fi
+    done
+
+    if [ -z "$SO_SRC" ] && [ "$IS_PROTON" -eq 0 ]; then
+        echo "[*] Downloading libpzo_native64.so from GitHub Releases for Linux..."
+        TARGET_SO="$SCRIPT_DIR/libpzo_native64.so"
+        SO_URL="https://github.com/prop11/PZO-Launcher/releases/latest/download/libpzo_native64.so"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL -A "PZO-Installer" "$SO_URL" -o "$TARGET_SO" || true
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q -U "PZO-Installer" "$SO_URL" -O "$TARGET_SO" || true
+        fi
+        [ -f "$TARGET_SO" ] && SO_SRC="$TARGET_SO"
+    fi
+
+    if [ -n "$SO_SRC" ]; then
+        cp -f "$SO_SRC" "$PZ_DIR/libpzo_native64.so"
+        mkdir -p "$PZ_DIR/linux64" "$PZ_DIR/natives" 2>/dev/null || true
+        cp -f "$SO_SRC" "$PZ_DIR/linux64/libpzo_native64.so" 2>/dev/null || true
+        cp -f "$SO_SRC" "$PZ_DIR/natives/libpzo_native64.so" 2>/dev/null || true
+        if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
+            cp -f "$SO_SRC" "$(dirname "$PZ_DIR")/libpzo_native64.so" 2>/dev/null || true
+            mkdir -p "$(dirname "$PZ_DIR")/linux64" 2>/dev/null || true
+            cp -f "$SO_SRC" "$(dirname "$PZ_DIR")/linux64/libpzo_native64.so" 2>/dev/null || true
+        fi
+        echo "[+] Installed Linux native companion: libpzo_native64.so"
+    fi
+
     if [ "$(basename "$PZ_DIR")" = "projectzomboid" ]; then
         PARENT_DIR="$(dirname "$PZ_DIR")"
-        if [ -f "$PARENT_DIR/ProjectZomboid64.json" ] || [ -f "$PARENT_DIR/projectzomboid.sh" ]; then
+        if [ -f "$PARENT_DIR/ProjectZomboid64.json" ] || [ -f "$PARENT_DIR/projectzomboid.sh" ] || [ -f "$PARENT_DIR/ProjectZomboid64.exe" ]; then
             cp -f "$PZ_JAR" "$PARENT_DIR/PZOptimEngine.jar" 2>/dev/null || true
             echo "[+] Mirrored PZOptimEngine.jar to parent Steam directory: $PARENT_DIR"
         fi
@@ -540,13 +623,14 @@ else
     fi
 
     # Safely update JSON while preserving existing classpath and libraries using Python
-    python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB" "$HAS_NATIVE_SO"
+    python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB" "$IS_PROTON" "$IS_ZB_ACTIVE"
 import sys, json, os
 
 json_file = sys.argv[1]
-alloc_ram = sys.argv[2]
-ram_mb = sys.argv[3]
-has_native = (len(sys.argv) > 4 and sys.argv[4] == "1")
+alloc_ram = int(sys.argv[2])
+ram_mb = int(sys.argv[3])
+is_proton = (len(sys.argv) > 4 and sys.argv[4] == "1")
+is_zb_active = (len(sys.argv) > 5 and sys.argv[5] == "1")
 
 data = {}
 if os.path.exists(json_file):
@@ -568,6 +652,9 @@ if "." not in cp:
 if "PZOptimEngine.jar" not in cp:
     dot_idx = cp.index(".")
     cp.insert(dot_idx + 1, "PZOptimEngine.jar")
+if is_zb_active and "ZombieBuddy.jar" not in cp:
+    pzo_idx = cp.index("PZOptimEngine.jar")
+    cp.insert(pzo_idx + 1, "ZombieBuddy.jar")
 if "projectzomboid.jar" not in cp:
     cp.append("projectzomboid.jar")
 data["classpath"] = cp
@@ -579,7 +666,7 @@ if not isinstance(existing_args, list):
 
 DROP_PREFIXES = (
     "-Xmx", "-Xms",
-    "-agentlib:pzo_native64",
+    "-agentlib:pzo_native64", "-agentlib:zbNative",
     "-XX:+UseZGC", "-XX:-UseZGC", "-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZCollection", "-XX:ZAllocationSpikeTolerance",
     "-XX:+UseG1GC", "-XX:-UseG1GC", "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC",
     "-XX:+AlwaysPreTouch", "-XX:-AlwaysPreTouch",
@@ -594,6 +681,10 @@ DROP_PREFIXES = (
     "--enable-native-access",
     "--add-exports=java.base/jdk.internal.misc",
     "-Djava.awt.headless",
+    "-Dzomboid.steam",
+    "-Dzomboid.znetlog",
+    "-XX:-CreateCoredumpOnCrash",
+    "-XX:-OmitStackTraceInFastThrow",
 )
 
 filtered_args = []
@@ -604,41 +695,95 @@ for arg in existing_args:
         continue
     if any(arg_str.startswith(p) for p in DROP_PREFIXES):
         continue
-    if "pzo_native64" in arg_str:
+    if "pzo_native64" in arg_str or "zbNative" in arg_str:
         continue
-    # Automatically sanitize Windows library path if running on Linux
+
+    # Library path handling
     if arg_str.startswith("-Djava.library.path="):
-        if "win64" in arg_str:
-            arg_str = "-Djava.library.path=linux64/:natives/:."
+        if is_proton:
+            if "win64" not in arg_str:
+                arg_str = "-Djava.library.path=win64/;natives/;."
+        else:
+            if "win64" in arg_str:
+                arg_str = "-Djava.library.path=linux64/:natives/:."
         has_lib_path = True
     filtered_args.append(arg_str)
 
 if not has_lib_path:
-    filtered_args.append("-Djava.library.path=linux64/:natives/:.")
+    if is_proton:
+        filtered_args.append("-Djava.library.path=win64/;natives/;.")
+    else:
+        filtered_args.append("-Djava.library.path=linux64/:natives/:.")
 
-pzo_args = [
-    "-agentlib:pzo_native64",
-    f"-Xmx{ram_mb}m",
-    "-XX:+UseG1GC",
-    "-XX:+PerfDisableSharedMem",
-    "-XX:InitiatingHeapOccupancyPercent=45",
-    "-XX:G1ReservePercent=15",
-    "-XX:+AlwaysPreTouch",
-    "-XX:+UnlockExperimentalVMOptions",
-    "-XX:+UseSuperWord",
-    "-XX:MaxInlineLevel=15",
-    "-XX:InlineSmallCode=2500",
-    "-XX:+UseNUMA",
-    "--enable-native-access=ALL-UNNAMED",
-    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
-]
+# Build pzo_args
+pzo_args = []
+if is_zb_active:
+    pzo_args.append("-agentlib:zbNative")
+pzo_args.append("-agentlib:pzo_native64")
+
+if is_proton:
+    pzo_args.extend([
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        f"-Xms{min(4096, ram_mb // 2)}m",
+        f"-Xmx{ram_mb}m",
+        "-Dzomboid.steam=1",
+        "-Dzomboid.znetlog=1",
+        "-XX:-CreateCoredumpOnCrash",
+        "-XX:-OmitStackTraceInFastThrow",
+        "-XX:+PerfDisableSharedMem",
+        "-XX:+UnlockExperimentalVMOptions",
+        "-XX:+UseSuperWord",
+        "-XX:MaxInlineLevel=15",
+        "-XX:InlineSmallCode=2500",
+        "-XX:+UseNUMA",
+        "-XX:+AlwaysPreTouch"
+    ])
+    # Platform sub-blocks for Windows 6.1 and 10.0 (sanitizing any duplicate agentlib entries)
+    data["windows"] = {
+        "6.1": {
+            "vmArgs": [
+                "-XX:+UseG1GC"
+            ]
+        },
+        "10.0.17134": {
+            "vmArgs": [
+                "-XX:+UseG1GC",
+                "-XX:InitiatingHeapOccupancyPercent=45",
+                "-XX:G1ReservePercent=15",
+                "-XX:+UseStringDeduplication"
+            ]
+        }
+    }
+else:
+    # Native Linux
+    pzo_args.extend([
+        f"-Xmx{ram_mb}m",
+        "-XX:+UseG1GC",
+        "-XX:+PerfDisableSharedMem",
+        "-XX:InitiatingHeapOccupancyPercent=45",
+        "-XX:G1ReservePercent=15",
+        "-XX:+AlwaysPreTouch",
+        "-XX:+UnlockExperimentalVMOptions",
+        "-XX:+UseSuperWord",
+        "-XX:MaxInlineLevel=15",
+        "-XX:InlineSmallCode=2500",
+        "-XX:+UseNUMA",
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
+    ])
+    if "windows" in data:
+        del data["windows"]
 
 data["vmArgs"] = filtered_args + pzo_args
 
 with open(json_file, 'w', encoding='utf-8') as f:
     json.dump(data, f, indent=4)
 
-print("[+] Successfully updated ProjectZomboid64.json preserving all game libraries.")
+if is_proton:
+    print("[+] Successfully configured ProjectZomboid64.json for Windows Depot (Steam Deck Proton / Wine).")
+else:
+    print("[+] Successfully configured ProjectZomboid64.json for Native Linux.")
 EOF
     echo "[+] Updated ProjectZomboid64.json with B42 heap & entrypoint."
 
@@ -652,21 +797,48 @@ EOF
     if [ -d "$PZ_DIR/projectzomboid" ]; then
         cp -f "$PZ_JAR" "$PZ_DIR/projectzomboid/PZOptimEngine.jar" 2>/dev/null || true
         cp -f "$JSON_FILE" "$PZ_DIR/projectzomboid/ProjectZomboid64.json" 2>/dev/null || true
-        mkdir -p "$PZ_DIR/projectzomboid/linux64" "$PZ_DIR/projectzomboid/natives" 2>/dev/null || true
-        cp -f "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/projectzomboid/libpzo_native64.so" 2>/dev/null || true
-        cp -f "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/projectzomboid/linux64/libpzo_native64.so" 2>/dev/null || true
-        cp -f "$PZ_DIR/libpzo_native64.so" "$PZ_DIR/projectzomboid/natives/libpzo_native64.so" 2>/dev/null || true
+        if [ "$IS_PROTON" -eq 1 ]; then
+            mkdir -p "$PZ_DIR/projectzomboid/win64" 2>/dev/null || true
+            [ -n "$DLL_SRC" ] && cp -f "$DLL_SRC" "$PZ_DIR/projectzomboid/pzo_native64.dll" 2>/dev/null || true
+            [ -n "$DLL_SRC" ] && cp -f "$DLL_SRC" "$PZ_DIR/projectzomboid/win64/pzo_native64.dll" 2>/dev/null || true
+        else
+            mkdir -p "$PZ_DIR/projectzomboid/linux64" "$PZ_DIR/projectzomboid/natives" 2>/dev/null || true
+            [ -n "$SO_SRC" ] && cp -f "$SO_SRC" "$PZ_DIR/projectzomboid/libpzo_native64.so" 2>/dev/null || true
+            [ -n "$SO_SRC" ] && cp -f "$SO_SRC" "$PZ_DIR/projectzomboid/linux64/libpzo_native64.so" 2>/dev/null || true
+            [ -n "$SO_SRC" ] && cp -f "$SO_SRC" "$PZ_DIR/projectzomboid/natives/libpzo_native64.so" 2>/dev/null || true
+        fi
         echo "[+] Synced engine and configs to projectzomboid subfolder."
     fi
     mkdir -p "$HOME/Zomboid/Lua"
     echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"0.9.9.5\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 
-    # Also sync to Proton prefix if it exists on Steam Deck
-    for pfx in "$HOME/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid" \
-               "$HOME/.steam/steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"; do
-        if [ -d "$pfx" ]; then
-            mkdir -p "$pfx/Lua"
+    # Also sync to Proton prefixes across all drives & SD cards on Steam Deck
+    PROTON_CANDIDATES=(
+        "$HOME/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
+        "$HOME/.steam/steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
+        "$HOME/.steam/root/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
+        "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
+        "/run/media/mmcblk0p1/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
+        "/run/media/deck"/*/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid
+        "/run/media"/*/*/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid
+        "/media"/*/*/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid
+    )
+    for vdf in "$HOME/.local/share/Steam/steamapps/libraryfolders.vdf" \
+               "$HOME/.steam/root/steamapps/libraryfolders.vdf" \
+               "$HOME/.steam/steam/steamapps/libraryfolders.vdf" \
+               "$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"; do
+        if [ -f "$vdf" ]; then
+            while IFS= read -r lib; do
+                PROTON_CANDIDATES+=(
+                    "$lib/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
+                )
+            done < <(sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"/\1/p' "$vdf")
+        fi
+    done
+    for pfx in "${PROTON_CANDIDATES[@]}"; do
+        if [ -d "$pfx" ] || [ -d "$(dirname "$pfx")" ]; then
+            mkdir -p "$pfx/Lua" 2>/dev/null || true
             cp -f "$HOME/Zomboid/Lua/pzo_status.json" "$pfx/Lua/pzo_status.json" 2>/dev/null || true
             echo "[+] Synced Lua bridge status to Proton prefix: $pfx/Lua/pzo_status.json"
         fi
@@ -674,7 +846,7 @@ EOF
 
     # Restore correct ownership if executed under sudo on Linux / Steam Deck
     if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
-        chown -R "$SUDO_USER:$SUDO_USER" "$HOME/Zomboid" "$PZ_DIR/PZOptimEngine.jar" "$PZ_DIR/ProjectZomboid64.json"* "$PZ_DIR/libpzo_native64.so"* 2>/dev/null || true
+        chown -R "$SUDO_USER:$SUDO_USER" "$HOME/Zomboid" "$PZ_DIR/PZOptimEngine.jar" "$PZ_DIR/ProjectZomboid64.json"* "$PZ_DIR/libpzo_native64.so"* "$PZ_DIR/pzo_native64.dll"* 2>/dev/null || true
     fi
 fi
 
