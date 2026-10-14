@@ -200,4 +200,4 @@ python3 package_release.py
 ---
 
 ## License
-Licensed under the [MIT License](LICENSE).
+Licensed under the [GNU General Public License v3.0 (GPL-3.0)](LICENSE).
