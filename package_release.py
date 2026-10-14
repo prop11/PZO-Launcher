@@ -120,7 +120,7 @@ def main():
     # 4. Package PZO_Optimizer_macOS_Linux.zip
     mac_linux_zip = os.path.join(dist_dir, "PZO_Optimizer_macOS_Linux.zip")
     with zipfile.ZipFile(mac_linux_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["pzo_optimizer.sh", "pzo_optimizer.command", "PZOptimEngine.jar", "README.md", "libpzo_native64.so", "libpzo_native64.dylib"]:
+        for f in ["pzo_optimizer.sh", "pzo_optimizer.command", "PZOptimEngine.jar", "README.md", "pzo_native64.dll", "libpzo_native64.so", "libpzo_native64.dylib"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
                 add_file_to_archive(zf, fp, f)
