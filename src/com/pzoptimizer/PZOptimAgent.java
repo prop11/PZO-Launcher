@@ -4,6 +4,8 @@ import java.io.*;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Project Zomboid Build 42 - Runtime JVM Instrumentation Agent & Java Mod Loader.
@@ -122,6 +124,10 @@ public class PZOptimAgent {
                 return patchTexturePackDevice(classfileBuffer);
             }
             if ("zombie/iso/weather/fog/ImprovedFogDrawer".equals(className) && classfileBuffer != null) {
+                if (ViewpointStanddownGovernor.isStanddownActive()) {
+                    PZOLogger.info("[PZO Agent] Project Viewpoint standdown active - skipping ImprovedFogDrawer bytecode transform to ensure 3D mod compatibility.");
+                    return null;
+                }
                 return patchImprovedFogDrawer(classfileBuffer);
             }
             return null;
@@ -1303,12 +1309,20 @@ public class PZOptimAgent {
                             caDos.writeShort(exTableLen);
                             caDos.write(exTable);
 
-                            caDos.writeShort(codeAttrs);
+                            List<Integer> retainedAttrNames = new ArrayList<>();
+                            List<byte[]> retainedAttrPayloads = new ArrayList<>();
+
                             for (int ca = 0; ca < codeAttrs; ca++) {
                                 int canameIdx = dis.readUnsignedShort();
                                 int calen = dis.readInt();
                                 byte[] cadata = dis.readNBytes(calen);
                                 String caname = (canameIdx > 0 && canameIdx < cpCount) ? utf8Strings[canameIdx] : "";
+
+                                // Strip LocalVariableTable, LocalVariableTypeTable, and LineNumberTable to prevent JVM verifier ClassFormatError
+                                // caused by bytecode length and instruction boundary shifts after prepending the 8-byte prefix
+                                if ("LocalVariableTable".equals(caname) || "LocalVariableTypeTable".equals(caname) || "LineNumberTable".equals(caname)) {
+                                    continue;
+                                }
 
                                 if ("StackMapTable".equals(caname)) {
                                     // Adjust StackMapTable: prepend same_frame(8) and decrement first frame delta by 1
@@ -1359,15 +1373,19 @@ public class PZOptimAgent {
                                         byte[] remainingSm = smDis.readAllBytes();
                                         smDos.write(remainingSm);
                                     }
-                                    byte[] newSm = smBaos.toByteArray();
-                                    caDos.writeShort(canameIdx);
-                                    caDos.writeInt(newSm.length);
-                                    caDos.write(newSm);
+                                    retainedAttrNames.add(canameIdx);
+                                    retainedAttrPayloads.add(smBaos.toByteArray());
                                 } else {
-                                    caDos.writeShort(canameIdx);
-                                    caDos.writeInt(calen);
-                                    caDos.write(cadata);
+                                    retainedAttrNames.add(canameIdx);
+                                    retainedAttrPayloads.add(cadata);
                                 }
+                            }
+
+                            caDos.writeShort(retainedAttrNames.size());
+                            for (int k = 0; k < retainedAttrNames.size(); k++) {
+                                caDos.writeShort(retainedAttrNames.get(k));
+                                caDos.writeInt(retainedAttrPayloads.get(k).length);
+                                caDos.write(retainedAttrPayloads.get(k));
                             }
 
                             byte[] caBytes = caBaos.toByteArray();

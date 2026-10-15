@@ -169,7 +169,7 @@ public final class FogQuarterBufferGovernor {
     private FogQuarterBufferGovernor() {}
 
     public static boolean isActive() {
-        return active && !fallback;
+        return active && !fallback && !ViewpointStanddownGovernor.isStanddownActive();
     }
 
     public static void setActive(boolean value) {
@@ -433,7 +433,7 @@ public final class FogQuarterBufferGovernor {
      * If unsupported, disabled, or an error occurs, returns false to run the vanilla drawer seamlessly.
      */
     public static boolean render(Object drawerInstance) {
-        if (!active || fallback || drawerInstance == null) {
+        if (!active || fallback || drawerInstance == null || ViewpointStanddownGovernor.isStanddownActive()) {
             return false;
         }
 

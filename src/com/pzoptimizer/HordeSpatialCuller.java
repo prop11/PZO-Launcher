@@ -153,6 +153,9 @@ public final class HordeSpatialCuller {
     }
 
     public static void processSpatialSweep() {
+        if (ViewpointStanddownGovernor.isStanddownActive()) {
+            return;
+        }
         if (!SpatialBufferPool.isInitialized()) return;
 
         try {
@@ -265,6 +268,9 @@ public final class HordeSpatialCuller {
     }
 
     public static int getLODTier(int zombieIndex) {
+        if (ViewpointStanddownGovernor.isStanddownActive()) {
+            return 0; // Highest fidelity when 3D mod is active
+        }
         if (zombieIndex >= 0 && zombieIndex < snapshotCount) {
             return SNAPSHOT_TIERS[zombieIndex];
         }
@@ -272,6 +278,9 @@ public final class HordeSpatialCuller {
     }
 
     public static boolean isOffscreen(int zombieIndex) {
+        if (ViewpointStanddownGovernor.isStanddownActive()) {
+            return false; // Never cull offscreen when 3D camera / Viewpoint is active
+        }
         if (zombieIndex >= 0 && zombieIndex < snapshotCount) {
             return SNAPSHOT_MASK[zombieIndex] == 0;
         }
