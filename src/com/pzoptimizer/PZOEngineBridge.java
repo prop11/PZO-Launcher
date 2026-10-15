@@ -201,6 +201,34 @@ public class PZOEngineBridge {
         return WorldUpscalerGovernor.isActive();
     }
 
+    public static double getWorldUpscalerRenderScale() {
+        return WorldUpscalerGovernor.getRenderScale();
+    }
+
+    public static double getWorldUpscalerSharpness() {
+        return WorldUpscalerGovernor.getSharpness();
+    }
+
+    public static boolean isViewpointStanddownActive() {
+        return ViewpointStanddownGovernor.isStanddownActive();
+    }
+
+    public static boolean isViewpointDetected() {
+        return ViewpointStanddownGovernor.isViewpointDetected();
+    }
+
+    public static String getViewpointStanddownMode() {
+        return ViewpointStanddownGovernor.getStanddownModeString();
+    }
+
+    public static void setViewpointStanddownMode(String mode) {
+        ViewpointStanddownGovernor.setStanddownMode(mode);
+    }
+
+    public static void toggleViewpointStanddown() {
+        ViewpointStanddownGovernor.toggleStanddown();
+    }
+
     public static void acknowledgeMultithreadingNotice() {
         PZOConfig.setMultithreadingNoticeAcknowledged(true);
     }
@@ -865,6 +893,110 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "isWorldUpscalerActive", isWorldUpscalerActiveFunc);
 
+                                        // getWorldUpscalerRenderScale
+                                        Object getUpscalerScaleFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(WorldUpscalerGovernor.getRenderScale()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getWorldUpscalerRenderScale", getUpscalerScaleFunc);
+
+                                        // getWorldUpscalerSharpness
+                                        Object getUpscalerSharpFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Double.valueOf(WorldUpscalerGovernor.getSharpness()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getWorldUpscalerSharpness", getUpscalerSharpFunc);
+
+                                        // isViewpointStanddownActive
+                                        Object isStanddownActiveFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(ViewpointStanddownGovernor.isStanddownActive()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isViewpointStanddownActive", isStanddownActiveFunc);
+
+                                        // isViewpointDetected
+                                        Object isViewpointDetectedFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], Boolean.valueOf(ViewpointStanddownGovernor.isViewpointDetected()));
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "isViewpointDetected", isViewpointDetectedFunc);
+
+                                        // getViewpointStanddownMode
+                                        Object getViewpointModeFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    pushObj.invoke(mArgs[0], ViewpointStanddownGovernor.getStanddownModeString());
+                                                    return 1;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "getViewpointStanddownMode", getViewpointModeFunc);
+
+                                        // setStanddownMode / setViewpointStanddownMode
+                                        Object setStanddownModeFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    try {
+                                                        Object arg = getArg.invoke(mArgs[0], 0);
+                                                        if (arg != null) {
+                                                            ViewpointStanddownGovernor.setStanddownMode(arg.toString());
+                                                        }
+                                                    } catch (Throwable ignored) {}
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "setStanddownMode", setStanddownModeFunc);
+                                        tableRawset.invoke(pzoTable, "setViewpointStanddownMode", setStanddownModeFunc);
+
+                                        // toggleViewpointStanddown
+                                        Object toggleStanddownFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    ViewpointStanddownGovernor.toggleStanddown();
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "toggleViewpointStanddown", toggleStanddownFunc);
+
                                         // acknowledgeMultithreadingNotice
                                         Object ackNoticeFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
@@ -972,7 +1104,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.5\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"0.9.9.5-unstable\"\n" +
                                             "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                             "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
@@ -1163,6 +1295,156 @@ public class PZOEngineBridge {
                                             "        if updateJoypadFocus then updateJoypadFocus(joypadData) end\n" +
                                             "    end\n" +
                                             "end\n" +
+                                            "local function addPZOSettingsTab()\n" +
+                                            "    if not MainOptions then return end\n" +
+                                            "    local function injectTab(mo)\n" +
+                                            "        if not mo or not mo.tabs then return end\n" +
+                                            "        if mo.pzoTabAdded then return end\n" +
+                                            "        mo.pzoTabAdded = true\n" +
+                                            "        local tabs = mo.tabs\n" +
+                                            "        local tabW = tabs.width or (mo.width - 40)\n" +
+                                            "        local tabH = (tabs.height and tabs.tabHeight) and (tabs.height - tabs.tabHeight) or (mo.height - 100)\n" +
+                                            "        local pzoPanel = ISPanelJoypad:new(0, 0, tabW, tabH)\n" +
+                                            "        pzoPanel:initialise()\n" +
+                                            "        pzoPanel:instantiate()\n" +
+                                            "        pzoPanel:setAnchorRight(true)\n" +
+                                            "        pzoPanel:setAnchorBottom(true)\n" +
+                                            "        pzoPanel:setScrollChildren(true)\n" +
+                                            "        pzoPanel:addScrollBars()\n" +
+                                            "        pzoPanel.backgroundColor = {r=0, g=0, b=0, a=0}\n" +
+                                            "        pzoPanel.borderColor = {r=0, g=0, b=0, a=0}\n" +
+                                            "        function pzoPanel:apply() end\n" +
+                                            "        function pzoPanel:save() end\n" +
+                                            "        function pzoPanel:restoreDefault() end\n" +
+                                            "        local modeBtn = ISButton:new(36, 175, 340, 30, 'Standdown Mode: [AUTO] (Click to Cycle)', pzoPanel, function(target, button)\n" +
+                                            "            if PZOEngine and PZOEngine.toggleViewpointStanddown then\n" +
+                                            "                PZOEngine.toggleViewpointStanddown()\n" +
+                                            "            end\n" +
+                                            "        end)\n" +
+                                            "        modeBtn:initialise()\n" +
+                                            "        modeBtn:instantiate()\n" +
+                                            "        modeBtn.backgroundColor = {r=0.10, g=0.14, b=0.20, a=0.95}\n" +
+                                            "        modeBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
+                                            "        modeBtn.textColor = {r=0.85, g=0.95, b=1.0, a=1.0}\n" +
+                                            "        pzoPanel:addChild(modeBtn)\n" +
+                                            "        local wsBtn = ISButton:new(36, 440, 180, 28, 'Steam Workshop', pzoPanel, function(target, button)\n" +
+                                            "            if openUrl then openUrl('https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250')\n" +
+                                            "            elseif PZOEngine and PZOEngine.openWorkshopPage then PZOEngine.openWorkshopPage() end\n" +
+                                            "        end)\n" +
+                                            "        wsBtn:initialise()\n" +
+                                            "        wsBtn:instantiate()\n" +
+                                            "        wsBtn.backgroundColor = {r=0.12, g=0.35, b=0.55, a=1.0}\n" +
+                                            "        wsBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
+                                            "        wsBtn.textColor = {r=0.9, g=0.95, b=1.0, a=1.0}\n" +
+                                            "        pzoPanel:addChild(wsBtn)\n" +
+                                            "        local ghBtn = ISButton:new(230, 440, 180, 28, 'GitHub Issues', pzoPanel, function(target, button)\n" +
+                                            "            if openUrl then openUrl('https://github.com/prop11/PZO-Launcher/issues')\n" +
+                                            "            elseif PZOEngine and PZOEngine.openGithubPage then PZOEngine.openGithubPage() end\n" +
+                                            "        end)\n" +
+                                            "        ghBtn:initialise()\n" +
+                                            "        ghBtn:instantiate()\n" +
+                                            "        ghBtn.backgroundColor = {r=0.20, g=0.22, b=0.26, a=1.0}\n" +
+                                            "        ghBtn.borderColor = {r=0.5, g=0.5, b=0.6, a=1.0}\n" +
+                                            "        ghBtn.textColor = {r=0.9, g=0.9, b=0.9, a=1.0}\n" +
+                                            "        pzoPanel:addChild(ghBtn)\n" +
+                                            "        local updateBtn = ISButton:new(424, 440, 180, 28, 'Check for Updates', pzoPanel, function(target, button)\n" +
+                                            "            if PZOEngine and PZOEngine.checkForUpdates then\n" +
+                                            "                PZOEngine.checkForUpdates()\n" +
+                                            "            end\n" +
+                                            "        end)\n" +
+                                            "        updateBtn:initialise()\n" +
+                                            "        updateBtn:instantiate()\n" +
+                                            "        updateBtn.backgroundColor = {r=0.15, g=0.45, b=0.25, a=1.0}\n" +
+                                            "        updateBtn.borderColor = {r=0.3, g=0.8, b=0.4, a=1.0}\n" +
+                                            "        updateBtn.textColor = {r=0.9, g=1.0, b=0.9, a=1.0}\n" +
+                                            "        pzoPanel:addChild(updateBtn)\n" +
+                                            "        pzoPanel.prerender = function(self)\n" +
+                                            "            ISPanelJoypad.prerender(self)\n" +
+                                            "            self:setScrollHeight(500)\n" +
+                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '0.9.9.5-unstable'\n" +
+                                            "            local standdownActive = false\n" +
+                                            "            local viewpointDetected = false\n" +
+                                            "            local standdownMode = 'AUTO'\n" +
+                                            "            local fsrActive = false\n" +
+                                            "            if PZOEngine then\n" +
+                                            "                if PZOEngine.isViewpointStanddownActive then standdownActive = PZOEngine.isViewpointStanddownActive() end\n" +
+                                            "                if PZOEngine.isViewpointDetected then viewpointDetected = PZOEngine.isViewpointDetected() end\n" +
+                                            "                if PZOEngine.getViewpointStanddownMode then standdownMode = PZOEngine.getViewpointStanddownMode() or 'AUTO' end\n" +
+                                            "                if PZOEngine.isWorldUpscalerActive then fsrActive = PZOEngine.isWorldUpscalerActive() end\n" +
+                                            "            end\n" +
+                                            "            self:drawText('PROJECT ZOMBOID OPTIMISER (PZO v' .. ver .. ')', 24, 12, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
+                                            "            self:drawText('High-Performance Multi-Core Architecture & Hardware Acceleration Engine', 24, 34, 0.7, 0.7, 0.7, 0.9, UIFont.Small)\n" +
+                                            "            local contentW = math.max(480, math.min(840, self:getWidth() - 56))\n" +
+                                            "            local vpY = 58\n" +
+                                            "            local vpH = 160\n" +
+                                            "            if standdownActive then\n" +
+                                            "                self:drawRect(24, vpY, contentW, vpH, 0.88, 0.08, 0.20, 0.12)\n" +
+                                            "                self:drawRectBorder(24, vpY, contentW, vpH, 1.0, 0.25, 0.85, 0.45)\n" +
+                                            "                self:drawText('PROJECT VIEWPOINT & 3D CAMERA MOD COMPATIBILITY', 36, vpY + 10, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
+                                            "                self:drawText('STATUS: [STANDDOWN ACTIVE - 3D COMPATIBILITY SAFEGUARD ENGAGED]', 36, vpY + 34, 0.35, 1.0, 0.55, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('PZO has disarmed conflicting fog buffers, 2D screen culling, and weather geometry passes.', 36, vpY + 56, 0.9, 0.95, 0.9, 0.95, UIFont.Small)\n" +
+                                            "                self:drawText('Project Viewpoint & True Weathers are running with 100% shader compatibility and zero artifacts.', 36, vpY + 74, 0.8, 0.9, 0.8, 0.9, UIFont.Small)\n" +
+                                            "            else\n" +
+                                            "                self:drawRect(24, vpY, contentW, vpH, 0.88, 0.10, 0.14, 0.22)\n" +
+                                            "                self:drawRectBorder(24, vpY, contentW, vpH, 1.0, 0.35, 0.65, 0.90)\n" +
+                                            "                self:drawText('PROJECT VIEWPOINT & 3D CAMERA MOD COMPATIBILITY', 36, vpY + 10, 0.35, 0.75, 1.0, 1.0, UIFont.Medium)\n" +
+                                            "                self:drawText('STATUS: [STANDDOWN INACTIVE - FULL PZO GRAPHICS ACCELERATION RUNNING]', 36, vpY + 34, 0.7, 0.85, 1.0, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('Full PZO visual optimizations are active: Quarter-Buffer Fog, Screen-Space Frustum Culling, and AVX2 sweeps.', 36, vpY + 56, 0.85, 0.85, 0.85, 0.95, UIFont.Small)\n" +
+                                            "                self:drawText('No 3D camera mods detected. PZO is maximizing Build 42 framerates and memory efficiency.', 36, vpY + 74, 0.75, 0.75, 0.75, 0.9, UIFont.Small)\n" +
+                                            "            end\n" +
+                                            "            local detectText = viewpointDetected and 'Viewpoint / True Weathers Detected: [YES] (Safeguard auto-engaged)' or 'Viewpoint / True Weathers Detected: [NO] (Vanilla camera active)'\n" +
+                                            "            local dr, dg, db = 0.7, 0.7, 0.7\n" +
+                                            "            if viewpointDetected then dr, dg, db = 0.3, 1.0, 0.5 end\n" +
+                                            "            self:drawText(detectText, 36, vpY + 94, dr, dg, db, 1.0, UIFont.Small)\n" +
+                                            "            modeBtn:setY(vpY + 118)\n" +
+                                            "            modeBtn.title = 'Standdown Mode: [' .. standdownMode .. '] (Click to Cycle)'\n" +
+                                            "            if standdownActive then\n" +
+                                            "                modeBtn.borderColor = {r=0.25, g=0.85, b=0.45, a=1.0}\n" +
+                                            "                modeBtn.textColor = {r=0.35, g=1.0, b=0.55, a=1.0}\n" +
+                                            "            else\n" +
+                                            "                modeBtn.borderColor = {r=0.4, g=0.6, b=0.8, a=1.0}\n" +
+                                            "                modeBtn.textColor = {r=0.8, g=0.9, b=1.0, a=1.0}\n" +
+                                            "            end\n" +
+                                            "            local fsrY = vpY + vpH + 14\n" +
+                                            "            local fsrH = 180\n" +
+                                            "            if fsrActive then\n" +
+                                            "                self:drawRect(24, fsrY, contentW, fsrH, 0.90, 0.06, 0.20, 0.10)\n" +
+                                            "                self:drawRectBorder(24, fsrY, contentW, fsrH, 1.0, 0.20, 0.90, 0.45)\n" +
+                                            "                self:drawText('AMD FIDELITYFX SUPER RESOLUTION (FSR 1.0)', 36, fsrY + 10, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
+                                            "                self:drawText('VISUAL NOTIFICATION: FSR 1.0 IS CURRENTLY [ENABLED]', 36, fsrY + 34, 0.35, 1.0, 0.55, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('Render Scale: 75%  |  Edge-Adaptive RCAS Sharpening: 80%  |  UI: Native 100%', 36, fsrY + 56, 0.9, 0.95, 0.9, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('The 3D game world is rendered at a performance scale and intelligently upscaled in real-time.', 36, fsrY + 76, 0.85, 0.85, 0.85, 0.95, UIFont.Small)\n" +
+                                            "                self:drawText('Delivers massive framerate increases on handhelds and high-res displays while preserving crisp UI text.', 36, fsrY + 94, 0.8, 0.8, 0.8, 0.9, UIFont.Small)\n" +
+                                            "                self:drawText('Status: Active via Steam Launch Option (-pzo_fsr)', 36, fsrY + 118, 0.2, 0.85, 1.0, 1.0, UIFont.Small)\n" +
+                                            "            else\n" +
+                                            "                self:drawRect(24, fsrY, contentW, fsrH, 0.90, 0.18, 0.12, 0.08)\n" +
+                                            "                self:drawRectBorder(24, fsrY, contentW, fsrH, 1.0, 0.90, 0.55, 0.20)\n" +
+                                            "                self:drawText('AMD FIDELITYFX SUPER RESOLUTION (FSR 1.0)', 36, fsrY + 10, 1.0, 0.75, 0.3, 1.0, UIFont.Medium)\n" +
+                                            "                self:drawText('VISUAL NOTIFICATION: FSR 1.0 IS CURRENTLY [DISABLED]', 36, fsrY + 34, 1.0, 0.45, 0.35, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('The game world is currently rendering at full native resolution with standard bilinear scaling.', 36, fsrY + 56, 0.85, 0.85, 0.85, 0.95, UIFont.Small)\n" +
+                                            "                self:drawText('How to Enable: In Steam, right-click Project Zomboid -> Properties -> General -> Launch Options.', 36, fsrY + 80, 0.95, 0.95, 0.95, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('Enter:  -pzo_fsr   and launch the game.', 36, fsrY + 98, 0.35, 1.0, 0.55, 1.0, UIFont.Small)\n" +
+                                            "                self:drawText('Provides massive FPS increases on Steam Deck, ROG Ally, integrated APUs, and 1440p / 4K displays.', 36, fsrY + 118, 0.8, 0.8, 0.8, 0.9, UIFont.Small)\n" +
+                                            "            end\n" +
+                                            "            local btnY = fsrY + fsrH + 14\n" +
+                                            "            wsBtn:setY(btnY)\n" +
+                                            "            ghBtn:setY(btnY)\n" +
+                                            "            updateBtn:setY(btnY)\n" +
+                                            "        end\n" +
+                                            "        tabs:addView('PZO', pzoPanel)\n" +
+                                            "    end\n" +
+                                            "    if not MainOptions.pzoSettingsHooked then\n" +
+                                            "        MainOptions.pzoSettingsHooked = true\n" +
+                                            "        local old_mo_create = MainOptions.create\n" +
+                                            "        MainOptions.create = function(self)\n" +
+                                            "            old_mo_create(self)\n" +
+                                            "            injectTab(self)\n" +
+                                            "        end\n" +
+                                            "    end\n" +
+                                            "    if MainOptions.instance and MainOptions.instance.tabs then\n" +
+                                            "        injectTab(MainOptions.instance)\n" +
+                                            "    end\n" +
+                                            "end\n" +
                                             "local function isMainMenuOnly(ms)\n" +
                                             "    if not ms or ms.inGame then return false end\n" +
                                             "    if not ms.bottomPanel or not ms.bottomPanel:getIsVisible() then return false end\n" +
@@ -1180,6 +1462,7 @@ public class PZOEngineBridge {
                                             "Events.OnMainMenuEnter.Add(function()\n" +
                                             "    addPZOBetaToggle()\n" +
                                             "    showPZOMultithreadingNotice()\n" +
+                                            "    addPZOSettingsTab()\n" +
                                             "    if MainScreen and not MainScreen.pzoHooked then\n" +
                                             "        MainScreen.pzoHooked = true\n" +
                                             "        local old_prerender = MainScreen.prerender\n" +
@@ -1191,6 +1474,9 @@ public class PZOEngineBridge {
                                             "            if not self.inGame and not self.pzoNoticeChecked then\n" +
                                             "                self.pzoNoticeChecked = true\n" +
                                             "                showPZOMultithreadingNotice()\n" +
+                                            "            end\n" +
+                                            "            if MainOptions and MainOptions.instance and MainOptions.instance.tabs and not MainOptions.instance.pzoTabAdded then\n" +
+                                            "                addPZOSettingsTab()\n" +
                                             "            end\n" +
                                             "            if self.pzoBetaButton then\n" +
                                             "                local shouldShow = isMainMenuOnly(self)\n" +
@@ -1222,7 +1508,11 @@ public class PZOEngineBridge {
                                             "        modal:setX((scrW - modal:getWidth()) / 2)\n" +
                                             "        modal:setY((scrH - modal:getHeight()) / 2)\n" +
                                             "    end\n" +
+                                            "    if MainOptions and MainOptions.instance and MainOptions.instance.tabs and not MainOptions.instance.pzoTabAdded then\n" +
+                                            "        addPZOSettingsTab()\n" +
+                                            "    end\n" +
                                             "end)\n" +
+                                            "addPZOSettingsTab()\n" +
                                             "if getFileWriter and not _G.pzoFileWriterHooked then\n" +
                                             "    _G.pzoFileWriterHooked = true\n" +
                                             "    local orig_gfw = getFileWriter\n" +

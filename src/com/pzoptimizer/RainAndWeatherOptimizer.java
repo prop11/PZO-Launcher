@@ -13,6 +13,10 @@ public final class RainAndWeatherOptimizer {
 
     public static synchronized void initialize() {
         if (initialized) return;
+        if (ViewpointStanddownGovernor.isStanddownActive()) {
+            PZOLogger.info("[RainAndWeatherOptimizer] Project Viewpoint standdown active - bypassing weather/fog overrides.");
+            return;
+        }
         initialized = true;
 
         applyLightingSplitUpdate();
@@ -24,6 +28,9 @@ public final class RainAndWeatherOptimizer {
     }
 
     public static void checkAndMaintain() {
+        if (ViewpointStanddownGovernor.isStanddownActive()) {
+            return;
+        }
         if (!initialized) {
             initialize();
         }

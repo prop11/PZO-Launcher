@@ -17,6 +17,10 @@ public final class RenderFrustumCuller {
     private static volatile long lastDimensionCheck = 0;
 
     public static boolean shouldRender(float x, float y, float width, float height) {
+        if (ViewpointStanddownGovernor.isStanddownActive()) {
+            return true; // 3D camera mods transform coordinate space; 2D screen-space culling must stand down
+        }
+
         if (!UnstableChannelGuard.isUnstableBuild()) {
             return true; // Pass through in stable builds
         }
