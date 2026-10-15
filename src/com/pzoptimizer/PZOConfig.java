@@ -10,11 +10,12 @@ import java.nio.file.Files;
  */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
-    public static final String CURRENT_NOTICE_VERSION = "0.9.9.5";
+    public static final String CURRENT_NOTICE_VERSION = "0.9.9.5-unstable";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
     private static volatile boolean isolateConflictingFpsMods = true;
     private static volatile String multithreadingNoticeAckVersion = "";
+    private static volatile String viewpointStanddownMode = "AUTO";
     private static volatile boolean loaded = false;
 
     public static synchronized void load() {
@@ -37,6 +38,12 @@ public final class PZOConfig {
                 } else {
                     isolateConflictingFpsMods = true;
                 }
+                String vpMode = extractJsonField(content, "viewpoint_standdown_mode");
+                if (vpMode != null && !vpMode.isEmpty()) {
+                    viewpointStanddownMode = vpMode.toUpperCase();
+                } else {
+                    viewpointStanddownMode = "AUTO";
+                }
             }
         } catch (Throwable ignored) {}
     }
@@ -44,9 +51,10 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
-                multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "");
+                multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
+                viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO");
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -133,6 +141,18 @@ public final class PZOConfig {
     public static String getMultithreadingNoticeAckVersion() {
         load();
         return multithreadingNoticeAckVersion;
+    }
+
+    public static String getViewpointStanddownMode() {
+        load();
+        return viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO";
+    }
+
+    public static void setViewpointStanddownMode(String mode) {
+        load();
+        viewpointStanddownMode = mode != null ? mode.toUpperCase() : "AUTO";
+        save();
+        PZOLogger.info("[PZO Config] Viewpoint standdown mode set to: " + viewpointStanddownMode);
     }
 
     private static String extractJsonField(String json, String fieldName) {
