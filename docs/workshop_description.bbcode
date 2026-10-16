@@ -1,0 +1,122 @@
+[h1]Project Zomboid Optimiser (Build 42 & Build 41)[/h1]
+
+ [hr][/hr]
+[h2]I am currently on my honeymoon, this mod will not be updated for at least 1 month, expect usual updates to resume around OCT 30th [/h2]
+
+ [hr][/hr]
+    [b]Project Zomboid Optimiser[/b] is a comprehensive performance, framerate, and desync optimization suite engineered specifically for
+  Project Zomboid Build 42 and Build 41 (Singleplayer and Multiplayer).
+
+    It dynamically mitigates game engine bottlenecks, reduces memory fragmentation, eliminates combat micro-hitches, optimizes vehicle
+  streaming, and includes an in-game [b]F10 Control Center[/b] with 7 dedicated configuration tabs.
+
+[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/01_framerate_and_stutter_boost.gif[/img]
+[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/01_pzo_vs_stock_frametime.gif[/img]
+
+    [hr][/hr]
+
+[url=https://github.com/prop11/PZO-Launcher/wiki/Troubleshooting-and-FAQ][h1]FAQ[/h1][/url]
+
+    [h2]Core Features[/h2]
+
+    [b]1. In-Game F10 Control Center (7 Tabs)[/b]
+    [list]
+    [*] [b]Tab 1 - Quick Actions & Presets:[/b] One-click automated sweeps, manual area cleanups, launcher RAM boosters, and custom profile
+  management (Potato Mode, Balanced, Max Quality, and User Custom Presets).
+    [*] [b]Tab 2 - General & Engine:[/b] Dynamic Multi-Story Building Occlusion Culling, Skeletal Animation LOD blending limits, Zombie 2D
+  Imposter rendering, and low-spec lighting rates.
+    [*] [b]Tab 3 - Vehicles:[/b] Anti-stutter high-speed chunk streamer, parked vehicle Bullet physics sleeping, driving priority lighting, and
+  headlight shadow management.
+    [*] [b]Tab 4 - Blood & Corpses:[/b] Smart blood decal stacking cap (max 4 per tile to eliminate GPU overdraw while keeping full gore),
+  automated corpse decay sweeps, and safe base radius exclusion.
+    [*] [b]Tab 5 - World Debris:[/b] Safe ground item sweeps (removes broken glass, cans, rotten food, and litter while strictly preserving
+  player bases, safehouses, generators, tools, and backpacks).
+    [*] [b]Tab 6 - Audio & Climate:[/b] Screen-space dynamic puddle shader toggles, rain splash particle clamps, animal pen audio limits,
+  burning zombie scream throttles, and fly sound emitter caps.
+    [*] [b]Tab 7 - Mod Profiler & Shield:[/b] Real-time mod execution monitor, 3rd-party GC freeze interceptor, log I/O spam throttler, and
+  vehicle mechanics null-recipe crash shields.
+    [/list]
+
+[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/02_multithreading_core_offload.gif[/img]
+
+    [b]2. Integrated High-Performance GLSL Shaders[/b]
+    [list]
+    [*] [b]Lightweight Screen-Space Puddles:[/b] Replaces heavy multi-octave Perlin noise iterations with a streamlined specular pass, cutting
+  GPU fillrate load by up to 40% during rain.
+    [*] [b]Low-Overhead Foliage & Wind Shader:[/b] Simplifies trigonometric vertex calculations for tree wind sway to prevent framerate drops
+  in dense forests.
+    [*] [b]Optimized Rain Streaks:[/b] Single-pass alpha blend that renders clean rain cascades without multi-layer particle lag.
+    [/list]
+
+    [b]3. Dynamic Multi-Story Building Occlusion Culling[/b]
+    [list]
+    [*] Automatically clamps vertical rendering on upper floors (Z >= 2) to eliminate off-screen floor draw calls.
+    [*] Event-driven on movement with state-delta caching for zero-stutter transitions and immediate exterior visibility near windows, stairs,
+  and balconies.
+    [/list]
+
+    [b]4. Combat Burst & Shotgun Impact Smoother[/b]
+    [list]
+    [*] Buffers blood splats and multi-kill gore across adjacent frames, eliminating the classic frame-freeze when firing shotguns into large
+  hordes.
+    [/list]
+
+    [b]5. Parked Vehicle Bullet Physics Sleeping[/b]
+    [list]
+    [*] Puts stationary, unoccupied vehicles into low-overhead physics sleep mode, waking them up instantly when approached or entered.
+    [/list]
+
+[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/04_vehicle_road_streaming.gif[/img]
+
+    [b]6. ModShield 3rd-Party Mod Protection[/b]
+    [list]
+    [*] [b]GC Interceptor:[/b] Prevents 3rd-party mods from triggering 300ms Stop-The-World garbage collection freezes during active combat and
+  driving.
+    [*] [b]Log Disk Throttler:[/b] Throttles runaway informational log spam to prevent disk write stalls while preserving 100% of errors and
+  tracebacks.
+    [*] [b]Vehicle Mechanics Crash Shield:[/b] Automatically sanitizes malformed vehicle repair recipes from 3rd-party mods in Build 42,
+  preventing NullPointerException crashes in vehicle mechanics menus.
+    [/list]
+
+[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/05_gc_freeze_shield.gif[/img]
+
+    [b]7. Main Menu Integration & Preset System[/b]
+    [list]
+    [*] Access the full Control Center directly from the Main Menu via the top-right button.
+    [*] Automatic update notification popups when new settings are introduced.
+    [*] Save, load, and manage custom named preset profiles to disk.
+    [/list]
+
+    [hr][/hr]
+
+    [h2]Multiplayer & Server Compatibility[/h2]
+    [list]
+    [*] 100% compatible with Singleplayer, Dedicated Servers, and Co-op.
+    [*] Singleplayer users have full local authority for all cleanups and optimizations.
+    [*] In Multiplayer, server-wide debris sweeps and preset sync tools are automatically secured and restricted to authorized Server Admins.
+    [/list]
+
+    [hr][/hr]
+
+    [h2]Supported Languages[/h2]
+    [list]
+    [*] English (EN)
+    [*] German (DE)
+    [*] Spanish (ES)
+    [*] French (FR)
+    [*] Russian (RU)
+    [*] Simplified Chinese (CN)
+    [*] Traditional Chinese (TC)
+    [/list]
+
+    [hr][/hr]
+
+    [h2]Compatibility[/h2]
+    [list]
+    [*] Fully compatible with Project Zomboid Build 42 and Build 41.
+    [*] Safe to add or remove mid-save at any time.
+    [*] Compatible with all major vehicle, map, weapon, and quality-of-life mods.
+    [/list]
+
+Workshop ID: 3787481250
+Mod ID: MPOptimizer
