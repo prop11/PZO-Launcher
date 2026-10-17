@@ -9,7 +9,7 @@ import java.lang.reflect.Method;
  * before handing execution over to zombie.network.GameServer.
  */
 public class PZOServerEntrypoint {
-    public static final String SERVER_VERSION = "0.9.9.5-unstable";
+    public static final String SERVER_VERSION = "1.0-unstable";
 
     private static volatile boolean initialized = false;
 

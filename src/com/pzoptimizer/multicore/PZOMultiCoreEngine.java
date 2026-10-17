@@ -23,8 +23,7 @@ public final class PZOMultiCoreEngine {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        int pCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
-        workerCount = Math.max(2, Math.min(pCores, 16));
+        workerCount = com.pzoptimizer.CpuTopologyGovernor.getOptimalWorkerCount();
 
         sharedWorkerPool = Executors.newFixedThreadPool(workerCount, new ThreadFactory() {
             private final AtomicInteger counter = new AtomicInteger(1);
@@ -37,6 +36,7 @@ public final class PZOMultiCoreEngine {
             }
         });
 
+        com.pzoptimizer.WorkerRandGovernor.ensureInstalled();
         MultiCoreChunkStreamer.initialize();
         MultiCoreHordeGovernor.initialize();
         MultiCoreAnimationEngine.initialize();
