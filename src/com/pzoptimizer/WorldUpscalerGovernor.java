@@ -123,6 +123,54 @@ public final class WorldUpscalerGovernor {
         }
     }
 
+    private static volatile boolean dynamicScaleActive = false;
+    private static volatile float minDynamicScale = 0.65f;
+    private static volatile float maxDynamicScale = 1.00f;
+    private static int consecutiveOverBudget = 0;
+    private static int consecutiveUnderBudget = 0;
+
+    public static boolean isDynamicScaleActive() {
+        return dynamicScaleActive;
+    }
+
+    public static void setDynamicScaleActive(boolean enabled) {
+        dynamicScaleActive = enabled;
+        consecutiveOverBudget = 0;
+        consecutiveUnderBudget = 0;
+    }
+
+    /**
+     * Dynamically adjusts FSR render scale between 0.65f and 1.00f based on frame-time headroom
+     * against the target frame interval, using deadband and hysteresis to prevent scale oscillation.
+     */
+    public static void updateDynamicScale(long frameStepNanos, int targetFps) {
+        if (!active || !dynamicScaleActive || frameStepNanos <= 0 || targetFps <= 0) {
+            return;
+        }
+        long targetIntervalNs = 1_000_000_000L / Math.max(30, Math.min(360, targetFps));
+        long highThresholdNs = (long) (targetIntervalNs * 0.94);
+        long lowThresholdNs = (long) (targetIntervalNs * 0.76);
+
+        if (frameStepNanos > highThresholdNs) {
+            consecutiveOverBudget++;
+            consecutiveUnderBudget = 0;
+            if (consecutiveOverBudget >= 3 && renderScale > minDynamicScale) {
+                setRenderScale(Math.max(minDynamicScale, renderScale - 0.04f));
+                consecutiveOverBudget = 0;
+            }
+        } else if (frameStepNanos < lowThresholdNs) {
+            consecutiveUnderBudget++;
+            consecutiveOverBudget = 0;
+            if (consecutiveUnderBudget >= 15 && renderScale < maxDynamicScale) {
+                setRenderScale(Math.min(maxDynamicScale, renderScale + 0.02f));
+                consecutiveUnderBudget = 0;
+            }
+        } else {
+            consecutiveOverBudget = 0;
+            consecutiveUnderBudget = 0;
+        }
+    }
+
     /**
      * Calculates scaled viewport dimensions based on native display size.
      * Output array: [scaledWidth, scaledHeight].

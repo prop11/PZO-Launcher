@@ -33,6 +33,11 @@ public final class EngineFramePacer {
         long targetEnd = frameStartNanos + targetFrameTimeNanos;
         long remainingNanos = targetEnd - System.nanoTime();
 
+        if (remainingNanos > 3_500_000L) {
+            GcSlackGovernor.onFrameSlack(remainingNanos);
+            remainingNanos = targetEnd - System.nanoTime();
+        }
+
         if (remainingNanos > 1_500_000L) {
             long sleepMillis = (remainingNanos - 1_000_000L) / 1_000_000L;
             try {
@@ -42,7 +47,7 @@ public final class EngineFramePacer {
 
         remainingNanos = targetEnd - System.nanoTime();
         if (remainingNanos > 100_000L) {
-            LockSupport.parkNanos(remainingNanos - 50_000L);
+            ShortWait.pause(remainingNanos - 50_000L);
         }
 
         while (System.nanoTime() < targetEnd) {
