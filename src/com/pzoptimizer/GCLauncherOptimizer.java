@@ -130,6 +130,14 @@ public final class GCLauncherOptimizer {
                 vmArgs.add(0, ZomboidConfigMigrator.TARGET_AGENTLIB);
                 changed = true;
             }
+            if (!vmArgs.contains("-XX:+IgnoreUnrecognizedVMOptions")) {
+                vmArgs.add("-XX:+IgnoreUnrecognizedVMOptions");
+                changed = true;
+            }
+            if (!vmArgs.contains("-XX:-UseTypeSpeculation") && !vmArgs.contains("-XX:+UseTypeSpeculation")) {
+                vmArgs.add("-XX:-UseTypeSpeculation");
+                changed = true;
+            }
 
             // Also inspect windows platform-specific blocks if present
             Object winObj = root.get("windows");

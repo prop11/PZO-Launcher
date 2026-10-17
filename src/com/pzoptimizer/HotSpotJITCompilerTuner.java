@@ -8,7 +8,7 @@ public class HotSpotJITCompilerTuner {
 
     public static void tuneRuntimeProperties() {
         try {
-            int cores = Runtime.getRuntime().availableProcessors();
+            int cores = CpuTopologyGovernor.getOptimalWorkerCount();
             
             int targetParallelism = Math.max(2, Math.min(16, cores));
             System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", String.valueOf(targetParallelism));
@@ -23,7 +23,9 @@ public class HotSpotJITCompilerTuner {
             
             System.setProperty("java.security.egd", "file:/dev/urandom");
 
-            PZOLogger.info("HotSpotJITCompilerTuner: Runtime properties configured for " + cores + " CPU cores");
+            WorkerRandGovernor.ensureInstalled();
+
+            PZOLogger.info("HotSpotJITCompilerTuner: Runtime properties configured for " + cores + " optimal worker cores (Hybrid CPU: " + CpuTopologyGovernor.IS_HYBRID_CPU + ")");
         } catch (Throwable ignored) {}
     }
 }
