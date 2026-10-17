@@ -8,12 +8,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * PropertyContainer / TilePropertyAliasMap Property ID Cache Governor.
- * During chunk hand-offs and property recalculations, PropertyContainer.has/Val looks up
- * the integer property ID by string name in TilePropertyAliasMap's HashMap on every call
- * (~10% of chunk hand-off time and ~0.8% of total GameThread CPU).
- *
- * PropIdCacheGovernor caches the resolved integer property ID per generation (and by ordinal
- * or string reference), invalidated automatically when TilePropertyAliasMap.Generate() runs.
+ * Thread-safe and lock-free across MainThread and PZO-ChunkStreamer-Worker threads.
  */
 public final class PropIdCacheGovernor {
 
@@ -21,7 +16,7 @@ public final class PropIdCacheGovernor {
     private static final int UNSET = Integer.MIN_VALUE;
     private static final AtomicInteger generation = new AtomicInteger(1);
 
-    private static volatile int cachedGen = 0;
+    private static volatile int cachedGen = 1;
     private static volatile int[] ordinalIds = new int[512];
     private static final ConcurrentHashMap<String, Integer> nameIds = new ConcurrentHashMap<>(512);
 
@@ -49,28 +44,37 @@ public final class PropIdCacheGovernor {
     /**
      * Called when TilePropertyAliasMap.Generate() runs on world initialization.
      */
-    public static void onAliasMapGenerated() {
-        generation.incrementAndGet();
+    public static synchronized void onAliasMapGenerated() {
+        int nextGen = generation.incrementAndGet();
         nameIds.clear();
         int[] fresh = new int[512];
         java.util.Arrays.fill(fresh, UNSET);
         ordinalIds = fresh;
-        cachedGen = generation.get();
+        cachedGen = nextGen;
         aliasMapInstance = null;
     }
 
     /**
      * Bytecode hook replacement for TilePropertyAliasMap.getIDFromPropertyName(Object aliasMap, String name).
-     * Caches the integer ID in a lock-free map for the current alias generation.
+     * Caches valid integer IDs (>= 0) in a lock-free ConcurrentHashMap for the current alias generation.
      */
     public static int getIDFromPropertyNameFast(Object aliasMap, String propName) {
         if (propName == null) return -1;
         if (active) {
             int g = generation.get();
-            if (g != cachedGen || (aliasMap != null && aliasMap != aliasMapInstance)) {
-                nameIds.clear();
-                cachedGen = g;
-                if (aliasMap != null) aliasMapInstance = aliasMap;
+            Object currentInst = aliasMapInstance;
+            if (g != cachedGen || (aliasMap != null && currentInst != aliasMap)) {
+                synchronized (PropIdCacheGovernor.class) {
+                    if (g != cachedGen || (aliasMap != null && aliasMapInstance != aliasMap)) {
+                        if (aliasMapInstance != null || g != cachedGen) {
+                            nameIds.clear();
+                        }
+                        cachedGen = g;
+                        if (aliasMap != null) {
+                            aliasMapInstance = aliasMap;
+                        }
+                    }
+                }
             }
             Integer cached = nameIds.get(propName);
             if (cached != null) {
@@ -80,7 +84,7 @@ public final class PropIdCacheGovernor {
         }
         cacheMisses.incrementAndGet();
         int resolved = invokeStockGetId(aliasMap, propName);
-        if (active && resolved != UNSET) {
+        if (active && resolved >= 0) {
             nameIds.put(propName, Integer.valueOf(resolved));
         }
         return resolved;
@@ -89,19 +93,23 @@ public final class PropIdCacheGovernor {
     private static int invokeStockGetId(Object aliasMap, String propName) {
         try {
             if (aliasMap == null) {
-                if (instanceField == null) {
+                Field f = instanceField;
+                if (f == null) {
                     Class<?> cls = Class.forName("zombie.core.TilePropertyAliasMap");
-                    instanceField = cls.getDeclaredField("instance");
-                    instanceField.setAccessible(true);
+                    f = cls.getDeclaredField("instance");
+                    f.setAccessible(true);
+                    instanceField = f;
                 }
-                aliasMap = instanceField.get(null);
+                aliasMap = f.get(null);
             }
             if (aliasMap != null) {
-                if (getIdMethod == null) {
-                    getIdMethod = aliasMap.getClass().getDeclaredMethod("getIDFromPropertyName", String.class);
-                    getIdMethod.setAccessible(true);
+                Method m = getIdMethod;
+                if (m == null) {
+                    m = aliasMap.getClass().getDeclaredMethod("getIDFromPropertyName", String.class);
+                    m.setAccessible(true);
+                    getIdMethod = m;
                 }
-                return ((Number) getIdMethod.invoke(aliasMap, propName)).intValue();
+                return ((Number) m.invoke(aliasMap, propName)).intValue();
             }
         } catch (Throwable ignored) {}
         return -1;

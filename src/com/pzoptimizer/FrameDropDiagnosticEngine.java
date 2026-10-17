@@ -155,7 +155,7 @@ public final class FrameDropDiagnosticEngine {
 
         ZombieLodGovernor.recordFrameStep(deltaNanos);
         BodyAtlasPrewarmGovernor.onFrameTick();
-        HotSaveGovernor.runHotSaveIfDue();
+        HotSaveGovernor.flushPendingIfDue();
         WorldUpscalerGovernor.updateDynamicScale(deltaNanos, ZombieLodGovernor.getTargetFps());
 
         double frameTimeMs = deltaNanos / 1_000_000.0;
@@ -163,6 +163,10 @@ public final class FrameDropDiagnosticEngine {
         frameTimeHistory[historyIndex] = frameTimeMs;
         historyIndex = (historyIndex + 1) % frameTimeHistory.length;
         totalFramesSampled++;
+
+        if ((totalFramesSampled & 63) == 0) {
+            WorkerRandGovernor.ensureInstalled();
+        }
 
         Object player = getActivePlayer();
         if (player == null) {
