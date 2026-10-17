@@ -1,28 +1,32 @@
 package com.pzoptimizer;
 
 import java.lang.reflect.Method;
-import java.util.Collections;
 import java.util.IdentityHashMap;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Chunk Main-Thread Border Hand-off Recalc Deduplicator.
- * During IsoChunk.loadInMainThread(), border squares and their neighbors invoke ReCalculateAll,
- * which calls IsoGridSquare.RecalcPropertiesIfNeeded(). Because a loaded chunk's square keeps
- * propertiesDirty = true, the exact same border square recomputes its properties ~15 times
- * within a single chunk hand-off even though no inputs change during the phase.
+ * Chunk Border Hand-off Recalc Deduplicator (Lock-Free Per-Thread).
+ * During IsoChunk.loadInMainThread() and WorldStreamer neighbor recalculations, border squares
+ * invoke IsoGridSquare.RecalcPropertiesIfNeeded() up to ~15 times per square within the same
+ * micro-window.
  *
- * ChunkHandoffRecalcGovernor deduplicates repeated RecalcPropertiesIfNeeded() calls on the same
- * square within the same frame/hand-off micro-window, cutting border hand-off cost by ~50%.
+ * Uses per-thread (ThreadLocal) deduplication state so MainThread, WorldStreamer, and
+ * PZO-ChunkStreamer-Worker threads never contend on a shared lock and never suppress
+ * another thread's legitimate recalculation pass.
  */
 public final class ChunkHandoffRecalcGovernor {
 
     private static volatile boolean active = true;
-    private static volatile long currentWindowNanos = 0L;
-    private static final long DEDUPE_WINDOW_NANOS = 1_500_000L; // 1.5 ms hand-off burst window
-    private static final Set<Object> recalcedInWindow = Collections.newSetFromMap(new IdentityHashMap<>(512));
-    private static Method recalcMethod = null;
+    private static final long DEDUPE_WINDOW_NANOS = 1_500_000L; // 1.5 ms burst window per thread
+    private static volatile Method recalcMethod = null;
+
+    private static final class ThreadWindow {
+        long windowStartNanos = 0L;
+        final IdentityHashMap<Object, Boolean> seenSquares = new IdentityHashMap<>(256);
+    }
+
+    private static final ThreadLocal<ThreadWindow> THREAD_WINDOW =
+        ThreadLocal.withInitial(ThreadWindow::new);
 
     public static final AtomicLong recalcsExecuted = new AtomicLong(0);
     public static final AtomicLong redundantRecalcsSkipped = new AtomicLong(0);
@@ -39,30 +43,31 @@ public final class ChunkHandoffRecalcGovernor {
 
     /**
      * 3-byte bytecode redirection target for invokevirtual IsoGridSquare.RecalcPropertiesIfNeeded()Z
-     * inside IsoGridSquare.ReCalculateAll / IsoChunk.loadInMainThread.
+     * inside IsoChunk.
      */
     public static boolean recalcPropertiesIfNeededFast(Object square) {
         if (square == null) return false;
         if (active) {
             long now = System.nanoTime();
-            synchronized (recalcedInWindow) {
-                if ((now - currentWindowNanos) > DEDUPE_WINDOW_NANOS) {
-                    recalcedInWindow.clear();
-                    currentWindowNanos = now;
-                }
-                if (!recalcedInWindow.add(square)) {
-                    redundantRecalcsSkipped.incrementAndGet();
-                    return false;
-                }
+            ThreadWindow tw = THREAD_WINDOW.get();
+            if ((now - tw.windowStartNanos) > DEDUPE_WINDOW_NANOS) {
+                tw.seenSquares.clear();
+                tw.windowStartNanos = now;
+            }
+            if (tw.seenSquares.put(square, Boolean.TRUE) != null) {
+                redundantRecalcsSkipped.incrementAndGet();
+                return false;
             }
         }
         recalcsExecuted.incrementAndGet();
         try {
-            if (recalcMethod == null) {
-                recalcMethod = square.getClass().getDeclaredMethod("RecalcPropertiesIfNeeded");
-                recalcMethod.setAccessible(true);
+            Method m = recalcMethod;
+            if (m == null) {
+                m = square.getClass().getDeclaredMethod("RecalcPropertiesIfNeeded");
+                m.setAccessible(true);
+                recalcMethod = m;
             }
-            return ((Boolean) recalcMethod.invoke(square)).booleanValue();
+            return ((Boolean) m.invoke(square)).booleanValue();
         } catch (Throwable t) {
             return false;
         }

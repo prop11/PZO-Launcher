@@ -29,7 +29,7 @@ public final class PZOMultiCoreEngine {
             private final AtomicInteger counter = new AtomicInteger(1);
             @Override
             public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "PZO-MultiCore-Worker-" + counter.getAndIncrement());
+                Thread t = new com.pzoptimizer.WorkerRandGovernor.WorkerThread(r, "PZO-MultiCore-Worker-" + counter.getAndIncrement());
                 t.setDaemon(true);
                 t.setPriority(Thread.NORM_PRIORITY);
                 return t;
