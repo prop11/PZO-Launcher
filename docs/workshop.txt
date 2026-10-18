@@ -3,7 +3,16 @@ id=3787481250
 title=Project Zomboid Optimiser
 description=[h1]Project Zomboid Optimiser (Build 42 & Build 41)[/h1]
 description=
-description= [hr][/hr]
+description=[hr][/hr]
+description=[h1]⚠️ DOWNLOAD THE JAVA ENGINE / LAUNCHER ON GITHUB HERE: ⚠️[/h1]
+description=[url=https://github.com/prop11/PZO-Launcher/releases][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_download_button.gif[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher/releases/tag/V1.0-unstable][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_unstable_button.png[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_repo_button.png[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher/releases][h1]👉 CLICK HERE TO DOWNLOAD THE PZO GITHUB ENGINE (RELEASES PAGE) 👈[/h1][/url]
+description=[url=https://github.com/prop11/PZO-Launcher][h1]👉 CLICK HERE FOR THE MAIN GITHUB REPOSITORY & INSTALL GUIDE 👈[/h1][/url]
+description=[b]IMPORTANT:[/b] Steam Workshop only allows Lua/media files! To get the [b]Multi-Threaded Java Engine, Native AVX2/SIMD C++ Accelerator, Bytecode Patches, and Automatic RAM/GC Optimizer[/b], click the giant GitHub buttons above and download the latest release!
+description=[hr][/hr]
+description=
 description=[h2]I am currently on my honeymoon, this mod will not be updated for at least 1 month, expect usual updates to resume around OCT 30th [/h2]
 description=
 description= [hr][/hr]
@@ -18,7 +27,10 @@ description=[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/
 description=
 description=    [hr][/hr]
 description=
-description=[url=https://github.com/prop11/PZO-Launcher/wiki/Troubleshooting-and-FAQ][h1]FAQ[/h1][/url]
+description=[url=https://github.com/prop11/PZO-Launcher/releases][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_download_button.png[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher/wiki/Troubleshooting-and-FAQ][h1]📖 TROUBLESHOOTING & FAQ WIKI 📖[/h1][/url]
+description=
+description=    [hr][/hr]
 description=
 description=    [h2]Core Features[/h2]
 description=
@@ -121,7 +133,14 @@ description=    [*] Safe to add or remove mid-save at any time.
 description=    [*] Compatible with all major vehicle, map, weapon, and quality-of-life mods.
 description=    [/list]
 description=
+description=[hr][/hr]
+description=[url=https://github.com/prop11/PZO-Launcher/releases][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_download_button.gif[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_repo_button.png[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher/releases][h1]👉 CLICK HERE TO DOWNLOAD THE GITHUB JAVA ENGINE (RELEASES) 👈[/h1][/url]
+description=[url=https://github.com/prop11/PZO-Launcher][h1]👉 MAIN GITHUB PAGE: https://github.com/prop11/PZO-Launcher 👈[/h1][/url]
+description=[hr][/hr]
+description=
 description=Workshop ID: 3787481250
 description=Mod ID: MPOptimizer
-tags=Build 41;Build 42;Audio;Interface;Misc;Multiplayer;Vehicles;QoL
-visibility=public
+description=tags=Build 41;Build 42;Audio;Interface;Misc;Multiplayer;Vehicles;QoL
+description=visibility=public
