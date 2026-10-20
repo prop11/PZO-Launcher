@@ -497,7 +497,11 @@ public final class FogQuarterBufferGovernor {
             if (uColorInfo != -1) glUniform4fMethod.invoke(null, uColorInfo, uniformsScratch[16], uniformsScratch[17], uniformsScratch[18], uniformsScratch[19]);
             if (uParamInfo != -1) glUniform4fMethod.invoke(null, uParamInfo, uniformsScratch[20], uniformsScratch[21], uniformsScratch[22], uniformsScratch[23]);
             if (uCameraInfo != -1) glUniform4fMethod.invoke(null, uCameraInfo, uniformsScratch[24], uniformsScratch[25], uniformsScratch[26], uniformsScratch[27]);
-            if (uFogScale != -1) glUniform4fMethod.invoke(null, uFogScale, (float) targetW / vpW, (float) targetH / vpH, (float) vpX, (float) vpY);
+            if (uFogScale != -1) {
+                // Under FSR the scene viewport is the reduced-resolution one; fog math expects full-res pixels
+                float rs = WorldRenderScale.scaleForTarget(prevFbo);
+                glUniform4fMethod.invoke(null, uFogScale, (float) targetW / vpW * rs, (float) targetH / vpH * rs, vpX / rs, vpY / rs);
+            }
 
             // Bind noise texture to Texture Unit 0
             glActiveTextureMethod.invoke(null, 0x84C0 /* GL_TEXTURE0 */);
