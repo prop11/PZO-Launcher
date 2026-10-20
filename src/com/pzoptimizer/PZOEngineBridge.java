@@ -1382,88 +1382,115 @@ public class PZOEngineBridge {
                                             "        function pzoPanel:apply() end\n" +
                                             "        function pzoPanel:save() end\n" +
                                             "        function pzoPanel:restoreDefault() end\n" +
-                                            "        local modeBtn = ISButton:new(36, 175, 340, 30, 'Standdown Mode: [AUTO] (Click to Cycle)', pzoPanel, function(target, button)\n" +
-                                            "            if PZOEngine and PZOEngine.toggleViewpointStanddown then\n" +
-                                            "                PZOEngine.toggleViewpointStanddown()\n" +
-                                            "            end\n" +
-                                            "        end)\n" +
-                                            "        modeBtn:initialise()\n" +
-                                            "        modeBtn:instantiate()\n" +
-                                            "        modeBtn.backgroundColor = {r=0.10, g=0.14, b=0.20, a=0.95}\n" +
-                                            "        modeBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
-                                            "        modeBtn.textColor = {r=0.85, g=0.95, b=1.0, a=1.0}\n" +
-                                            "        pzoPanel:addChild(modeBtn)\n" +
-                                            "        local wsBtn = ISButton:new(36, 440, 180, 28, 'Steam Workshop', pzoPanel, function(target, button)\n" +
-                                            "            if openUrl then openUrl('https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250')\n" +
-                                            "            elseif PZOEngine and PZOEngine.openWorkshopPage then PZOEngine.openWorkshopPage() end\n" +
-                                            "        end)\n" +
-                                            "        wsBtn:initialise()\n" +
-                                            "        wsBtn:instantiate()\n" +
-                                            "        wsBtn.backgroundColor = {r=0.12, g=0.35, b=0.55, a=1.0}\n" +
-                                            "        wsBtn.borderColor = {r=0.3, g=0.6, b=0.9, a=1.0}\n" +
-                                            "        wsBtn.textColor = {r=0.9, g=0.95, b=1.0, a=1.0}\n" +
-                                            "        pzoPanel:addChild(wsBtn)\n" +
-                                            "        local ghBtn = ISButton:new(230, 440, 180, 28, 'GitHub Issues', pzoPanel, function(target, button)\n" +
-                                            "            if openUrl then openUrl('https://github.com/prop11/PZO-Launcher/issues')\n" +
-                                            "            elseif PZOEngine and PZOEngine.openGithubPage then PZOEngine.openGithubPage() end\n" +
-                                            "        end)\n" +
-                                            "        ghBtn:initialise()\n" +
-                                            "        ghBtn:instantiate()\n" +
-                                            "        ghBtn.backgroundColor = {r=0.20, g=0.22, b=0.26, a=1.0}\n" +
-                                            "        ghBtn.borderColor = {r=0.5, g=0.5, b=0.6, a=1.0}\n" +
-                                            "        ghBtn.textColor = {r=0.9, g=0.9, b=0.9, a=1.0}\n" +
-                                            "        pzoPanel:addChild(ghBtn)\n" +
-                                            "        local updateBtn = ISButton:new(424, 440, 180, 28, 'Check for Updates', pzoPanel, function(target, button)\n" +
-                                            "            if PZOEngine and PZOEngine.checkForUpdates then\n" +
-                                            "                PZOEngine.checkForUpdates()\n" +
-                                            "            end\n" +
-                                            "        end)\n" +
-                                            "        updateBtn:initialise()\n" +
-                                            "        updateBtn:instantiate()\n" +
-                                            "        updateBtn.backgroundColor = {r=0.15, g=0.45, b=0.25, a=1.0}\n" +
-                                            "        updateBtn.borderColor = {r=0.3, g=0.8, b=0.4, a=1.0}\n" +
-                                            "        updateBtn.textColor = {r=0.9, g=1.0, b=0.9, a=1.0}\n" +
-                                            "        pzoPanel:addChild(updateBtn)\n" +
+                                            "        local function makeButton(title, bg, border, text, onClick)\n" +
+                                            "            local b = ISButton:new(0, 0, 100, 24, title, pzoPanel, onClick)\n" +
+                                            "            b:initialise()\n" +
+                                            "            b:instantiate()\n" +
+                                            "            b.backgroundColor = bg\n" +
+                                            "            b.borderColor = border\n" +
+                                            "            b.textColor = text\n" +
+                                            "            pzoPanel:addChild(b)\n" +
+                                            "            return b\n" +
+                                            "        end\n" +
+                                            "        local modeBtn = makeButton('Standdown Mode: [AUTO] (Click to Cycle)',\n" +
+                                            "            {r=0.10, g=0.14, b=0.20, a=0.95}, {r=0.3, g=0.6, b=0.9, a=1.0}, {r=0.85, g=0.95, b=1.0, a=1.0},\n" +
+                                            "            function(target, button)\n" +
+                                            "                if PZOEngine and PZOEngine.toggleViewpointStanddown then PZOEngine.toggleViewpointStanddown() end\n" +
+                                            "            end)\n" +
+                                            "        local wsBtn = makeButton('Steam Workshop',\n" +
+                                            "            {r=0.12, g=0.35, b=0.55, a=1.0}, {r=0.3, g=0.6, b=0.9, a=1.0}, {r=0.9, g=0.95, b=1.0, a=1.0},\n" +
+                                            "            function(target, button)\n" +
+                                            "                if openUrl then openUrl('https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250')\n" +
+                                            "                elseif PZOEngine and PZOEngine.openWorkshopPage then PZOEngine.openWorkshopPage() end\n" +
+                                            "            end)\n" +
+                                            "        local ghBtn = makeButton('GitHub Issues',\n" +
+                                            "            {r=0.20, g=0.22, b=0.26, a=1.0}, {r=0.5, g=0.5, b=0.6, a=1.0}, {r=0.9, g=0.9, b=0.9, a=1.0},\n" +
+                                            "            function(target, button)\n" +
+                                            "                if openUrl then openUrl('https://github.com/prop11/PZO-Launcher/issues')\n" +
+                                            "                elseif PZOEngine and PZOEngine.openGithubPage then PZOEngine.openGithubPage() end\n" +
+                                            "            end)\n" +
+                                            "        local updateBtn = makeButton('Check for Updates',\n" +
+                                            "            {r=0.15, g=0.45, b=0.25, a=1.0}, {r=0.3, g=0.8, b=0.4, a=1.0}, {r=0.9, g=1.0, b=0.9, a=1.0},\n" +
+                                            "            function(target, button)\n" +
+                                            "                if PZOEngine and PZOEngine.checkForUpdates then PZOEngine.checkForUpdates() end\n" +
+                                            "            end)\n" +
+                                            "        -- Layout is derived from the live font metrics every frame, so any UI font size fits\n" +
+                                            "        local function fitButton(btn, x, y, h)\n" +
+                                            "            local tm = getTextManager()\n" +
+                                            "            btn:setX(x)\n" +
+                                            "            btn:setY(y)\n" +
+                                            "            btn:setWidth(tm:MeasureStringX(UIFont.Small, btn.title) + 24)\n" +
+                                            "            btn:setHeight(h)\n" +
+                                            "            return btn:getWidth()\n" +
+                                            "        end\n" +
                                             "        pzoPanel.prerender = function(self)\n" +
                                             "            ISPanelJoypad.prerender(self)\n" +
-                                            "            self:setScrollHeight(500)\n" +
+                                            "            local tm = getTextManager()\n" +
+                                            "            local hS = tm:getFontHeight(UIFont.Small)\n" +
+                                            "            local hM = tm:getFontHeight(UIFont.Medium)\n" +
+                                            "            local pad = math.max(10, math.floor(hS * 0.6))\n" +
+                                            "            local gap = math.max(2, math.floor(hS * 0.2))\n" +
+                                            "            local btnH = hS + 10\n" +
+                                            "            local x0 = 24\n" +
+                                            "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
                                             "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0.1-unstable'\n" +
-                                            "            local standdownActive = false\n" +
-                                            "            local viewpointDetected = false\n" +
-                                            "            local standdownMode = 'AUTO'\n" +
-                                            "            local fsrActive = false\n" +
+                                            "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
+                                            "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                             "            if PZOEngine then\n" +
                                             "                if PZOEngine.isViewpointStanddownActive then standdownActive = PZOEngine.isViewpointStanddownActive() end\n" +
                                             "                if PZOEngine.isViewpointDetected then viewpointDetected = PZOEngine.isViewpointDetected() end\n" +
                                             "                if PZOEngine.getViewpointStanddownMode then standdownMode = PZOEngine.getViewpointStanddownMode() or 'AUTO' end\n" +
                                             "                if PZOEngine.isWorldUpscalerActive then fsrActive = PZOEngine.isWorldUpscalerActive() end\n" +
+                                            "                if PZOEngine.getWorldUpscalerRenderScale then fsrScale = PZOEngine.getWorldUpscalerRenderScale() or fsrScale end\n" +
+                                            "                if PZOEngine.getWorldUpscalerSharpness then fsrSharp = PZOEngine.getWorldUpscalerSharpness() or fsrSharp end\n" +
                                             "            end\n" +
-                                            "            self:drawText('PROJECT ZOMBOID OPTIMISER (PZO v' .. ver .. ')', 24, 12, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
-                                            "            self:drawText('High-Performance Multi-Core Architecture & Hardware Acceleration Engine', 24, 34, 0.7, 0.7, 0.7, 0.9, UIFont.Small)\n" +
-                                            "            local contentW = math.max(480, math.min(840, self:getWidth() - 56))\n" +
-                                            "            local vpY = 58\n" +
-                                            "            local vpH = 160\n" +
+                                            "            local y = 12\n" +
+                                            "            self:drawText('PROJECT ZOMBOID OPTIMISER (PZO v' .. ver .. ')', x0, y, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
+                                            "            y = y + hM + gap\n" +
+                                            "            self:drawText('High-Performance Multi-Core Architecture & Hardware Acceleration Engine', x0, y, 0.7, 0.7, 0.7, 0.9, UIFont.Small)\n" +
+                                            "            y = y + hS + pad\n" +
+                                            "            -- Draws a bordered card sized to its contents; returns the y below the card and the y below its text\n" +
+                                            "            local function card(top, title, tc, lines, extraH, bg, bd)\n" +
+                                            "                local w = tm:MeasureStringX(UIFont.Medium, title)\n" +
+                                            "                for _, ln in ipairs(lines) do w = math.max(w, tm:MeasureStringX(UIFont.Small, ln[1])) end\n" +
+                                            "                w = math.min(maxW, math.max(480, w + pad * 2))\n" +
+                                            "                local h = pad + hM + gap + #lines * (hS + gap) + extraH + pad\n" +
+                                            "                self:drawRect(x0, top, w, h, bg[1], bg[2], bg[3], bg[4])\n" +
+                                            "                self:drawRectBorder(x0, top, w, h, bd[1], bd[2], bd[3], bd[4])\n" +
+                                            "                local ty = top + pad\n" +
+                                            "                self:drawText(title, x0 + pad, ty, tc[1], tc[2], tc[3], 1.0, UIFont.Medium)\n" +
+                                            "                ty = ty + hM + gap\n" +
+                                            "                for _, ln in ipairs(lines) do\n" +
+                                            "                    self:drawText(ln[1], x0 + pad, ty, ln[2], ln[3], ln[4], ln[5] or 1.0, UIFont.Small)\n" +
+                                            "                    ty = ty + hS + gap\n" +
+                                            "                end\n" +
+                                            "                return top + h, ty\n" +
+                                            "            end\n" +
+                                            "            local vpLines\n" +
+                                            "            local vpTitle, vpBg, vpBd\n" +
                                             "            if standdownActive then\n" +
-                                            "                self:drawRect(24, vpY, contentW, vpH, 0.88, 0.08, 0.20, 0.12)\n" +
-                                            "                self:drawRectBorder(24, vpY, contentW, vpH, 1.0, 0.25, 0.85, 0.45)\n" +
-                                            "                self:drawText('PROJECT VIEWPOINT & 3D CAMERA MOD COMPATIBILITY', 36, vpY + 10, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
-                                            "                self:drawText('STATUS: [STANDDOWN ACTIVE - 3D COMPATIBILITY SAFEGUARD ENGAGED]', 36, vpY + 34, 0.35, 1.0, 0.55, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('PZO has disarmed conflicting fog buffers, 2D screen culling, and weather geometry passes.', 36, vpY + 56, 0.9, 0.95, 0.9, 0.95, UIFont.Small)\n" +
-                                            "                self:drawText('Project Viewpoint & True Weathers are running with 100% shader compatibility and zero artifacts.', 36, vpY + 74, 0.8, 0.9, 0.8, 0.9, UIFont.Small)\n" +
+                                            "                vpTitle, vpBg, vpBd = {0.25, 0.95, 0.45}, {0.88, 0.08, 0.20, 0.12}, {1.0, 0.25, 0.85, 0.45}\n" +
+                                            "                vpLines = {\n" +
+                                            "                    {'STATUS: [STANDDOWN ACTIVE - 3D COMPATIBILITY SAFEGUARD ENGAGED]', 0.35, 1.0, 0.55},\n" +
+                                            "                    {'PZO has disarmed conflicting fog buffers, 2D screen culling, and weather geometry passes.', 0.9, 0.95, 0.9, 0.95},\n" +
+                                            "                    {'Project Viewpoint & True Weathers are running with full shader compatibility.', 0.8, 0.9, 0.8, 0.9},\n" +
+                                            "                }\n" +
                                             "            else\n" +
-                                            "                self:drawRect(24, vpY, contentW, vpH, 0.88, 0.10, 0.14, 0.22)\n" +
-                                            "                self:drawRectBorder(24, vpY, contentW, vpH, 1.0, 0.35, 0.65, 0.90)\n" +
-                                            "                self:drawText('PROJECT VIEWPOINT & 3D CAMERA MOD COMPATIBILITY', 36, vpY + 10, 0.35, 0.75, 1.0, 1.0, UIFont.Medium)\n" +
-                                            "                self:drawText('STATUS: [STANDDOWN INACTIVE - FULL PZO GRAPHICS ACCELERATION RUNNING]', 36, vpY + 34, 0.7, 0.85, 1.0, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('Full PZO visual optimizations are active: Quarter-Buffer Fog, Screen-Space Frustum Culling, and AVX2 sweeps.', 36, vpY + 56, 0.85, 0.85, 0.85, 0.95, UIFont.Small)\n" +
-                                            "                self:drawText('No 3D camera mods detected. PZO is maximizing Build 42 framerates and memory efficiency.', 36, vpY + 74, 0.75, 0.75, 0.75, 0.9, UIFont.Small)\n" +
+                                            "                vpTitle, vpBg, vpBd = {0.35, 0.75, 1.0}, {0.88, 0.10, 0.14, 0.22}, {1.0, 0.35, 0.65, 0.90}\n" +
+                                            "                vpLines = {\n" +
+                                            "                    {'STATUS: [STANDDOWN INACTIVE - FULL PZO GRAPHICS ACCELERATION RUNNING]', 0.7, 0.85, 1.0},\n" +
+                                            "                    {'Full PZO visual optimizations are active: Quarter-Buffer Fog, Screen-Space Frustum Culling, and AVX2 sweeps.', 0.85, 0.85, 0.85, 0.95},\n" +
+                                            "                    {'No 3D camera mods detected. PZO is maximizing Build 42 framerates and memory efficiency.', 0.75, 0.75, 0.75, 0.9},\n" +
+                                            "                }\n" +
                                             "            end\n" +
-                                            "            local detectText = viewpointDetected and 'Viewpoint / True Weathers Detected: [YES] (Safeguard auto-engaged)' or 'Viewpoint / True Weathers Detected: [NO] (Vanilla camera active)'\n" +
-                                            "            local dr, dg, db = 0.7, 0.7, 0.7\n" +
-                                            "            if viewpointDetected then dr, dg, db = 0.3, 1.0, 0.5 end\n" +
-                                            "            self:drawText(detectText, 36, vpY + 94, dr, dg, db, 1.0, UIFont.Small)\n" +
-                                            "            modeBtn:setY(vpY + 118)\n" +
+                                            "            if viewpointDetected then\n" +
+                                            "                table.insert(vpLines, {'Viewpoint / True Weathers Detected: [YES] (Safeguard auto-engaged)', 0.3, 1.0, 0.5})\n" +
+                                            "            else\n" +
+                                            "                table.insert(vpLines, {'Viewpoint / True Weathers Detected: [NO] (Vanilla camera active)', 0.7, 0.7, 0.7})\n" +
+                                            "            end\n" +
+                                            "            local vpBottom, vpTextBottom = card(y, 'PROJECT VIEWPOINT & 3D CAMERA MOD COMPATIBILITY', vpTitle, vpLines, btnH + gap, vpBg, vpBd)\n" +
                                             "            modeBtn.title = 'Standdown Mode: [' .. standdownMode .. '] (Click to Cycle)'\n" +
+                                            "            fitButton(modeBtn, x0 + pad, vpTextBottom + gap, btnH)\n" +
                                             "            if standdownActive then\n" +
                                             "                modeBtn.borderColor = {r=0.25, g=0.85, b=0.45, a=1.0}\n" +
                                             "                modeBtn.textColor = {r=0.35, g=1.0, b=0.55, a=1.0}\n" +
@@ -1471,31 +1498,38 @@ public class PZOEngineBridge {
                                             "                modeBtn.borderColor = {r=0.4, g=0.6, b=0.8, a=1.0}\n" +
                                             "                modeBtn.textColor = {r=0.8, g=0.9, b=1.0, a=1.0}\n" +
                                             "            end\n" +
-                                            "            local fsrY = vpY + vpH + 14\n" +
-                                            "            local fsrH = 180\n" +
+                                            "            y = vpBottom + pad\n" +
+                                            "            local fsrLines\n" +
                                             "            if fsrActive then\n" +
-                                            "                self:drawRect(24, fsrY, contentW, fsrH, 0.90, 0.06, 0.20, 0.10)\n" +
-                                            "                self:drawRectBorder(24, fsrY, contentW, fsrH, 1.0, 0.20, 0.90, 0.45)\n" +
-                                            "                self:drawText('AMD FIDELITYFX SUPER RESOLUTION (FSR 1.0)', 36, fsrY + 10, 0.25, 0.95, 0.45, 1.0, UIFont.Medium)\n" +
-                                            "                self:drawText('VISUAL NOTIFICATION: FSR 1.0 IS CURRENTLY [ENABLED]', 36, fsrY + 34, 0.35, 1.0, 0.55, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('Render Scale: 75%  |  Edge-Adaptive RCAS Sharpening: 80%  |  UI: Native 100%', 36, fsrY + 56, 0.9, 0.95, 0.9, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('The 3D game world is rendered at a performance scale and intelligently upscaled in real-time.', 36, fsrY + 76, 0.85, 0.85, 0.85, 0.95, UIFont.Small)\n" +
-                                            "                self:drawText('Delivers massive framerate increases on handhelds and high-res displays while preserving crisp UI text.', 36, fsrY + 94, 0.8, 0.8, 0.8, 0.9, UIFont.Small)\n" +
-                                            "                self:drawText('Status: Active via Steam Launch Option (-pzo_fsr)', 36, fsrY + 118, 0.2, 0.85, 1.0, 1.0, UIFont.Small)\n" +
+                                            "                fsrLines = {\n" +
+                                            "                    {'VISUAL NOTIFICATION: FSR 1.0 IS CURRENTLY [ENABLED]', 0.35, 1.0, 0.55},\n" +
+                                            "                    {'Render Scale: ' .. math.floor(fsrScale * 100 + 0.5) .. '%  |  RCAS Sharpening: ' .. math.floor(fsrSharp * 100 + 0.5) .. '%  |  UI: Native 100%', 0.9, 0.95, 0.9},\n" +
+                                            "                    {'The 3D game world is rendered at a performance scale and upscaled with AMD FSR 1.0 every frame.', 0.85, 0.85, 0.85, 0.95},\n" +
+                                            "                    {'Boosts framerates on handhelds and high-resolution displays while keeping UI text crisp.', 0.8, 0.8, 0.8, 0.9},\n" +
+                                            "                    {'Status: Active via Steam Launch Option (-pzo_fsr)', 0.2, 0.85, 1.0},\n" +
+                                            "                }\n" +
+                                            "                y = card(y, 'AMD FIDELITYFX SUPER RESOLUTION (FSR 1.0)', {0.25, 0.95, 0.45}, fsrLines, 0, {0.90, 0.06, 0.20, 0.10}, {1.0, 0.20, 0.90, 0.45})\n" +
                                             "            else\n" +
-                                            "                self:drawRect(24, fsrY, contentW, fsrH, 0.90, 0.18, 0.12, 0.08)\n" +
-                                            "                self:drawRectBorder(24, fsrY, contentW, fsrH, 1.0, 0.90, 0.55, 0.20)\n" +
-                                            "                self:drawText('AMD FIDELITYFX SUPER RESOLUTION (FSR 1.0)', 36, fsrY + 10, 1.0, 0.75, 0.3, 1.0, UIFont.Medium)\n" +
-                                            "                self:drawText('VISUAL NOTIFICATION: FSR 1.0 IS CURRENTLY [DISABLED]', 36, fsrY + 34, 1.0, 0.45, 0.35, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('The game world is currently rendering at full native resolution with standard bilinear scaling.', 36, fsrY + 56, 0.85, 0.85, 0.85, 0.95, UIFont.Small)\n" +
-                                            "                self:drawText('How to Enable: In Steam, right-click Project Zomboid -> Properties -> General -> Launch Options.', 36, fsrY + 80, 0.95, 0.95, 0.95, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('Enter:  -pzo_fsr   and launch the game.', 36, fsrY + 98, 0.35, 1.0, 0.55, 1.0, UIFont.Small)\n" +
-                                            "                self:drawText('Provides massive FPS increases on Steam Deck, ROG Ally, integrated APUs, and 1440p / 4K displays.', 36, fsrY + 118, 0.8, 0.8, 0.8, 0.9, UIFont.Small)\n" +
+                                            "                fsrLines = {\n" +
+                                            "                    {'VISUAL NOTIFICATION: FSR 1.0 IS CURRENTLY [DISABLED]', 1.0, 0.45, 0.35},\n" +
+                                            "                    {'The game world is currently rendering at full native resolution.', 0.85, 0.85, 0.85, 0.95},\n" +
+                                            "                    {'How to Enable: In Steam, right-click Project Zomboid -> Properties -> General -> Launch Options.', 0.95, 0.95, 0.95},\n" +
+                                            "                    {'Enter:  -pzo_fsr   and launch the game.', 0.35, 1.0, 0.55},\n" +
+                                            "                    {'Boosts FPS on Steam Deck, ROG Ally, integrated APUs, and 1440p / 4K displays.', 0.8, 0.8, 0.8, 0.9},\n" +
+                                            "                }\n" +
+                                            "                y = card(y, 'AMD FIDELITYFX SUPER RESOLUTION (FSR 1.0)', {1.0, 0.75, 0.3}, fsrLines, 0, {0.90, 0.18, 0.12, 0.08}, {1.0, 0.90, 0.55, 0.20})\n" +
                                             "            end\n" +
-                                            "            local btnY = fsrY + fsrH + 14\n" +
-                                            "            wsBtn:setY(btnY)\n" +
-                                            "            ghBtn:setY(btnY)\n" +
-                                            "            updateBtn:setY(btnY)\n" +
+                                            "            y = y + pad\n" +
+                                            "            local bx = x0\n" +
+                                            "            for _, b in ipairs({wsBtn, ghBtn, updateBtn}) do\n" +
+                                            "                local bw = tm:MeasureStringX(UIFont.Small, b.title) + 24\n" +
+                                            "                if bx > x0 and bx + bw > x0 + maxW then\n" +
+                                            "                    bx = x0\n" +
+                                            "                    y = y + btnH + gap\n" +
+                                            "                end\n" +
+                                            "                bx = bx + fitButton(b, bx, y, btnH) + 12\n" +
+                                            "            end\n" +
+                                            "            self:setScrollHeight(y + btnH + pad)\n" +
                                             "        end\n" +
                                             "        tabs:addView('PZO', pzoPanel)\n" +
                                             "    end\n" +
