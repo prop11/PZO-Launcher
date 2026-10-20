@@ -1,35 +1,61 @@
 package com.pzoptimizer;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.HashMap;
+import java.util.Map;
+import zombie.core.TilePropertyAliasMap;
 
 /**
  * PropertyContainer / TilePropertyAliasMap Property ID Cache Governor.
- * Thread-safe and lock-free across MainThread and PZO-ChunkStreamer-Worker threads.
+ *
+ * Vanilla resolves every tile property lookup through HashMap<String, Integer>.getOrDefault, which
+ * walks a Node and unboxes an Integer per call. After each TilePropertyAliasMap.Generate() this
+ * governor snapshots the table into a flat open-addressed String[]/int[] pair, so a hit is one array
+ * probe with an identity compare (property names are mostly interned literals) and no boxing.
+ *
+ * Thread-safety: the snapshot is immutable and published through a single volatile field, so the
+ * MainThread and PZO worker threads read it lock-free. Generate() runs on the MainThread during world
+ * load; while it runs (and before the first one completes) lookups fall through to vanilla.
  */
 public final class PropIdCacheGovernor {
 
     private static volatile boolean active = true;
-    private static final int UNSET = Integer.MIN_VALUE;
-    private static final AtomicInteger generation = new AtomicInteger(1);
 
-    private static volatile int cachedGen = 1;
-    private static volatile int[] ordinalIds = new int[512];
-    private static final ConcurrentHashMap<String, Integer> nameIds = new ConcurrentHashMap<>(512);
+    private static final class Snapshot {
+        final String[] keys;
+        final int[] ids;
+        final int mask;
 
-    private static volatile Object aliasMapInstance = null;
-    private static volatile Method getIdMethod = null;
-    private static volatile Field instanceField = null;
+        Snapshot(Map<String, Integer> source) {
+            int cap = Integer.highestOneBit(Math.max(16, source.size() * 4) - 1) << 1;
+            keys = new String[cap];
+            ids = new int[cap];
+            mask = cap - 1;
+            for (Map.Entry<String, Integer> e : source.entrySet()) {
+                String k = e.getKey();
+                if (k == null || e.getValue() == null) continue;
+                int i = k.hashCode() & mask;
+                while (keys[i] != null) {
+                    i = (i + 1) & mask;
+                }
+                keys[i] = k;
+                ids[i] = e.getValue();
+            }
+        }
 
-    public static final AtomicLong cacheHits = new AtomicLong(0);
-    public static final AtomicLong cacheMisses = new AtomicLong(0);
-
-    static {
-        java.util.Arrays.fill(ordinalIds, UNSET);
+        int lookup(String name) {
+            int i = name.hashCode() & mask;
+            String k;
+            while ((k = keys[i]) != null) {
+                if (k == name || k.equals(name)) {
+                    return ids[i];
+                }
+                i = (i + 1) & mask;
+            }
+            return -1;
+        }
     }
+
+    private static volatile Snapshot snapshot = null;
 
     private PropIdCacheGovernor() {}
 
@@ -41,77 +67,36 @@ public final class PropIdCacheGovernor {
         active = val;
     }
 
-    /**
-     * Called when TilePropertyAliasMap.Generate() runs on world initialization.
-     */
-    public static synchronized void onAliasMapGenerated() {
-        int nextGen = generation.incrementAndGet();
-        nameIds.clear();
-        int[] fresh = new int[512];
-        java.util.Arrays.fill(fresh, UNSET);
-        ordinalIds = fresh;
-        cachedGen = nextGen;
-        aliasMapInstance = null;
+    public static boolean isSnapshotReady() {
+        return snapshot != null;
     }
 
     /**
-     * Bytecode hook replacement for TilePropertyAliasMap.getIDFromPropertyName(Object aliasMap, String name).
-     * Caches valid integer IDs (>= 0) in a lock-free ConcurrentHashMap for the current alias generation.
+     * Redirect target for invokevirtual TilePropertyAliasMap.Generate(HashMap) inside IsoWorld.
+     */
+    public static void generate(Object aliasMap, HashMap<String, java.util.ArrayList<String>> propertyValueMap) {
+        TilePropertyAliasMap map = (TilePropertyAliasMap) aliasMap;
+        snapshot = null;
+        map.Generate(propertyValueMap);
+        if (map == TilePropertyAliasMap.instance) {
+            try {
+                snapshot = new Snapshot(map.propertyToId);
+                PZOLogger.info("[PropIdCacheGovernor] Property-ID snapshot rebuilt (" + map.propertyToId.size() + " properties)");
+            } catch (Throwable t) {
+                snapshot = null;
+                PZOLogger.warn("[PropIdCacheGovernor] Snapshot build failed, using vanilla lookups: " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Redirect target for invokevirtual TilePropertyAliasMap.getIDFromPropertyName(String) inside PropertyContainer.
      */
     public static int getIDFromPropertyNameFast(Object aliasMap, String propName) {
-        if (propName == null) return -1;
-        if (active) {
-            int g = generation.get();
-            Object currentInst = aliasMapInstance;
-            if (g != cachedGen || (aliasMap != null && currentInst != aliasMap)) {
-                synchronized (PropIdCacheGovernor.class) {
-                    if (g != cachedGen || (aliasMap != null && aliasMapInstance != aliasMap)) {
-                        if (aliasMapInstance != null || g != cachedGen) {
-                            nameIds.clear();
-                        }
-                        cachedGen = g;
-                        if (aliasMap != null) {
-                            aliasMapInstance = aliasMap;
-                        }
-                    }
-                }
-            }
-            Integer cached = nameIds.get(propName);
-            if (cached != null) {
-                cacheHits.incrementAndGet();
-                return cached.intValue();
-            }
+        Snapshot s = snapshot;
+        if (active && s != null && propName != null && aliasMap == TilePropertyAliasMap.instance) {
+            return s.lookup(propName);
         }
-        cacheMisses.incrementAndGet();
-        int resolved = invokeStockGetId(aliasMap, propName);
-        if (active && resolved >= 0) {
-            nameIds.put(propName, Integer.valueOf(resolved));
-        }
-        return resolved;
-    }
-
-    private static int invokeStockGetId(Object aliasMap, String propName) {
-        try {
-            if (aliasMap == null) {
-                Field f = instanceField;
-                if (f == null) {
-                    Class<?> cls = Class.forName("zombie.core.TilePropertyAliasMap");
-                    f = cls.getDeclaredField("instance");
-                    f.setAccessible(true);
-                    instanceField = f;
-                }
-                aliasMap = f.get(null);
-            }
-            if (aliasMap != null) {
-                Method m = getIdMethod;
-                if (m == null) {
-                    m = aliasMap.getClass().getDeclaredMethod("getIDFromPropertyName", String.class);
-                    m.setAccessible(true);
-                    getIdMethod = m;
-                }
-                return ((Number) m.invoke(aliasMap, propName)).intValue();
-            }
-        } catch (Throwable ignored) {}
-        return -1;
+        return ((TilePropertyAliasMap) aliasMap).getIDFromPropertyName(propName);
     }
 }

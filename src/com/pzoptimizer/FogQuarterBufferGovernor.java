@@ -6,6 +6,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.concurrent.atomic.AtomicLong;
+import zombie.core.ShaderHelper;
+import zombie.core.SpriteRenderer;
+import zombie.core.opengl.GLStateRenderThread;
+import zombie.core.textures.Texture;
 
 /**
  * Project Zomboid Build 42 & 41 - Single-Pass Quarter-Resolution Fog & Weather Governor.
@@ -159,12 +163,7 @@ public final class FogQuarterBufferGovernor {
     private static Method getTextureIdMethod = null;
     private static Method getIDMethod = null;
 
-    // Core matrix peek reflection
-    private static Object coreInstance = null;
-    private static Field projectionMatrixStackField = null;
-    private static Field modelViewMatrixStackField = null;
-    private static Method stackPeekMethod = null;
-    private static Method matrixGetMethod = null;
+    private static final org.joml.Matrix4f mvpScratch = new org.joml.Matrix4f();
 
     private FogQuarterBufferGovernor() {}
 
@@ -258,19 +257,6 @@ public final class FogQuarterBufferGovernor {
             glBindRenderbufferMethod = gl30.getMethod("glBindRenderbuffer", int.class, int.class);
             glRenderbufferStorageMethod = gl30.getMethod("glRenderbufferStorage", int.class, int.class, int.class, int.class);
             glDeleteRenderbuffersMethod = gl30.getMethod("glDeleteRenderbuffers", int.class);
-
-            // Reflect Core matrix stack if present (Build 42)
-            try {
-                Class<?> coreClass = Class.forName("zombie.core.Core");
-                Method getInstanceMethod = coreClass.getMethod("getInstance");
-                coreInstance = getInstanceMethod.invoke(null);
-                projectionMatrixStackField = coreClass.getField("projectionMatrixStack");
-                modelViewMatrixStackField = coreClass.getField("modelViewMatrixStack");
-                Class<?> stackClass = projectionMatrixStackField.getType();
-                stackPeekMethod = stackClass.getMethod("peek");
-                Class<?> matrixClass = Class.forName("org.joml.Matrix4f");
-                matrixGetMethod = matrixClass.getMethod("get", FloatBuffer.class);
-            } catch (Throwable ignored) {}
 
             // Reflect ImprovedFog.getNoiseTexture()
             try {
@@ -443,6 +429,10 @@ public final class FogQuarterBufferGovernor {
         initDrawerFields(drawerInstance.getClass());
         if (fallback || rectBufferField == null) return false;
 
+        // Every GL change below must be undone in the finally block, or the engine's cached
+        // texture/shader/GL state goes stale and the rest of the frame renders black.
+        boolean touchedGL = false;
+        int prevFbo = 0, vpX = 0, vpY = 0, vpW = 0, vpH = 0;
         try {
             ByteBuffer rectBuffer = (ByteBuffer) rectBufferField.get(drawerInstance);
             if (rectBuffer == null || rectBuffer.position() != 0 || rectBuffer.limit() == 0) {
@@ -454,25 +444,26 @@ public final class FogQuarterBufferGovernor {
 
             // Query current active viewport (GL_VIEWPORT = 0x0BA2)
             glGetIntegervMethod.invoke(null, 0x0BA2, viewportScratch);
-            int vpX = viewportScratch[0];
-            int vpY = viewportScratch[1];
-            int vpW = viewportScratch[2];
-            int vpH = viewportScratch[3];
+            vpX = viewportScratch[0];
+            vpY = viewportScratch[1];
+            vpW = viewportScratch[2];
+            vpH = viewportScratch[3];
             if (vpW <= 0 || vpH <= 0) return false;
 
             // Query current active framebuffer binding (GL_FRAMEBUFFER_BINDING = 0x8CA6)
             glGetIntegervMethod.invoke(null, 0x8CA6, viewportScratch);
-            int prevFbo = viewportScratch[0];
+            prevFbo = viewportScratch[0];
+
+            // Checked before any GL mutation so a missing noise texture yields to vanilla cleanly
+            int noiseGlId = getNoiseTextureId();
+            if (noiseGlId <= 0) return false;
 
             int targetW = Math.max(64, (int) (vpW * downscaleRatio));
             int targetH = Math.max(64, (int) (vpH * downscaleRatio));
 
+            touchedGL = true;
             ensureFogBufferAllocated(targetW, targetH);
             if (fogFbo == 0) return false;
-
-            // Extract noise texture OpenGL texture ID
-            int noiseGlId = getNoiseTextureId();
-            if (noiseGlId <= 0) return false;
 
             // Extract uniforms
             for (int i = 0; i < uniformFields.length; i++) {
@@ -550,9 +541,6 @@ public final class FogQuarterBufferGovernor {
             // 5. Composite Quarter-Res Fog onto Scene with Hardware Bilinear Filtering
             compositeFogToScene();
 
-            // 6. Restore Clean GL State
-            restoreGLState();
-
             fogFramesDrawn.incrementAndGet();
             fogRectanglesDrawn.addAndGet(numRectangles);
             drawCallsSaved.addAndGet(Math.max(0, numRectangles - 1));
@@ -560,9 +548,12 @@ public final class FogQuarterBufferGovernor {
             return true;
         } catch (Throwable t) {
             fallback = true;
-            restoreGLState();
             PZOLogger.warn("[FogQuarterBufferGovernor] Non-fatal notice during fog pass, switching to stock drawer: " + t.getMessage());
             return false;
+        } finally {
+            if (touchedGL) {
+                restoreGLState(prevFbo, vpX, vpY, vpW, vpH);
+            }
         }
     }
 
@@ -647,35 +638,17 @@ public final class FogQuarterBufferGovernor {
     private static void setupMvpMatrix(int vw, int vh) throws Exception {
         if (uMvpMatrix == -1) return;
 
-        // Try reading JOML matrix stack from Core.getInstance()
-        if (coreInstance != null && projectionMatrixStackField != null && modelViewMatrixStackField != null) {
-            try {
-                Object pStack = projectionMatrixStackField.get(coreInstance);
-                Object mStack = modelViewMatrixStackField.get(coreInstance);
-                if (pStack != null && mStack != null) {
-                    Object pMatrix = stackPeekMethod.invoke(pStack);
-                    Object mMatrix = stackPeekMethod.invoke(mStack);
-                    if (pMatrix != null && mMatrix != null) {
-                        // Matrix multiplication: proj * modelView
-                        Method mulMethod = pMatrix.getClass().getMethod("mul", pMatrix.getClass());
-                        Method setMethod = pMatrix.getClass().getMethod("set", pMatrix.getClass());
-                        Method allocMethod = pStack.getClass().getMethod("alloc");
-                        Method releaseMethod = pStack.getClass().getMethod("release", pMatrix.getClass());
-
-                        Object mvp = allocMethod.invoke(pStack);
-                        setMethod.invoke(mvp, pMatrix);
-                        mulMethod.invoke(mvp, mMatrix);
-
-                        matrixScratch.clear();
-                        matrixGetMethod.invoke(mvp, matrixScratch);
-                        releaseMethod.invoke(pStack, mvp);
-
-                        glUniformMatrix4fvMethod.invoke(null, uMvpMatrix, false, matrixScratch);
-                        return;
-                    }
-                }
-            } catch (Throwable ignored) {}
-        }
+        // Same projection * modelView product vanilla's VBORenderer feeds the stock fog shader
+        try {
+            zombie.core.Core core = zombie.core.Core.getInstance();
+            if (core != null && !core.projectionMatrixStack.isEmpty() && !core.modelViewMatrixStack.isEmpty()) {
+                zombie.core.skinnedmodel.model.VertexBufferObject.getModelViewProjection(mvpScratch);
+                matrixScratch.clear();
+                mvpScratch.get(matrixScratch);
+                glUniformMatrix4fvMethod.invoke(null, uMvpMatrix, false, matrixScratch);
+                return;
+            }
+        } catch (Throwable ignored) {}
 
         // Standard 2D Orthographic Projection Matrix fallback: (left=0, right=vw, bottom=vh, top=0, near=-1, far=1)
         matrixScratch.clear();
@@ -733,15 +706,35 @@ public final class FogQuarterBufferGovernor {
         glDrawArraysMethod.invoke(null, 0x0007 /* GL_QUADS */, 0, 4);
     }
 
-    private static void restoreGLState() {
+    /**
+     * Leaves GL exactly as vanilla ImprovedFogDrawer.render() does: VBORenderer.flush() leaves
+     * attribs 0-4 enabled on texture unit 0, then the drawer binds the default shader through
+     * ShaderHelper and calls GLStateRenderThread.restore() to re-apply the engine's cached state.
+     */
+    private static void restoreGLState(int prevFbo, int vpX, int vpY, int vpW, int vpH) {
         try {
-            if (glUseProgramMethod != null) glUseProgramMethod.invoke(null, 0);
-            if (glBindBufferMethod != null) glBindBufferMethod.invoke(null, 0x8892, 0);
-            if (glActiveTextureMethod != null) glActiveTextureMethod.invoke(null, 0x84C0);
-            if (glBindTextureMethod != null) glBindTextureMethod.invoke(null, 0x0DE1, 0);
-            if (glEnableMethod != null) glEnableMethod.invoke(null, 0x0B71 /* GL_DEPTH_TEST */);
-            if (glDepthMaskMethod != null) glDepthMaskMethod.invoke(null, true);
+            glBindFramebufferMethod.invoke(null, 0x8D40 /* GL_FRAMEBUFFER */, prevFbo);
+            glViewportMethod.invoke(null, vpX, vpY, vpW, vpH);
+            glBindBufferMethod.invoke(null, 0x8892 /* GL_ARRAY_BUFFER */, 0);
+            for (int i = 0; i < 5; i++) {
+                glEnableVertexAttribArrayMethod.invoke(null, i);
+            }
+            glActiveTextureMethod.invoke(null, 0x84C0 /* GL_TEXTURE0 */);
+            glBindTextureMethod.invoke(null, 0x0DE1 /* GL_TEXTURE_2D */, 0);
         } catch (Throwable ignored) {}
+
+        // Engine caches skip redundant binds; invalidate them so the next sprite/shader rebinds for real.
+        try {
+            Texture.lastTextureID = -1;
+            SpriteRenderer.ringBuffer.restoreBoundTextures = true;
+            SpriteRenderer.ringBuffer.restoreVbos = true;
+            ShaderHelper.forgetCurrentlyBound();
+            ShaderHelper.glUseProgramObjectARB(0);
+            GLStateRenderThread.restore();
+        } catch (Throwable t) {
+            fallback = true;
+            PZOLogger.warn("[FogQuarterBufferGovernor] Engine GL state resync unavailable, switching to stock drawer: " + t.getMessage());
+        }
     }
 
     private static void ensureFogBufferAllocated(int w, int h) throws Exception {
@@ -770,6 +763,7 @@ public final class FogQuarterBufferGovernor {
         glBindRenderbufferMethod.invoke(null, 0x8D41 /* GL_RENDERBUFFER */, fogDepthRb);
         glRenderbufferStorageMethod.invoke(null, 0x8D41, 0x88F0 /* GL_DEPTH24_STENCIL8 */, w, h);
         glFramebufferRenderbufferMethod.invoke(null, 0x8D40, 0x821A /* GL_DEPTH_STENCIL_ATTACHMENT */, 0x8D41, fogDepthRb);
+        glBindRenderbufferMethod.invoke(null, 0x8D41, 0);
 
         int status = ((Number) glCheckFramebufferStatusMethod.invoke(null, 0x8D40)).intValue();
         if (status != 0x8CD5 /* GL_FRAMEBUFFER_COMPLETE */) {

@@ -155,7 +155,6 @@ public final class FrameDropDiagnosticEngine {
 
         ZombieLodGovernor.recordFrameStep(deltaNanos);
         BodyAtlasPrewarmGovernor.onFrameTick();
-        HotSaveGovernor.flushPendingIfDue();
         WorldUpscalerGovernor.updateDynamicScale(deltaNanos, ZombieLodGovernor.getTargetFps());
 
         double frameTimeMs = deltaNanos / 1_000_000.0;

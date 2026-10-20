@@ -1,35 +1,24 @@
 package com.pzoptimizer;
 
-import java.lang.reflect.Method;
-import java.util.IdentityHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import zombie.iso.IsoGridSquare;
 
 /**
- * Chunk Border Hand-off Recalc Deduplicator (Lock-Free Per-Thread).
+ * Chunk Border Hand-off Recalc Gate.
  * During IsoChunk.loadInMainThread() and WorldStreamer neighbor recalculations, border squares
  * invoke IsoGridSquare.RecalcPropertiesIfNeeded() up to ~15 times per square within the same
- * micro-window.
+ * micro-window. Vanilla already guards the work with the public propertiesDirty flag, so the only
+ * safe dedupe is that same flag: a clean square returns immediately, a dirty one always recalcs.
+ * (A time-window dedupe would skip legitimate recalcs on squares re-dirtied inside the window.)
  *
- * Uses per-thread (ThreadLocal) deduplication state so MainThread, WorldStreamer, and
- * PZO-ChunkStreamer-Worker threads never contend on a shared lock and never suppress
- * another thread's legitimate recalculation pass.
+ * Counters are plain longs: this sits on a very hot path and exact telemetry is not worth a
+ * contended atomic per call.
  */
 public final class ChunkHandoffRecalcGovernor {
 
     private static volatile boolean active = true;
-    private static final long DEDUPE_WINDOW_NANOS = 1_500_000L; // 1.5 ms burst window per thread
-    private static volatile Method recalcMethod = null;
 
-    private static final class ThreadWindow {
-        long windowStartNanos = 0L;
-        final IdentityHashMap<Object, Boolean> seenSquares = new IdentityHashMap<>(256);
-    }
-
-    private static final ThreadLocal<ThreadWindow> THREAD_WINDOW =
-        ThreadLocal.withInitial(ThreadWindow::new);
-
-    public static final AtomicLong recalcsExecuted = new AtomicLong(0);
-    public static final AtomicLong redundantRecalcsSkipped = new AtomicLong(0);
+    private static long recalcsExecuted = 0L;
+    private static long cleanSquaresSkipped = 0L;
 
     private ChunkHandoffRecalcGovernor() {}
 
@@ -41,35 +30,24 @@ public final class ChunkHandoffRecalcGovernor {
         active = val;
     }
 
+    public static long getRecalcsExecuted() {
+        return recalcsExecuted;
+    }
+
+    public static long getCleanSquaresSkipped() {
+        return cleanSquaresSkipped;
+    }
+
     /**
-     * 3-byte bytecode redirection target for invokevirtual IsoGridSquare.RecalcPropertiesIfNeeded()Z
-     * inside IsoChunk.
+     * Redirect target for invokevirtual IsoGridSquare.RecalcPropertiesIfNeeded()V inside IsoGridSquare.
      */
-    public static boolean recalcPropertiesIfNeededFast(Object square) {
-        if (square == null) return false;
-        if (active) {
-            long now = System.nanoTime();
-            ThreadWindow tw = THREAD_WINDOW.get();
-            if ((now - tw.windowStartNanos) > DEDUPE_WINDOW_NANOS) {
-                tw.seenSquares.clear();
-                tw.windowStartNanos = now;
-            }
-            if (tw.seenSquares.put(square, Boolean.TRUE) != null) {
-                redundantRecalcsSkipped.incrementAndGet();
-                return false;
-            }
+    public static void recalcPropertiesIfNeededFast(Object square) {
+        IsoGridSquare sq = (IsoGridSquare) square;
+        if (active && !sq.propertiesDirty) {
+            cleanSquaresSkipped++;
+            return;
         }
-        recalcsExecuted.incrementAndGet();
-        try {
-            Method m = recalcMethod;
-            if (m == null) {
-                m = square.getClass().getDeclaredMethod("RecalcPropertiesIfNeeded");
-                m.setAccessible(true);
-                recalcMethod = m;
-            }
-            return ((Boolean) m.invoke(square)).booleanValue();
-        } catch (Throwable t) {
-            return false;
-        }
+        recalcsExecuted++;
+        sq.RecalcPropertiesIfNeeded();
     }
 }

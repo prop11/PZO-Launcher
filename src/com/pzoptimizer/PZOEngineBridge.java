@@ -285,27 +285,27 @@ public class PZOEngineBridge {
     }
 
     public static long getChunkHandoffRecalcsSkipped() {
-        return ChunkHandoffRecalcGovernor.redundantRecalcsSkipped.get();
+        return ChunkHandoffRecalcGovernor.getCleanSquaresSkipped();
     }
 
     public static long getLookupMemoHits() {
-        return LookupMemoGovernor.memoHits.get();
+        return LookupMemoGovernor.memoHits.sum();
     }
 
     public static long getPropIdCacheHits() {
-        return PropIdCacheGovernor.cacheHits.get();
+        return PropIdCacheGovernor.isSnapshotReady() ? 1L : 0L;
     }
 
     public static long getRagdollFastFalseReturns() {
-        return RagdollGateGovernor.fastPathChecksSaved.get();
+        return RagdollGateGovernor.getFastPathChecksSaved();
     }
 
     public static long getAnimalLosChecksSkipped() {
-        return AnimalLosSkipGovernor.animalWalksSkipped.get();
+        return AnimalLosSkipGovernor.getAnimalWalksSkipped();
     }
 
     public static long getWorkerRandDraws() {
-        return WorkerRandGovernor.workerLockFreeDraws.get();
+        return WorkerRandGovernor.workerLockFreeDraws.sum();
     }
 
     public static long getBodyAtlasSpritesPrewarmed() {
@@ -392,6 +392,8 @@ public class PZOEngineBridge {
                 BodyAtlasPrewarmGovernor.setActive(value);
             } else if ("JVM_GcSlackGovernor".equals(key)) {
                 GcSlackGovernor.setActive(value);
+            } else if ("JVM_EngineFramePacer".equals(key)) {
+                EngineFramePacer.setEnabled(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -1168,7 +1170,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.0-unstable\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.0.1-unstable\"\n" +
                                             "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                             "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
@@ -1425,7 +1427,7 @@ public class PZOEngineBridge {
                                             "        pzoPanel.prerender = function(self)\n" +
                                             "            ISPanelJoypad.prerender(self)\n" +
                                             "            self:setScrollHeight(500)\n" +
-                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0-unstable'\n" +
+                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0.1-unstable'\n" +
                                             "            local standdownActive = false\n" +
                                             "            local viewpointDetected = false\n" +
                                             "            local standdownMode = 'AUTO'\n" +
