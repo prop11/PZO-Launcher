@@ -89,12 +89,57 @@ public final class WorldUpscalerGovernor {
         if (!checkedParams) {
             checkLaunchParams(null);
         }
+        return active && !pipelineFailed;
+    }
+
+    // Kept here (not read from WorldUpscaleRenderer) so isActive() never loads game render classes early
+    private static volatile boolean pipelineFailed = false;
+
+    static void markPipelineFailed() {
+        pipelineFailed = true;
+    }
+
+    /** Whether -pzo_fsr was present when the agent started; only then are the render-scale hooks installed. */
+    public static boolean isRequestedAtLaunch() {
+        if (!checkedParams) {
+            checkLaunchParams(null);
+        }
         return active;
     }
 
     public static void setActive(boolean value) {
         active = value;
         checkedParams = true;
+    }
+
+    /** Scale the world should render at next frame (1.0 = native, no upscale). */
+    public static float getEffectiveScale() {
+        if (!WorldRenderScale.isInstalled() || !isActive() || "native".equals(upscalerMode)) {
+            return 1.0f;
+        }
+        return renderScale;
+    }
+
+    private static int lastQueuedFrame = Integer.MIN_VALUE;
+
+    /**
+     * Redirect target for invokevirtual Core.RenderOffScreenBuffer(). Queues the FSR pass on the render
+     * thread right before the world composite; only once per frame because a second upscale would read
+     * the already-upscaled image as its low-resolution input.
+     */
+    public static void renderOffScreenBuffer(Object core) {
+        try {
+            if (WorldRenderScale.isInstalled()) {
+                int frame = zombie.iso.IsoCamera.frameState.frameCount;
+                if (frame != lastQueuedFrame) {
+                    lastQueuedFrame = frame;
+                    zombie.core.SpriteRenderer.instance.drawGeneric(WorldUpscaleRenderer.INSTANCE);
+                }
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[WorldUpscalerGovernor] Could not queue FSR pass: " + t.getMessage());
+        }
+        ((zombie.core.Core) core).RenderOffScreenBuffer();
     }
 
     public static float getRenderScale() {

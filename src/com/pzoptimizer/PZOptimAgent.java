@@ -17,7 +17,18 @@ public class PZOptimAgent {
         if (instrumentationInstance != null) return;
         instrumentationInstance = inst;
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
-        
+
+        // Must be decided before any game class loads: the render-scale hooks are installed at class-load time
+        try {
+            fsrRenderScaleHooks = WorldUpscalerGovernor.isRequestedAtLaunch();
+            if (fsrRenderScaleHooks) {
+                WorldRenderScale.markInstalled();
+                PZOLogger.success("[PZO Agent] -pzo_fsr detected: installing world render-scale hooks for FSR 1.0");
+            }
+        } catch (Throwable t) {
+            fsrRenderScaleHooks = false;
+        }
+
         try {
             inst.addTransformer(new EngineTransformer(), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
@@ -80,6 +91,8 @@ public class PZOptimAgent {
         return instrumentationInstance;
     }
 
+    private static volatile boolean fsrRenderScaleHooks = false;
+
     private static volatile boolean bytecodeBloodCap = true;
 
     public static boolean isBytecodeBloodCap() {
@@ -108,6 +121,88 @@ public class PZOptimAgent {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                  ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+            byte[] specific = transformSpecific(className, classfileBuffer);
+            if (!fsrRenderScaleHooks || className == null || classfileBuffer == null || !className.startsWith("zombie/")) {
+                return specific;
+            }
+            byte[] base = (specific != null) ? specific : classfileBuffer;
+            byte[] scaled = applyRenderScaleRedirects(className, base);
+            return (scaled != null) ? scaled : specific;
+        }
+
+        private static final String RS = "com/pzoptimizer/WorldRenderScale";
+
+        // {owner, name, desc, wrapper}: every LWJGL entry point the game uses for pixel-space state, from a
+        // scan of projectzomboid.jar. Wrappers are static with the identical descriptor.
+        private static final String[][] RENDER_SCALE_REDIRECTS = {
+            {"org/lwjgl/opengl/GL11", "glViewport", "(IIII)V", "glViewport"},
+            {"org/lwjgl/opengl/GL30", "glViewport", "(IIII)V", "glViewport"},
+            {"org/lwjgl/opengl/GL43", "glViewport", "(IIII)V", "glViewport"},
+            {"org/lwjgl/opengl/GL11", "glScissor", "(IIII)V", "glScissor"},
+            {"org/lwjgl/opengl/GL11", "glPushAttrib", "(I)V", "glPushAttrib"},
+            {"org/lwjgl/opengl/GL43", "glPushAttrib", "(I)V", "glPushAttrib"},
+            {"org/lwjgl/opengl/GL11", "glPopAttrib", "()V", "glPopAttrib"},
+            {"org/lwjgl/opengl/GL43", "glPopAttrib", "()V", "glPopAttrib"},
+            {"org/lwjgl/opengl/GL11", "glGetIntegerv", "(I[I)V", "glGetIntegerv"},
+            {"org/lwjgl/opengl/GL11", "glGetIntegerv", "(ILjava/nio/IntBuffer;)V", "glGetIntegerv"},
+            {"org/lwjgl/opengl/GL30", "glBindFramebuffer", "(II)V", "glBindFramebuffer"},
+            {"org/lwjgl/opengl/GL30C", "glBindFramebuffer", "(II)V", "glBindFramebuffer"},
+            {"org/lwjgl/opengl/GL43", "glBindFramebuffer", "(II)V", "glBindFramebuffer"},
+            {"org/lwjgl/opengl/GL44", "glBindFramebuffer", "(II)V", "glBindFramebuffer"},
+            {"org/lwjgl/opengl/ARBFramebufferObject", "glBindFramebuffer", "(II)V", "glBindFramebuffer"},
+            {"org/lwjgl/opengl/EXTFramebufferObject", "glBindFramebufferEXT", "(II)V", "glBindFramebufferEXT"},
+            {"org/lwjgl/opengl/GL30", "glBlitFramebuffer", "(IIIIIIIIII)V", "glBlitFramebuffer"},
+            {"org/lwjgl/opengl/GL30C", "glBlitFramebuffer", "(IIIIIIIIII)V", "glBlitFramebuffer"},
+            {"org/lwjgl/opengl/GL43", "glBlitFramebuffer", "(IIIIIIIIII)V", "glBlitFramebuffer"},
+            {"org/lwjgl/opengl/GL44", "glBlitFramebuffer", "(IIIIIIIIII)V", "glBlitFramebuffer"},
+            {"org/lwjgl/opengl/GL20", "glShaderSource", "(ILjava/lang/CharSequence;)V", "glShaderSource"},
+            {"org/lwjgl/opengl/GL20", "glUseProgram", "(I)V", "glUseProgram"},
+            {"org/lwjgl/opengl/GL43", "glUseProgram", "(I)V", "glUseProgram"},
+            {"org/lwjgl/opengl/GL20", "glLinkProgram", "(I)V", "glLinkProgram"},
+        };
+
+        private static boolean containsAscii(byte[] haystack, String needle) {
+            byte[] n = needle.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            outer:
+            for (int i = 0, max = haystack.length - n.length; i <= max; i++) {
+                for (int j = 0; j < n.length; j++) {
+                    if (haystack[i + j] != n[j]) continue outer;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        private byte[] applyRenderScaleRedirects(String className, byte[] b) {
+            byte[] current = b;
+            boolean changed = false;
+            int sites = 0;
+            for (String[] r : RENDER_SCALE_REDIRECTS) {
+                if (!containsAscii(current, r[1]) || !containsAscii(current, r[0])) continue;
+                byte[] next = redirectCallSites(current, 0xB8, r[0], r[1], r[2], RS, r[3], r[2], null);
+                if (next != null) {
+                    current = next;
+                    changed = true;
+                    sites++;
+                }
+            }
+            // The composite hook queues the FSR pass ahead of every world -> screen blit
+            if (containsAscii(current, "RenderOffScreenBuffer")) {
+                byte[] next = redirectCallSites(current, 0xB6, "zombie/core/Core", "RenderOffScreenBuffer", "()V",
+                    "com/pzoptimizer/WorldUpscalerGovernor", "renderOffScreenBuffer", "(Ljava/lang/Object;)V", null);
+                if (next != null) {
+                    current = next;
+                    changed = true;
+                    sites++;
+                }
+            }
+            if (changed) {
+                PZOLogger.info("[PZO Agent] FSR render-scale hooks: " + className + " (" + sites + " call types)");
+            }
+            return changed ? current : null;
+        }
+
+        private byte[] transformSpecific(String className, byte[] classfileBuffer) {
             if ("zombie/core/skinnedmodel/visual/HumanVisual".equals(className) && classfileBuffer != null) {
                 return patchHumanVisual(classfileBuffer);
             }
