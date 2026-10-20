@@ -1,37 +1,27 @@
 package com.pzoptimizer;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
+import zombie.characters.IsoPlayer;
+import zombie.characters.animals.IsoAnimal;
+import zombie.characters.animals.behavior.BaseAnimalBehavior;
+import zombie.iso.IsoCamera;
 
 /**
- * Idle IsoAnimal Line-of-Sight Cell-Walk Bypass Governor.
- * Because IsoAnimal extends IsoPlayer, vanilla updates every animal in-place on the GameThread
- * and invokes IsoAnimal.updateLOS(), which iterates through the entire cell's object list
- * (~2,500+ IsoMovingObjects in Louisville), costing ~0.48 ms per frame.
+ * IsoAnimal.updateLOS() Distant Calm-Animal Throttle.
+ * Vanilla updateLOS() walks the whole cell object list for every animal every frame to find nearby
+ * zombies and players. For calm animals far from every local player this governor runs the walk on
+ * a staggered 1-in-N frame cadence instead of every frame, so livestock still notices an approaching
+ * zombie within a fraction of a second while the per-frame cost drops by ~N.
  *
- * When an animal is calm/idle (spottedChr == null && lastAlerted <= 0f) and no player is within
- * 11 tiles and no zombie is within 12 tiles, walking the 2,500-object list is a pure no-op.
- * AnimalLosSkipGovernor detects this exact idle state and skips the redundant cell scan.
+ * Animals that have spotted something or were recently alerted always run the full walk.
  */
 public final class AnimalLosSkipGovernor {
 
     private static volatile boolean active = true;
-    private static final float PLAYER_REACH_SQ = 11.0f * 11.0f;
-    private static final float ZOMBIE_REACH_SQ = 12.0f * 12.0f;
+    private static final float PLAYER_REACH_SQ = 22.0f * 22.0f;
+    private static final int DISTANT_CADENCE_FRAMES = 15;
 
-    private static Field behaviorField = null;
-    private static Field spottedChrField = null;
-    private static Field lastAlertedField = null;
-    private static Method getXMethod = null;
-    private static Method getYMethod = null;
-    private static Field playersField = null;
-    private static boolean reflectionReady = false;
-    private static boolean reflectionFailed = false;
-
-    public static final AtomicLong animalWalksSkipped = new AtomicLong(0);
-    public static final AtomicLong animalWalksExecuted = new AtomicLong(0);
+    private static long animalWalksSkipped = 0L;
+    private static long animalWalksExecuted = 0L;
 
     private AnimalLosSkipGovernor() {}
 
@@ -43,98 +33,51 @@ public final class AnimalLosSkipGovernor {
         active = val;
     }
 
-    private static synchronized void initReflection(Object animal) {
-        if (reflectionReady || reflectionFailed || animal == null) return;
-        try {
-            Class<?> animalCls = animal.getClass();
-            getXMethod = animalCls.getMethod("getX");
-            getYMethod = animalCls.getMethod("getY");
-
-            try {
-                Class<?> playerCls = Class.forName("zombie.characters.IsoPlayer");
-                playersField = playerCls.getField("players");
-            } catch (Throwable ignored) {}
-
-            for (Field f : animalCls.getDeclaredFields()) {
-                String fname = f.getName().toLowerCase();
-                if (fname.contains("behavior") || fname.equals("abanimal")) {
-                    f.setAccessible(true);
-                    behaviorField = f;
-                    break;
-                }
-            }
-            if (behaviorField != null) {
-                Class<?> behCls = behaviorField.getType();
-                for (Field bf : behCls.getDeclaredFields()) {
-                    if ("spottedChr".equals(bf.getName())) {
-                        bf.setAccessible(true);
-                        spottedChrField = bf;
-                    } else if ("lastAlerted".equals(bf.getName())) {
-                        bf.setAccessible(true);
-                        lastAlertedField = bf;
-                    }
-                }
-            }
-            reflectionReady = (getXMethod != null && getYMethod != null);
-        } catch (Throwable t) {
-            reflectionFailed = true;
-        }
+    public static long getAnimalWalksSkipped() {
+        return animalWalksSkipped;
     }
 
-    /**
-     * Called at the start of IsoAnimal.updateLOS().
-     * Returns true if the animal is calm and isolated from players/zombies so the cell walk can be skipped.
-     */
-    public static boolean shouldSkipUpdateLOS(Object animal) {
-        if (!active || animal == null || reflectionFailed) return false;
-        if (!reflectionReady) {
-            initReflection(animal);
-            if (!reflectionReady) return false;
-        }
+    public static long getAnimalWalksExecuted() {
+        return animalWalksExecuted;
+    }
 
-        try {
-            if (behaviorField != null && spottedChrField != null && lastAlertedField != null) {
-                Object beh = behaviorField.get(animal);
-                if (beh != null) {
-                    Object spotted = spottedChrField.get(beh);
-                    if (spotted != null) {
-                        animalWalksExecuted.incrementAndGet();
-                        return false;
-                    }
-                    float alerted = ((Number) lastAlertedField.get(beh)).floatValue();
-                    if (alerted > 0.0f) {
-                        animalWalksExecuted.incrementAndGet();
-                        return false;
-                    }
-                }
-            }
+    /** Prefix hook on IsoAnimal.updateLOS(): returning true skips the vanilla body for this frame. */
+    public static boolean shouldSkipUpdateLOS(Object obj) {
+        if (!active) return false;
+        IsoAnimal animal = (IsoAnimal) obj;
 
-            float ax = ((Number) getXMethod.invoke(animal)).floatValue();
-            float ay = ((Number) getYMethod.invoke(animal)).floatValue();
-
-            if (playersField != null) {
-                Object[] players = (Object[]) playersField.get(null);
-                if (players != null) {
-                    for (int i = 0; i < players.length; i++) {
-                        Object p = players[i];
-                        if (p != null) {
-                            float px = ((Number) getXMethod.invoke(p)).floatValue();
-                            float py = ((Number) getYMethod.invoke(p)).floatValue();
-                            float dpx = ax - px;
-                            float dpy = ay - py;
-                            if ((dpx * dpx + dpy * dpy) <= (PLAYER_REACH_SQ * 4.0f)) {
-                                animalWalksExecuted.incrementAndGet();
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
-
-            animalWalksSkipped.incrementAndGet();
-            return true;
-        } catch (Throwable t) {
+        if (animal.spottedChr != null) {
+            animalWalksExecuted++;
             return false;
         }
+        BaseAnimalBehavior behavior = animal.getBehavior();
+        if (behavior != null && behavior.lastAlerted > 0.0f) {
+            animalWalksExecuted++;
+            return false;
+        }
+
+        float ax = animal.getX();
+        float ay = animal.getY();
+        IsoPlayer[] players = IsoPlayer.players;
+        for (int i = 0; i < players.length; i++) {
+            IsoPlayer p = players[i];
+            if (p != null) {
+                float dx = ax - p.getX();
+                float dy = ay - p.getY();
+                if (dx * dx + dy * dy <= PLAYER_REACH_SQ) {
+                    animalWalksExecuted++;
+                    return false;
+                }
+            }
+        }
+
+        // Stagger by identity so a herd does not all scan on the same frame
+        int phase = Math.floorMod(IsoCamera.frameState.frameCount + System.identityHashCode(animal), DISTANT_CADENCE_FRAMES);
+        if (phase == 0) {
+            animalWalksExecuted++;
+            return false;
+        }
+        animalWalksSkipped++;
+        return true;
     }
 }

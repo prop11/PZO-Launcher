@@ -27,8 +27,10 @@ public class PZOptimAgent {
                     String name = c.getName();
                     if ("zombie.iso.IsoGridSquare".equals(name) ||
                         "zombie.iso.IsoChunkMap".equals(name) ||
-                        "zombie.iso.IsoChunk".equals(name) ||
                         "zombie.iso.ChunkSaveWorker".equals(name) ||
+                        "zombie.iso.WorldStreamer".equals(name) ||
+                        "zombie.iso.IsoWorld".equals(name) ||
+                        "zombie.core.skinnedmodel.animation.AnimationPlayer".equals(name) ||
                         "zombie.FileGuidTable".equals(name) ||
                         "zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandlePool".equals(name) ||
                         "zombie.core.properties.PropertyContainer".equals(name) ||
@@ -119,7 +121,10 @@ public class PZOptimAgent {
                 return patchSpriteConfig(classfileBuffer);
             }
             if ("zombie/iso/IsoGridSquare".equals(className) && classfileBuffer != null) {
-                return patchIsoGridSquare(classfileBuffer);
+                byte[] blood = patchIsoGridSquare(classfileBuffer);
+                byte[] base = (blood != null) ? blood : classfileBuffer;
+                byte[] recalc = redirectRecalcPropertiesIfNeeded(base);
+                return (recalc != null) ? recalc : blood;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
                 return patchBaseVehicle(classfileBuffer);
@@ -133,8 +138,14 @@ public class PZOptimAgent {
             if ("zombie/iso/ChunkSaveWorker".equals(className) && classfileBuffer != null) {
                 return patchChunkSaveWorker(classfileBuffer);
             }
-            if ("zombie/iso/IsoChunk".equals(className) && classfileBuffer != null) {
-                return patchIsoChunk(classfileBuffer);
+            if ("zombie/iso/WorldStreamer".equals(className) && classfileBuffer != null) {
+                return patchWorldStreamer(classfileBuffer);
+            }
+            if ("zombie/iso/IsoWorld".equals(className) && classfileBuffer != null) {
+                return patchIsoWorld(classfileBuffer);
+            }
+            if ("zombie/core/skinnedmodel/animation/AnimationPlayer".equals(className) && classfileBuffer != null) {
+                return patchAnimationPlayer(classfileBuffer);
             }
             if ("zombie/FileGuidTable".equals(className) && classfileBuffer != null) {
                 return patchFileGuidTable(classfileBuffer);
@@ -1498,14 +1509,16 @@ public class PZOptimAgent {
         }
 
         /**
-         * Generic instruction-accurate 3-byte call-site redirector.
-         * Redirects targetOpcode (0xB6 invokevirtual or 0xB8 invokestatic) targeting
-         * (targetMethodName, targetMethodDesc) to invokestatic (0xB8) on (govClassName, govMethodName, govMethodDesc).
-         * Preserves exact bytecode instruction offsets, exception tables, and StackMapTable frames.
+         * Generic instruction-accurate call-site redirector.
+         * Redirects targetOpcode (0xB6 invokevirtual, 0xB8 invokestatic or 0xB9 invokeinterface) calling
+         * targetOwner.targetMethodName(targetMethodDesc) to invokestatic on (govClassName, govMethodName, govMethodDesc).
+         * The governor must take the receiver (if any) as its first parameter. invokeinterface is 5 bytes, so it
+         * becomes invokestatic + 2 nops; instruction offsets, exception tables and StackMapTable frames are preserved.
          */
         private byte[] redirectCallSites(
                 byte[] b,
                 int targetOpcode,
+                String targetOwner,
                 String targetMethodName,
                 String targetMethodDesc,
                 String govClassName,
@@ -1550,7 +1563,11 @@ public class PZOptimAgent {
                 for (int k = 1; k < cpCount; k++) {
                     if (tags[k] == 10 || tags[k] == 11) {
                         int p = tagOffsets[k] + 1;
+                        int ownerIdx = ((b[p] & 0xFF) << 8) | (b[p + 1] & 0xFF);
                         int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                        if (!targetOwner.equals(classNameAt(b, tags, tagOffsets, utf8Strings, cpCount, ownerIdx))) {
+                            continue;
+                        }
                         if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
                             int ntp = tagOffsets[ntIdx] + 1;
                             int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
@@ -1565,7 +1582,13 @@ public class PZOptimAgent {
                     }
                 }
 
-                if (targetMethodRef == -1) return null;
+                if (targetMethodRef == -1) {
+                    if (logTag != null) {
+                        PZOLogger.warn(String.format("[PZO Agent] Redirect target not found: %s.%s%s (game update?) - %s inactive",
+                            targetOwner, targetMethodName, targetMethodDesc, govClassName));
+                    }
+                    return null;
+                }
 
                 byte oldHi = (byte) ((targetMethodRef >> 8) & 0xFF);
                 byte oldLo = (byte) (targetMethodRef & 0xFF);
@@ -1600,6 +1623,10 @@ public class PZOptimAgent {
 
                 byte[] rest = new byte[b.length - pos];
                 System.arraycopy(b, pos, rest, 0, rest.length);
+
+                int thisClassIdx = ((rest[2] & 0xFF) << 8) | (rest[3] & 0xFF);
+                // Only the target method's own body is skipped (recursion guard), and only when it lives in this class
+                boolean ownerIsThisClass = targetOwner.equals(classNameAt(b, tags, tagOffsets, utf8Strings, cpCount, thisClassIdx));
 
                 int mpos = 6; // skip access_flags, this_class, super_class
                 int ifaces = ((rest[mpos] & 0xFF) << 8) | (rest[mpos + 1] & 0xFF);
@@ -1636,7 +1663,8 @@ public class PZOptimAgent {
                         int alen = ((rest[mpos + 2] & 0xFF) << 24) | ((rest[mpos + 3] & 0xFF) << 16)
                                 | ((rest[mpos + 4] & 0xFF) << 8) | (rest[mpos + 5] & 0xFF);
                         mpos += 6;
-                        if ("Code".equals(aname) && !(targetMethodName.equals(mName) && targetMethodDesc.equals(mDesc))) {
+                        boolean isTargetBody = ownerIsThisClass && targetMethodName.equals(mName) && targetMethodDesc.equals(mDesc);
+                        if ("Code".equals(aname) && !isTargetBody) {
                             int codeLen = ((rest[mpos + 4] & 0xFF) << 24) | ((rest[mpos + 5] & 0xFF) << 16)
                                     | ((rest[mpos + 6] & 0xFF) << 8) | (rest[mpos + 7] & 0xFF);
                             int cstart = mpos + 8;
@@ -1645,12 +1673,17 @@ public class PZOptimAgent {
                                 int op = rest[cstart + pc] & 0xFF;
                                 int step = getInstructionLength(rest, cstart, pc);
                                 if (step <= 0) break;
-                                if (step == 3 && op == (targetOpcode & 0xFF)
+                                if (op == (targetOpcode & 0xFF)
+                                        && (step == 3 || (op == 0xB9 && step == 5))
                                         && rest[cstart + pc + 1] == oldHi
                                         && rest[cstart + pc + 2] == oldLo) {
                                     rest[cstart + pc] = (byte) 0xB8; // invokestatic
                                     rest[cstart + pc + 1] = newHi;
                                     rest[cstart + pc + 2] = newLo;
+                                    if (step == 5) {
+                                        rest[cstart + pc + 3] = 0x00; // nop
+                                        rest[cstart + pc + 4] = 0x00; // nop
+                                    }
                                     patched++;
                                 }
                                 pc += step;
@@ -1660,7 +1693,13 @@ public class PZOptimAgent {
                     }
                 }
 
-                if (patched == 0) return null;
+                if (patched == 0) {
+                    if (logTag != null) {
+                        PZOLogger.warn(String.format("[PZO Agent] No %s call sites matched (opcode 0x%02X) - %s inactive",
+                            targetMethodName, targetOpcode, govClassName));
+                    }
+                    return null;
+                }
 
                 ByteArrayOutputStream outBaos = new ByteArrayOutputStream(b.length + 128);
                 DataOutputStream outDos = new DataOutputStream(outBaos);
@@ -1681,74 +1720,109 @@ public class PZOptimAgent {
             return null;
         }
 
+        private static String classNameAt(byte[] b, int[] tags, int[] tagOffsets, String[] utf8Strings, int cpCount, int classIdx) {
+            if (classIdx <= 0 || classIdx >= cpCount || tags[classIdx] != 7) return null;
+            int p = tagOffsets[classIdx] + 1;
+            int nameIdx = ((b[p] & 0xFF) << 8) | (b[p + 1] & 0xFF);
+            return (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : null;
+        }
+
+        /** Applies redirects in order; each one builds on the previous result. Returns null if none applied. */
+        private byte[] chain(byte[] original, java.util.function.UnaryOperator<byte[]>... steps) {
+            byte[] current = original;
+            boolean changed = false;
+            for (java.util.function.UnaryOperator<byte[]> step : steps) {
+                byte[] next = step.apply(current);
+                if (next != null) {
+                    current = next;
+                    changed = true;
+                }
+            }
+            return changed ? current : null;
+        }
+
         private byte[] patchChunkSaveWorker(byte[] b) {
+            // HotsaveAncilliarySystems is a private instance method (invokevirtual on Java 11+ nestmates)
             return redirectCallSites(
                 b,
-                0xB8,
+                0xB6,
+                "zombie/iso/ChunkSaveWorker",
                 "HotsaveAncilliarySystems",
                 "()V",
                 "com/pzoptimizer/HotSaveGovernor",
-                "HotsaveAncilliarySystems",
-                "()V",
-                "Bytecode-patched ChunkSaveWorker: HotSaveGovernor 10s mid-travel stall throttle armed"
+                "hotsaveAncilliarySystems",
+                "(Ljava/lang/Object;)V",
+                "Bytecode-patched ChunkSaveWorker: HotSaveGovernor mid-travel hot-save throttle armed"
             );
         }
 
-        private byte[] patchIsoChunk(byte[] b) {
+        private byte[] patchWorldStreamer(byte[] b) {
+            // Deferred hot-saves are flushed on the WorldStreamer thread, the same thread vanilla saves on
             return redirectCallSites(
                 b,
                 0xB6,
+                "zombie/iso/ChunkSaveWorker",
+                "Update",
+                "(Lzombie/iso/IsoChunk;)V",
+                "com/pzoptimizer/HotSaveGovernor",
+                "update",
+                "(Ljava/lang/Object;Ljava/lang/Object;)V",
+                "Bytecode-patched WorldStreamer: HotSaveGovernor deferred hot-save flush armed"
+            );
+        }
+
+        private byte[] redirectRecalcPropertiesIfNeeded(byte[] b) {
+            return redirectCallSites(
+                b,
+                0xB6,
+                "zombie/iso/IsoGridSquare",
                 "RecalcPropertiesIfNeeded",
-                "()Z",
+                "()V",
                 "com/pzoptimizer/ChunkHandoffRecalcGovernor",
                 "recalcPropertiesIfNeededFast",
-                "(Ljava/lang/Object;)Z",
-                "Bytecode-patched IsoChunk: ChunkHandoffRecalcGovernor border recalc deduplication armed"
+                "(Ljava/lang/Object;)V",
+                "Bytecode-patched IsoGridSquare: ChunkHandoffRecalcGovernor clean-square recalc gate armed"
             );
         }
 
+        @SuppressWarnings("unchecked")
         private byte[] patchFileGuidTable(byte[] b) {
-            byte[] step1 = redirectCallSites(
-                b,
-                0xB6,
-                "get",
-                "(Ljava/lang/Object;)Ljava/lang/Object;",
-                "com/pzoptimizer/LookupMemoGovernor",
-                "treeMapGetFast",
-                "(Ljava/util/TreeMap;Ljava/lang/Object;)Ljava/lang/Object;",
-                "Bytecode-patched FileGuidTable: LookupMemoGovernor O(1) GUID hash memo armed"
-            );
-            byte[] base = (step1 != null) ? step1 : b;
-            byte[] step2 = redirectCallSites(
-                base,
-                0xB6,
-                "clear",
-                "()V",
-                "com/pzoptimizer/LookupMemoGovernor",
-                "treeMapClearFast",
-                "(Ljava/util/TreeMap;)V",
-                null
-            );
-            return (step2 != null) ? step2 : step1;
+            return chain(b,
+                cur -> redirectCallSites(cur, 0xB9, "java/util/Map", "get",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;",
+                    "com/pzoptimizer/LookupMemoGovernor", "mapGetFast",
+                    "(Ljava/util/Map;Ljava/lang/Object;)Ljava/lang/Object;",
+                    "Bytecode-patched FileGuidTable: LookupMemoGovernor O(1) GUID hash memo armed"),
+                cur -> redirectCallSites(cur, 0xB9, "java/util/Map", "put",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    "com/pzoptimizer/LookupMemoGovernor", "mapPutFast",
+                    "(Ljava/util/Map;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    "Bytecode-patched FileGuidTable: LookupMemoGovernor put invalidation armed"),
+                cur -> redirectCallSites(cur, 0xB9, "java/util/Map", "clear", "()V",
+                    "com/pzoptimizer/LookupMemoGovernor", "mapClearFast", "(Ljava/util/Map;)V",
+                    "Bytecode-patched FileGuidTable: LookupMemoGovernor clear invalidation armed"));
         }
 
+        @SuppressWarnings("unchecked")
         private byte[] patchAnimationVariableHandlePool(byte[] b) {
-            return redirectCallSites(
-                b,
-                0xB6,
-                "get",
-                "(Ljava/lang/Object;)Ljava/lang/Object;",
-                "com/pzoptimizer/LookupMemoGovernor",
-                "treeMapGetFast",
-                "(Ljava/util/TreeMap;Ljava/lang/Object;)Ljava/lang/Object;",
-                "Bytecode-patched AnimationVariableHandlePool: LookupMemoGovernor O(1) handle memo armed"
-            );
+            return chain(b,
+                cur -> redirectCallSites(cur, 0xB9, "java/util/Map", "get",
+                    "(Ljava/lang/Object;)Ljava/lang/Object;",
+                    "com/pzoptimizer/LookupMemoGovernor", "mapGetFast",
+                    "(Ljava/util/Map;Ljava/lang/Object;)Ljava/lang/Object;",
+                    "Bytecode-patched AnimationVariableHandlePool: LookupMemoGovernor O(1) handle memo armed"),
+                cur -> redirectCallSites(cur, 0xB9, "java/util/Map", "put",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    "com/pzoptimizer/LookupMemoGovernor", "mapPutFast",
+                    "(Ljava/util/Map;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    "Bytecode-patched AnimationVariableHandlePool: LookupMemoGovernor put invalidation armed"));
         }
 
         private byte[] patchPropertyContainer(byte[] b) {
             return redirectCallSites(
                 b,
                 0xB6,
+                "zombie/core/TilePropertyAliasMap",
                 "getIDFromPropertyName",
                 "(Ljava/lang/String;)I",
                 "com/pzoptimizer/PropIdCacheGovernor",
@@ -1756,6 +1830,39 @@ public class PZOptimAgent {
                 "(Ljava/lang/Object;Ljava/lang/String;)I",
                 "Bytecode-patched PropertyContainer: PropIdCacheGovernor property-ID fast cache armed"
             );
+        }
+
+        private byte[] patchIsoWorld(byte[] b) {
+            // The alias map is regenerated in place on every world load; the cache must be rebuilt after it
+            return redirectCallSites(
+                b,
+                0xB6,
+                "zombie/core/TilePropertyAliasMap",
+                "Generate",
+                "(Ljava/util/HashMap;)V",
+                "com/pzoptimizer/PropIdCacheGovernor",
+                "generate",
+                "(Ljava/lang/Object;Ljava/util/HashMap;)V",
+                "Bytecode-patched IsoWorld: PropIdCacheGovernor alias-map regeneration hook armed"
+            );
+        }
+
+        private byte[] patchAnimationPlayer(byte[] b) {
+            byte[] withAlloc = redirectCallSites(b, 0xB8, "zombie/core/physics/RagdollController", "alloc",
+                "()Lzombie/core/physics/RagdollController;",
+                "com/pzoptimizer/RagdollGateGovernor", "allocController",
+                "()Lzombie/core/physics/RagdollController;",
+                "Bytecode-patched AnimationPlayer: RagdollGateGovernor controller alloc tracking armed");
+            if (withAlloc == null) return null;
+            byte[] withRelease = redirectCallSites(withAlloc, 0xB8, "zombie/util/Pool", "tryRelease",
+                "(Lzombie/util/IPooledObject;)Lzombie/util/IPooledObject;",
+                "com/pzoptimizer/RagdollGateGovernor", "releaseController",
+                "(Lzombie/util/IPooledObject;)Lzombie/util/IPooledObject;",
+                "Bytecode-patched AnimationPlayer: RagdollGateGovernor controller release tracking armed");
+            // Half-installed tracking would undercount live ragdolls, so ship neither unless both apply
+            if (withRelease == null) return null;
+            RagdollGateGovernor.markTrackingInstalled();
+            return withRelease;
         }
 
         private byte[] patchIsoGameCharacter(byte[] b) {

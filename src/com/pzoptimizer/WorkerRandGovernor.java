@@ -3,7 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Per-Worker Lock-Free RNG Stream Governor.
@@ -32,7 +32,7 @@ public final class WorkerRandGovernor extends Random {
     private static volatile Object randStdInstance = null;
     private static volatile Field randField = null;
 
-    public static final AtomicLong workerLockFreeDraws = new AtomicLong(0);
+    public static final LongAdder workerLockFreeDraws = new LongAdder();
 
     private final Random delegate;
 
@@ -102,28 +102,33 @@ public final class WorkerRandGovernor extends Random {
         } catch (Throwable ignored) {}
     }
 
+    // EngineThreadGovernor renames the game's main/render threads to "PZO-MainSimulationThread" /
+    // "PZO-RenderThread", so a "PZO-" prefix alone would pull them off the stock generator.
+    // Classified once per thread; worker names are fixed at creation.
+    private static final ThreadLocal<Boolean> IS_WORKER = ThreadLocal.withInitial(() -> {
+        Thread t = Thread.currentThread();
+        if (t == zombie.MainThread.mainThread) return Boolean.FALSE;
+        if (t instanceof WorkerThread) return Boolean.TRUE;
+        String name = t.getName();
+        return Boolean.valueOf(name != null && (name.startsWith("PZO-MultiCore-Worker-")
+            || name.startsWith("PZO-ChunkStreamer-Worker-")
+            || name.equals("PZO-MultiCoreHordeGovernor")));
+    });
+
     private static boolean shouldUseWorkerStream() {
         if (!active) return false;
         Thread t = Thread.currentThread();
         if (t == mainThread) return false;
         if (t instanceof WorkerThread) return true;
-        String name = t.getName();
-        if (name != null) {
-            if (name.startsWith("PZO-")) {
-                return true;
-            }
-            if ("MainThread".equals(name) || "main".equals(name)) {
-                mainThread = t;
-                return false;
-            }
-        }
+        if (IS_WORKER.get()) return true;
+        if (t == zombie.MainThread.mainThread) mainThread = t;
         return false;
     }
 
     @Override
     protected int next(int bits) {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextInt() >>> (32 - bits);
         }
         return delegate.nextInt() >>> (32 - bits);
@@ -132,7 +137,7 @@ public final class WorkerRandGovernor extends Random {
     @Override
     public int nextInt() {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextInt();
         }
         return delegate.nextInt();
@@ -141,7 +146,7 @@ public final class WorkerRandGovernor extends Random {
     @Override
     public int nextInt(int bound) {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextInt(bound);
         }
         return delegate.nextInt(bound);
@@ -150,7 +155,7 @@ public final class WorkerRandGovernor extends Random {
     @Override
     public long nextLong() {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextLong();
         }
         return delegate.nextLong();
@@ -159,7 +164,7 @@ public final class WorkerRandGovernor extends Random {
     @Override
     public float nextFloat() {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextFloat();
         }
         return delegate.nextFloat();
@@ -168,7 +173,7 @@ public final class WorkerRandGovernor extends Random {
     @Override
     public double nextDouble() {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextDouble();
         }
         return delegate.nextDouble();
@@ -177,7 +182,7 @@ public final class WorkerRandGovernor extends Random {
     @Override
     public boolean nextBoolean() {
         if (shouldUseWorkerStream()) {
-            workerLockFreeDraws.incrementAndGet();
+            workerLockFreeDraws.increment();
             return ThreadLocalRandom.current().nextBoolean();
         }
         return delegate.nextBoolean();

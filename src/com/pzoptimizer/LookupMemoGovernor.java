@@ -1,24 +1,27 @@
 package com.pzoptimizer;
 
-import java.util.Collections;
+import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * O(1) Lock-Free Exact-String Memoization Governor for Case-Insensitive TreeMap Lookups.
  * Vanilla FileGuidTable (~12,000 clothing/item GUIDs) and AnimationVariableHandlePool use
  * TreeMap(String.CASE_INSENSITIVE_ORDER), comparing strings char-by-char on every lookup.
  *
- * Multi-threading optimizations:
- * 1. Two volatile identity fast-slots eliminate synchronizedMap(WeakHashMap) lock contention
- *    across MainThread and PZO-ChunkStreamer-Worker threads.
- * 2. Never caches null returns, so AnimationVariableHandlePool's lazy get-then-put initialization
+ * Both maps are declared as Map, so the redirected call sites are invokeinterface Map.get/put/clear.
+ * Only TreeMaps are memoized; any other Map implementation passes straight through.
+ *
+ * Correctness rules:
+ * 1. Never caches null returns, so AnimationVariableHandlePool's lazy get-then-put initialization
  *    always sees newly registered handles immediately.
- * 3. Synchronizes on the underlying TreeMap during cache-miss reads so concurrent worker threads
- *    never race on non-thread-safe TreeMap traversal.
+ * 2. Every put/clear on a memoized map drops that map's memo. A case-insensitive put can change the
+ *    answer for several exact-case keys, so per-key invalidation would not be safe.
+ * 3. The original map is only read under its own monitor on a miss; callers that already serialize
+ *    (AnimationVariableHandlePool holds s_threadLock) are unaffected.
  */
 public final class LookupMemoGovernor {
 
@@ -30,11 +33,54 @@ public final class LookupMemoGovernor {
     private static volatile TreeMap<?, ?> slot2Tree = null;
     private static volatile ConcurrentHashMap<Object, Object> slot2Memo = null;
 
-    private static final Map<TreeMap<?, ?>, ConcurrentHashMap<Object, Object>> treeMemos =
-        Collections.synchronizedMap(new WeakHashMap<>());
+    // Must be identity-keyed: TreeMap.equals/hashCode are content-based, so a WeakHashMap entry
+    // becomes unreachable as soon as the map is mutated. Only a handful of maps are ever memoized.
+    private static final class IdentityWeakTable {
+        private final ArrayList<WeakReference<TreeMap<?, ?>>> keys = new ArrayList<>();
+        private final ArrayList<ConcurrentHashMap<Object, Object>> values = new ArrayList<>();
 
-    public static final AtomicLong memoHits = new AtomicLong(0);
-    public static final AtomicLong memoMisses = new AtomicLong(0);
+        private int indexOf(TreeMap<?, ?> tree) {
+            for (int i = keys.size() - 1; i >= 0; i--) {
+                TreeMap<?, ?> k = keys.get(i).get();
+                if (k == null) {
+                    keys.remove(i);
+                    values.remove(i);
+                } else if (k == tree) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        ConcurrentHashMap<Object, Object> get(TreeMap<?, ?> tree) {
+            int i = indexOf(tree);
+            return i < 0 ? null : values.get(i);
+        }
+
+        boolean containsKey(TreeMap<?, ?> tree) {
+            return indexOf(tree) >= 0;
+        }
+
+        void put(TreeMap<?, ?> tree, ConcurrentHashMap<Object, Object> memo) {
+            int i = indexOf(tree);
+            if (i >= 0) {
+                values.set(i, memo);
+            } else {
+                keys.add(new WeakReference<>(tree));
+                values.add(memo);
+            }
+        }
+
+        void clear() {
+            keys.clear();
+            values.clear();
+        }
+    }
+
+    private static final IdentityWeakTable treeMemos = new IdentityWeakTable();
+
+    public static final LongAdder memoHits = new LongAdder();
+    public static final LongAdder memoMisses = new LongAdder();
 
     private LookupMemoGovernor() {}
 
@@ -85,32 +131,40 @@ public final class LookupMemoGovernor {
         }
     }
 
-    /**
-     * 3-byte bytecode redirection target for TreeMap.get(Object) inside FileGuidTable
-     * and AnimationVariableHandlePool.
-     */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public static Object treeMapGetFast(TreeMap tree, Object key) {
-        if (tree == null) return null;
-        if (!active || key == null) {
-            synchronized (tree) {
-                return tree.get(key);
-            }
+    // Swaps in a fresh memo rather than clearing: a reader that missed before the write can only
+    // populate the discarded instance, never the live one.
+    private static void invalidate(TreeMap<?, ?> tree) {
+        synchronized (treeMemos) {
+            if (!treeMemos.containsKey(tree)) return;
+            ConcurrentHashMap<Object, Object> fresh = new ConcurrentHashMap<>(1024);
+            treeMemos.put(tree, fresh);
+            if (tree == slot1Tree) slot1Memo = fresh;
+            if (tree == slot2Tree) slot2Memo = fresh;
         }
+    }
+
+    /**
+     * Redirect target for invokeinterface Map.get(Object) inside FileGuidTable and AnimationVariableHandlePool.
+     */
+    @SuppressWarnings("rawtypes")
+    public static Object mapGetFast(Map map, Object key) {
+        if (!active || key == null || !(map instanceof TreeMap)) {
+            return map.get(key);
+        }
+        TreeMap tree = (TreeMap) map;
 
         ConcurrentHashMap<Object, Object> memo = getOrCreateMemo(tree);
         Object cached = memo.get(key);
         if (cached != null) {
-            memoHits.incrementAndGet();
+            memoHits.increment();
             return cached;
         }
 
-        memoMisses.incrementAndGet();
+        memoMisses.increment();
         Object actual;
         synchronized (tree) {
             actual = tree.get(key);
         }
-        // Only cache non-null values so lazy get-then-put pools (AnimationVariableHandlePool) never see stale nulls
         if (actual != null) {
             memo.put(key, actual);
         }
@@ -118,27 +172,35 @@ public final class LookupMemoGovernor {
     }
 
     /**
-     * 3-byte bytecode redirection target for TreeMap.clear() inside FileGuidTable.
+     * Redirect target for invokeinterface Map.put(Object, Object).
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static Object mapPutFast(Map map, Object key, Object value) {
+        if (!(map instanceof TreeMap)) {
+            return map.put(key, value);
+        }
+        TreeMap tree = (TreeMap) map;
+        Object previous;
+        synchronized (tree) {
+            previous = tree.put(key, value);
+        }
+        invalidate(tree);
+        return previous;
+    }
+
+    /**
+     * Redirect target for invokeinterface Map.clear().
      */
     @SuppressWarnings("rawtypes")
-    public static void treeMapClearFast(TreeMap tree) {
-        if (tree == null) return;
+    public static void mapClearFast(Map map) {
+        if (!(map instanceof TreeMap)) {
+            map.clear();
+            return;
+        }
+        TreeMap tree = (TreeMap) map;
         synchronized (tree) {
             tree.clear();
         }
-        synchronized (treeMemos) {
-            if (tree == slot1Tree) {
-                slot1Tree = null;
-                slot1Memo = null;
-            }
-            if (tree == slot2Tree) {
-                slot2Tree = null;
-                slot2Memo = null;
-            }
-            ConcurrentHashMap<Object, Object> memo = treeMemos.remove(tree);
-            if (memo != null) {
-                memo.clear();
-            }
-        }
+        invalidate(tree);
     }
 }

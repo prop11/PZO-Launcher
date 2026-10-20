@@ -172,6 +172,35 @@ public class EngineThreadGovernor {
             this.target = target;
         }
 
+        private static java.lang.invoke.VarHandle gwCurrentTime = null;
+        private static java.lang.invoke.VarHandle gwAccumulator = null;
+        private static boolean pacerReflectionFailed = false;
+
+        /**
+         * Mirrors GameWindow.mainThreadStep(): with a capped framerate the next frameStep runs once
+         * accumulator + (now - currentTime) reaches 1e9 / lockFPS.
+         */
+        private static void paceToNextFrame() {
+            if (pacerReflectionFailed || zombie.core.PerformanceSettings.instance.isFramerateUncapped()) return;
+            try {
+                if (gwCurrentTime == null) {
+                    java.lang.invoke.MethodHandles.Lookup lookup = java.lang.invoke.MethodHandles.privateLookupIn(
+                        zombie.GameWindow.class, java.lang.invoke.MethodHandles.lookup());
+                    gwCurrentTime = lookup.findStaticVarHandle(zombie.GameWindow.class, "currentTime", long.class);
+                    gwAccumulator = lookup.findStaticVarHandle(zombie.GameWindow.class, "accumulator", long.class);
+                }
+                int lockFps = zombie.core.PerformanceSettings.getLockFPS();
+                if (lockFps <= 0) return;
+                long desiredDt = 1_000_000_000L / lockFps;
+                long currentTime = (long) gwCurrentTime.get();
+                long accumulator = (long) gwAccumulator.get();
+                EngineFramePacer.paceUntil(currentTime + (desiredDt - accumulator));
+            } catch (Throwable t) {
+                pacerReflectionFailed = true;
+                PZOLogger.warn("[EngineThreadGovernor] Frame pacer disabled (GameWindow timing unavailable): " + t.getMessage());
+            }
+        }
+
         private static void ensureReflection() {
             if (reflectionInit) return;
             try {
@@ -220,6 +249,7 @@ public class EngineThreadGovernor {
                                 UIFramePacingGovernor.onFrameBoundary(System.currentTimeMillis());
                                 AudioCadenceGovernor.isCadenceTickDue(fc);
                                 VRRDisplayGovernor.detectMonitorRefreshRate();
+                                paceToNextFrame();
                             }
                         }
                     }
