@@ -79,9 +79,17 @@ public final class WorldUpscalerGovernor {
         if (found) {
             active = true;
             PZOLogger.success("[WorldUpscalerGovernor] AMD FSR 1.0 Upscaler activated via -pzo_fsr launch parameter (Render Scale: " + (int)(renderScale * 100) + "%, Sharpness: " + (int)(sharpness * 100) + "%)");
+            try {
+                PZOptimAgent.enableRenderScaleHooks();
+            } catch (Throwable t) {
+                PZOLogger.warn("[WorldUpscalerGovernor] Could not install render-scale hooks: " + t.getMessage());
+            }
         } else {
             active = false;
-            PZOLogger.info("[WorldUpscalerGovernor] FSR 1.0 Upscaler inactive (-pzo_fsr launch parameter not detected). Native resolution preserved.");
+            // The agent runs before main() receives the game arguments, so only main's check is conclusive
+            if (args != null) {
+                PZOLogger.info("[WorldUpscalerGovernor] FSR 1.0 Upscaler inactive (-pzo_fsr launch parameter not detected). Native resolution preserved.");
+            }
         }
     }
 
