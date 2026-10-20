@@ -222,6 +222,9 @@ public class EngineThreadGovernor {
             try {
                 target.run();
             } finally {
+                if (BenchmarkHarness.isActive()) {
+                    BenchmarkHarness.tick();
+                }
                 try {
                     ensureReflection();
                     if (fsField != null) {
