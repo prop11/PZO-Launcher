@@ -18,17 +18,6 @@ public class PZOptimAgent {
         instrumentationInstance = inst;
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
 
-        // Must be decided before any game class loads: the render-scale hooks are installed at class-load time
-        try {
-            fsrRenderScaleHooks = WorldUpscalerGovernor.isRequestedAtLaunch();
-            if (fsrRenderScaleHooks) {
-                WorldRenderScale.markInstalled();
-                PZOLogger.success("[PZO Agent] -pzo_fsr detected: installing world render-scale hooks for FSR 1.0");
-            }
-        } catch (Throwable t) {
-            fsrRenderScaleHooks = false;
-        }
-
         try {
             inst.addTransformer(new EngineTransformer(), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
@@ -92,6 +81,40 @@ public class PZOptimAgent {
     }
 
     private static volatile boolean fsrRenderScaleHooks = false;
+
+    /**
+     * Installs the FSR render-scale hooks. ProjectZomboid64.exe hands Steam launch options only to main(),
+     * not to the JVM, so -pzo_fsr is usually first seen in PZOEntrypoint.main after the agent started;
+     * zombie.* classes already loaded by then are retransformed so they get hooked too.
+     */
+    public static synchronized void enableRenderScaleHooks() {
+        if (fsrRenderScaleHooks) return;
+        Instrumentation inst = instrumentationInstance;
+        if (inst == null) {
+            PZOLogger.warn("[PZO Agent] -pzo_fsr requested but the instrumentation agent is not attached - FSR unavailable");
+            return;
+        }
+        fsrRenderScaleHooks = true;
+        WorldRenderScale.markInstalled();
+        int retransformed = 0;
+        if (inst.isRetransformClassesSupported()) {
+            List<Class<?>> loaded = new ArrayList<>();
+            for (Class<?> c : inst.getAllLoadedClasses()) {
+                if (c.getName().startsWith("zombie.") && inst.isModifiableClass(c)) {
+                    loaded.add(c);
+                }
+            }
+            for (Class<?> c : loaded) {
+                try {
+                    inst.retransformClasses(c);
+                    retransformed++;
+                } catch (Throwable t) {
+                    PZOLogger.warn("[PZO Agent] FSR retransform notice for " + c.getName() + ": " + t.getMessage());
+                }
+            }
+        }
+        PZOLogger.success("[PZO Agent] -pzo_fsr: world render-scale hooks installed (" + retransformed + " already-loaded game classes rechecked)");
+    }
 
     private static volatile boolean bytecodeBloodCap = true;
 
