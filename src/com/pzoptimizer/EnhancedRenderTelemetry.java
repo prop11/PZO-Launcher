@@ -37,7 +37,7 @@ public final class EnhancedRenderTelemetry {
 
         snap.drawsCulled = RenderFrustumCuller.getCulledCount();
         snap.subterraneanTilesCulled = ZOcclusionCuller.getCulledCount();
-        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount() + HordeAnimationLODGovernor.getBoneTransformsSaved() + com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
+        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount() + com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
         snap.glCallsFiltered = GLStateOptimizer.getGlCallsFiltered();
         snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
         snap.hordeCulledOffscreen = HordeSpatialCuller.lastCulledOffscreenCount.get();

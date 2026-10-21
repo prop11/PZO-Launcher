@@ -79,10 +79,7 @@ public class PZOEntrypoint {
         FastBitwiseChunkIndexer.initialize();
         DirectBufferAllocatorGovernor.initialize();
         FrameDropDiagnosticEngine.initialize();
-        FMODOcclusionGovernor.initialize();
-        HordeAnimationLODGovernor.initialize();
         VerticalChunkStreamer.initialize();
-        DynamicLightingCuller.initialize();
         ChunkIngestionPacer.initialize();
         PredictiveChunkStreamer.initialize();
         ContainerConfiguratorGuard.initialize();
@@ -95,7 +92,6 @@ public class PZOEntrypoint {
             PZOLogger.success("[PZO Unstable Engine] EnhancedRenderTelemetry Active");
         }
         PowerThrottlingShield.apply();
-        KahluaGCPacer.start();
         LuaInterpreterAccelerator.apply();
         FastPathCache.normalize("media/textures");
         LogRotationGuard.checkAndRotateLogs();
