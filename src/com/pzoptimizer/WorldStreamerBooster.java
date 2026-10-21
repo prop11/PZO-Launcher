@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 
-/**
- * WorldStreamer Thread Priority & Chunk Bandwidth Booster.
- * Elevates the "World Streamer" and "Lighting" thread priorities so the OS never starves
- */
+/** Raises the World Streamer and Lighting thread priorities so they are not starved while driving. */
 public class WorldStreamerBooster {
 
     private static volatile boolean streamBoosterInstalled = false;

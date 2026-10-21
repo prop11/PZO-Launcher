@@ -2,10 +2,7 @@ package com.pzoptimizer;
 
 import java.lang.reflect.Field;
 
-/**
- * PZO Corpse Audio Governor & Spatial Sound Limiter.
- * Dynamically caps dead body audio scan counts in massive slaughter zones
- */
+/** Caps FliesSound.maxCorpseCount at 12 so dense corpse piles do not scan dozens of bodies per chunk. */
 public final class CorpseAudioGovernor {
 
     public static void applyCorpseAudioLimits() {
@@ -14,7 +11,7 @@ public final class CorpseAudioGovernor {
             Field maxCorpseField = fliesClass.getField("maxCorpseCount");
             int currentMax = maxCorpseField.getInt(null);
             
-            // Limit from 25-50 down to a responsive 12 bodies per chunk
+            // Vanilla allows 25-50 bodies per chunk
             if (currentMax > 12) {
                 maxCorpseField.setInt(null, 12);
                 PZOLogger.success("CorpseAudioGovernor: Paced corpse audio emitters (maxCorpseCount = 12)");

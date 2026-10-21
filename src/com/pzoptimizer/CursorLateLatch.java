@@ -4,14 +4,9 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Zero-Latency Software Cursor Late-Latching Governor.
- * When "Lock cursor to window" is enabled, Project Zomboid renders a software cursor sprite
- * sampled at the start of the simulation frame. With VSync enabled or under heavy GPU loads,
- * the cursor trails the player's physical mouse movement by 15-26ms, creating noticeable float.
- * 
- * CursorLateLatch captures the cursor sprite transform and, immediately prior to final display
- * presentation on the render thread, polls the latest hardware pointer position and snaps the
- * rendered sprite to the newest coordinate, delivering instant, hardware-like cursor responsiveness.
+ * With "Lock cursor to window", PZ draws a software cursor sampled at the start of the simulation frame,
+ * so it trails the real mouse by 15-26 ms under VSync or heavy GPU load. The cursor sprite's transform is
+ * captured and, just before present on the render thread, moved to the latest pointer position.
  */
 public final class CursorLateLatch {
 
@@ -61,10 +56,7 @@ public final class CursorLateLatch {
         recordedY = y;
     }
 
-    /**
-     * Resolves the delta offset to snap the software cursor to the newest hardware position.
-     * Output array: [deltaX, deltaY].
-     */
+    /** Offset from the queued cursor position to the newest pointer position, as [dx, dy]. */
     public static float[] calculateLateLatchDelta(float currentX, float currentY) {
         if (!active) {
             return new float[] {0.0f, 0.0f};

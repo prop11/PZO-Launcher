@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Build 42 Direct Memory & NIO Stream Acceleration.
- * Configures per-thread direct buffer caches and CPU core worker concurrency.
- */
+/** Direct buffer cache, path cache and loader concurrency system properties. */
 public class StreamBufferBooster {
 
     public static void applyStreamTweaks() {
@@ -12,14 +9,14 @@ public class StreamBufferBooster {
             System.setProperty("sun.io.useCanonCaches", "true");
             System.setProperty("sun.io.useCanonPrefixCache", "true");
 
-            // Java 17 NIO Direct Memory cache (256 KB per thread buffer)
+            // NIO direct buffer cache, 256 KB per thread
             System.setProperty("jdk.nio.maxCachedBufferSize", "262144");
 
             // Concurrency scaling for background async loaders
             int cores = Runtime.getRuntime().availableProcessors();
             System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", String.valueOf(Math.max(4, cores)));
 
-            // High-throughput network DNS cache timeout for MP servers
+            // DNS cache timeout for multiplayer servers
             System.setProperty("sun.net.inetaddr.ttl", "60");
         } catch (Throwable ignored) {}
     }

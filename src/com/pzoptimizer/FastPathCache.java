@@ -1,10 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Project Zomboid Build 42 - High-Speed L1 Path Normalization & Interning Cache.
- * Eliminates millions of temporary String and char[] allocations during texture,
- * model, and sound asset loading.
- */
+/** Normalizes and interns asset paths (textures, models, sounds) to avoid repeated String copies during loading. */
 public class FastPathCache {
     private static final int CACHE_SIZE = 4096;
     private static final int MASK = CACHE_SIZE - 1;
@@ -21,7 +17,6 @@ public class FastPathCache {
             return VAL_CACHE[hash];
         }
 
-        // Fast normalization without regex or unnecessary string copies
         String normalized = path.indexOf('\\') != -1 ? path.replace('\\', '/') : path;
         normalized = ResourceInterner.intern(normalized);
 

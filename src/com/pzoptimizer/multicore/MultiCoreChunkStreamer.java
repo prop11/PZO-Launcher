@@ -18,10 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Multi-Core Chunk Streamer (Pillar 1).
- * Re-architects Project Zomboid Build 42 chunk streaming from a single background thread
- */
+/** Parallel chunk loading: chunk requests from WorldStreamer are read and decompressed on PZO worker threads instead of one background thread. */
 public final class MultiCoreChunkStreamer {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -31,12 +28,12 @@ public final class MultiCoreChunkStreamer {
     private static Thread dispatcherThread;
     private static int workerCount = 4;
 
-    // Thread-local heap NIO chunk buffers (1 MB per worker thread = zero GC overhead + supports .array() for CRC32)
+    // Per-thread 1 MB heap buffers (heap, so .array() works for CRC32)
     private static final ThreadLocal<ByteBuffer> DIRECT_CHUNK_BUFFER = ThreadLocal.withInitial(() -> {
-        return ByteBuffer.allocate(1048576); // 1,048,576 bytes = 1 MB heap buffer
+        return ByteBuffer.allocate(1048576);
     });
 
-    // Thread-safe in-flight chunk tracking to eliminate duplicate parallel loading
+    // Chunks currently being loaded, so two workers never load the same one
     private static final Set<Long> IN_FLIGHT_CHUNKS = ConcurrentHashMap.newKeySet();
 
     private static final Object CHUNK_PARSE_LOCK = new Object();
@@ -136,10 +133,8 @@ public final class MultiCoreChunkStreamer {
     private static volatile boolean queueHooked = false;
 
     /**
-     * Specialized queue installed into WorldStreamer.jobQueue via Unsafe.
-     * Intercepts incoming chunk load requests, triggers asynchronous
-     * parallel disk pre-read and AVX2 decompression across P-Core workers, and passes
-     * chunks to WorldStreamer with zero monitor lock contention.
+     * Queue installed into WorldStreamer.jobQueue via Unsafe. Incoming chunk load requests are pre-read from
+     * disk and decompressed on the PZO workers, then passed to WorldStreamer without contending on its monitor.
      */
     public static class PZOChunkStreamQueue extends ConcurrentLinkedQueue<IsoChunk> {
         @Override
@@ -219,7 +214,7 @@ public final class MultiCoreChunkStreamer {
 
         long chunkKey = (((long) chunk.wx) << 32) | (((long) chunk.wy) & 0xFFFFFFFFL);
         if (!IN_FLIGHT_CHUNKS.add(chunkKey)) {
-            // Chunk coordinate is ALREADY in-flight on another worker; deduplicate
+            // Already being loaded by another worker
             return;
         }
 
@@ -233,11 +228,11 @@ public final class MultiCoreChunkStreamer {
 
                     long durationMs = (System.nanoTime() - startTime) / 1_000_000L;
                     totalChunksStreamedParallel.incrementAndGet();
-                    totalStreamTimeSavedMs.addAndGet(Math.max(1, 140L - durationMs)); // Vanilla wastes 140ms sleep
+                    totalStreamTimeSavedMs.addAndGet(Math.max(1, 140L - durationMs)); // instead of vanilla's 140 ms sleep
                 } catch (Throwable t) {
                     PZOLogger.warn("[MultiCoreChunkStreamer] Fallback recovery for chunk (" + chunk.wx + "," + chunk.wy + "): " + t.getMessage());
-                    // Fallback: Safely parse synchronously under parse lock without dumping into WorldStreamer.jobQueue
-                    // (Dumping into WorldStreamer risks thread collisions because WorldStreamer does not acquire CHUNK_PARSE_LOCK).
+                    // Fallback: parse synchronously under the parse lock. Handing it to WorldStreamer.jobQueue instead
+                    // would race, because WorldStreamer does not take CHUNK_PARSE_LOCK.
                     try {
                         synchronized (getParseLock()) {
                             resetSanityCheck();
@@ -275,9 +270,8 @@ public final class MultiCoreChunkStreamer {
     public static void processChunkParallel(IsoChunk chunk) {
         if (chunk == null || chunk.loaded) return;
 
-        // Note: Save/load mutual exclusion is natively guaranteed by IsoChunk.acquireLock(wx, wy),
-        // and background saves are safely handled by WorldStreamer. Calling ChunkSaveWorker.Update here
-        // caused MainThread freezes and non-thread-safe SaveBufferMap race conditions.
+        // Save/load exclusion already comes from IsoChunk.acquireLock(wx, wy) and WorldStreamer handles background
+        // saves. Calling ChunkSaveWorker.Update here froze the main thread and raced on SaveBufferMap.
 
         ByteBuffer workerBuf = DIRECT_CHUNK_BUFFER.get();
         workerBuf.clear();
@@ -291,20 +285,19 @@ public final class MultiCoreChunkStreamer {
                         loadedData.rewind();
                     }
                 } catch (Throwable t) {
-                    // File missing, empty, or unreadable: fallback to clean in-memory generation
+                    // Missing, empty or unreadable file: generate the chunk in memory instead
                     loadedData = null;
                 }
             }
 
-            // Guarded with getParseLock() (the IsoChunk.sanityCheck singleton monitor lock).
-            // Synchronizing on sanityCheckInstance guarantees mutual exclusion with both other workers
-            // AND any vanilla WorldStreamer operations (since SanityCheck.beginLoad/endLoad synchronize on sanityCheck).
+            // getParseLock() is the IsoChunk.sanityCheck monitor. Vanilla's SanityCheck.beginLoad/endLoad also
+            // synchronize on it, so this excludes both other workers and WorldStreamer.
             synchronized (getParseLock()) {
                 resetSanityCheck();
                 try {
                     chunk.LoadChunk(chunk.wx, chunk.wy, loadedData);
 
-                    // Vehicles DB: Always load vehicle instances from vehicles.db for all chunks
+                    // Always load vehicles from vehicles.db
                     if (VehiclesDB2.instance != null) {
                         try {
                             VehiclesDB2.instance.loadChunk(chunk);

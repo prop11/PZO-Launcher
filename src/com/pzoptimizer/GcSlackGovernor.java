@@ -7,15 +7,12 @@ import java.lang.management.MemoryUsage;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Frame-Slack Young Generation GC Pacer Governor.
- * With G1GC, a young collection pause (3-8 ms) normally triggers wherever the GameThread happens
- * to be when Eden fills up -- often mid-step during horde combat or high-speed driving, causing a
- * dropped frame.
+ * With G1, a young collection (3-8 ms) runs wherever the game thread is when Eden fills up, often mid-step
+ * during combat or driving, which drops a frame.
  *
- * GcSlackGovernor monitors the "G1 Eden Space" pool via JMX. When Eden usage exceeds 90% of its
- * learned collection threshold and the frame limiter has spare slack time at the end of a step,
- * it nudges the young collection inside the idle slack window so the next active game tick runs
- * with a clean Eden pool and zero mid-step GC pause.
+ * This watches the "G1 Eden Space" pool via JMX. When Eden is above 90% of its learned collection threshold
+ * and the frame limiter has slack left at the end of a step, it tips the young collection into that idle
+ * window, so the next tick starts with an empty Eden.
  */
 public final class GcSlackGovernor {
 
@@ -106,7 +103,7 @@ public final class GcSlackGovernor {
             long now = System.nanoTime();
 
             if (remaining > 0 && remaining <= threshold && remaining <= (24L << 20) && (now - lastSlackCollectNanos) > 500_000_000L) {
-                // Allocate short-lived small Eden filler chunks to tip the imminent Young GC inside this idle slack window
+                // Small short-lived allocations tip the imminent young GC into this idle window
                 long deadline = now + Math.min(spareSlackNanos - 1_500_000L, 2_500_000L);
                 int chunkBytes = 128 * 1024; // 128 KB (never humongous)
                 long beforeCount = youngCollector.getCollectionCount();

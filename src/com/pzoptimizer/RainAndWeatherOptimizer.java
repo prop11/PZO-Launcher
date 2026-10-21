@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * Project Zomboid Build 42 - Rain & Weather Travel Performance Optimizer.
- * Forensically addresses the critical bottlenecks causing major hitching and stuttering
- */
+/** Weather settings that hitch while travelling in rain: lighting split updates, puddle levels, weather masking, and a puddle geometry cache. */
 public final class RainAndWeatherOptimizer {
 
     private static volatile boolean initialized = false;
@@ -37,9 +34,8 @@ public final class RainAndWeatherOptimizer {
     }
 
     /**
-     * Ensures lightingSplitUpdate remains disabled.
-     * When true, FBORenderCell caps chunk updates to 5 chunks/frame, causing flashlight flickering
-     * and preventing other players' flashlights in multiplayer from illuminating.
+     * Keeps lightingSplitUpdate off. When on, FBORenderCell caps chunk updates at 5 per frame, which makes
+     * flashlights flicker and stops other players' flashlights lighting anything in multiplayer.
      */
     public static void applyLightingSplitUpdate() {
         try {
@@ -59,9 +55,7 @@ public final class RainAndWeatherOptimizer {
         }
     }
 
-    /**
-     * Enforces ground-level puddles (perfPuddles = 1) if currently set to all 32 levels (0).
-     */
+    /** Switches puddles to ground level only (perfPuddles = 2) when set lower. */
     public static void applyPuddlesElevationCap() {
         try {
             Class<?> coreClass = Class.forName("zombie.core.Core");
@@ -71,7 +65,7 @@ public final class RainAndWeatherOptimizer {
                 Method getPerfPuddlesMethod = coreClass.getMethod("getPerfPuddles");
                 int currentPuddles = (int) getPerfPuddlesMethod.invoke(core);
                 if (currentPuddles < 2) {
-                    // Option 0 is All Levels, 1 is Ground with Ruts (8 neighbor scans/square). Level 2 is Ground Only (neighbor lookups skipped).
+                    // 0 = all levels, 1 = ground with ruts (8 neighbour scans per square), 2 = ground only
                     Method setPerfPuddlesMethod = coreClass.getMethod("setPerfPuddles", int.class);
                     setPerfPuddlesMethod.invoke(core, 2);
                     PZOLogger.success("[RainAndWeatherOptimizer] Puddle scanning set to Ground Only (Z=0, 8-neighbor lookups bypassed)");
@@ -82,9 +76,7 @@ public final class RainAndWeatherOptimizer {
         }
     }
 
-    /**
-     * Ensures WeatherFxMask.maskingEnabled is unconditionally active (prevents raw gray box indoors).
-     */
+    /** Keeps WeatherFxMask.maskingEnabled on; without it indoor areas show a raw gray box. */
     private static void ensureWeatherMaskingRestored() {
         try {
             Class<?> maskClass = Class.forName("zombie.iso.weather.fx.WeatherFxMask");
@@ -93,11 +85,7 @@ public final class RainAndWeatherOptimizer {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Puddle Geometry & Vertex Array Cache.
-     * Caches 32-float packed puddle vertex batches per chunk level to avoid rebuilding
-     * ~8,000 vertex records from scratch each frame during rain and thunderstorms.
-     */
+    /** Caches packed puddle vertex batches per chunk level, so rain does not rebuild ~8,000 vertex records every frame. */
     public static final class PuddleMeshCache {
         private static final java.util.Map<Long, float[]> cachedPuddleVertices = new java.util.concurrent.ConcurrentHashMap<>();
         private static final java.util.concurrent.atomic.AtomicLong totalPuddleBatchesReused = new java.util.concurrent.atomic.AtomicLong(0);

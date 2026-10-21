@@ -4,13 +4,9 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Dynamic Zombie LOD & Animation Blending Governor.
- * In vanilla Build 42, the engine always targets 510 3D animated models and 20 blended animations
- * even if the CPU/GPU is overwhelmed by a 1,000+ zombie horde, crashing framerates.
- * 
- * ZombieLodGovernor monitors real-time frame budget headroom (p50 and p90 frame times).
- * Under heavy load, it dynamically reduces 3D skeletal models to flat atlas sprites,
- * restoring full visual fidelity when frame headroom recovers.
+ * Vanilla always targets 510 3D animated models and 20 blended animations, even when a 1,000+ zombie horde
+ * has the frame rate collapsing. This tracks p50 and p90 frame times and, under load, switches more zombies
+ * to flat atlas sprites, stepping back up once there is headroom again.
  */
 public final class ZombieLodGovernor {
 
@@ -65,9 +61,6 @@ public final class ZombieLodGovernor {
         return currentLodLevel;
     }
 
-    /**
-     * Records the duration of a completed game/render frame step.
-     */
     public static void recordFrameStep(long stepDurationNanos) {
         if (!active || stepDurationNanos <= 0) return;
 

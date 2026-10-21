@@ -5,16 +5,14 @@ import java.util.Map;
 import zombie.core.TilePropertyAliasMap;
 
 /**
- * PropertyContainer / TilePropertyAliasMap Property ID Cache Governor.
+ * Vanilla resolves every tile property lookup through HashMap<String, Integer>.getOrDefault, which walks a
+ * node and unboxes an Integer per call. After each TilePropertyAliasMap.Generate() this governor snapshots
+ * the table into a flat open-addressed String[]/int[] pair, so a hit is one array probe with an identity
+ * compare (property names are mostly interned literals) and no boxing.
  *
- * Vanilla resolves every tile property lookup through HashMap<String, Integer>.getOrDefault, which
- * walks a Node and unboxes an Integer per call. After each TilePropertyAliasMap.Generate() this
- * governor snapshots the table into a flat open-addressed String[]/int[] pair, so a hit is one array
- * probe with an identity compare (property names are mostly interned literals) and no boxing.
- *
- * Thread-safety: the snapshot is immutable and published through a single volatile field, so the
- * MainThread and PZO worker threads read it lock-free. Generate() runs on the MainThread during world
- * load; while it runs (and before the first one completes) lookups fall through to vanilla.
+ * Thread-safety: the snapshot is immutable and published through a single volatile field, so the main
+ * thread and PZO worker threads read it lock-free. Generate() runs on the main thread during world load;
+ * while it runs (and before the first one completes) lookups fall through to vanilla.
  */
 public final class PropIdCacheGovernor {
 

@@ -13,10 +13,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/**
- * PZO Real-Time Frame-Time Profiler & Stutter Diagnostic Engine.
- * Measures nanosecond frame times, detects frame drops / micro-stutters,
- */
+/** Measures frame times and logs frame drops and stutters with their likely cause. */
 public final class FrameDropDiagnosticEngine {
 
     private static volatile boolean running = false;
@@ -141,9 +138,6 @@ public final class FrameDropDiagnosticEngine {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Called on each rendered frame to compute frame time and detect stutter anomalies.
-     */
     public static void onFrameTick() {
         long now = System.nanoTime();
         long deltaNanos = now - lastFrameTimeNanos;

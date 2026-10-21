@@ -4,9 +4,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Project Zomboid Engine Features & Architecture Tuner.
- * Automatically unlocks 100% verified, rock-solid multi-threaded pathfinding, asynchronous lighting,
- * multi-threaded audio, 13x13 chunk streaming, and shared skeletal animation bone caches.
+ * Sets the DebugOptions and PerformanceSettings PZO relies on: native threaded pathfinding, the unsafe
+ * threading options forced off, and lighting / animation LOD values.
  */
 public class EngineFeaturesTuner {
 
@@ -18,15 +17,15 @@ public class EngineFeaturesTuner {
                 Object debugOptionsInstance = instanceField.get(null);
 
                 if (debugOptionsInstance != null) {
-                    // A. Native Code Pathfinding & Navigation (100% thread-safe)
+                    // Native pathfinding on its own thread
                     setOptionValue(debugOptionsInstance, "threadPathfinding", true);
                     setOptionValue(debugOptionsInstance, "pathfindUseNativeCode", true);
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
-                    // B. Multi-Threaded Engine Subsystems (Grid Stacks, Lighting)
-                    // Keep threadAnimation = false to prevent experimental Kahlua Lua single-threaded VM crashes
-                    // Keep threadAmbient = false, threadSound = false, threadWorld = false to prevent FMOD audio race conditions (e.g. DayZ Ambient Sound TimSort crash)
-                    // Keep threadLighting = false, threadGridStacks = false to eliminate RenderThread .join() stalls on PZForkJoinPool
+                    // Kept off on purpose:
+                    // - threadAnimation: crashes the single-threaded Kahlua VM
+                    // - threadAmbient / threadSound / threadWorld: FMOD races (e.g. the DayZ Ambient Sound TimSort crash)
+                    // - threadLighting / threadGridStacks: RenderThread .join() stalls on PZForkJoinPool
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
                     setOptionValue(debugOptionsInstance, "threadLighting", false);
                     setOptionValue(debugOptionsInstance, "lightingSplitUpdate", false);
@@ -36,7 +35,6 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "threadGridStacks", false);
                     setOptionValue(debugOptionsInstance, "threadModelSlotInit", true);
 
-                    // C. Model Texture Size Limiter
                     try {
                         Field modelGroupField = debugOptionsClass.getField("model");
                         Object modelGroup = modelGroupField.get(debugOptionsInstance);
@@ -49,8 +47,8 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // Corpses and items in chunk texture FBO must remain false (vanilla default)
-                    // In Build 42, enabling them causes chunk FBO texture invalidation on every frame while bodies or items move.
+                    // Vanilla default. Corpses or items in the chunk texture invalidate the chunk FBO every frame
+                    // while bodies or items move.
                     try {
                         Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
                         Object fboGroup = fboGroupField.get(debugOptionsInstance);
@@ -60,7 +58,7 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // E. Persist thread-safe options to debug-options.ini
+                    // Persist to debug-options.ini
                     persistDebugOptionsFile();
 
                     PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Pathfinding Native)");

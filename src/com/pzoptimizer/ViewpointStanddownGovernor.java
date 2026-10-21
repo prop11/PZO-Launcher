@@ -5,18 +5,11 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 /**
- * Project Viewpoint & 3D Camera / Weather Standdown Governor.
- * 
- * Protects game stability and mod compatibility when running mods that modify
- * the 3D projection, camera matrices, or weather shaders (such as Project Viewpoint:
- * True Weathers & Lighting, IsoViewpoint, or PZ3D).
- * 
- * When standdown is active:
- * 1. Bytecode patching for ImprovedFogDrawer is completely bypassed (leaving vanilla/modded shaders untouched).
- * 2. FogQuarterBufferGovernor yields immediately to vanilla/modded fog rendering.
- * 3. RenderFrustumCuller stands down to prevent incorrect 2D screen-space culling of 3D objects.
- * 4. HordeSpatialCuller stands down frustum culling so entities outside 2D bounds are not hidden.
- * 5. RainAndWeatherOptimizer stands down weather masking and puddle elevation overrides.
+ * Stands PZO's rendering changes down when a mod replaces the 3D projection, camera matrices or weather
+ * shaders (Project Viewpoint: True Weathers & Lighting, IsoViewpoint, PZ3D). While active:
+ * - ImprovedFogDrawer is not bytecode-patched, and FogQuarterBufferGovernor yields to vanilla/modded fog
+ * - RenderFrustumCuller and HordeSpatialCuller skip 2D screen-space culling, which would hide 3D-projected objects
+ * - RainAndWeatherOptimizer leaves weather masking and puddle settings alone
  */
 public final class ViewpointStanddownGovernor {
 
@@ -41,7 +34,7 @@ public final class ViewpointStanddownGovernor {
         if (initialized) return;
         initialized = true;
 
-        // 1. Read persistent mode from PZOConfig
+        // Persistent mode from PZOConfig
         try {
             String savedMode = PZOConfig.getViewpointStanddownMode();
             if (savedMode != null && !savedMode.isEmpty()) {
@@ -49,10 +42,9 @@ public final class ViewpointStanddownGovernor {
             }
         } catch (Throwable ignored) {}
 
-        // 2. Check launch flags and system properties
+        // Launch flags and system properties
         checkLaunchParams();
 
-        // 3. Perform initial detection
         checkDetection();
     }
 
@@ -90,7 +82,7 @@ public final class ViewpointStanddownGovernor {
 
         boolean detected = false;
 
-        // 1. Check loaded classes for known Viewpoint / True Weathers / 3D mod classes
+        // Known Viewpoint / True Weathers / 3D mod classes already loaded
         String[] modClasses = new String[] {
             "viewpoint.Viewpoint",
             "viewpoint.Camera3D",
@@ -108,7 +100,7 @@ public final class ViewpointStanddownGovernor {
             } catch (Throwable ignored) {}
         }
 
-        // 2. Check PZ ActiveMods list via reflection
+        // The game's ActiveMods list
         if (!detected) {
             try {
                 Class<?> activeModsClass = Class.forName("zombie.modding.ActiveMods");
@@ -130,7 +122,7 @@ public final class ViewpointStanddownGovernor {
             } catch (Throwable ignored) {}
         }
 
-        // 3. Check ZomboidFileSystem active mods via reflection
+        // ZomboidFileSystem's active mods
         if (!detected) {
             try {
                 Class<?> zfsClass = Class.forName("zombie.ZomboidFileSystem");

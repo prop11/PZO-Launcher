@@ -22,11 +22,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
-/**
- * Project Zomboid Build 42 - Embedded Java & ZombieBuddy Mod Loader.
- * Automatically discovers, deduplicates, classloads, and hooks 3rd-party Java Workshop mods
- * across all mounted Steam libraries and custom mod directories.
- */
+/** Finds, deduplicates and loads third-party Java workshop mods across all Steam libraries, deferring ZombieBuddy mods to ZombieBuddy. */
 public class JavaModLoader {
     private static final Set<String> LOADED_MODS = new HashSet<>();
     private static int successCount = 0;
@@ -277,7 +273,7 @@ public class JavaModLoader {
 
         ModMetadata meta = findModMetadataForJar(jarFile);
 
-        // 1. Check if disabled in Project Zomboid Mod Manager (default.txt)
+        // Skip mods disabled in the mod manager (default.txt)
         Set<String> enabled = getEnabledModIds();
         if (!enabled.isEmpty() && !meta.modIds.isEmpty()) {
             boolean anyEnabled = false;
@@ -296,13 +292,12 @@ public class JavaModLoader {
             }
         }
 
-        // 2. Coexistence check: If this is a ZombieBuddy mod
+        // ZombieBuddy mods are left to ZombieBuddy
         boolean zbPresent = isZombieBuddyPresent();
         if (meta.isZombieBuddyMod || meta.javaPkgName != null || meta.requiresZombieBuddy) {
             if (zbPresent) {
-                // Defer to ZombieBuddy runtime agent:
-                // Prevents premature class definition, allows ZombieBuddy's own @Patch ByteBuddy engine
-                // to instrument target game classes upon ZomboidFileSystem.loadMods execution.
+                // Loading these here would define their classes too early; ZombieBuddy's own @Patch engine
+                // instruments the game classes when ZomboidFileSystem.loadMods runs.
                 successCount++;
                 PZOLogger.info(String.format("[JavaModLoader] [COEXISTENCE] Deferring '%s' (%s) to ZombieBuddy runtime agent (javaPkgName: %s)",
                     jarFile.getName(),

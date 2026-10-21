@@ -1,10 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Thread-Local Vector & Coordinate Pool.
- * Eliminates temporary 3D/2D vector allocations in high-frequency raycasting,
- * horde spatial queries, and line-of-sight math.
- */
+/** Thread-local vectors for raycasting, horde spatial queries and line-of-sight math. */
 public class VectorPool {
 
     public static class Vec2 {

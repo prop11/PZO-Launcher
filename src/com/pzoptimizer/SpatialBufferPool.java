@@ -4,10 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 
-/**
- * PZO Off-Heap Direct Spatial Buffer Pool (Phase 3 SIMD Acceleration).
- * Pre-allocates dedicated off-heap direct NIO buffers for up to 8,192 concurrent entities.
- */
+/** Pre-allocated direct buffers for spatial data on up to 8,192 entities. */
 public final class SpatialBufferPool {
 
     public static final int MAX_ENTITIES = 8192;

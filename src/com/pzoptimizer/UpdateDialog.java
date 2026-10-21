@@ -7,10 +7,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Build 42 - Pre-Menu Native Interactive Update Prompt & Self-Updater.
- * Multi-Platform: Windows (WinForms), macOS (Cocoa/AppleScript), Linux & Steam Deck (Zenity/KDialog).
- */
+/** Pre-menu update prompt and self-updater, using WinForms on Windows, AppleScript on macOS and Zenity/KDialog on Linux and Steam Deck. */
 public class UpdateDialog {
     private static final String CONFIG_FILE = "pzo_config.json";
 
@@ -56,12 +53,11 @@ public class UpdateDialog {
         String installedVersion = PZONative.getInstalledNativeVersion();
         String expectedVersion = UpdateChecker.CURRENT_VERSION;
 
-        // If file is present and versions match, native library is up-to-date and fully compatible
         if (filePresent && expectedVersion.equalsIgnoreCase(installedVersion)) {
             return false;
         }
 
-        // Safeguard: If base semantic versions match (e.g. 0.9.9.4 and 0.9.9.4-unstable), they share identical ABI
+        // Same base version (e.g. 0.9.9.4 and 0.9.9.4-unstable) means the same native ABI
         if (filePresent && installedVersion != null && !installedVersion.isEmpty()) {
             String cleanExpected = expectedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
             String cleanInstalled = installedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
@@ -562,7 +558,7 @@ public class UpdateDialog {
             boolean nativeInstalled = PZONative.isNativeFilePresent() || currentNative.exists() || win64Dll.exists();
             boolean hasNewNative = false;
 
-            // Step 1: Download matching native companion library first if native governor is installed or supported
+            // Download the matching native library first, when native support is installed or available
             List<String> nativeCandidates = new ArrayList<>();
             if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
                 nativeCandidates.add(dllDownloadUrl);
@@ -591,7 +587,7 @@ public class UpdateDialog {
                 }
             }
 
-            // CRITICAL: If native governor is installed on user's system, we MUST NOT perform a partial update!
+            // With the native library installed, never update the jar alone
             if (nativeInstalled && !hasNewNative) {
                 if (newNative.exists()) newNative.delete();
                 PZOLogger.error("Failed to download matching native library (" + nativeFileName + ") for version " + latestVersion + ". Aborting update to avoid library mismatch.");
@@ -599,7 +595,7 @@ public class UpdateDialog {
                 return;
             }
 
-            // Step 2: Download PZOptimEngine.jar
+            // Then PZOptimEngine.jar
             List<String> jarCandidates = new ArrayList<>();
             if (downloadUrl != null && !downloadUrl.isEmpty() && !downloadUrl.contains("/releases/latest/")) {
                 jarCandidates.add(downloadUrl);

@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Off-Screen Skeletal Skinning Governor (3D Model Animation Culler).
- * In Project Zomboid Build 42, 3D animated models (zombies, characters, animals) compute
- */
+/** Skips skinning for 3D models more than 128 px off screen (unstable channel only). */
 public final class ModelSkinningGovernor {
 
     public static final AtomicLong boneTransformsSaved = new AtomicLong(0);

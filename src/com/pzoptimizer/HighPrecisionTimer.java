@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Project Zomboid - High Precision Timer & Windows Micro-Sleep Stabilizer.
- * Locks the Windows OS timer resolution to 1.0ms with zero CPU context-switch overhead.
- */
+/** Holds a 1 ms Windows timer resolution for the process. */
 public class HighPrecisionTimer {
     private static volatile boolean initialized = false;
 
@@ -13,8 +10,8 @@ public class HighPrecisionTimer {
 
         Thread timerThread = new Thread(() -> {
             try {
-                // Sleep with a long interval; the JVM timer resolution request
-                // remains active at the OS level for the entire process duration.
+                // Sleeping on a long interval keeps the JVM's timer resolution request active
+                // for the whole process.
                 while (true) {
                     Thread.sleep(60000);
                 }

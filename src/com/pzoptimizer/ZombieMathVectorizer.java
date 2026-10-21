@@ -3,17 +3,13 @@ package com.pzoptimizer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 
-/**
- * Project Zomboid Build 42 - SIMD-Inspired Vectorized Zombie Math Engine (Phase 3).
- * Accelerates distance calculations, line-of-sight raycasts, angle interpolation,
- * and batch spatial entity culling using 8-wide AVX2 instructions and FastMath lookup tables.
- */
+/** Distance, line-of-sight, angle and batch culling math, using 8-wide AVX2 through the native library and FastMath tables. */
 public class ZombieMathVectorizer {
     private static boolean active = false;
 
     public static void apply() {
         try {
-            // Warm the FastMath trigonometric tables into CPU L1/L2 cache
+            // Touch the FastMath tables so their first real use is not a cold miss
             for (int i = -180; i <= 180; i++) {
                 float rad = (float) Math.toRadians(i);
                 FastMath.sin(rad);
@@ -71,9 +67,6 @@ public class ZombieMathVectorizer {
         return PZONative.classifyTiersAVX2(directCoords, count, ox, oy, t0Sq, t1Sq, t2Sq, directOutTiers);
     }
 
-    /**
-     * Fast squared Euclidean distance calculation without square root overhead.
-     */
     public static float distanceSq(float x1, float y1, float x2, float y2) {
         float dx = x2 - x1;
         float dy = y2 - y1;

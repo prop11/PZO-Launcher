@@ -2,11 +2,7 @@ package com.pzoptimizer;
 
 import java.lang.reflect.Field;
 
-/**
- * Project Zomboid Build 42 - Corrupt Chunk & Savegame Recovery Shield.
- * Prevents game-ending crashes when encountering truncated, corrupted, or
- * invalid map chunk files (map_X_Y.bin) from crashed saves or removed map mods.
- */
+/** Keeps truncated or corrupt map_X_Y.bin chunk files (crashed saves, removed map mods) from crashing the game. */
 public class ChunkCrashShield {
     private static volatile int recoveredChunks = 0;
 
@@ -20,13 +16,9 @@ public class ChunkCrashShield {
     }
 
     /**
-     * Project Zomboid Build 42 - IsoChunkMap Parity & Coordinate Sanity Shield.
-     * Prevents fatal 'ArrayIndexOutOfBoundsException: Index 271 out of bounds for length 256'
-     * caused by even chunkGridWidth values (e.g. 16 instead of odd 13, 15, 17, 19).
-     * 
-     * In PZ's centered chunk grid (2*R + 1), width must always be odd.
-     * If an even width is detected or swap buffers are undersized, this guard
-     * corrects the grid parity and transparently expands swap buffers.
+     * The chunk grid is centered (2*R + 1), so its width must be odd. An even chunkGridWidth (e.g. 16) causes
+     * "ArrayIndexOutOfBoundsException: Index 271 out of bounds for length 256"; this rounds the width up to the
+     * next odd value and grows the swap buffers to match.
      */
     public static void enforceChunkGridSanity() {
         try {
@@ -37,9 +29,9 @@ public class ChunkCrashShield {
 
             if (width > 0) {
                 if (width % 2 != 0) {
-                    return; // Already valid odd grid parity (13x13, 11x11, 9x9) - do not touch!
+                    return; // already odd
                 }
-                int safeWidth = width + 1; // Force to safe odd number (e.g. 16 -> 17)
+                int safeWidth = width + 1; // e.g. 16 -> 17
                 widthField.setInt(null, safeWidth);
 
                 try {
@@ -53,7 +45,7 @@ public class ChunkCrashShield {
                 return;
             }
 
-            // Ensure active IsoCell chunkMap buffers match or exceed required capacity (width * width)
+            // The cell's chunkMap buffers must hold at least width * width chunks
             int requiredLen = width * width;
             try {
                 Class<?> worldClass = Class.forName("zombie.iso.IsoWorld");

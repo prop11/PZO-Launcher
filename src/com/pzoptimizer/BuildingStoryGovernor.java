@@ -7,14 +7,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Building Story Randomization Governor.
- * When rolling random building stories during chunk generation (e.g. `RBTrashed.trashHouse`),
- * the game queries `RoomDef.isKidsRoom` repeatedly for every square in the building.
- * Each query re-scans every square of the room against a list of 19 tile names.
- * 
- * BuildingStoryGovernor memoizes room classification for the duration of the building
- * story generation pass, eliminating quadratic tile string comparisons and avoiding 10-100ms
- * frame hitches during world streaming.
+ * Building story generation (e.g. RBTrashed.trashHouse) calls RoomDef.isKidsRoom for every square in the
+ * building, and each call re-scans the room's squares against 19 tile names. Results are memoized for the
+ * duration of one building's story pass.
  */
 public final class BuildingStoryGovernor {
 
@@ -83,10 +78,7 @@ public final class BuildingStoryGovernor {
         return active && CONTEXT.get().depth > 0;
     }
 
-    /**
-     * Retrieves cached kids-room evaluation if available within current pass.
-     * Returns null if uncomputed.
-     */
+    /** Cached result for the current pass, or null if not computed yet. */
     public static Boolean getCachedResult(Object roomDef) {
         if (!active || roomDef == null) return null;
         PassContext ctx = CONTEXT.get();
@@ -98,9 +90,6 @@ public final class BuildingStoryGovernor {
         return res;
     }
 
-    /**
-     * Stores computed kids-room result for the active building pass.
-     */
     public static void putCachedResult(Object roomDef, boolean isKidsRoom) {
         if (!active || roomDef == null) return;
         PassContext ctx = CONTEXT.get();

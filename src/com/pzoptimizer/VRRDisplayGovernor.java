@@ -4,14 +4,9 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Variable Refresh Rate (VRR) & Display Synchronization Governor.
- * On G-Sync, FreeSync, and high-refresh gaming displays, allowing framerate to hit
- * or exceed the monitor refresh rate triggers driver V-Sync buffering, introducing 20-40ms
- * of sudden input lag.
- * 
- * VRRDisplayGovernor detects display refresh frequencies and automatically locks the optimal
- * sub-refresh cap (e.g., 58 on 60Hz, 141 on 144Hz, 237 on 240Hz) to keep the display
- * continuously inside its native hardware VRR window.
+ * On G-Sync / FreeSync displays, reaching the refresh rate pushes the driver into V-Sync buffering and adds
+ * 20-40 ms of input lag. This reads the display refresh rate and caps just below it (58 at 60 Hz, 141 at
+ * 144 Hz, 237 at 240 Hz) to stay inside the VRR window.
  */
 public final class VRRDisplayGovernor {
 
@@ -36,9 +31,6 @@ public final class VRRDisplayGovernor {
         autoCapEnabled = value;
     }
 
-    /**
-     * Detects desktop display refresh frequency.
-     */
     public static int detectMonitorRefreshRate() {
         if (detectionDone) return detectedRefreshHz.get();
 

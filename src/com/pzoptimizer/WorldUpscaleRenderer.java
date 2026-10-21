@@ -241,8 +241,6 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         return p;
     }
 
-    // ------------------------------------------------------------------ shaders
-
     // Attribute-less fullscreen triangle
     static final String FULLSCREEN_VERT = String.join("\n",
         "#version 330",

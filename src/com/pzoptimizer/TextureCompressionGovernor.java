@@ -9,17 +9,11 @@ import java.security.MessageDigest;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Worker-Pool BC3/DXT5 Texture Compressor & Persistent Disk Texture Cache.
- * In Project Zomboid, texture packs consume 4-8 GB of uncompressed VRAM. Enabling vanilla
- * `textureCompression` commands the OpenGL driver to compress textures synchronously on the
- * render thread during `glTexImage2D`, freezing the game for 30+ seconds during boot.
- * 
- * TextureCompressionGovernor introduces:
- * 1. Asynchronous Worker-Pool BC3 (DXT5) Block Encoding: Compresses textures into 4x4 BC3 blocks
- *    on background worker threads, allowing the render thread to upload pre-compressed data
- *    in 1/4 the bytes via `glCompressedTexImage2D`.
- * 2. Persistent Disk Cache (`pzo_texcache`): Caches encoded BC3 blocks across game launches,
- *    eliminating re-compression on subsequent boots and slashing VRAM footprint by ~75%.
+ * Texture packs take 4-8 GB of VRAM uncompressed, and vanilla textureCompression makes the driver compress
+ * synchronously on the render thread inside glTexImage2D, freezing boot for 30+ seconds. This:
+ * - encodes textures to BC3 (DXT5) 4x4 blocks on background workers, so the render thread uploads a
+ *   quarter of the bytes through glCompressedTexImage2D
+ * - caches the encoded blocks in pzo_texcache across launches
  */
 public final class TextureCompressionGovernor {
 
@@ -51,9 +45,6 @@ public final class TextureCompressionGovernor {
         return cacheDir;
     }
 
-    /**
-     * Checks if a pre-compressed BC3 texture exists on disk.
-     */
     public static byte[] loadCachedBC3(String packName, String pageName, int width, int height) {
         if (!active) return null;
         File dir = getCacheDirectory();
@@ -71,9 +62,6 @@ public final class TextureCompressionGovernor {
         return null;
     }
 
-    /**
-     * Saves compressed BC3 blocks to persistent disk cache.
-     */
     public static void saveCachedBC3(String packName, String pageName, int width, int height, byte[] bc3Data) {
         if (!active || bc3Data == null || bc3Data.length == 0) return;
         File dir = getCacheDirectory();
@@ -94,7 +82,7 @@ public final class TextureCompressionGovernor {
      * Encodes 16 RGBA pixels (64 bytes) into one 16-byte BC3 block (8 bytes alpha + 8 bytes color).
      */
     public static void encodeBlockBC3(byte[] rgba, int offset, int stride, byte[] out, int outOffset) {
-        // 1. Alpha block (8 bytes)
+        // Alpha block (8 bytes)
         int minA = 255;
         int maxA = 0;
         for (int y = 0; y < 4; y++) {
@@ -112,7 +100,7 @@ public final class TextureCompressionGovernor {
             out[outOffset + i] = 0;
         }
 
-        // 2. Color block (8 bytes: 2x 16-bit RGB565 endpoints + 4 bytes of 2-bit indices)
+        // Color block (8 bytes: two RGB565 endpoints + 4 bytes of 2-bit indices)
         int minR = 255, minG = 255, minB = 255;
         int maxR = 0, maxG = 0, maxB = 0;
         for (int y = 0; y < 4; y++) {

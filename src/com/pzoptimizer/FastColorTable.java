@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * L1 Pre-Computed RGBA Integer-to-Float Fast Lookup Table.
- * Replaces expensive floating-point divisions (b / 255.0f) with instant O(1) array lookups.
- */
+/** 256-entry table mapping an 8-bit color channel to a 0-1 float. */
 public final class FastColorTable {
     private static final float[] BYTE_TO_FLOAT = new float[256];
 
@@ -13,9 +10,6 @@ public final class FastColorTable {
         }
     }
 
-    /**
-     * Instantly converts an 8-bit unsigned color channel (0-255) to a 0.0f-1.0f float with zero division latency.
-     */
     public static float getFloat(int byteVal) {
         if (byteVal < 0) return 0.0f;
         if (byteVal > 255) return 1.0f;

@@ -13,13 +13,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Project Zomboid Build 42 - Log Spam & PrintStream Lock Contention Shield.
- * In heavy modpacks, poorly optimized mods frequently execute debug logging inside
- * per-frame render or tick loops (e.g. LingLi_SCTD_LipsSkin logging 8,869 times).
- * Synchronous I/O and synchronized PrintStream locks create severe thread contention
- * between the render loop and main thread, driving frame times up to 100ms+.
- * This shield installs a zero-overhead deduplicating stream on System.out, System.err,
- * and DebugLog, muzzling repeating duplicate messages while periodically summarizing them.
+ * Some mods log from per-frame render or tick loops (e.g. LingLi_SCTD_LipsSkin logging 8,869 times), and the
+ * synchronized PrintStream turns that into lock contention between the render and main threads. This wraps
+ * System.out, System.err and DebugLog in a deduplicating stream that suppresses repeats and periodically
+ * prints a summary.
  */
 public final class LogSpamShield {
 

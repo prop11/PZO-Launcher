@@ -11,18 +11,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import sun.misc.Unsafe;
 
 /**
- * Texture Pack Index Governor & Fast Page Seek Accelerator.
- * In Project Zomboid Build 42, version-0 texture packs (.pack files totaling over 526 MB)
- * do not record pre-computed byte offsets for page boundaries. During startup, the engine
- * scans through the entire 526 MB byte-by-byte via synchronized stream reads (TexturePackPage.readIntByte)
- * searching for the 0xDEADBEEF page terminator, burning 0.5 to 0.6 seconds of boot CPU time.
- * 
- * TexturePackIndexGovernor introduces:
- * 1. Persistent Pack Index Cache (pzo_packs/): Caches exact page boundary offsets (start -> end)
- *    keyed by pack file size, modification timestamp, and PZO build key.
- * 2. Instant Sub-Millisecond Page Seeking: On repeat launches, skips the page byte scan
- *    directly to the end offset via input.skip(), reducing over 500,000 synchronized stream
- *    iterations down to a single seek call per page.
+ * Version-0 texture packs (over 526 MB of .pack files) do not store page offsets, so at startup the engine
+ * reads through all of them byte by byte (TexturePackPage.readIntByte, synchronized) looking for the
+ * 0xDEADBEEF page terminator, 0.5-0.6 s of boot CPU. Page end offsets are cached in pzo_packs/, keyed by
+ * pack size, modification time and PZO build; on later launches each page is skipped with one seek.
  */
 public final class TexturePackIndexGovernor {
 
@@ -105,9 +97,6 @@ public final class TexturePackIndexGovernor {
         return null;
     }
 
-    /**
-     * Resolves getPosition() method on PositionInputStream.
-     */
     private static long getStreamPosition(InputStream in) {
         try {
             if (getPositionMethod == null) {
@@ -123,9 +112,7 @@ public final class TexturePackIndexGovernor {
         return -1L;
     }
 
-    /**
-     * High-performance stream skipper with zero-return handling.
-     */
+    /** skip() that handles zero returns. */
     private static long skipInput(InputStream input, long length) throws IOException {
         long skipped = 0L;
         while (skipped < length) {
@@ -180,7 +167,6 @@ public final class TexturePackIndexGovernor {
                 return invokeFallbackReadIntByte(in);
             }
 
-            // 1. Check for Cache Hit
             Long endPos = data.endByStart.get(startPos);
             if (endPos != null && endPos > startPos) {
                 long toSkip = endPos - startPos;
@@ -190,7 +176,7 @@ public final class TexturePackIndexGovernor {
                 return TARGET_TERMINATOR;
             }
 
-            // 2. Cache Miss: Fast JIT-optimized scan in a tight local loop
+            // Cache miss: scan in a tight local loop and record the page end
             int ring = 0;
             while (true) {
                 int b = in.read();
@@ -232,9 +218,6 @@ public final class TexturePackIndexGovernor {
         }
     }
 
-    /**
-     * Loads or creates PackIndexData for a given .pack file.
-     */
     private static PackIndexData getOrLoadIndex(String packPath) {
         PackIndexData existing = indices.get(packPath);
         if (existing != null) return existing;

@@ -1,7 +1,5 @@
 #!/bin/bash
-# ==============================================================================
-# Project Zomboid Build 42 - Config & Engine Optimizer (macOS & Linux)
-# ==============================================================================
+# PZO installer for macOS and Linux
 
 set -e
 
@@ -34,7 +32,7 @@ if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
     fi
 fi
 
-# 1. Locate or Auto-Download PZOptimEngine.jar
+# Locate or download PZOptimEngine.jar
 if [ -f "$SCRIPT_DIR/PZOptimEngine.jar" ]; then
     PZ_JAR="$SCRIPT_DIR/PZOptimEngine.jar"
 elif [ -f "$SCRIPT_DIR/dist/PZOptimEngine.jar" ]; then
@@ -69,7 +67,7 @@ fi
 
 echo "[+] Using engine package: $PZ_JAR"
 
-# 2. Detect Total RAM in GB
+# Total RAM in GB
 TOTAL_RAM=8
 if [ "$OS_TYPE" = "Darwin" ]; then
     RAM_BYTES=$(sysctl -n hw.memsize 2>/dev/null || echo 8589934592)
@@ -126,9 +124,7 @@ clean_lua_bridge_files() {
     done
 }
 
-# ==============================================================================
-# macOS Native .app Bundle Installation
-# ==============================================================================
+# macOS: install into the .app bundle
 if [ "$OS_TYPE" = "Darwin" ]; then
     echo "[*] Platform: macOS"
     POSSIBLE_APP_PATHS=(
@@ -375,9 +371,7 @@ PYEOF
 
     resign_bundle
 
-# ==============================================================================
-# Linux Steam Installation
-# ==============================================================================
+# Linux Steam installation
 else
     echo "[*] Platform: Linux"
 
@@ -541,8 +535,7 @@ else
     cp -f "$PZ_JAR" "$INSTALLED_JAR"
     echo "[+] Installed PZOptimEngine.jar -> $INSTALLED_JAR"
 
-    # Install companion native libraries:
-    # 1. Windows / Proton companion: pzo_native64.dll
+    # Companion native libraries: pzo_native64.dll for Windows / Proton depots
     DLL_SRC=""
     for d_c in "$SCRIPT_DIR/pzo_native64.dll" "$SCRIPT_DIR/dist/pzo_native64.dll" "$SCRIPT_DIR/../dist/pzo_native64.dll" "$SCRIPT_DIR/native/pzo_native64.dll" "$PWD/pzo_native64.dll"; do
         if [ -f "$d_c" ]; then
@@ -575,7 +568,7 @@ else
         echo "[+] Installed Windows / Proton native companion: pzo_native64.dll"
     fi
 
-    # 2. Linux native companion: libpzo_native64.so
+    # libpzo_native64.so for native Linux
     SO_SRC=""
     for so_c in "$SCRIPT_DIR/libpzo_native64.so" "$SCRIPT_DIR/dist/libpzo_native64.so" "$SCRIPT_DIR/../dist/libpzo_native64.so" "$SCRIPT_DIR/native/libpzo_native64.so" "$PWD/libpzo_native64.so"; do
         if [ -f "$so_c" ]; then

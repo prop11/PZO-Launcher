@@ -3,11 +3,7 @@ package com.pzoptimizer;
 import java.io.File;
 import java.nio.file.Files;
 
-/**
- * PZO Persistent Configuration Manager.
- * Stores user preferences (such as Beta / Unstable build opt-in and ignored versions)
- * into pzo_config.json across Windows, macOS, and Linux.
- */
+/** Persistent preferences (beta opt-in, ignored versions) in pzo_config.json. */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
     public static final String CURRENT_NOTICE_VERSION = "1.0.1-unstable";

@@ -5,10 +5,7 @@ import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.Statement;
 
-/**
- * Project Zomboid Build 42 - Zero-Stutter Chunk & Savegame I/O Accelerator.
- * Enhances background disk streaming for world save files (map_*.bin, zpop_*.bin)
- */
+/** Larger I/O buffers for save files (map_*.bin, zpop_*.bin), and SQLite WAL mode plus memory-mapping for the save databases. */
 public class SaveGameStreamBooster {
     private static final int OPTIMAL_BUFFER_SIZE = 131072; // 128 KB high-throughput buffer
     private static volatile boolean dbTuned = false;
@@ -19,12 +16,11 @@ public class SaveGameStreamBooster {
 
     public static void tuneSaveEngine() {
         try {
-            // Tune standard I/O buffer properties
             System.setProperty("zomboid.io.buffersize", String.valueOf(OPTIMAL_BUFFER_SIZE));
             PopTemplateGuard.ensurePopulated();
         } catch (Throwable ignored) {}
 
-        // Launch background daemon to apply SQLite WAL mode and memory-mapping when database connections open
+        // Apply SQLite WAL mode and memory-mapping once the database connections open
         startDbTuningDaemon();
     }
 

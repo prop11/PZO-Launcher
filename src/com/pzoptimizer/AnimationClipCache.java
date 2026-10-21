@@ -9,13 +9,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 3D Skeletal Animation Clip Disk Cache Engine.
- * Vanilla Build 42 imports over 2,200 `.X` 3D animation files using `jassimp` on every launch,
- * consuming 15-20 thread-seconds of CPU time during startup.
- * 
- * AnimationClipCache serializes parsed animation keyframe tracks into a compact, memory-mapped
- * binary format (.pzac) during first import. On subsequent launches, keyframes are restored directly
- * from disk without invoking heavy native jassimp parsers, slashing game boot times by 5-15 seconds.
+ * Disk cache for parsed animation clips. B42 imports ~2,200 .X animation files through jassimp on every
+ * launch; parsed keyframe tracks are written to a binary .pzac file on first import and read back on
+ * later launches instead of running the importer again.
  */
 public final class AnimationClipCache {
 
@@ -70,9 +66,7 @@ public final class AnimationClipCache {
         backgroundWriter.start();
     }
 
-    /**
-     * Generates a stable SHA-256 cache key for an animation asset based on its path and metadata.
-     */
+    /** Cache key: SHA-256 of the asset path and metadata. */
     public static String computeCacheKey(String assetPath, long fileSize, long lastModified) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -99,9 +93,6 @@ public final class AnimationClipCache {
         return b;
     }
 
-    /**
-     * Checks if a cached binary animation file exists and is valid.
-     */
     public static File getCachedAnimationFile(String cacheKey) {
         if (!active) return null;
         File dir = getCacheDirectory();
@@ -114,12 +105,9 @@ public final class AnimationClipCache {
         return null;
     }
 
-    /**
-     * Queues an asynchronous write of parsed animation keyframe tracks to disk.
-     */
     public static void queueAsyncSave(String cacheKey, byte[] serializedData) {
         if (!active || serializedData == null || serializedData.length == 0) return;
-        getCacheDirectory(); // Ensure writer thread started
+        getCacheDirectory();
 
         asyncDiskWrites.offer(() -> {
             try {
@@ -140,9 +128,6 @@ public final class AnimationClipCache {
         });
     }
 
-    /**
-     * Reads serialized animation bytes from a cached .pzac file.
-     */
     public static byte[] readCachedBytes(File cacheFile) {
         if (cacheFile == null || !cacheFile.exists()) return null;
         try (DataInputStream dis = new DataInputStream(new BufferedInputStream(new FileInputStream(cacheFile)))) {

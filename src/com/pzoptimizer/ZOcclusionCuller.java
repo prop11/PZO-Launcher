@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Subterranean Z-Level Occlusion Shield (Build 42 32-Level Vertical Culler).
- * In Build 42, the world supports up to 32 vertical levels (-16 to +16).
- */
+/** Skips rendering underground levels (Z < 0) while the player is on the surface (unstable channel only). */
 public final class ZOcclusionCuller {
 
     public static final AtomicLong subterraneanTilesCulled = new AtomicLong(0);
@@ -25,7 +22,7 @@ public final class ZOcclusionCuller {
 
         updatePlayerZ();
 
-        // If player is on surface (Z >= 0), subterranean levels (Z < 0) are occluded by ground terrain
+        // On the surface (Z >= 0), levels below ground are hidden by the terrain
         if (cachedPlayerZ >= 0) {
             subterraneanTilesCulled.addAndGet(64); // 8x8 tile layer equivalent
             return false;

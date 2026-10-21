@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Project Zomboid Build 42 - Distant Horde AI & Spatial Staggering Engine (Phase 3).
- * Staggers expensive pathfinding and sensory checks for distant zombies (>32 tiles)
- */
+/** Staggers AI updates for distant zombies: every 3rd frame at medium range, every 6th beyond that, phased by zombie ID. */
 public class HordeHibernationEngine {
     private static int frameCounter = 0;
     private static final int HIBERNATION_DISTANCE_SQ = 35 * 35; // 1225 tiles^2
@@ -12,13 +9,13 @@ public class HordeHibernationEngine {
     public static boolean shouldProcessZombieAI(int zombieIndex, int zombieId) {
         int tier = HordeSpatialCuller.getLODTier(zombieIndex);
         if (tier <= 1) {
-            return true; // Close zombies (<32 tiles) always process at full 60 FPS
+            return true; // LOD tiers 0-1: every frame
         } else if (tier == 2) {
-            // Medium-far zombies (32-50 tiles): stagger every 3rd frame
+            // tier 2: every 3rd frame
             int slot = Math.abs(zombieId) % 3;
             return (frameCounter % 3) == slot;
         } else {
-            // Out of range (>50 tiles / offscreen): stagger every 6th frame
+            // beyond: every 6th frame
             int slot = Math.abs(zombieId) % 6;
             return (frameCounter % 6) == slot;
         }
@@ -38,7 +35,7 @@ public class HordeHibernationEngine {
             return (frameCounter % 6) == slot;
         }
 
-        // Distant zombies: stagger updates across 3 interleaved frames based on ID
+        // medium range: every 3rd frame, phased by ID
         int slot = Math.abs(zombieId) % 3;
         return (frameCounter % 3) == slot;
     }

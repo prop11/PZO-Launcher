@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * HotSpot JIT Compiler & JVM Runtime Environment Tuner.
- * Sets runtime system properties to maximize thread concurrency and eliminate JIT compilation lag.
- */
+/** Sets JIT and runtime system properties sized to the CPU core count. */
 public class HotSpotJITCompilerTuner {
 
     public static void tuneRuntimeProperties() {

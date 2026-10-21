@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.io.File;
 import java.lang.reflect.Method;
 
-/**
- * Project Zomboid Build 42 - Dedicated High-Performance Engine Optimizer & Wrapper.
- * Fully compatible with vanilla Project Zomboid and ZombieBuddy modding framework.
- */
+/** Launcher entry point: runs PZO's startup tuning, then hands over to the game's main class. */
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
@@ -33,7 +30,7 @@ public class PZOEntrypoint {
         WorldUpscalerGovernor.checkLaunchParams(args);
         BenchmarkHarness.checkLaunchParams(args);
 
-        // Automatically inspect and migrate ProjectZomboid64.json if upgrading from older releases (e.g. 0.8.2 -> 0.9.5)
+        // Migrate ProjectZomboid64.json from older PZO releases (e.g. 0.8.2 -> 0.9.5)
         try {
             ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
         } catch (Throwable ignored) {}
@@ -47,7 +44,7 @@ public class PZOEntrypoint {
             }
         } catch (Throwable ignored) {}
 
-        // Ensure critical Zomboid user directories exist & write live pzo_status.json across all discovered drives & paths
+        // Create the Zomboid user directories and write pzo_status.json to every discovered Zomboid path
         try {
             TelemetryReporter.refreshDiscoveredDirectories(args);
             long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
@@ -58,7 +55,6 @@ public class PZOEntrypoint {
             PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB | Native: " + isNative + ")");
         } catch (Throwable ignored) {}
 
-        // HotSpot JIT & System Property Tuning
         HotSpotJITCompilerTuner.tuneRuntimeProperties();
 
         PZOEngineBridge.initialize();
@@ -157,7 +153,7 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
 
-        // 6b. Native Governor DLL Version Verification
+        // Native library version check
         if (!fullUpdateHandled) {
             try {
                 UpdateDialog.checkAndPromptNativeMismatch(resolvedNativeUrl);

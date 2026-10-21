@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * PZO Fast Math & L1 Cache-Aligned Trigonometry Engine.
- * Provides single-cycle trigonometric functions, fast inverse square root,
- */
+/** Table-based trigonometry and a fast inverse square root. */
 public final class PZOFastMath {
 
     private static final int TABLE_SIZE = 65536;
@@ -47,9 +44,7 @@ public final class PZOFastMath {
         return dx * dx + dy * dy + dz * dz;
     }
 
-    /**
-     * Fast Inverse Square Root (IEEE 754 bit-hack with 1 Newton-Raphson iteration).
-     */
+    /** Fast inverse square root (IEEE 754 bit trick, one Newton-Raphson step). */
     public static float invSqrt(float x) {
         float xhalf = 0.5f * x;
         int i = Float.floatToIntBits(x);

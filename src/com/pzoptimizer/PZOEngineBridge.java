@@ -5,10 +5,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
-/**
- * Dedicated Kahlua / LuaManager Java-Lua bridge for Project Zomboid.
- * Exposes native zero-overhead engine diagnostic and optimization methods directly to Lua scripts.
- */
+/** Exposes PZO engine status, diagnostics and options to Lua through LuaManager.env. */
 public class PZOEngineBridge {
 
     private static volatile boolean initialized = false;
@@ -519,9 +516,7 @@ public class PZOEngineBridge {
         }
     }
 
-    /**
-     * Asynchronously discovers and binds to zombie.Lua.LuaManager when Kahlua initializes.
-     */
+    /** Waits for zombie.Lua.LuaManager to initialize, then binds the PZO globals. */
     public static synchronized void initialize() {
         if (initialized) return;
         initialized = true;
@@ -549,13 +544,11 @@ public class PZOEngineBridge {
                     if (env != null) {
                         Method rawset = env.getClass().getMethod("rawset", Object.class, Object.class);
 
-                        // Direct boolean and number globals
                         rawset.invoke(env, "PZOEngineActive", Boolean.TRUE);
                         rawset.invoke(env, "isPZOEngineActive", Boolean.TRUE);
                         rawset.invoke(env, "PZOEngineRAM", cachedRamGb);
                         rawset.invoke(env, "PZOEngineVersion", UpdateChecker.CURRENT_VERSION);
 
-                        // Create KahluaTable for PZOEngine and PZOEngineBridge
                         try {
                             Field platformField = lmClass.getField("platform");
                             Object platform = platformField.get(null);
@@ -569,7 +562,6 @@ public class PZOEngineBridge {
                                     tableRawset.invoke(pzoTable, "version", UpdateChecker.CURRENT_VERSION);
                                     tableRawset.invoke(pzoTable, "g1gc", Boolean.TRUE);
 
-                                    // Build dynamic JavaFunction proxies for Kahlua
                                     try {
                                         Class<?> javaFuncClass = Class.forName("se.krka.kahlua.vm.JavaFunction");
                                         Class<?> callFrameClass = Class.forName("se.krka.kahlua.vm.LuaCallFrame");

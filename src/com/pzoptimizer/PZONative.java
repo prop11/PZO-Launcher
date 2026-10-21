@@ -7,9 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Project Zomboid Build 42 - Dedicated High-Performance Native Kernel & Hardware Governor.
- * Bridges Java to pzo_native64.dll / libpzo_native64.so / libpzo_native64.dylib for low-latency
- * OS scheduling, sub-millisecond timer locking, power throttling exemption, and AVX2 spatial SIMD batching.
+ * JNI bridge to pzo_native64.dll / libpzo_native64.so / libpzo_native64.dylib: OS scheduling, timer
+ * resolution, power throttling exemption and AVX2 batch helpers.
  */
 public class PZONative {
 
@@ -396,7 +395,7 @@ public class PZONative {
         return count;
     }
 
-    // Phase 2: High-Speed SIMD Decompression & Win32 Chunk Stream Acceleration
+    // Decompression and Win32 chunk stream helpers
 
     public static int decompress(byte[] src, int srcOff, int srcLen, byte[] dst, int dstOff, int dstCap) {
         if (!isLoaded() || src == null || dst == null || srcLen <= 0 || dstCap <= 0) return -1;
@@ -503,7 +502,7 @@ public class PZONative {
         return "Unknown";
     }
 
-    // Native JNI Declarations (Implemented in pzo_native.c)
+    // JNI declarations, implemented in native/pzo_native.c
     public static native String getNativeVersion();
     private static native boolean initNative();
     public static native boolean setHighPrecisionTimer(boolean enable);

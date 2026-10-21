@@ -57,7 +57,7 @@ def main():
     print(f" Dist: {dist_dir}")
     print("================================================================================")
 
-    # 1. Build client and server JARs if not already present or out of date
+    # Build the client and server jars if missing or out of date
     client_mf = os.path.join(src_dir, "META-INF", "MANIFEST.MF")
     server_mf = os.path.join(src_dir, "META-INF", "MANIFEST_SERVER.MF")
     client_jar = os.path.join(dist_dir, "PZOptimEngine.jar")
@@ -68,7 +68,7 @@ def main():
     if os.path.isdir(bin_dir) and os.path.isfile(server_mf):
         create_jar(bin_dir, server_mf, server_jar)
 
-    # Also copy to root if helpful
+    # Also copy them to the repo root
     if os.path.isfile(client_jar):
         shutil.copy2(client_jar, os.path.join(root_dir, "PZOptimEngine.jar"))
     if os.path.isfile(server_jar):
@@ -77,7 +77,7 @@ def main():
     # Search locations for assets (prefer workspace root and native source dirs over stale dist)
     search_dirs = [root_dir, native_dir, dist_dir]
 
-    # 2. Gather standalone binaries & scripts for dist/
+    # Standalone binaries and scripts for dist/
     files_to_copy = [
         "pzo_native64.dll",
         "libpzo_native64.so",
@@ -108,7 +108,6 @@ def main():
         with open(fp, "rb") as f:
             zf.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
 
-    # 3. Package PZO-Optimizer-Windows.zip
     win_zip = os.path.join(dist_dir, "PZO-Optimizer-Windows.zip")
     with zipfile.ZipFile(win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in ["install.bat", "PZOptimEngine.jar", "pzo_native64.dll", "README.md"]:
@@ -117,7 +116,6 @@ def main():
                 add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO-Optimizer-Windows.zip ({os.path.getsize(win_zip):,} bytes)")
 
-    # 4. Package PZO_Optimizer_macOS_Linux.zip
     mac_linux_zip = os.path.join(dist_dir, "PZO_Optimizer_macOS_Linux.zip")
     with zipfile.ZipFile(mac_linux_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in ["pzo_optimizer.sh", "pzo_optimizer.command", "PZOptimEngine.jar", "README.md", "pzo_native64.dll", "libpzo_native64.so", "libpzo_native64.dylib"]:
@@ -126,7 +124,6 @@ def main():
                 add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO_Optimizer_macOS_Linux.zip ({os.path.getsize(mac_linux_zip):,} bytes)")
 
-    # 5. Package PZO-Server-Windows.zip
     srv_win_zip = os.path.join(dist_dir, "PZO-Server-Windows.zip")
     with zipfile.ZipFile(srv_win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in ["PZOServerEngine.jar", "README_SERVER.md", "pzo_native64.dll"]:
@@ -135,7 +132,6 @@ def main():
                 add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO-Server-Windows.zip ({os.path.getsize(srv_win_zip):,} bytes)")
 
-    # 6. Package PZO-Server-Linux.zip
     srv_linux_zip = os.path.join(dist_dir, "PZO-Server-Linux.zip")
     with zipfile.ZipFile(srv_linux_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in ["PZOServerEngine.jar", "README_SERVER.md", "libpzo_native64.so"]:

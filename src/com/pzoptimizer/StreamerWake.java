@@ -4,11 +4,7 @@ import java.lang.reflect.Field;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
-/**
- * Event-Driven WorldStreamer Wake-Up Controller.
- * Cuts short the vanilla 140ms Thread.sleep idle delay in WorldStreamer.threadLoop()
- * as soon as new chunks are enqueued or ingested by PZO's multi-core pipeline.
- */
+/** Wakes WorldStreamer.threadLoop() from its 140 ms idle sleep as soon as PZO queues or ingests chunks. */
 public final class StreamerWake {
 
     private static volatile Thread streamerThread = null;
@@ -45,9 +41,7 @@ public final class StreamerWake {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Replaces static sleep intervals with interruptible, unparkable nano-parking.
-     */
+    /** Interruptible replacement for the streamer's fixed sleep. */
     public static void idle(long millis) throws InterruptedException {
         if (!active || millis <= 0) {
             Thread.sleep(millis);
@@ -64,10 +58,7 @@ public final class StreamerWake {
         }
     }
 
-    /**
-     * Instantly unparks the WorldStreamer thread when work is available.
-     * Uses LockSupport.unpark without thread interruption to protect active NIO file channels.
-     */
+    /** Unparks the WorldStreamer thread. Uses unpark rather than interrupt, which would close its NIO file channels. */
     public static void signal() {
         if (!active) return;
 

@@ -5,14 +5,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * World Map Street Label Layout & Render Governor.
- * Opening the in-game world map (`UIWorldMap`) incurs substantial CPU overhead (~80%
- * of map frame time) recalculating street name projections and translation queries
- * even when the map camera is stationary.
- * 
- * WorldMapPerformanceGovernor caches projected street name layout vectors and text spans
- * against the map viewport matrix, reusing layout calculations until camera pan, zoom,
- * or map data changes.
+ * The world map (UIWorldMap) spends most of its frame time re-projecting street names and re-running their
+ * translation lookups even when the map camera is still. Street label layouts are cached against the map
+ * view and reused until it pans, zooms or the map data changes.
  */
 public final class WorldMapPerformanceGovernor {
 
@@ -62,7 +57,6 @@ public final class WorldMapPerformanceGovernor {
             return true;
         }
 
-        // View updated
         state.zoom = zoom;
         state.centerX = cx;
         state.centerY = cy;
@@ -70,17 +64,11 @@ public final class WorldMapPerformanceGovernor {
         return false;
     }
 
-    /**
-     * Returns the current generation stamp for cache keying.
-     */
     public static long getViewStamp(Object mapInstance) {
         ViewState state = viewStates.get(mapInstance);
         return state != null ? state.stamp : 0L;
     }
 
-    /**
-     * Clears cached view states when world map is closed.
-     */
     public static void clear() {
         viewStates.clear();
     }

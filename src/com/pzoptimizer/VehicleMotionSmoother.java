@@ -6,12 +6,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Sub-Tick Vehicle Motion Smoothing Engine.
- * Bullet physics in Build 42 advances vehicles at a fixed 100 Hz (10ms steps).
- * On high-refresh displays (120Hz, 144Hz, 165Hz, 240Hz), non-integer stepping causes
- * vehicle and camera micro-judder.
- * This smoother calculates sub-tick delta interpolation during the render frame and restores
- * canonical simulation coordinates immediately after, preserving 100% physics and server integrity.
+ * Bullet advances vehicles at a fixed 100 Hz, which judders at 120-240 Hz refresh rates. Vehicle positions
+ * are interpolated between physics ticks for rendering and restored to the simulated values right after,
+ * so physics and the server never see the interpolated positions.
  */
 public final class VehicleMotionSmoother {
 
@@ -85,7 +82,6 @@ public final class VehicleMotionSmoother {
             float dynamicAlpha = Math.min(1.0f, (float) elapsed / (float) PHYSICS_STEP_NANOS);
             if (dynamicAlpha <= 0.0f || dynamicAlpha >= 1.0f) return;
 
-            // Render interpolation occurs under zero-copy bounds
         } catch (Throwable ignored) {}
     }
 

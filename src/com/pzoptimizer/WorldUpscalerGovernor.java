@@ -3,14 +3,9 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * World Resolution Scaling & FSR 1.0 Upscaler Governor.
- * For players on integrated APUs (Steam Deck, ROG Ally, Intel Iris Xe, Radeon 780M/890M)
- * or 4K displays, GPU fillrate and shading pixel cost create a strict framerate ceiling.
- * 
- * WorldUpscalerGovernor manages rendering the game world viewport at a reduced render scale
- * (e.g., 50% to 75% resolution) while preserving full native resolution for the user interface,
- * resolving the world pass using AMD FidelityFX Super Resolution 1.0 (EASU + RCAS sharpening)
- * to deliver massive FPS increases with sharp visual clarity.
+ * Opt-in world render scaling (-pzo_fsr): the world renders below native resolution (75% by default) and is
+ * upscaled with FSR 1.0 (EASU + RCAS) while the UI stays native. Aimed at fill-rate-limited setups such as
+ * APUs (Steam Deck, ROG Ally, Iris Xe, Radeon 780M/890M) and 4K displays.
  */
 public final class WorldUpscalerGovernor {
 
@@ -24,16 +19,14 @@ public final class WorldUpscalerGovernor {
 
     private WorldUpscalerGovernor() {}
 
-    /**
-     * Inspects command-line arguments and system properties for -pzo_fsr launch parameter.
-     */
+    /** Looks for -pzo_fsr in the launch arguments, the JVM command line, system properties and environment. */
     public static synchronized void checkLaunchParams(String[] args) {
         if (checkedParams && (args == null || args.length == 0)) return;
         checkedParams = true;
 
         boolean found = false;
 
-        // 1. Inspect command-line arguments (passed into PZOEntrypoint.main)
+        // Arguments passed to PZOEntrypoint.main
         if (args != null) {
             for (String arg : args) {
                 if (arg != null) {
@@ -46,7 +39,7 @@ public final class WorldUpscalerGovernor {
             }
         }
 
-        // 2. Inspect full command line string from JVM
+        // Full JVM command line
         if (!found) {
             try {
                 String sunCmd = System.getProperty("sun.java.command");
@@ -56,7 +49,7 @@ public final class WorldUpscalerGovernor {
             } catch (Throwable ignored) {}
         }
 
-        // 3. Inspect system properties and environment variables
+        // System properties and environment variables
         if (!found) {
             try {
                 String sysProp = System.getProperty("pzo_fsr");
@@ -224,10 +217,7 @@ public final class WorldUpscalerGovernor {
         }
     }
 
-    /**
-     * Calculates scaled viewport dimensions based on native display size.
-     * Output array: [scaledWidth, scaledHeight].
-     */
+    /** Scaled viewport size for the native display size, as [width, height]. */
     public static int[] getScaledViewport(int nativeWidth, int nativeHeight) {
         if (!active || renderScale >= 0.999f) {
             return new int[] {nativeWidth, nativeHeight};

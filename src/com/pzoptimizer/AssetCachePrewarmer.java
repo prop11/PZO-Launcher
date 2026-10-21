@@ -5,10 +5,7 @@ import java.io.FileInputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 
-/**
- * Non-blocking Background Texture & Asset Cache Pre-Warmer.
- * Reads texture pack headers into OS page cache at boot and immediately releases file handles.
- */
+/** Reads texture pack headers into the OS page cache at boot, then closes the files. */
 public class AssetCachePrewarmer {
     public static void startPrewarmingAsync() {
         Thread prewarmer = new Thread(() -> {

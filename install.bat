@@ -16,10 +16,7 @@ pause
 exit /b %errorlevel%
 
 # __START_POWERSHELL__
-# ==============================================================================
-# Project Zomboid Build 42 - Config & Engine Optimizer (PZO)
-# Native PowerShell Engine Installer & Uninstaller
-# ==============================================================================
+# PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
 Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.0.1-unstable)" -ForegroundColor Cyan
@@ -51,9 +48,7 @@ if (-not (Test-Path -LiteralPath $ZomboidModsDir -ErrorAction SilentlyContinue))
     New-Item -ItemType Directory -Path $ZomboidModsDir -Force | Out-Null
 }
 
-# ==========================================
-# JSON TEMPLATES (Defined upfront - No BOM)
-# ==========================================
+# JSON templates (written without a BOM)
 $Json5OrLess = @"
 {
     "mainClass": "com/pzoptimizer/PZOEntrypoint",
@@ -456,9 +451,7 @@ if ($SourceDll) {
     }
 }
 
-# ==========================================
-# ZOMBIEBUDDY COEXISTENCE & PRESERVATION
-# ==========================================
+# ZombieBuddy coexistence
 $zbNativeDll = [System.IO.Path]::Combine($InstallPath, "zbNative.dll")
 $zbNativeWin64 = [System.IO.Path]::Combine($InstallPath, "win64\zbNative.dll")
 $hasZbInJson = $false
@@ -610,9 +603,7 @@ function Apply-PZOConfiguration {
     Write-Host "Generated Lua bridge status: $PzoStatusFile" -ForegroundColor Green
 }
 
-# ==========================================
-# EXISTING INSTALLATION CHECK (UPDATE / UNINSTALL)
-# ==========================================
+# Existing installation: update or uninstall
 if (Test-Path $InstalledJarPath) {
     Write-Host "`n[!] PZOptimEngine is already installed." -ForegroundColor Yellow
     Write-Host "1) Update    - Overwrite PZOptimEngine.jar with the new version & refresh config [Default]"
@@ -715,7 +706,7 @@ if (Test-Path $InstalledJarPath) {
                 Write-Host "Restored original clean stock backup: $($cleanBackup.Name) -> $TargetFileName" -ForegroundColor Green
             }
 
-            # Guaranteed sanitization: Ensure ProjectZomboid64.json contains no orphaned PZO entries
+            # Make sure ProjectZomboid64.json has no orphaned PZO entries left
             if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
                 $jsonRaw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
                 if ($jsonRaw -and (($jsonRaw -match "com/pzoptimizer") -or ($jsonRaw -match "pzo_native64") -or ($jsonRaw -match "PZOptimEngine\.jar"))) {
@@ -728,7 +719,7 @@ if (Test-Path $InstalledJarPath) {
                 }
             }
 
-            # Cleanses debug-options.ini to prevent FBO thrashing in vanilla
+            # Reset debug-options.ini so vanilla does not thrash chunk FBOs
             $debugOptFile = [System.IO.Path]::Combine($HOME, "Zomboid\debug-options.ini")
             if (Test-Path -LiteralPath $debugOptFile -ErrorAction SilentlyContinue) {
                 $dbgContent = Get-Content -LiteralPath $debugOptFile -Raw -ErrorAction SilentlyContinue
@@ -752,9 +743,7 @@ if (Test-Path $InstalledJarPath) {
     }
 }
 
-# ==========================================
-# FRESH INSTALLATION
-# ==========================================
+# Fresh installation
 Write-Host "`nStarting fresh installation..." -ForegroundColor Cyan
 
 if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyContinue)) {

@@ -2,10 +2,7 @@ package com.pzoptimizer;
 
 import java.lang.reflect.Method;
 
-/**
- * PZO Smart Generational Heap Cleaner & Zero-Pause GC Governor.
- * Monitors gameplay state and triggers concurrent memory compaction during safe idle windows
- */
+/** Passive heap monitor; never calls System.gc(), G1 manages collection itself. */
 public final class GenerationalHeapCleaner {
 
     private static volatile boolean running = false;
@@ -13,8 +10,7 @@ public final class GenerationalHeapCleaner {
     private static final long MIN_GC_INTERVAL_MS = 60_000; // Minimum 60s between idle sweeps
 
     public static void startGovernor() {
-        // Maintained as passive non-blocking monitor. Explicit System.gc() is strictly disabled
-        // to ensure HotSpot G1GC manages memory concurrently with zero Stop-The-World pauses.
+        // Passive only: explicit System.gc() stays disabled so G1 manages memory itself
         PZOLogger.success("GenerationalHeapCleaner: Zero-Pause Memory Governor initialized (Passive Concurrent Mode)");
     }
 

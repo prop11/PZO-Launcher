@@ -4,14 +4,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Retained-Mode UI Command Replay Optimizer.
- * In vanilla Build 42, every UI element's Lua prerender/render runs repeatedly at 60 Hz
- * even when the entire screen is completely static (e.g. inventory windows, hotbars, status panels).
- * 
- * UIRetainedOptimizer tracks user input and dirty events:
- * - On input (mouse click, key press, scroll, hover), marks UI elements dirty for fresh rendering.
- * - On clean frames, allows replaying previously generated draw commands, completely skipping
- *   redundant Lua script execution.
+ * Every UI element's Lua prerender/render runs every frame even when nothing on screen changes. Input
+ * (click, key, scroll, hover) marks elements dirty; clean elements can replay their previous draw commands
+ * instead of running the Lua again.
  */
 public final class UIRetainedOptimizer {
 
@@ -54,7 +49,6 @@ public final class UIRetainedOptimizer {
             return false;
         }
 
-        // Element is clean and no input occurred
         totalReplays.incrementAndGet();
         return true;
     }

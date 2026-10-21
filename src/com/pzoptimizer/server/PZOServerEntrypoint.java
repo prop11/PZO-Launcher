@@ -3,11 +3,7 @@ package com.pzoptimizer.server;
 import java.io.File;
 import java.lang.reflect.Method;
 
-/**
- * Project Zomboid Build 42 & 41 - Dedicated Server Master Optimization Entrypoint.
- * Bootstraps zero-lag networking, multi-threaded horde simulation, and 24/7 memory stability
- * before handing execution over to zombie.network.GameServer.
- */
+/** Dedicated server entry point: applies PZO's server tuning, then hands over to zombie.network.GameServer. */
 public class PZOServerEntrypoint {
     public static final String SERVER_VERSION = "1.0.1-unstable";
 

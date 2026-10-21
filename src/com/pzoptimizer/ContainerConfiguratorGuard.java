@@ -8,10 +8,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Project Zomboid Build 42 - Modded Container & ItemConfigurator Dynamic Registration Guard.
- * In Build 42, custom modded vehicles (KI5, DAMN, etc.) define custom container types
- */
+/** Wraps ItemConfigurator's container-name map so container types from modded vehicles (KI5, DAMN, etc.) are registered on first lookup. */
 public final class ContainerConfiguratorGuard {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -26,7 +23,7 @@ public final class ContainerConfiguratorGuard {
         obtainUnsafe();
         installGuard();
 
-        // Background daemon to ensure guard persists across world reloads
+        // Re-applies the guard after world reloads
         Thread guardDaemon = new Thread(ContainerConfiguratorGuard::daemonLoop, "PZO-ContainerGuard");
         guardDaemon.setDaemon(true);
         guardDaemon.setPriority(Thread.MIN_PRIORITY);
@@ -57,7 +54,6 @@ public final class ContainerConfiguratorGuard {
             unsafeInstance.putObject(base, offset, wrappedMap);
             installed = true;
 
-            // Pre-register common modded vehicle container names
             preRegisterCommonModContainers();
 
             PZOLogger.success("[ContainerConfiguratorGuard] Armed: Dynamic Modded Container Registration Guard (Zero ItemPickInfo Log Contention)");

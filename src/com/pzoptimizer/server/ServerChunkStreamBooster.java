@@ -1,9 +1,6 @@
 package com.pzoptimizer.server;
 
-/**
- * Project Zomboid Dedicated Server - Zero-Lag World Save & SQLite Stream Booster.
- * Configures 256KB disk buffer streaming to eliminate world save lag spikes.
- */
+/** 256 KB disk buffers for server world saves. */
 public class ServerChunkStreamBooster {
     public static void apply() {
         try {

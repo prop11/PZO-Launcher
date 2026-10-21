@@ -2,10 +2,7 @@ package com.pzoptimizer;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Project Zomboid Build 42 - Advanced OpenGL & Shader State Optimizer.
- * Eliminates thousands of redundant GPU uniform, matrix, texture, alpha, and depth calls per frame.
- */
+/** Skips uniform, matrix, texture, alpha and depth calls whose value matches the cached GL state. */
 public class GLStateOptimizer {
     public static volatile boolean enabled = true;
 
@@ -13,7 +10,6 @@ public class GLStateOptimizer {
         enabled = value;
     }
 
-    // Live Optimization Telemetry Counters
     public static final AtomicLong glCallsFiltered = new AtomicLong(0);
     public static final AtomicLong matricesSkipped = new AtomicLong(0);
     public static final AtomicLong uniformsSkipped = new AtomicLong(0);
@@ -173,14 +169,13 @@ public class GLStateOptimizer {
             return true;
         }
 
-        // Fast float-by-float unrolled matrix comparison (Zero memory allocation)
         float[] last = state.lastMatrix;
         if (last[0] == newMatrix[0] && last[1] == newMatrix[1] && last[2] == newMatrix[2] && last[3] == newMatrix[3] &&
             last[4] == newMatrix[4] && last[5] == newMatrix[5] && last[6] == newMatrix[6] && last[7] == newMatrix[7] &&
             last[8] == newMatrix[8] && last[9] == newMatrix[9] && last[10] == newMatrix[10] && last[11] == newMatrix[11] &&
             last[12] == newMatrix[12] && last[13] == newMatrix[13] && last[14] == newMatrix[14] && last[15] == newMatrix[15]) {
             matricesSkipped.incrementAndGet();
-            return false; // Matrix matches cached state, skip redundant GPU upload
+            return false;
         }
 
         System.arraycopy(newMatrix, 0, state.lastMatrix, 0, 16);

@@ -1,10 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Procedural Foliage Wind & Vegetation Sway Governor.
- * Manages vertex shader wind sway parameters and phase offsets for trees, bushes,
- * and high-density grass, creating natural environmental motion with near-zero GPU overhead.
- */
+/** Wind sway parameters and per-position phase offsets for trees, bushes and grass. */
 public final class FoliageWindGovernor {
 
     private static volatile boolean active = true;
@@ -29,9 +25,6 @@ public final class FoliageWindGovernor {
         globalWindIntensity = Math.max(0.0f, Math.min(3.0f, intensity));
     }
 
-    /**
-     * Calculates vertex displacement sway offset for a given world position and time.
-     */
     public static float calculateSwayOffset(float worldX, float worldY, float heightFraction, long timeMs) {
         if (!active || heightFraction <= 0.05f) return 0.0f;
 

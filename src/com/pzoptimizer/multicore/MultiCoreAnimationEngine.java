@@ -15,10 +15,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Multi-Core Skeletal Animation Engine (Pillar 3).
- * Solves Build 42 skeletal skinning CPU bottlenecks without static scratch race conditions:
- */
+/** Animation culling and LOD helpers; skeletal updates themselves stay on the game thread. */
 public final class MultiCoreAnimationEngine {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -121,14 +118,8 @@ public final class MultiCoreAnimationEngine {
 
     private static final AtomicLong frameCounter = new AtomicLong(0);
 
-    /**
-     * Applies dynamic multi-threaded skeletal bone update culling and LOD across the active horde.
-     * Off-screen zombies bypass 100% of bone matrix calculations (saving 64 matrix ops per entity per frame).
-     * Distant zombies (Tier 2, 32-50 tiles) downsample bone updates to alternate frames.
-     * Evaluates in parallel across dedicated P-Core worker threads.
-     */
+    /** No-op: skeletal bone updates and ragdoll physics stay on the game thread. */
     public static void applyHordeAnimationGovernor(List<?> zombies, int count, byte[] cullMask, byte[] tiers) {
-        // Skeletal bone updates and ragdoll physics are managed natively on the game engine thread
     }
 
     public static long getBoneTransformsBypassed() {
