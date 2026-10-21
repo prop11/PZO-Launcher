@@ -495,15 +495,26 @@ else
         esac
     fi
 
-    # Detect whether the game is running as Windows depot via Proton / Wine or Native Linux
+    # Only the Windows depot ships ProjectZomboid64.exe. A win64/ folder is no evidence: older PZO
+    # installers created one on native Linux too, which flipped later runs into Proton mode.
     IS_PROTON=0
-    if [ -f "$PZ_DIR/ProjectZomboid64.exe" ] || [ -d "$PZ_DIR/win64" ] || [ -f "$(dirname "$PZ_DIR")/ProjectZomboid64.exe" ] || [ -d "$(dirname "$PZ_DIR")/win64" ]; then
+    if [ -f "$PZ_DIR/ProjectZomboid64.exe" ] || [ -f "$(dirname "$PZ_DIR")/ProjectZomboid64.exe" ]; then
         IS_PROTON=1
         echo "[+] Environment Detected: Windows Depot under Steam Deck Proton / Wine"
         echo "    Using Windows binaries (pzo_native64.dll) and win64/ library paths."
     else
         echo "[+] Environment Detected: Native Linux"
         echo "    Using Linux binaries (libpzo_native64.so) and linux64/ library paths."
+        # Remove the Windows companion earlier installers dropped here
+        CLEAN_DIRS=("$PZ_DIR")
+        [ "$(basename "$PZ_DIR")" = "projectzomboid" ] && CLEAN_DIRS+=("$(dirname "$PZ_DIR")")
+        for c_dir in "${CLEAN_DIRS[@]}"; do
+            if [ -f "$c_dir/win64/pzo_native64.dll" ] || [ -f "$c_dir/pzo_native64.dll" ]; then
+                rm -f "$c_dir/win64/pzo_native64.dll" "$c_dir/pzo_native64.dll"
+                rmdir "$c_dir/win64" 2>/dev/null || true
+                echo "[+] Removed stray Windows native companion from $c_dir"
+            fi
+        done
     fi
 
     # Check for ZombieBuddy conflict / coexistence
@@ -556,7 +567,7 @@ else
         [ -f "$TARGET_DLL" ] && DLL_SRC="$TARGET_DLL"
     fi
 
-    if [ -n "$DLL_SRC" ]; then
+    if [ "$IS_PROTON" -eq 1 ] && [ -n "$DLL_SRC" ]; then
         cp -f "$DLL_SRC" "$PZ_DIR/pzo_native64.dll"
         mkdir -p "$PZ_DIR/win64" 2>/dev/null || true
         cp -f "$DLL_SRC" "$PZ_DIR/win64/pzo_native64.dll" 2>/dev/null || true
@@ -589,7 +600,7 @@ else
         [ -f "$TARGET_SO" ] && SO_SRC="$TARGET_SO"
     fi
 
-    if [ -n "$SO_SRC" ]; then
+    if [ "$IS_PROTON" -eq 0 ] && [ -n "$SO_SRC" ]; then
         cp -f "$SO_SRC" "$PZ_DIR/libpzo_native64.so"
         mkdir -p "$PZ_DIR/linux64" "$PZ_DIR/natives" 2>/dev/null || true
         cp -f "$SO_SRC" "$PZ_DIR/linux64/libpzo_native64.so" 2>/dev/null || true
@@ -697,7 +708,8 @@ for arg in existing_args:
             if "win64" not in arg_str:
                 arg_str = "-Djava.library.path=win64/;natives/;."
         else:
-            if "win64" in arg_str:
+            # ';' is the Windows separator; on Linux the JVM would read the whole value as one folder
+            if "win64" in arg_str or ";" in arg_str:
                 arg_str = "-Djava.library.path=linux64/:natives/:."
         has_lib_path = True
     filtered_args.append(arg_str)
