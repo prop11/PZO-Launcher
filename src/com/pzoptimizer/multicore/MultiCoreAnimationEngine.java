@@ -116,12 +116,6 @@ public final class MultiCoreAnimationEngine {
         }
     }
 
-    private static final AtomicLong frameCounter = new AtomicLong(0);
-
-    /** No-op: skeletal bone updates and ragdoll physics stay on the game thread. */
-    public static void applyHordeAnimationGovernor(List<?> zombies, int count, byte[] cullMask, byte[] tiers) {
-    }
-
     public static long getBoneTransformsBypassed() {
         return totalBoneTransformsBypassed.get();
     }

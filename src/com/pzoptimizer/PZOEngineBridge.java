@@ -87,7 +87,7 @@ public class PZOEngineBridge {
     }
 
     public static long getBoneTransformsSaved() {
-        return HordeAnimationLODGovernor.getBoneTransformsSaved() + com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
+        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
     }
 
     public static boolean isMultiCoreActive() {
