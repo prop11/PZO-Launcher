@@ -4,10 +4,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.util.Locale;
 
-/**
- * PZO Enhanced Rendering Telemetry & Performance Gain Monitor.
- * Tracks real-time metrics and estimated hardware resource savings across:
- */
+/** Collects PZO culling and throttling counters and turns them into estimated CPU/GPU time savings. */
 public final class EnhancedRenderTelemetry {
 
     public static class MetricsSnapshot {

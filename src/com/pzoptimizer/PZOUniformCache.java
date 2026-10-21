@@ -3,12 +3,9 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * OpenGL Shader Uniform State Cache.
- * In Project Zomboid Build 42, every tile sprite drawn with the tile-depth shader re-issues
- * depth uniforms hundreds of times per chunk bake and thousands of times per frame.
- * On modern threaded GPU drivers (NVIDIA / AMD), each glUniform* call produces driver thread
- * synchronization overhead.
- * PZOUniformCache memoizes active shader uniforms and skips redundant driver calls.
+ * The tile-depth shader re-sends depth uniforms for every tile sprite, hundreds of times per chunk bake and
+ * thousands per frame, and each glUniform* call costs driver-thread synchronization on threaded drivers.
+ * This remembers the last value per uniform and skips calls that would not change it.
  */
 public final class PZOUniformCache {
 

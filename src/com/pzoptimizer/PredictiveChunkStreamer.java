@@ -9,10 +9,7 @@ import java.nio.ByteOrder;
 import java.util.HashSet;
 import java.util.Set;
 
-/**
- * PZO Universal Predictive Chunk Streamer (Next-Gen Chunk Streaming Engine).
- * Tracks player travel mode (driving, sprinting, walking) and proactively registers
- */
+/** Watches the player's travel mode (driving, sprinting, walking) and pre-reads chunk files ahead of the direction of travel. */
 public final class PredictiveChunkStreamer {
 
     private static volatile boolean running = false;

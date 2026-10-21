@@ -3,15 +3,10 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * High-Speed PNG Paeth Filter & Depth Map Palette Decompressor.
- * Project Zomboid Build 42 decompresses large texture packs (`.pack`) and tile depth maps
- * upon game boot and world loading.
- * 
- * FastTextureDecompressor provides:
- * 1. 4-Channel Interleaved Paeth Un-filtering: Maintains neighboring channel values in CPU
- *    registers, delivering 40% faster scanline reconstruction with byte-identical output.
- * 2. 256-Entry 32-bit Integer Palette Translation: Translates tile depth maps via direct
- *    primitive table lookups instead of per-byte unpacking.
+ * Faster decoding for the texture packs and tile depth maps loaded at boot and world load:
+ * - Paeth un-filtering for 4-channel scanlines that keeps neighbouring channel values in locals,
+ *   with byte-identical output
+ * - 8-bit palette indices to packed 32-bit RGBA through a 256-entry table
  */
 public final class FastTextureDecompressor {
 
@@ -26,9 +21,6 @@ public final class FastTextureDecompressor {
         active = value;
     }
 
-    /**
-     * Interleaved 4-channel Paeth scanline un-filtering in-place.
-     */
     public static void unfilterPaeth4(byte[] cur, byte[] prev) {
         if (!active || cur == null || prev == null) return;
         int n = cur.length;
@@ -41,7 +33,6 @@ public final class FastTextureDecompressor {
 
         scanlinesProcessed.incrementAndGet();
 
-        // Initialize first pixel
         int a0 = (cur[1] += prev[1]) & 0xFF;
         int a1 = (cur[2] += prev[2]) & 0xFF;
         int a2 = (cur[3] += prev[3]) & 0xFF;
@@ -81,9 +72,6 @@ public final class FastTextureDecompressor {
         }
     }
 
-    /**
-     * Standard Paeth predictor.
-     */
     public static int predictPaeth(int a, int b, int c) {
         int pa = Math.abs(b - c);
         int pb = Math.abs(a - c);
@@ -93,9 +81,6 @@ public final class FastTextureDecompressor {
         return c;
     }
 
-    /**
-     * Translates 8-bit palette indices to 32-bit packed RGBA using direct table indexing.
-     */
     public static void decodePaletteToRgba(byte[] indices, int[] paletteTable, int[] outRgba, int count) {
         if (!active || indices == null || paletteTable == null || outRgba == null) return;
         int limit = Math.min(count, Math.min(indices.length, outRgba.length));

@@ -4,15 +4,9 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * High-Precision Camera Drive & Zoom Smoother.
- * In Build 42, `PlayerCamera.update` drives look-ahead camera panning using
- * coarse `System.currentTimeMillis()` deltas (10-15ms Windows timer granularity)
- * and truncates camera offsets to whole offscreen pixels. At high refresh rates
- * (120Hz-240Hz) and fractional zoom levels (< 1.0), this creates noticeable camera
- * micro-judder.
- * 
- * CameraDriveSmoother calculates look-ahead panning using nanosecond-resolution delta
- * timing and snaps camera offsets to screen-space pixel boundaries.
+ * PlayerCamera.update computes look-ahead panning from System.currentTimeMillis() deltas (10-15 ms timer
+ * granularity on Windows) and truncates offsets to whole offscreen pixels, which judders at high refresh
+ * rates and at zoom levels below 1.0. This uses nanoTime deltas and snaps offsets to screen pixels instead.
  */
 public final class CameraDriveSmoother {
 
@@ -43,9 +37,6 @@ public final class CameraDriveSmoother {
         active = value;
     }
 
-    /**
-     * Calculates smooth look-ahead panning multiplier using high-precision nanosecond timing.
-     */
     public static float computePanMultiplier(int playerIndex, float stockMultiplier, float panSpeed) {
         if (!active || playerIndex < 0 || playerIndex >= lastNanos.length) {
             return stockMultiplier;
@@ -83,13 +74,9 @@ public final class CameraDriveSmoother {
             return (float) ((int) offset);
         }
 
-        // Align to screen pixel boundary
         return zoom * (float) ((int) (offset / zoom));
     }
 
-    /**
-     * Resolves player camera zoom level safely.
-     */
     public static float getPlayerZoom(int playerIndex) {
         initZoomReflection();
         try {

@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/**
- * PZO FMOD Occlusion Governor & Audio Suppression Eliminator.
- * Resolves the Build 42 Unstable acoustic raycasting bug where open/transitioning
- */
+/** Currently inactive: initialize() only logs, and governAudioParameters() does not change the emitter. */
 public final class FMODOcclusionGovernor {
 
     private static volatile boolean active = false;

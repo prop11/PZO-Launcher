@@ -1,9 +1,6 @@
 #!/bin/bash
-# ==============================================================================
-# Project Zomboid Build 42 - PZO Optimizer  |  macOS installer (FIXED)
-# Rewritten macOS branch: safe JVM flags, no main-class swap, no -agentlib,
-# absolute -javaagent path, arch-checked dylib, proper re-signing.
-# ==============================================================================
+# PZO installer for macOS: safe JVM flags, no main-class swap, no -agentlib,
+# absolute -javaagent path, arch-checked dylib, re-signing afterwards.
 
 set -u
 
@@ -20,7 +17,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ------------------------------------------------------------------ engine jar
+# Engine jar
 PZ_JAR=""
 for c in "$SCRIPT_DIR/PZOptimEngine.jar" "$SCRIPT_DIR/dist/PZOptimEngine.jar" "$PWD/PZOptimEngine.jar"; do
     [ -f "$c" ] && PZ_JAR="$c" && break
@@ -47,7 +44,7 @@ if [ -z "$PZ_JAR" ] || [ ! -f "$PZ_JAR" ]; then
 fi
 echo "[+] Engine package: $PZ_JAR"
 
-# ------------------------------------------------------------------ app bundle
+# App bundle
 APP_BUNDLE=""
 for p in \
     "$HOME/Library/Application Support/Steam/steamapps/common/ProjectZomboid/Project Zomboid.app" \
@@ -75,7 +72,7 @@ if [ ! -f "$PLIST" ]; then
 fi
 echo "[+] Game bundle: $APP_BUNDLE"
 
-# --------------------------------------------------------------- menu (repeat)
+# Menu (repeat)
 MODE="install"
 if [ -f "$INSTALLED_JAR" ] || [ -f "${PLIST}.bak" ]; then
     echo ""
@@ -118,7 +115,7 @@ resign_bundle() {
         || echo "[!] Signature verification reported problems (usually still playable)."
 }
 
-# ------------------------------------------------------------------- uninstall
+# Uninstall
 if [ "$MODE" = "uninstall" ]; then
     rm -f "$INSTALLED_JAR" "$JAVA_DIR/libpzo_native64.dylib" "$APP_BUNDLE/Contents/MacOS/libpzo_native64.dylib"
     if [ -f "${PLIST}.bak" ]; then
@@ -134,7 +131,7 @@ if [ "$MODE" = "uninstall" ]; then
     exit 0
 fi
 
-# ------------------------------------------------------- runtime probe (arch/version)
+# Runtime probe (arch/version)
 LAUNCHER_BIN=""
 for b in "$APP_BUNDLE/Contents/MacOS/JavaAppLauncher" "$APP_BUNDLE/Contents/MacOS"/*; do
     [ -f "$b" ] && [ -x "$b" ] && LAUNCHER_BIN="$b" && break
@@ -161,7 +158,7 @@ else
     echo "[!] Bundled JRE not found - assuming Java $JAVA_MAJOR (conservative flags)."
 fi
 
-# ------------------------------------------------------------------------- RAM
+# RAM
 RAM_BYTES="$(sysctl -n hw.memsize 2>/dev/null || echo 8589934592)"
 TOTAL_RAM=$((RAM_BYTES / 1024 / 1024 / 1024))
 if   [ "$TOTAL_RAM" -ge 32 ]; then ALLOC_RAM=8
@@ -172,7 +169,7 @@ fi
 RAM_MB=$((ALLOC_RAM * 1024))
 echo "[+] System RAM ${TOTAL_RAM}GB -> heap ${ALLOC_RAM}GB (-Xmx${RAM_MB}m)"
 
-# --------------------------------------------------------------- install files
+# Install files
 mkdir -p "$JAVA_DIR"
 cp -f "$PZ_JAR" "$INSTALLED_JAR"
 echo "[+] Installed $INSTALLED_JAR"
@@ -203,7 +200,7 @@ if [ -n "$DYLIB_SRC" ]; then
     fi
 fi
 
-# ------------------------------------------------------------------ plist work
+# Plist work
 [ -f "${PLIST}.bak" ] || { cp -f "$PLIST" "${PLIST}.bak"; echo "[+] Backed up stock Info.plist -> Info.plist.bak"; }
 cp -f "$PLIST" "${PLIST}.pzo-prev"
 

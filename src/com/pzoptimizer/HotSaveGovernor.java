@@ -7,15 +7,14 @@ import zombie.iso.ChunkSaveWorker;
 import zombie.iso.IsoChunk;
 
 /**
- * ChunkSaveWorker Ancillary Hot-Save Throttler.
- * While driving or running across chunks, ChunkSaveWorker's save queue drains roughly every 0.45s
- * and calls HotsaveAncilliarySystems(), which serializes the entire IsoMetaGrid on the GameThread
- * via MainThread.invokeOnMainThread, causing a 2-5 ms GameThread hitch twice a second.
+ * While driving or running across chunks, ChunkSaveWorker's save queue drains about every 0.45 s and calls
+ * HotsaveAncilliarySystems(), which serializes the whole IsoMetaGrid on the game thread via
+ * MainThread.invokeOnMainThread: a 2-5 ms hitch twice a second.
  *
- * HotSaveGovernor throttles mid-travel ancillary hot-saves to a configurable interval (default 10s).
- * Deferred saves are flushed from ChunkSaveWorker.Update on the WorldStreamer thread - the only thread
- * vanilla ever hot-saves from - because HotsaveAncilliarySystems shares a static SaveBufferMap and
- * does disk I/O, so it must never run concurrently or on the GameThread.
+ * Mid-travel ancillary hot-saves are throttled to a configurable interval (default 10 s). Deferred saves
+ * are flushed from ChunkSaveWorker.Update on the WorldStreamer thread, the only thread vanilla hot-saves
+ * from, because HotsaveAncilliarySystems shares a static SaveBufferMap and does disk I/O, so it must never
+ * run concurrently or on the game thread.
  */
 public final class HotSaveGovernor {
 

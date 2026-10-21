@@ -8,26 +8,26 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * O(1) Lock-Free Exact-String Memoization Governor for Case-Insensitive TreeMap Lookups.
- * Vanilla FileGuidTable (~12,000 clothing/item GUIDs) and AnimationVariableHandlePool use
- * TreeMap(String.CASE_INSENSITIVE_ORDER), comparing strings char-by-char on every lookup.
+ * Exact-string memo in front of case-insensitive TreeMap lookups. Vanilla FileGuidTable (~12,000 clothing
+ * and item GUIDs) and AnimationVariableHandlePool use TreeMap(String.CASE_INSENSITIVE_ORDER), comparing
+ * strings char by char on every lookup.
  *
  * Both maps are declared as Map, so the redirected call sites are invokeinterface Map.get/put/clear.
  * Only TreeMaps are memoized; any other Map implementation passes straight through.
  *
  * Correctness rules:
- * 1. Never caches null returns, so AnimationVariableHandlePool's lazy get-then-put initialization
- *    always sees newly registered handles immediately.
- * 2. Every put/clear on a memoized map drops that map's memo. A case-insensitive put can change the
- *    answer for several exact-case keys, so per-key invalidation would not be safe.
- * 3. The original map is only read under its own monitor on a miss; callers that already serialize
- *    (AnimationVariableHandlePool holds s_threadLock) are unaffected.
+ * - Null results are never cached, so AnimationVariableHandlePool's lazy get-then-put initialization
+ *   always sees newly registered handles immediately.
+ * - Every put/clear on a memoized map drops that map's memo. A case-insensitive put can change the
+ *   answer for several exact-case keys, so per-key invalidation would not be safe.
+ * - The original map is only read under its own monitor on a miss; callers that already serialize
+ *   (AnimationVariableHandlePool holds s_threadLock) are unaffected.
  */
 public final class LookupMemoGovernor {
 
     private static volatile boolean active = true;
 
-    // Lock-free L1 identity slots for the two primary TreeMaps (FileGuidTable & AnimationVariableHandlePool)
+    // Identity slots for the two known maps (FileGuidTable, AnimationVariableHandlePool)
     private static volatile TreeMap<?, ?> slot1Tree = null;
     private static volatile ConcurrentHashMap<Object, Object> slot1Memo = null;
     private static volatile TreeMap<?, ?> slot2Tree = null;

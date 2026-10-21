@@ -8,16 +8,12 @@ import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO SIMD AVX2 Batch Horde Spatial Culler & Vectorized Entity Processor (Phase 3).
- * Vectorizes spatial proximity checks, camera frustum AABB culling, and multi-tier LOD classification
- */
+/** Batched proximity, camera AABB culling and LOD-tier classification for zombies, using AVX2 through the native library when available. */
 public final class HordeSpatialCuller {
 
     private static volatile boolean active = false;
     private static Thread cullerThread = null;
 
-    // Telemetry
     public static final AtomicInteger lastTrackedZombieCount = new AtomicInteger(0);
     public static final AtomicInteger lastCulledOffscreenCount = new AtomicInteger(0);
     public static final AtomicInteger lastHibernatingCount = new AtomicInteger(0);
@@ -42,7 +38,6 @@ public final class HordeSpatialCuller {
     private static boolean reflectionResolved = false;
     private static boolean reflectionNoticeLogged = false;
 
-    // Internal snapshot storage
     private static final int MAX_SNAPSHOT = SpatialBufferPool.MAX_ENTITIES;
     private static final byte[] SNAPSHOT_TIERS = new byte[MAX_SNAPSHOT];
     private static final byte[] SNAPSHOT_MASK = new byte[MAX_SNAPSHOT];
@@ -144,7 +139,7 @@ public final class HordeSpatialCuller {
             try {
                 boolean driving = VehicleTravelOptimizer.isPlayerDriving();
                 processSpatialSweep();
-                // Relaxed telemetry sweep: 2 Hz while driving, 4 Hz on foot (eliminates L3 cache contention with main thread)
+                // 2 Hz sweep while driving, 4 Hz on foot
                 Thread.sleep(driving ? 500 : 250);
             } catch (InterruptedException ie) {
                 break;
@@ -218,13 +213,11 @@ public final class HordeSpatialCuller {
                 }
             }
 
-            // Distance calculation
             PZONative.calculateDistancesAVX2(coordBuf, count, px, py, distBuf);
 
-            // Multi-Tier classification (Tier 0: <=256, Tier 1: <=1024, Tier 2: <=2500, Tier 3: >2500)
+            // LOD tiers by squared distance: <=256, <=1024, <=2500, beyond
             PZONative.classifyTiersAVX2(coordBuf, count, px, py, TIER_CLOSE_SQ, TIER_MEDIUM_SQ, TIER_FAR_SQ, tiersBuf);
 
-            // Camera AABB Frustum Culling
             float minX = px - CAMERA_HALF_SPAN;
             float minY = py - CAMERA_HALF_SPAN;
             float maxX = px + CAMERA_HALF_SPAN;

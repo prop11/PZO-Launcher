@@ -23,10 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Island-Based Spatial Partitioning Simulation Scheduler (Pillar 4).
- * Re-architects MovingObjectUpdateScheduler from single-threaded sequential simulation
- */
+/** Spatial island scheduler for MovingObjectUpdateScheduler. Simulation currently stays on the main thread; see the note below. */
 public final class MultiCoreIslandScheduler {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -53,11 +50,9 @@ public final class MultiCoreIslandScheduler {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        // NOTE: In Build 42, MovingObjectUpdateScheduler manages IsoGameCharacter.updateAlpha()
-        // and non-thread-safe IsoGridSquare.movingObjects lists. Parallelizing simulation across
-        // background worker threads causes alpha calculation skips (invisible zombies) and race
-        // conditions on square transfer. We preserve main-thread simulation for 100% visual fidelity
-        // and collision integrity.
+        // MovingObjectUpdateScheduler also drives IsoGameCharacter.updateAlpha() and the non-thread-safe
+        // IsoGridSquare.movingObjects lists. Running simulation on workers skipped alpha updates (invisible
+        // zombies) and raced on square transfers, so simulation stays on the main thread.
         initialized.set(true);
         active = false;
         PZOLogger.info("[MultiCoreIslandScheduler] Preserving main-thread simulation for 100% zombie visibility & collision safety");
@@ -195,7 +190,7 @@ public final class MultiCoreIslandScheduler {
             if (!parallelSweepExecuted && (!redIslands.isEmpty() || !blackIslands.isEmpty())) {
                 executeParallelSimulation();
                 parallelSweepExecuted = true;
-                // Return boundary objects count so the vanilla caller executes only the boundary entities!
+                // Report only the boundary objects, so the vanilla caller runs just those
                 return boundaryAndPlayerObjects.size();
             } else if (parallelSweepExecuted && !parallelPostUpdateExecuted && (!redIslands.isEmpty() || !blackIslands.isEmpty())) {
                 executeParallelPostUpdate();

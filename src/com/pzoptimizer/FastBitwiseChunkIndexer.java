@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * PZO 64-Bit Register Spatial Chunk & Meta-Grid Indexer.
- * Operates directly on 64-bit CPU machine registers in 1 instruction,
- */
+/** Bit-packing helpers for chunk and meta-grid indices. */
 public final class FastBitwiseChunkIndexer {
 
     public static void initialize() {
@@ -26,10 +23,7 @@ public final class FastBitwiseChunkIndexer {
         return ((long) (z & 0xFF) << 48) | ((long) (x & 0xFFFFFF) << 24) | (y & 0xFFFFFF);
     }
 
-    /**
-     * Interleaves bits of two 16-bit integers to produce a 32-bit Morton code (Z-order curve index).
-     * Maximizes CPU cache locality for adjacent 2D tile spatial searches.
-     */
+    /** Interleaves two 16-bit values into a 32-bit Morton (Z-order) code, keeping neighbouring tiles close in memory. */
     public static int mortonEncode2D(int x, int y) {
         return (spreadBits(x & 0xFFFF)) | (spreadBits(y & 0xFFFF) << 1);
     }

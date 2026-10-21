@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * PZO Unstable Channel Gatekeeper.
- * Enforces strict channel isolation:
- */
+/** Reports whether this is an unstable-channel build; unstable-only features check it. */
 public final class UnstableChannelGuard {
 
     private static volatile Boolean cachedIsUnstable = null;

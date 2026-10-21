@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Project Zomboid Build 42 - Multiplayer NIO & Zero-Copy Packet Buffer Pooler.
- * Configures off-heap direct byte buffer pooling to eliminate young-gen GC spikes in Multiplayer.
- */
+/** Configures Netty direct buffer pooling for multiplayer to cut young-gen GC churn. */
 public class NettyBufferPooler {
     public static void apply() {
         try {

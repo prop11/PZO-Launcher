@@ -11,11 +11,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * PZO Multi-Channel Update Checker.
- * Supports strict channel isolation between Stable (releases/latest) and Beta/Unstable (releases list).
- * 100% pure Java with zero external dependencies.
- */
+/** Update checks: stable reads releases/latest, beta/unstable reads the full releases list. */
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "1.0.1-unstable";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";

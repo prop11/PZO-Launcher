@@ -17,16 +17,12 @@ import zombie.popman.ZombiePopulationManager;
 import zombie.popman.ZombieStateFlags;
 
 /**
- * Project Zomboid Build 42 - Zombie Population Engine Governor (PopmanGovernor).
- *
- * Implements low-latency, zero-GC optimizations for the native popman subsystem:
- *  1. ZombieStateFlags Flyweight Cache: Pre-allocates and reuses immutable state flag instances (0..63),
- *     eliminating thousands of short-lived heap allocations during cell realization.
- *  2. Sparse Active-Cell Grid Aggregator: Replaces the full-map O(Width*Height) scan and Arrays.fill
- *     with an O(K) sparse active-cell index, completely eliminating the 5-second zombie count stutter.
- *  3. Direct Unsafe Record Unpacker: Accelerates 29-byte unaligned zombie records from readByteBuffer.
- *
- * 100% stable, fully preserves vanilla data structures, and never alters native thread synchronization.
+ * Population manager optimizations that keep vanilla data structures and native threading as they are:
+ * - ZombieStateFlags flyweights: the 64 possible flag values are pre-allocated and reused instead of
+ *   allocated per zombie during cell realization
+ * - sparse active-cell aggregation: replaces the full-map scan and Arrays.fill behind the 5-second
+ *   zombie count stutter with a pass over active cells only
+ * - Unsafe unpacking of the 29-byte zombie records returned by readByteBuffer
  */
 public final class PopmanGovernor {
 
@@ -36,7 +32,7 @@ public final class PopmanGovernor {
     // Flyweight cache for standard 6-bit ZombieStateFlags (2^6 = 64 states)
     private static final ZombieStateFlags[] STATE_FLAGS_CACHE = new ZombieStateFlags[64];
 
-    // Sparse active-cell tracking (eliminates full grid scan)
+    // Cells touched by the last update, so only those are cleared
     private static int[] activeCellIndices = new int[256];
     private static int activeCount = 0;
     private static long lastRealZombieUpdate = 0L;
@@ -52,11 +48,10 @@ public final class PopmanGovernor {
     private static MethodHandle handleNRealZombieCount = null;
     private static boolean reflectionResolved = false;
 
-    // Direct Unsafe instance for zero-copy buffer reads
+    // Unsafe for direct buffer reads
     private static sun.misc.Unsafe unsafeInstance = null;
     private static long bufferAddressOffset = -1L;
 
-    // Telemetry counters
     public static final AtomicLong totalRealZombiesIndexed = new AtomicLong(0);
     public static final AtomicLong totalFullScansAvoided = new AtomicLong(0);
     public static final AtomicLong totalStateFlagsCached = new AtomicLong(0);
@@ -65,7 +60,6 @@ public final class PopmanGovernor {
     public static synchronized void initialize() {
         if (initialized) return;
 
-        // 1. Pre-warm ZombieStateFlags flyweight cache
         try {
             for (int i = 0; i < 64; i++) {
                 STATE_FLAGS_CACHE[i] = ZombieStateFlags.fromInt(i);
@@ -75,10 +69,8 @@ public final class PopmanGovernor {
             PZOLogger.warn("[PopmanGovernor] Failed to pre-warm ZombieStateFlags cache: " + t.getMessage());
         }
 
-        // 2. Obtain Unsafe for direct buffer memory operations
         obtainUnsafe();
 
-        // 3. Resolve ZombiePopulationManager fields & native method handles
         resolvePopmanReflection();
 
         initialized = true;
@@ -135,10 +127,7 @@ public final class PopmanGovernor {
         }
     }
 
-    /**
-     * Retrieves an immutable flyweight ZombieStateFlags instance for the given int bitmask.
-     * Guaranteed 100% binary and mod-compatible.
-     */
+    /** Shared immutable ZombieStateFlags instance for the given bitmask. */
     public static ZombieStateFlags getFlags(int flags) {
         if (flags >= 0 && flags < 64) {
             totalStateFlagsCached.incrementAndGet();
@@ -148,10 +137,7 @@ public final class PopmanGovernor {
         return ZombieStateFlags.fromInt(flags);
     }
 
-    /**
-     * Executes the high-performance sparse active-cell grid update.
-     * Replaces vanilla's O(Width*Height) full-array iteration with an O(K) active-cell pass.
-     */
+    /** Sparse replacement for vanilla's full-grid zombie count update: only cells active last time or now are touched. */
     public static void updateRealZombieCountFast(ZombiePopulationManager zpm) {
         if (!reflectionResolved || zpm == null) return;
 
@@ -171,7 +157,7 @@ public final class PopmanGovernor {
                 fieldRealZombieCount2.set(zpm, count2);
             }
 
-            // 1. Clear ONLY the cells that were active on the previous update (Zero Arrays.fill)
+            // Clear only the cells that were active last update (no Arrays.fill)
             for (int i = 0; i < activeCount; i++) {
                 int oldIdx = activeCellIndices[i];
                 if (oldIdx >= 0 && oldIdx < count1.length) {
@@ -197,7 +183,6 @@ public final class PopmanGovernor {
             int zCount = zombies.size();
             totalRealZombiesIndexed.addAndGet(zCount);
 
-            // 2. Sparse populate active cells
             for (int i = 0; i < zCount; i++) {
                 IsoZombie z = zombies.get(i);
                 if (z == null) continue;
@@ -218,7 +203,7 @@ public final class PopmanGovernor {
                 }
             }
 
-            // 3. Pack triplets directly into realZombieCount2
+            // Pack triplets into realZombieCount2
             short nonZero = (short) activeCount;
             for (int k = 0; k < activeCount; k++) {
                 int idx = activeCellIndices[k];
@@ -227,12 +212,12 @@ public final class PopmanGovernor {
                 count2[k * 3 + 2] = count1[idx];
             }
 
-            // 4. Dispatch to native C++ popman thread
+            // Hand off to the native popman thread
             if (handleNRealZombieCount != null) {
                 handleNRealZombieCount.invokeExact(nonZero, count2);
             }
 
-            // 5. Update timestamp so vanilla updateMain() never executes the slow full-grid loop
+            // Bump the timestamp so vanilla updateMain() skips its full-grid loop
             long now = System.currentTimeMillis();
             fieldRealZombieUpdateTime.setLong(zpm, now);
 
@@ -243,10 +228,7 @@ public final class PopmanGovernor {
         }
     }
 
-    /**
-     * Unpacks 29-byte zombie records directly from the native direct buffer using Unsafe.
-     * Bypasses 8 virtual ByteBuffer calls and boundary checks per zombie.
-     */
+    /** Reads the 29-byte zombie records straight from the native direct buffer with Unsafe, skipping 8 ByteBuffer calls per zombie. */
     public static int unpackZombieDirect(ByteBuffer buf, int offset, float[] outFloats, int[] outInts) {
         if (unsafeInstance == null || bufferAddressOffset < 0 || !buf.isDirect()) {
             return -1; // Fallback to standard reading

@@ -7,9 +7,7 @@ import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Build 42 - Runtime JVM Instrumentation Agent & Java Mod Loader.
- */
+/** JVM agent entry point: registers the bytecode transformer that applies the PZO engine patches. */
 public class PZOptimAgent {
     private static volatile Instrumentation instrumentationInstance = null;
 
@@ -478,7 +476,7 @@ public class PZOptimAgent {
                             int len = dis.readInt();
                             dis.skipBytes(len);
                         }
-                        // Write valid 1-byte RETURN Code attribute without dead code or stackmap requirements
+                        // Replace the body with a bare RETURN, so no StackMapTable is needed
                         dos.writeShort(1); // attrCount = 1
                         dos.writeShort(codeUtf8Index); // attr_name = "Code"
                         dos.writeInt(13); // attr_length = 2+2+4+1+2+2 = 13
@@ -1475,8 +1473,8 @@ public class PZOptimAgent {
                                 byte[] cadata = dis.readNBytes(calen);
                                 String caname = (canameIdx > 0 && canameIdx < cpCount) ? utf8Strings[canameIdx] : "";
 
-                                // Strip LocalVariableTable, LocalVariableTypeTable, and LineNumberTable to prevent JVM verifier ClassFormatError
-                                // caused by bytecode length and instruction boundary shifts after prepending the 8-byte prefix
+                                // The 8-byte prefix shifts every instruction, so LocalVariableTable, LocalVariableTypeTable and
+                                // LineNumberTable would point at wrong offsets and fail class loading; drop them
                                 if ("LocalVariableTable".equals(caname) || "LocalVariableTypeTable".equals(caname) || "LineNumberTable".equals(caname)) {
                                     continue;
                                 }

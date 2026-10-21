@@ -5,15 +5,11 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * DeadBodyAtlas Generic Zombie LOD Sprite Pre-Warming Governor.
- * When a large zombie horde first enters view and distant zombies transition to flat LOD sprites
- * (IsoZombie.renderTextureInsteadOfModel -> DeadBodyAtlas.getBodyTexture), vanilla lazily poses and
- * renders all 128 generic zombie body combinations (female/male x idle/walktoward x 8 directions x 4 frames)
- * on the GameThread in a single burst, causing a ~30 ms first-sight stutter spike.
- *
- * BodyAtlasPrewarmGovernor drip-feeds 2 generic body atlas requests per frame after world entry
- * (starting 60 frames after world init), pre-populating all 128 cached atlas entries smoothly with
- * zero perceptible frame impact before the player encounters a horde.
+ * Pre-warms DeadBodyAtlas's generic zombie LOD sprites. The first time a horde switches to flat LOD sprites
+ * (IsoZombie.renderTextureInsteadOfModel -> DeadBodyAtlas.getBodyTexture), vanilla poses and renders all 128
+ * generic body combinations (female/male x idle/walktoward x 8 directions x 4 frames) on the game thread in
+ * one burst, a ~30 ms stutter. This requests 2 per frame starting 60 frames after world init, so the atlas
+ * is filled before the first horde shows up.
  */
 public final class BodyAtlasPrewarmGovernor {
 
@@ -74,9 +70,6 @@ public final class BodyAtlasPrewarmGovernor {
         }
     }
 
-    /**
-     * Called once per frame on the GameThread during world rendering.
-     */
     public static void onFrameTick() {
         if (!active || nextIndex >= TOTAL_COMBINATIONS || reflectionFailed) {
             return;

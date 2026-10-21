@@ -16,10 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Multi-Core Horde Governor (Pillar 2).
- * Accelerates large horde spatial proximity checks, frustum culling, and multi-tier
- */
+/** Horde proximity, frustum culling and LOD-tier classification, spread across the PZO workers. */
 public final class MultiCoreHordeGovernor {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -35,7 +32,7 @@ public final class MultiCoreHordeGovernor {
     public static final AtomicLong totalParallelSweeps = new AtomicLong(0);
     public static final AtomicLong totalSweepTimeNanos = new AtomicLong(0);
 
-    // Snapshot arrays for atomic lock-free reads by other game subsystems
+    // Snapshot arrays other subsystems read without locking
     private static final byte[] SNAPSHOT_TIERS = new byte[MAX_ENTITIES];
     private static final byte[] SNAPSHOT_MASK = new byte[MAX_ENTITIES];
     private static final float[] SNAPSHOT_DISTANCES = new float[MAX_ENTITIES];
@@ -289,7 +286,6 @@ public final class MultiCoreHordeGovernor {
                 PZONative.cullAABBAVX2(coordBuf, count, minX, minY, maxX, maxY, maskBuf);
                 PZONative.calculateFovAVX2(coordBuf, headingBuf, count, px, py, FOV_DIST_SQ, COS_HALF_FOV, CLOSE_AWARE_SQ, fovBuf);
             } else {
-                // Multi-core parallel SIMD execution
                 List<CompletableFuture<Void>> futures = new ArrayList<>(numPartitions);
                 for (int p = 0; p < numPartitions; p++) {
                     final int startIdx = p * PARTITION_SIZE;
@@ -331,14 +327,14 @@ public final class MultiCoreHordeGovernor {
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             }
 
-            // SIMD Crowd Flocking & Separation Vector Accelerator across nearby entities
+            // Crowd separation vectors for nearby entities
             if (count >= 2) {
                 PZONative.calculateRepulsionAVX2(coordBuf, count, SEPARATION_RADIUS, MAX_REPULSION_FORCE, repulsionBuf);
                 repulsionBuf.rewind();
                 repulsionBuf.get(SNAPSHOT_REPULSION, 0, count * 2);
             }
 
-            // Transfer directly into snapshot arrays for instant thread-safe lookups
+            // Copy into the snapshot arrays
             distBuf.rewind();
             distBuf.get(SNAPSHOT_DISTANCES, 0, count);
 
@@ -367,7 +363,7 @@ public final class MultiCoreHordeGovernor {
             lastHibernatingCount.set(hibernating);
             lastVisibleCount.set(visible);
 
-            // Synchronize with HordeSpatialCuller for zero-overhead legacy lookups
+            // Keep HordeSpatialCuller's arrays in sync for older callers
             com.pzoptimizer.HordeSpatialCuller.syncFromMultiCore(count, culled, hibernating, SNAPSHOT_DISTANCES, SNAPSHOT_TIERS, SNAPSHOT_MASK);
 
             long sweepDuration = System.nanoTime() - sweepStart;

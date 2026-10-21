@@ -12,22 +12,15 @@ import zombie.core.opengl.GLStateRenderThread;
 import zombie.core.textures.Texture;
 
 /**
- * Project Zomboid Build 42 & 41 - Single-Pass Quarter-Resolution Fog & Weather Governor.
- * 
- * Forensically addresses the massive rendering stall during heavy fog, thunderstorms, and rain:
- * Stock Build 42 renders up to 12 overlapping full-screen rectangles per tile row across multiple levels,
- * running complex 7-octave noise fragment math directly across the full scene buffer for every rectangle,
- * resulting in 50-100+ separate draw runs and complete GPU fragment fill-rate exhaustion.
- * 
- * FogQuarterBufferGovernor:
- * - Batches ALL fog rectangles of the frame into a single vertex buffer using vertex attributes
- *   for per-rectangle positions, edge-fade widths, and noise offsets.
- * - Renders all rectangles in a SINGLE draw call into an offscreen quarter-resolution Framebuffer Object
- *   (50% width x 50% height = 25% fragment fill rate), eliminating 75% of fragment shading workload.
- * - Seamlessly utilizes PersistentVBOGovernor (ARB_buffer_storage) for zero-stall persistent GPU mapped memory.
- * - Composites the downscaled fog layer onto the scene framebuffer with hardware bilinear filtering.
- * - Includes 100% graceful fallback: if hardware FBOs, GLSL shaders, or driver capabilities fail,
- *   execution immediately and seamlessly yields to vanilla ImprovedFogDrawer.
+ * Quarter-resolution replacement for ImprovedFogDrawer.render().
+ *
+ * Stock B42 draws up to 12 overlapping full-screen rectangles per tile row across levels, each running a
+ * 7-octave noise shader over the full scene buffer, so heavy fog and storms turn into 50-100+ draws and
+ * become fill-rate bound. This batches every fog rectangle of the frame into one vertex buffer (position,
+ * edge fade and noise offset per rectangle as attributes), draws them in a single call into a half-width,
+ * half-height FBO, and composites that onto the scene with bilinear filtering. PersistentVBOGovernor
+ * buffers are used when ARB_buffer_storage is available. If FBOs, shaders or the noise texture are
+ * unavailable it returns false and vanilla ImprovedFogDrawer runs instead.
  */
 public final class FogQuarterBufferGovernor {
 
@@ -35,35 +28,29 @@ public final class FogQuarterBufferGovernor {
     private static volatile boolean fallback = false;
     private static volatile float downscaleRatio = 0.5f; // 0.5 = 25% fragment pixel area
 
-    // Live Telemetry
     public static final AtomicLong fogFramesDrawn = new AtomicLong(0);
     public static final AtomicLong fogRectanglesDrawn = new AtomicLong(0);
     public static final AtomicLong drawCallsSaved = new AtomicLong(0);
 
-    // Framebuffer state
     private static int fogFbo = 0;
     private static int fogColorTex = 0;
     private static int fogDepthRb = 0;
     private static int allocatedW = 0;
     private static int allocatedH = 0;
 
-    // Quad VBO
     private static int quadVbo = 0;
 
-    // Dynamic stream VBO ring fallback (used when persistent VBOs are unsupported)
+    // Stream VBO ring, used when persistent VBOs are unsupported
     private static final int[] streamVbos = new int[3];
     private static int streamVboIdx = 0;
     private static ByteBuffer dynamicStagingBuffer = null;
 
-    // Persistent VBO instance
     private static PersistentVBOGovernor.PersistentBuffer persistentBuffer = null;
     private static final int STRIDE_BYTES = 36; // 9 floats: 3 pos, 4 rect, 2 extra
 
-    // Shader Programs
     private static int fogProgram = 0;
     private static int compositeProgram = 0;
 
-    // Fog Program Uniform Locations
     private static int uScreenInfo = -1;
     private static int uTextureInfo = -1;
     private static int uScalingInfo = -1;
@@ -75,21 +62,17 @@ public final class FogQuarterBufferGovernor {
     private static int uNoiseTexture = -1;
     private static int uMvpMatrix = -1;
 
-    // Fog Program Attribute Locations
     private static int aPosition = 0;
     private static int aRect = 1;
     private static int aExtra = 2;
 
-    // Composite Program Uniform Locations
     private static int uCompFogTexture = -1;
 
-    // Scratch buffers
     private static final int[] viewportScratch = new int[4];
     private static final float[] uniformsScratch = new float[28];
     private static final FloatBuffer matrixScratch = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     private static final float[] clearColorScratch = new float[4];
 
-    // Reflection handles: GL11
     private static boolean glInitialized = false;
     private static Method glGetIntegervMethod = null;
     private static Method glGetFloatvMethod = null;
@@ -108,16 +91,13 @@ public final class FogQuarterBufferGovernor {
     private static Method glDeleteTexturesMethod = null;
     private static Method glDrawArraysMethod = null;
 
-    // Reflection handles: GL13
     private static Method glActiveTextureMethod = null;
 
-    // Reflection handles: GL15
     private static Method glGenBuffersMethod = null;
     private static Method glBindBufferMethod = null;
     private static Method glBufferDataMethod = null;
     private static Method glDeleteBuffersMethod = null;
 
-    // Reflection handles: GL20
     private static Method glCreateShaderMethod = null;
     private static Method glShaderSourceMethod = null;
     private static Method glCompileShaderMethod = null;
@@ -140,7 +120,6 @@ public final class FogQuarterBufferGovernor {
     private static Method glDisableVertexAttribArrayMethod = null;
     private static Method glVertexAttribPointerMethod = null;
 
-    // Reflection handles: GL30
     private static Method glGenFramebuffersMethod = null;
     private static Method glBindFramebufferMethod = null;
     private static Method glFramebufferTexture2DMethod = null;
@@ -152,13 +131,11 @@ public final class FogQuarterBufferGovernor {
     private static Method glRenderbufferStorageMethod = null;
     private static Method glDeleteRenderbuffersMethod = null;
 
-    // ImprovedFogDrawer field cache
     private static boolean fieldsReflected = false;
     private static Field rectBufferField = null;
     private static Field alphaField = null;
     private static Field[] uniformFields = null;
 
-    // ImprovedFog noise texture lookup
     private static Method getNoiseTextureMethod = null;
     private static Method getTextureIdMethod = null;
     private static Method getIDMethod = null;
@@ -258,7 +235,6 @@ public final class FogQuarterBufferGovernor {
             glRenderbufferStorageMethod = gl30.getMethod("glRenderbufferStorage", int.class, int.class, int.class, int.class);
             glDeleteRenderbuffersMethod = gl30.getMethod("glDeleteRenderbuffers", int.class);
 
-            // Reflect ImprovedFog.getNoiseTexture()
             try {
                 Class<?> improvedFogClass = Class.forName("zombie.iso.weather.fog.ImprovedFog");
                 getNoiseTextureMethod = improvedFogClass.getMethod("getNoiseTexture");
@@ -309,7 +285,6 @@ public final class FogQuarterBufferGovernor {
     private static void initShaders() throws Exception {
         if (fogProgram != 0 && compositeProgram != 0) return;
 
-        // 1. Compile Fog Program
         int vertShader = compileShader(0x8B31 /* GL_VERTEX_SHADER */, FOG_VERT);
         int fragShader = compileShader(0x8B30 /* GL_FRAGMENT_SHADER */, FOG_FRAG);
         fogProgram = ((Number) glCreateProgramMethod.invoke(null)).intValue();
@@ -326,7 +301,6 @@ public final class FogQuarterBufferGovernor {
         glDeleteShaderMethod.invoke(null, vertShader);
         glDeleteShaderMethod.invoke(null, fragShader);
 
-        // Fetch Fog Program Uniforms
         uScreenInfo = getUniform(fogProgram, "screenInfo");
         uTextureInfo = getUniform(fogProgram, "textureInfo");
         uScalingInfo = getUniform(fogProgram, "scalingInfo");
@@ -338,12 +312,10 @@ public final class FogQuarterBufferGovernor {
         uNoiseTexture = getUniform(fogProgram, "NoiseTexture");
         uMvpMatrix = getUniform(fogProgram, "ModelViewProjection");
 
-        // Fetch Fog Program Attributes
         aPosition = getAttrib(fogProgram, "aPosition");
         aRect = getAttrib(fogProgram, "aRect");
         aExtra = getAttrib(fogProgram, "aExtra");
 
-        // 2. Compile Composite Program
         int compVert = compileShader(0x8B31, QUAD_VERT);
         int compFrag = compileShader(0x8B30, COMPOSITE_FRAG);
         compositeProgram = ((Number) glCreateProgramMethod.invoke(null)).intValue();
@@ -414,9 +386,8 @@ public final class FogQuarterBufferGovernor {
     }
 
     /**
-     * Primary entrypoint hooked into ImprovedFogDrawer.render().
-     * If quarter-buffer rendering succeeds, returns true so the caller returns immediately.
-     * If unsupported, disabled, or an error occurs, returns false to run the vanilla drawer seamlessly.
+     * Hooked at the top of ImprovedFogDrawer.render(). Returns true when the quarter-res pass drew the fog
+     * (the caller then returns), false to let vanilla draw it.
      */
     public static boolean render(Object drawerInstance) {
         if (!active || fallback || drawerInstance == null || ViewpointStanddownGovernor.isStanddownActive()) {
@@ -442,7 +413,7 @@ public final class FogQuarterBufferGovernor {
             int numRectangles = rectBuffer.limit() / 60; // 60 bytes per rectangle
             if (numRectangles <= 0) return false;
 
-            // Query current active viewport (GL_VIEWPORT = 0x0BA2)
+            // GL_VIEWPORT = 0x0BA2
             glGetIntegervMethod.invoke(null, 0x0BA2, viewportScratch);
             vpX = viewportScratch[0];
             vpY = viewportScratch[1];
@@ -450,7 +421,7 @@ public final class FogQuarterBufferGovernor {
             vpH = viewportScratch[3];
             if (vpW <= 0 || vpH <= 0) return false;
 
-            // Query current active framebuffer binding (GL_FRAMEBUFFER_BINDING = 0x8CA6)
+            // GL_FRAMEBUFFER_BINDING = 0x8CA6
             glGetIntegervMethod.invoke(null, 0x8CA6, viewportScratch);
             prevFbo = viewportScratch[0];
 
@@ -465,28 +436,23 @@ public final class FogQuarterBufferGovernor {
             ensureFogBufferAllocated(targetW, targetH);
             if (fogFbo == 0) return false;
 
-            // Extract uniforms
             for (int i = 0; i < uniformFields.length; i++) {
                 uniformsScratch[i] = uniformFields[i].getFloat(drawerInstance);
             }
 
-            // 1. Bind quarter-res fog FBO
             glBindFramebufferMethod.invoke(null, 0x8D40 /* GL_FRAMEBUFFER */, fogFbo);
             glViewportMethod.invoke(null, 0, 0, targetW, targetH);
             glDisableMethod.invoke(null, 0x0C11 /* GL_SCISSOR_TEST */);
             glDisableMethod.invoke(null, 0x0B90 /* GL_STENCIL_TEST */);
 
-            // Clear fog buffer
             glGetFloatvMethod.invoke(null, 0x0C22 /* GL_COLOR_CLEAR_VALUE */, clearColorScratch);
             glClearColorMethod.invoke(null, 0.0f, 0.0f, 0.0f, 0.0f);
             glClearMethod.invoke(null, 0x00004000 /* GL_COLOR_BUFFER_BIT */);
             glClearColorMethod.invoke(null, clearColorScratch[0], clearColorScratch[1], clearColorScratch[2], clearColorScratch[3]);
 
-            // 2. Upload batched rectangles (zero-stall Persistent VBO or ring streaming)
             int boundVbo = uploadFogRectangles(rectBuffer, numRectangles);
             if (boundVbo == 0) return false;
 
-            // 3. Bind Fog Shader Program & Upload Uniforms
             glUseProgramMethod.invoke(null, fogProgram);
             setupMvpMatrix(vpW, vpH);
 
@@ -503,18 +469,15 @@ public final class FogQuarterBufferGovernor {
                 glUniform4fMethod.invoke(null, uFogScale, (float) targetW / vpW * rs, (float) targetH / vpH * rs, vpX / rs, vpY / rs);
             }
 
-            // Bind noise texture to Texture Unit 0
             glActiveTextureMethod.invoke(null, 0x84C0 /* GL_TEXTURE0 */);
             glBindTextureMethod.invoke(null, 0x0DE1 /* GL_TEXTURE_2D */, noiseGlId);
             if (uNoiseTexture != -1) glUniform1iMethod.invoke(null, uNoiseTexture, 0);
 
-            // Configure Blend & Depth State for Downscaled Quad Pass
             glEnableMethod.invoke(null, 0x0BE2 /* GL_BLEND */);
             glBlendFuncMethod.invoke(null, 0x0302 /* GL_SRC_ALPHA */, 0x0303 /* GL_ONE_MINUS_SRC_ALPHA */);
             glDisableMethod.invoke(null, 0x0B71 /* GL_DEPTH_TEST */);
             glDepthMaskMethod.invoke(null, false);
 
-            // Bind Vertex Array Attributes
             glBindBufferMethod.invoke(null, 0x8892 /* GL_ARRAY_BUFFER */, boundVbo);
             long slotOffset = (persistentBuffer != null) ? persistentBuffer.getSlotOffsetBytes() : 0L;
 
@@ -531,18 +494,16 @@ public final class FogQuarterBufferGovernor {
                 glVertexAttribPointerMethod.invoke(null, aExtra, 2, 0x1406 /* GL_FLOAT */, false, STRIDE_BYTES, slotOffset + 28L);
             }
 
-            // SINGLE DRAW CALL: Draws all fog rectangles in 1 GPU dispatch!
             glDrawArraysMethod.invoke(null, 0x0007 /* GL_QUADS */, 0, numRectangles * 4);
 
             if (persistentBuffer != null) {
                 persistentBuffer.markDrawn();
             }
 
-            // 4. Restore Scene Framebuffer & Viewport
             glBindFramebufferMethod.invoke(null, 0x8D40 /* GL_FRAMEBUFFER */, prevFbo);
             glViewportMethod.invoke(null, vpX, vpY, vpW, vpH);
 
-            // 5. Composite Quarter-Res Fog onto Scene with Hardware Bilinear Filtering
+            // Composite onto the scene; bilinear filtering does the upscale
             compositeFogToScene();
 
             fogFramesDrawn.incrementAndGet();
@@ -564,7 +525,6 @@ public final class FogQuarterBufferGovernor {
     private static int uploadFogRectangles(ByteBuffer rects, int numRects) throws Exception {
         int bytesNeeded = numRects * 4 * STRIDE_BYTES;
 
-        // Try persistent mapped buffer first
         if (PersistentVBOGovernor.isActive()) {
             if (persistentBuffer == null || persistentBuffer.getSlotSizeBytes() < bytesNeeded) {
                 if (persistentBuffer != null) persistentBuffer.dispose();
@@ -579,7 +539,7 @@ public final class FogQuarterBufferGovernor {
             }
         }
 
-        // Stream VBO ring fallback
+        // Fallback: stream VBO ring
         if (streamVbos[0] == 0) {
             for (int i = 0; i < streamVbos.length; i++) {
                 streamVbos[i] = ((Number) glGenBuffersMethod.invoke(null)).intValue();
@@ -625,7 +585,6 @@ public final class FogQuarterBufferGovernor {
 
             float sideFrac = (32.0f * tileScale) / Math.max(1.0f, ex - sx);
 
-            // 4 Vertices for GL_QUADS
             putVertex(dest, sx, sy, 0.0f, 0.0f, sideFrac, offset, depthTop, layerAlpha);
             putVertex(dest, ex, sy, 1.0f, 0.0f, sideFrac, offset, depthTop, layerAlpha);
             putVertex(dest, ex, ey, 1.0f, 1.0f, sideFrac, offset, depthBottom, layerAlpha);
@@ -654,7 +613,7 @@ public final class FogQuarterBufferGovernor {
             }
         } catch (Throwable ignored) {}
 
-        // Standard 2D Orthographic Projection Matrix fallback: (left=0, right=vw, bottom=vh, top=0, near=-1, far=1)
+        // Fallback: plain 2D ortho (0, vw, vh, 0, -1, 1)
         matrixScratch.clear();
         for (int i = 0; i < 16; i++) matrixScratch.put(0.0f);
         matrixScratch.put(0, 2.0f / vw);
@@ -748,11 +707,9 @@ public final class FogQuarterBufferGovernor {
 
         cleanupBuffers();
 
-        // 1. Generate FBO
         fogFbo = ((Number) glGenFramebuffersMethod.invoke(null)).intValue();
         glBindFramebufferMethod.invoke(null, 0x8D40 /* GL_FRAMEBUFFER */, fogFbo);
 
-        // 2. Generate Color Texture (RGBA8 with Bilinear Linear Filtering)
         fogColorTex = ((Number) glGenTexturesMethod.invoke(null)).intValue();
         glBindTextureMethod.invoke(null, 0x0DE1 /* GL_TEXTURE_2D */, fogColorTex);
         glTexImage2DMethod.invoke(null, 0x0DE1, 0, 0x8058 /* GL_RGBA8 */, w, h, 0, 0x1908 /* GL_RGBA */, 0x1401 /* GL_UNSIGNED_BYTE */, (ByteBuffer) null);
@@ -762,7 +719,6 @@ public final class FogQuarterBufferGovernor {
         glTexParameteriMethod.invoke(null, 0x0DE1, 0x2803 /* GL_TEXTURE_WRAP_T */, 0x812F /* GL_CLAMP_TO_EDGE */);
         glFramebufferTexture2DMethod.invoke(null, 0x8D40, 0x8CE0 /* GL_COLOR_ATTACHMENT0 */, 0x0DE1, fogColorTex, 0);
 
-        // 3. Generate Depth Renderbuffer (DEPTH24_STENCIL8)
         fogDepthRb = ((Number) glGenRenderbuffersMethod.invoke(null)).intValue();
         glBindRenderbufferMethod.invoke(null, 0x8D41 /* GL_RENDERBUFFER */, fogDepthRb);
         glRenderbufferStorageMethod.invoke(null, 0x8D41, 0x88F0 /* GL_DEPTH24_STENCIL8 */, w, h);
@@ -802,8 +758,6 @@ public final class FogQuarterBufferGovernor {
         return String.format("FogQuarterBuffer: frames=%d | rects=%d | calls_saved=%d | active=%s",
                 fogFramesDrawn.get(), fogRectanglesDrawn.get(), drawCallsSaved.get(), isActive() ? "true" : "fallback");
     }
-
-    // ------------------------------------------------------------------------------------------------ Shaders
 
     private static final String FOG_VERT = String.join("\n",
         "#version 140",

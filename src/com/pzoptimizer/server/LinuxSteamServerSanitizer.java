@@ -6,10 +6,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 
-/**
- * Linux Dedicated Server Steam Native Library Sanitizer.
- * Automatically resolves SteamAPI_Init() failures on Indifferent Broccoli, Pterodactyl,
- */
+/** Fixes SteamAPI_Init() failures on Linux dedicated server hosts (Indifferent Broccoli, Pterodactyl, etc.) caused by missing Steam native libraries. */
 public class LinuxSteamServerSanitizer {
 
     public static void sanitize() {

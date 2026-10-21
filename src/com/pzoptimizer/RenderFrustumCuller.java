@@ -3,10 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Screen-Space Frustum Draw Culler (Build 42 Rendering Acceleration).
- * Intercepts 2D sprite draw calls before they enter SpriteRenderer command buffers.
- */
+/** Drops 2D sprite draws that fall outside the screen before they reach the SpriteRenderer command buffers. */
 public final class RenderFrustumCuller {
 
     public static final AtomicLong drawCallsCulled = new AtomicLong(0);

@@ -3,12 +3,9 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * World Map Zone Edge & Polygon Intersection Governor.
- * When registering map zones across chunks during world loading, vanilla PZ tests
- * all four chunk boundaries against every polygon edge of every zone.
- * 
- * ZoneEdgeGovernor applies bounding-box margin rejection prior to arithmetic intersection
- * math, eliminating 80%+ of quadratic polygon edge calculations during chunk registration.
+ * When map zones are registered across chunks during world loading, vanilla tests all four chunk edges
+ * against every polygon edge of every zone. A bounding-box rejection runs first, so most edge pairs skip
+ * the intersection math.
  */
 public final class ZoneEdgeGovernor {
 
@@ -52,9 +49,6 @@ public final class ZoneEdgeGovernor {
         return lineSegmentIntersection(sx, sy, ex, ey, n1x, n1y, n2x, n2y);
     }
 
-    /**
-     * Standard 2D line segment intersection test.
-     */
     private static boolean lineSegmentIntersection(float x1, float y1, float x2, float y2,
                                                    float x3, float y3, float x4, float y4) {
         float d = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);

@@ -6,15 +6,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * UI Frame Pacing & Tick Staggering Governor.
- * Vanilla Project Zomboid triggers Lua update passes for all UI elements concurrently
- * every 100ms (`UIManager.doTick`). This concentrates 1-2ms of Lua scripting execution
- * into a single periodic frame, resulting in recurring micro-stutters when multiple
- * inventory, health, or crafting containers are open.
- * 
- * UIFramePacingGovernor phases and distributes each top-level UI element's 100ms update
- * window evenly across consecutive frames, smoothing out frame time deltas while maintaining
- * identical 10Hz element update rates.
+ * UIManager.doTick runs the Lua update of every UI element every 100 ms in the same frame, 1-2 ms of Lua in
+ * one go, which stutters with several inventory, health or crafting windows open. Each top-level element's
+ * 100 ms window is phase-shifted so the updates spread across frames; each element still updates at 10 Hz.
  */
 public final class UIFramePacingGovernor {
 

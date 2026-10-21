@@ -5,8 +5,8 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Project Zomboid Build 42 - Dedicated High-Performance Thread and Scheduler Governor.
- * Intercepts the engine's core execution pipelines:
+ * Raises process, render-thread and main-thread scheduling priority, and wraps MainThread.mainThreadLoop
+ * so the per-frame governors and the frame pacer run after every step.
  */
 public class EngineThreadGovernor {
 
@@ -47,20 +47,16 @@ public class EngineThreadGovernor {
         int backoffMs = 100;
         while (true) {
             try {
-                // Try hooking RenderThread if not yet optimized
                 if (!renderThreadOptimized) {
                     tryHookRenderThread();
                 }
 
-                // Try hooking MainThread if not yet fully optimized and paced
                 if (!mainThreadOptimized || !mainThreadPacerHooked) {
                     tryHookMainThread();
                 }
 
-                // Maintain background workers (LightingThread, PathfindNativeThread, WorldStreamer)
                 maintainWorkerThreads();
 
-                // Once primary threads are optimized and paced, relax polling to 5000ms
                 if (renderThreadOptimized && mainThreadOptimized && mainThreadPacerHooked) {
                     backoffMs = 5000;
                     TexturePackIndexGovernor.saveDirtyIndices();
@@ -77,10 +73,7 @@ public class EngineThreadGovernor {
         }
     }
 
-    /**
-     * Dispatches a Runnable directly into the OpenGL Render Context queue.
-     * When executed on the Render Thread, native scheduler boosts are applied.
-     */
+    /** Applies the native scheduler boost from inside the render thread, via its invoke queue. */
     private static void tryHookRenderThread() {
         try {
             Class<?> renderThreadClass = Class.forName("zombie.core.opengl.RenderThread");
@@ -111,10 +104,7 @@ public class EngineThreadGovernor {
 
     private static volatile boolean mainThreadPacerHooked = false;
 
-    /**
-     * Dispatches a Runnable directly into the Main Simulation Thread queue.
-     * When executed on the Main Thread, native scheduler boosts are applied.
-     */
+    /** Same for the main thread, and installs the mainThreadLoop wrapper. */
     private static void tryHookMainThread() {
         try {
             Class<?> mainThreadClass = Class.forName("zombie.MainThread");
@@ -141,7 +131,7 @@ public class EngineThreadGovernor {
                 });
             }
 
-            // Hook MainThread.mainThreadLoop with Zero-Lock Diagnostic Probe (No Sleeping, Zero Lock Contention)
+            // Wrap MainThread.mainThreadLoop so the per-frame governors and the frame pacer run after each step
             if (!mainThreadPacerHooked) {
                 try {
                     Field loopField = mainThreadClass.getDeclaredField("mainThreadLoop");
@@ -261,9 +251,7 @@ public class EngineThreadGovernor {
         }
     }
 
-    /**
-     * Maintains optimal scheduling for engine worker subsystems (Lighting, Pathfinding).
-     */
+    /** Keeps LightingThread and PathfindNativeThread at normal priority or above. */
     private static void maintainWorkerThreads() {
         try {
             // LightingThread

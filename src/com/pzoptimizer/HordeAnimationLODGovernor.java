@@ -2,10 +2,7 @@ package com.pzoptimizer;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * PZO Dynamic Skeletal Rigging & Animation LOD Governor.
- * Build 42 natively manages skeletal animation blending and bone matrix evaluation on the main thread.
- */
+/** Placeholder: B42 already handles skeletal blending and bone matrices itself; only the counters are used. */
 public final class HordeAnimationLODGovernor {
 
     private static volatile boolean active = false;

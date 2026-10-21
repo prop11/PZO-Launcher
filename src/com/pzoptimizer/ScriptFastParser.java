@@ -4,13 +4,9 @@ import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Linear-Time O(N) Script & Tile Geometry Parser.
- * Stock script parsing in `ScriptManager` repeatedly executes backward comment removal
- * with `StringBuilder.replace` and sub-strings remainder text after every block token,
- * resulting in O(N^2) load bottlenecks for large geometry files (e.g., `tileGeometry.txt`).
- * 
- * ScriptFastParser provides single-pass forward scanning with depth-tracked comment stripping
- * and indexed token balancing, accelerating game boot and large mod load times.
+ * ScriptManager strips comments by repeatedly calling StringBuilder.replace backwards and re-substrings the
+ * remaining text after every block, which is quadratic on large files such as tileGeometry.txt. This does
+ * comment stripping and block splitting in single forward passes.
  */
 public final class ScriptFastParser {
 

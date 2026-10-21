@@ -12,10 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Project Zomboid Build 42 - Configuration Migrator & Validator.
- * Automatically inspects and patches ProjectZomboid64.json (and Info.plist on macOS)
- */
+/** Checks and repairs ProjectZomboid64.json (and Info.plist on macOS) so the PZO launch arguments are present. */
 public final class ZomboidConfigMigrator {
 
     public static final String TARGET_JSON_NAME = "ProjectZomboid64.json";
@@ -101,9 +98,7 @@ public final class ZomboidConfigMigrator {
         return 2048;
     }
 
-    /**
-     * Checks if the specified ProjectZomboid64.json requires migration to 0.9.5 standards.
-     */
+    /** Whether the given ProjectZomboid64.json is missing any of the 0.9.5+ PZO settings. */
     public static boolean isMigrationNeeded(File jsonFile) {
         if (jsonFile == null || !jsonFile.exists() || jsonFile.length() == 0) {
             return false;
@@ -266,7 +261,7 @@ public final class ZomboidConfigMigrator {
             }
         }
 
-        // Clean undesirable or superseded arguments
+        // Drop unwanted or superseded arguments
         List<String> userCleanArgs = new ArrayList<>();
         for (String arg : rawArgs) {
             if (arg == null || arg.trim().isEmpty()) continue;
@@ -298,18 +293,18 @@ public final class ZomboidConfigMigrator {
 
         List<String> targetArgs = new ArrayList<>();
 
-        // 3a. Native agent bridges: PZO native governor and third-party agents (e.g. ZombieBuddy) seamlessly
+        // Native agents: the PZO native library and third-party agents such as ZombieBuddy
         targetArgs.add(TARGET_AGENTLIB);
         if (zbActive) {
             targetArgs.add("-agentlib:zbNative");
             PZOLogger.info("[ZomboidConfigMigrator] Preserved ZombieBuddy bridge (-agentlib:zbNative)");
         }
 
-        // 3b. JVM 17/21+ export & native access parameters
+        // Module exports and native access flags for Java 17/21+
         targetArgs.add("--enable-native-access=ALL-UNNAMED");
         targetArgs.add("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED");
 
-        // 3c. Platform-specific native library search paths
+        // Platform-specific native library search paths
         if (isWin) {
             targetArgs.add("-Djava.library.path=win64/;.;natives/");
         } else if (isLinux) {
@@ -318,7 +313,7 @@ public final class ZomboidConfigMigrator {
             targetArgs.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
         }
 
-        // 3d. User memory allocations (-Xms, -Xmx) and Steam args preserved (with auto-upgrade from vanilla 3GB)
+        // Keep the user's -Xms / -Xmx and Steam args (vanilla 3 GB is upgraded)
         boolean hasXms = false;
         boolean hasXmx = false;
         int recMaxMb = getRecommendedHeapMb();
@@ -349,7 +344,7 @@ public final class ZomboidConfigMigrator {
         if (!hasXms) targetArgs.add(3, "-Xms" + recMsMb + "m");
         if (!hasXmx) targetArgs.add(4, "-Xmx" + recMaxMb + "m");
 
-        // 3e. Inject all 0.9.5 performance flags if missing
+        // Add any missing performance flags
         for (String pf : REQUIRED_VM_ARGS) {
             if (!targetArgs.contains(pf)) {
                 targetArgs.add(pf);
@@ -449,9 +444,7 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /**
-     * Lightweight recursive JSON parser and serializer with zero external dependencies.
-     */
+    /** Minimal recursive JSON parser and serializer. */
     public static class JsonMini {
         public static Object parse(String json) {
             if (json == null) return null;

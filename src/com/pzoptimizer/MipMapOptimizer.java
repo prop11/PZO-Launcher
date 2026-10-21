@@ -4,13 +4,9 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * High-Speed Bulk Row MipMap Generation Engine.
- * Vanilla `ImageData.scaleMipLevelMaxAlpha` and `scaleMipLevelAverage` execute per-byte
- * absolute offset reads and writes on direct ByteBuffers inside deeply nested loops.
- * 
- * MipMapOptimizer buffers parent row pairs into thread-local scratch arrays via bulk transfers,
- * performs fast local array indexing for alpha downsampling, and commits results with
- * bulk row puts, significantly accelerating texture streaming and mip generation.
+ * Vanilla ImageData.scaleMipLevelMaxAlpha / scaleMipLevelAverage read and write direct ByteBuffers one byte
+ * at a time with absolute offsets. This copies each pair of parent rows into thread-local arrays, downsamples
+ * there, and writes each result row back with one bulk put.
  */
 public final class MipMapOptimizer {
 

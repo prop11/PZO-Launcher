@@ -4,10 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 
-/**
- * PZO DirectBufferAllocator Governor & Zero-Stall Native VRAM Optimizer.
- * Periodically trims and compacts zombie.core.utils.DirectBufferAllocator's tracking list,
- */
+/** Every 5 s, removes disposed entries from DirectBufferAllocator's tracking list once it holds more than 64. */
 public final class DirectBufferAllocatorGovernor {
 
     private static volatile boolean running = false;
@@ -21,7 +18,7 @@ public final class DirectBufferAllocatorGovernor {
 
             while (running) {
                 try {
-                    Thread.sleep(5000); // Prune every 5 seconds
+                    Thread.sleep(5000);
 
                     Class<?> allocatorClass = Class.forName("zombie.core.utils.DirectBufferAllocator");
                     Field lockField = allocatorClass.getDeclaredField("LOCK");
@@ -36,7 +33,6 @@ public final class DirectBufferAllocatorGovernor {
                             @SuppressWarnings("unchecked")
                             ArrayList<Object> allList = (ArrayList<Object>) allField.get(null);
                             if (allList != null && allList.size() > 64) {
-                                // Fast single-pass in-place compaction
                                 allList.removeIf(item -> {
                                     if (item == null) return true;
                                     try {

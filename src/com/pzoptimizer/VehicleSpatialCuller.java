@@ -9,12 +9,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * High-Efficiency Vehicle Spatial Culler for Zombie Line-of-Sight Calculations.
- * In vehicle-dense urban environments, zombies line-of-sight checks (`IsoZombie.isVehicleBetween`)
- * execute full 3D coordinate transformation matrices and ray-box intersections against every vehicle.
- * 
- * VehicleSpatialCuller provides fast 2D distance-squared rejection against the vehicle's
- * outer bounding sphere before expensive 3D transformation matrices are invoked.
+ * IsoZombie.isVehicleBetween runs full 3D transforms and ray-box tests against every vehicle, which adds up
+ * in parking lots. A 2D squared-distance test against each vehicle's bounding circle rejects most of them first.
  */
 public final class VehicleSpatialCuller {
 

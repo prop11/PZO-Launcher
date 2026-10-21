@@ -3,15 +3,14 @@ package com.pzoptimizer;
 import zombie.iso.IsoGridSquare;
 
 /**
- * Chunk Border Hand-off Recalc Gate.
- * During IsoChunk.loadInMainThread() and WorldStreamer neighbor recalculations, border squares
- * invoke IsoGridSquare.RecalcPropertiesIfNeeded() up to ~15 times per square within the same
- * micro-window. Vanilla already guards the work with the public propertiesDirty flag, so the only
- * safe dedupe is that same flag: a clean square returns immediately, a dirty one always recalcs.
- * (A time-window dedupe would skip legitimate recalcs on squares re-dirtied inside the window.)
+ * During IsoChunk.loadInMainThread() and WorldStreamer neighbor recalculations, border squares call
+ * IsoGridSquare.RecalcPropertiesIfNeeded() up to ~15 times each in quick succession. Vanilla already guards
+ * the work with the public propertiesDirty flag, and that flag is the only safe dedupe: a clean square
+ * returns immediately, a dirty one always recalcs. A time-window dedupe would skip squares re-dirtied
+ * inside the window.
  *
- * Counters are plain longs: this sits on a very hot path and exact telemetry is not worth a
- * contended atomic per call.
+ * Counters are plain longs: this is a very hot path and exact telemetry is not worth a contended atomic
+ * per call.
  */
 public final class ChunkHandoffRecalcGovernor {
 

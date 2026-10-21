@@ -4,15 +4,10 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * OpenGL Low-Latency & Reflex-Style Frame Pacing Governor.
- * Without explicit queue management, GPU-bound or VSync-capped OpenGL engines allow
- * the simulation thread to queue multiple complete command buffers ahead of the GPU,
- * resulting in severe input latency.
- * 
- * LowLatencyPacingGovernor introduces:
- * 1. OpenGL Sync Fences: Restricts outstanding unrendered GPU frames to at most 1 frame.
- * 2. Just-In-Time (JIT) Input Pacing: Delays input polling until immediately before the
- *    render thread has capacity, guaranteeing fresh input delivery with identical throughput.
+ * Without queue limits, a GPU-bound or VSync-capped OpenGL game lets the simulation queue several frames
+ * ahead of the GPU, adding input latency. This:
+ * - uses GL sync fences to keep at most one unrendered frame queued
+ * - delays input sampling until just before the render thread has capacity
  */
 public final class LowLatencyPacingGovernor {
 
@@ -85,23 +80,21 @@ public final class LowLatencyPacingGovernor {
 
         try {
             if (glFenceSyncMethod != null) {
-                // Delete previous fence in this ring slot
                 long oldFence = frameFences[fenceIndex];
                 if (oldFence != 0L && glDeleteSyncMethod != null) {
                     glDeleteSyncMethod.invoke(null, oldFence);
                 }
 
-                // Insert new fence
                 Object syncObj = glFenceSyncMethod.invoke(null, 37143, 0);
                 if (syncObj instanceof Number) {
                     frameFences[fenceIndex] = ((Number) syncObj).longValue();
                 }
 
-                // Wait on oldest fence in the ring if queue exceeds maxQueuedFrames
+                // Wait on the oldest fence once more than maxQueuedFrames are queued
                 int waitSlot = (fenceIndex + RING_SIZE - maxQueuedFrames) % RING_SIZE;
                 long fenceToWait = frameFences[waitSlot];
                 if (fenceToWait != 0L && glClientWaitSyncMethod != null) {
-                    // Wait up to 50ms with GL_SYNC_FLUSH_COMMANDS_BIT = 1
+                    // Up to 50 ms, GL_SYNC_FLUSH_COMMANDS_BIT = 1
                     glClientWaitSyncMethod.invoke(null, fenceToWait, 1, 50_000_000L);
                     fencesSynced.incrementAndGet();
                 }

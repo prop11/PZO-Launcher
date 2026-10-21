@@ -2,10 +2,7 @@ package com.pzoptimizer.server;
 
 import java.util.concurrent.ForkJoinPool;
 
-/**
- * Project Zomboid Dedicated Server - Multi-Threaded Zombie Simulation Engine.
- * Distributes zombie pathfinding, migration, and collision checks across all host CPU cores.
- */
+/** Sizes the common ForkJoinPool (4-32 threads) for server zombie simulation. */
 public class ServerHordeSimEngine {
     public static void apply() {
         try {

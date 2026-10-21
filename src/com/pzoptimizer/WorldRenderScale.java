@@ -94,8 +94,6 @@ public final class WorldRenderScale {
         return rtScale;
     }
 
-    // ------------------------------------------------------------------ state queries
-
     private static int worldFboId() {
         try {
             TextureFBO fbo = Core.getInstance().offscreenBuffer.current;
@@ -136,8 +134,6 @@ public final class WorldRenderScale {
     private static int sc(int v) {
         return Math.round(v * rtScale);
     }
-
-    // ------------------------------------------------------------------ frame latch (render thread)
 
     /** True if the world FBO received scaled rendering since the last upscale. */
     static boolean consumeWorldDirty() {
@@ -184,8 +180,6 @@ public final class WorldRenderScale {
             GL11C.glScissor(v[0], v[1], v[2], v[3]);
         }
     }
-
-    // ------------------------------------------------------------------ redirect targets
 
     public static void glViewport(int x, int y, int w, int h) {
         logicalViewport[0] = x;
@@ -313,8 +307,6 @@ public final class WorldRenderScale {
         }
         GL30C.glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
     }
-
-    // ------------------------------------------------------------------ gl_FragCoord rewrite
 
     public static void glShaderSource(int shader, CharSequence source) {
         CharSequence out = source;

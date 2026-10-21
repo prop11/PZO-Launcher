@@ -6,11 +6,10 @@ import zombie.characters.animals.behavior.BaseAnimalBehavior;
 import zombie.iso.IsoCamera;
 
 /**
- * IsoAnimal.updateLOS() Distant Calm-Animal Throttle.
- * Vanilla updateLOS() walks the whole cell object list for every animal every frame to find nearby
- * zombies and players. For calm animals far from every local player this governor runs the walk on
- * a staggered 1-in-N frame cadence instead of every frame, so livestock still notices an approaching
- * zombie within a fraction of a second while the per-frame cost drops by ~N.
+ * Throttles IsoAnimal.updateLOS() for calm animals far from every local player.
+ * Vanilla walks the whole cell object list for every animal every frame to find nearby zombies and
+ * players. Distant calm animals run that walk on a staggered 1-in-N frame cadence instead, so livestock
+ * still notices an approaching zombie within a fraction of a second.
  *
  * Animals that have spotted something or were recently alerted always run the full walk.
  */

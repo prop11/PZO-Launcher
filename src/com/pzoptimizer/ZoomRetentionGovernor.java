@@ -5,13 +5,8 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Zoom Retention Governor & FBO Eviction Damper.
- * In Build 42, zooming in shrinks the visible viewport and immediately evicts chunk FBO
- * textures that leave the screen. Zooming back out re-triggers hundreds of chunk bakes
- * simultaneously, causing severe 50-300ms frame drops.
- * 
- * ZoomRetentionGovernor retains baked chunk-level FBO textures within the bounding
- * rectangle of the widest possible camera zoom, avoiding mass re-bakes on zoom out.
+ * Zooming in evicts chunk FBO textures that leave the screen, and zooming back out re-bakes hundreds of
+ * chunks at once (50-300 ms drops). Baked chunk-level textures inside the widest zoom's view rectangle are kept.
  */
 public final class ZoomRetentionGovernor {
 

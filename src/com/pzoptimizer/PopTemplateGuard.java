@@ -5,10 +5,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Project Zomboid Build 42 - PopTemplateManager Crash Guard & Visual Bounds Shield.
- * Prevents game-ending exceptions in HumanVisual and CharacterCreationMain:
- */
+/** Guards HumanVisual and CharacterCreationMain against out-of-range PopTemplateManager lists. */
 public class PopTemplateGuard {
 
     private static volatile boolean initialized = false;
@@ -72,9 +69,8 @@ public class PopTemplateGuard {
                     }
                 }
 
-                // Enforce exact vanilla list sizes:
-                // maleSkins & femaleSkins MUST be exactly 5 items (MaleBody01..05)
-                // so CharacterCreationMain.lua:652 self.skinColors[1..5] is never indexed out-of-bounds!
+                // maleSkins and femaleSkins must hold exactly 5 entries (MaleBody01..05), or
+                // CharacterCreationMain.lua:652 indexes self.skinColors[1..5] out of range
                 trimToSize(ptm, "maleSkins", 5, "MaleBody01");
                 trimToSize(ptm, "femaleSkins", 5, "FemaleBody01");
                 trimToSize(ptm, "maleSkinsZombie1", 4, "MaleZombie01");

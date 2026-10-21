@@ -6,11 +6,9 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Hybrid CPU Topology Detector & Optimal Frame Worker Sizer.
- * Detects physical core counts and heterogeneous/hybrid core layouts (Intel P-Core + E-Core,
- * AMD Zen 5 + Zen 5c) via Linux sysfs or native JNI telemetry.
- * Prevents over-subscribing frame-synchronous worker pools onto lower-clocked efficiency cores
- * or SMT siblings, which otherwise increase barrier tail latency.
+ * Detects physical cores and hybrid layouts (Intel P/E cores, AMD Zen 5 + Zen 5c) via Linux sysfs or the
+ * native library, so frame-synchronous worker pools are not spread onto efficiency cores or SMT siblings,
+ * which only adds barrier tail latency.
  */
 public final class CpuTopologyGovernor {
 
@@ -69,9 +67,8 @@ public final class CpuTopologyGovernor {
     private CpuTopologyGovernor() {}
 
     /**
-     * Computes the optimal worker thread count for frame-synchronous parallel batches.
-     * On hybrid CPUs with >9 physical cores (e.g. Ryzen AI 9 HX 370 / Intel Core Ultra),
-     * caps at min(11, physicalCores - 1) to eliminate E-core/SMT barrier stragglers.
+     * Worker count for frame-synchronous parallel batches. On hybrid CPUs with more than 9 physical cores
+     * (Ryzen AI 9 HX 370, Core Ultra) this caps at min(11, physicalCores - 1) to avoid E-core/SMT stragglers.
      */
     public static int getOptimalWorkerCount() {
         if (IS_HYBRID_CPU && PHYSICAL_CORES > 9) {

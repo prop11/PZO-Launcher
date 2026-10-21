@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * PZO Deep Engine-Level OpenGL State Governor.
- * Shadows active OpenGL texture bindings, blend modes, alpha functions,
- */
+/** Shadow copies of the bound texture, shader program and blend state, used to skip redundant GL calls. */
 public final class EngineGLStateGovernor {
 
     private static volatile int activeTextureId = -1;

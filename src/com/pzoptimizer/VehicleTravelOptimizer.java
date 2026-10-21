@@ -5,10 +5,7 @@ import java.lang.reflect.Method;
 import java.util.concurrent.locks.ReentrantLock;
 import sun.misc.Unsafe;
 
-/**
- * Project Zomboid Build 42 - Vehicle Travel & High-Speed Chunk Streaming Optimizer.
- * Solves the primary architectural root causes of vehicle stutter in Build 42:
- */
+/** Vehicle travel stutter fixes: a non-fair IsoChunkMap.bSettingChunk lock and distance-based simulation throttling for town zombies. */
 public final class VehicleTravelOptimizer {
 
     private static volatile boolean initialized = false;
@@ -54,9 +51,7 @@ public final class VehicleTravelOptimizer {
         }
     }
 
-    /**
-     * 1. Replaces IsoChunkMap.bSettingChunk fair lock with a high-throughput non-fair lock.
-     */
+    /** Replaces the IsoChunkMap.bSettingChunk fair lock with a non-fair one. */
     public static synchronized boolean installUnfairChunkLock() {
         if (unfairLockInstalled) return true;
         obtainUnsafe();
@@ -221,10 +216,8 @@ public final class VehicleTravelOptimizer {
     }
 
     /**
-     * 3. Installs a dynamic entity simulation governor into MovingObjectUpdateScheduler.
-     * Intercepts the FULL simulation bucket (where 500+ alerted town zombies are dumped by engine sound)
-     * and redirects distant zombies (> 20 tiles) to QUARTER (15 FPS) and EIGHTH (7.5 FPS) simulation,
-     * dropping main-thread pathfinding and collision overhead by 75-85% during vehicle travel.
+     * Hooks MovingObjectUpdateScheduler's FULL bucket, where engine noise dumps 500+ alerted town zombies while
+     * driving, and moves zombies more than 20 tiles away to the QUARTER (15 FPS) and EIGHTH (7.5 FPS) buckets.
      */
     public static synchronized boolean installSimulationGovernor() {
         if (simulationGovernorInstalled) return true;

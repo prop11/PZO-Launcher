@@ -3,14 +3,9 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Audio Parameter Upkeep & Cadence Governor.
- * FMOD Studio operates asynchronously with an internal update interval of 20ms (50 Hz).
- * On high-refresh displays running at 120-240 FPS, vanilla PZ evaluates character,
- * emitter, and occlusion parameters every render frame, performing 2-5 redundant recalculations
- * for every audio mixer frame.
- * 
- * AudioCadenceGovernor rates parameter refresh passes to a steady 60 Hz cadence while
- * ensuring new sound triggers and stop events execute with zero latency.
+ * FMOD Studio updates every 20 ms, but vanilla re-evaluates character, emitter and occlusion parameters
+ * every render frame, so at 120-240 FPS most of that work is redundant. Parameter refreshes are limited
+ * to 60 Hz; new sound triggers and stop events still run immediately.
  */
 public final class AudioCadenceGovernor {
 
@@ -34,9 +29,6 @@ public final class AudioCadenceGovernor {
         targetHz = Math.max(30, Math.min(120, hz));
     }
 
-    /**
-     * Determines if a recurring audio parameter evaluation pass is due this frame.
-     */
     public static boolean isCadenceTickDue(int frameCount) {
         if (!active || targetHz <= 0) return true;
 

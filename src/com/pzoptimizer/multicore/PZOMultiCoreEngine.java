@@ -8,10 +8,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * PZO Master Multi-Core Engine Coordinator.
- * Orchestrates all 4 architectural multi-core scaling pillars:
- */
+/** Creates the shared PZO worker pool and starts the chunk streamer, horde governor, animation engine and island scheduler. */
 public final class PZOMultiCoreEngine {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);

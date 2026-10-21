@@ -15,8 +15,8 @@ import java.util.function.Supplier;
 import sun.misc.Unsafe;
 
 /**
- * Project Zomboid Build 42 - FileSystem Whitelist & Secondary-Drive Protection Shield.
- * In Build 42, ZomboidFileSystem.validatePrefix(path) enforces an internal whitelist
+ * B42's ZomboidFileSystem.validatePrefix(path) only allows whitelisted roots. This adds every Steam library
+ * and workshop root it finds, so installs and mods on secondary drives are not rejected.
  */
 public final class FileSystemWhitelistShield {
 
@@ -42,7 +42,7 @@ public final class FileSystemWhitelistShield {
         obtainUnsafe();
         collectAllSearchRoots();
 
-        // Continuous lifecycle daemon: maintains whitelist throughout game boot, main menu, and save loading
+        // Keeps the whitelist in place through boot, the main menu and save loading
         Thread daemon = new Thread(() -> {
             while (true) {
                 try {
@@ -219,9 +219,7 @@ public final class FileSystemWhitelistShield {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Unbreakable supplier wrapper: always ensures discovered secondary drive roots are included.
-     */
+    /** Supplier wrapper that always adds the discovered secondary-drive roots. */
     private static final class PZOShieldSupplier implements Supplier<List<Path>> {
         private final Supplier<List<Path>> delegate;
         private final Set<String> roots;

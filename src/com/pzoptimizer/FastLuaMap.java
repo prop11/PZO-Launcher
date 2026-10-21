@@ -7,10 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Project Zomboid Build 42 - High-Performance Hybrid Map for KahluaTableImpl.
- * Stores contiguous 1-based integer keys (1..N) in a flat primitive Object[] array,
- */
+/** KahluaTableImpl backing map: contiguous integer keys 1..N live in a flat Object[], everything else in a LinkedHashMap. */
 public class FastLuaMap extends AbstractMap<Object, Object> {
 
     private Object[] arrayPart = new Object[16];

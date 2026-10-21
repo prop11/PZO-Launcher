@@ -6,17 +6,13 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Per-Worker Lock-Free RNG Stream Governor.
- * Vanilla Project Zomboid's RandStandard.INSTANCE uses a single CellularAutomatonRNG
- * protected by a fair ReentrantLock. When multi-core worker threads execute chunk parsing,
- * animation updates, or spatial checks concurrently, they contend heavily on that lock.
- *
- * WorkerRandGovernor wraps RandStandard.INSTANCE's internal Random field so that:
- * 1. The main GameThread takes a 1-cycle pointer equality fast-path (Thread.currentThread() == mainThread)
- *    straight to the stock generator, preserving main-thread RNG sequence with zero string overhead.
- * 2. All PZO worker threads (PZO-MultiCore-Worker, PZO-ChunkStreamer-Worker, PZO-MultiCoreHordeGovernor)
- *    draw from lock-free ThreadLocalRandom streams with zero lock contention.
- * 3. Automatically re-wraps RandStandard.INSTANCE.rand if world init replaces it.
+ * Vanilla RandStandard.INSTANCE is one CellularAutomatonRNG behind a fair ReentrantLock, so PZO workers
+ * drawing random numbers concurrently (chunk parsing, animation, spatial checks) contend on it.
+ * RandStandard.INSTANCE's internal Random is wrapped so that:
+ * - the main game thread goes straight to the stock generator (a reference compare), keeping its sequence
+ * - PZO worker threads (PZO-MultiCore-Worker, PZO-ChunkStreamer-Worker, PZO-MultiCoreHordeGovernor) use
+ *   ThreadLocalRandom with no lock
+ * - the wrapper is re-applied if world init replaces RandStandard.INSTANCE.rand
  */
 public final class WorkerRandGovernor extends Random {
 
@@ -54,8 +50,8 @@ public final class WorkerRandGovernor extends Random {
     }
 
     /**
-     * Installs or re-installs the lock-free worker RNG wrapper onto zombie.core.random.RandStandard.INSTANCE.
-     * Safe and fast to call periodically on frame ticks (single reference comparison when already wrapped).
+     * Installs or re-installs the worker RNG wrapper on zombie.core.random.RandStandard.INSTANCE. Cheap to
+     * call every frame: one reference compare when already wrapped.
      */
     public static void ensureInstalled() {
         if (!active) return;

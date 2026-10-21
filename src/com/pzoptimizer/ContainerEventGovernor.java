@@ -10,13 +10,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Project Zomboid Build 42 - Container & Door Toggle Event Governor.
- * Coalesces rapid synchronous OnContainerUpdate Lua event bursts triggered
- * during door opening/closing, container looting, and spatial tile updates.
- * In heavy modpacks (300+ mods), multiple mods hook OnContainerUpdate simultaneously,
- * executing full inventory and container sort loops on the main thread.
- * This governor ensures the initial update triggers with zero latency, debounces bursts
- * within 250ms, and guarantees a trailing dispatch for the final state.
+ * Coalesces OnContainerUpdate bursts from door toggles, looting and tile updates. In large modpacks several
+ * mods hook OnContainerUpdate and each runs full inventory sorts on the main thread. The first update fires
+ * immediately, bursts within 250 ms are debounced, and a trailing dispatch delivers the final state.
  */
 public final class ContainerEventGovernor {
 
@@ -26,8 +22,8 @@ public final class ContainerEventGovernor {
     private static volatile GovernedEventMap governedMapRef = null;
 
     public static void initialize() {
-        // Disabled: In Build 42, background thread Lua event triggering and OnContainerUpdate
-        // interception causes thread contention and drops events during multi-corpse combat drops.
+        // Disabled: firing Lua events from a background thread and intercepting OnContainerUpdate caused
+        // contention and dropped events during multi-corpse drops.
     }
 
     public static synchronized boolean installGovernor() {
@@ -88,7 +84,6 @@ public final class ContainerEventGovernor {
             if ("OnContainerUpdate".equals(key)) {
                 long now = System.currentTimeMillis();
                 if (now - lastContainerUpdateTime < DEBOUNCE_WINDOW_MS) {
-                    // Coalesce rapid bursts within 250ms
                     hasPendingUpdate = true;
                     return emptyContainerEvent;
                 }

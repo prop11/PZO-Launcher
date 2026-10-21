@@ -4,9 +4,8 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 
 /**
- * PZO Real-Time Telemetry & Diagnostic HUD Bridge.
- * Aggregates runtime engine health, frame time variance, GC pause overhead,
- * off-heap direct buffer allocation, SIMD AVX2 horde culler status, and chunk streaming rates.
+ * Engine health numbers for the telemetry HUD: frame-time variance, GC overhead, direct buffer use,
+ * horde culler status and chunk streaming rate.
  */
 public final class PZOTelemetryHUD {
 

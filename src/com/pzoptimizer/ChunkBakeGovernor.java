@@ -4,14 +4,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * PZO Chunk Bake Governor & FBO Render Optimizer.
- * In Build 42, crossing chunk boundaries or moving past high-rise structures can trigger
- * burst bakes (30-90 chunk levels re-baking concurrently), overwhelming the GPU and RenderThread.
- * 
- * ChunkBakeGovernor introduces:
- * 1. Prioritized per-frame bake quota (4-6 bakes/frame max during vehicle travel).
- * 2. Mipmap level truncation (clamps 11-level FBO mip chains to levels 1-3, saving 66% GPU bake time).
- * 3. Corpse flies dirty-flag dampening (prevents redundant chunk level invalidations).
+ * Crossing chunk boundaries or passing tall buildings can re-bake 30-90 chunk levels in one burst and
+ * stall the render thread. This governor:
+ * - caps bakes per frame (4-6 while driving), except for the player's own 3x3 chunks
+ * - clamps FBO mip chains to levels 1-3
+ * - only dirties chunk levels for corpse flies when flies presence actually toggles
  */
 public final class ChunkBakeGovernor {
 
@@ -60,14 +57,12 @@ public final class ChunkBakeGovernor {
     }
 
     /**
-     * Determines whether a chunk level should be granted an immediate FBO bake this frame.
-     * Player's immediate surroundings (dist <= 1) are always granted.
-     * Distant chunks are paced under the frame budget to prevent Render Thread starvation.
+     * Whether a chunk level may bake this frame. The player's surrounding chunks (dist <= 1) always may;
+     * the rest share the per-frame budget.
      */
     public static boolean allowChunkBake(int wx, int wy, int level) {
         if (!active) return true;
 
-        // Immediate priority for player's immediate 3x3 chunk perimeter
         if (playerChunkX != -1 && playerChunkY != -1) {
             int dx = Math.abs(wx - playerChunkX);
             int dy = Math.abs(wy - playerChunkY);
@@ -78,7 +73,6 @@ public final class ChunkBakeGovernor {
             }
         }
 
-        // Paced bakes for peripheral or distant chunk levels
         int current = bakesThisFrame.get();
         if (current < maxBakesPerFrame) {
             bakesThisFrame.incrementAndGet();
@@ -90,10 +84,7 @@ public final class ChunkBakeGovernor {
         return false;
     }
 
-    /**
-     * Dampens FliesSound corpse updates.
-     * Only permits dirty-marking of chunk levels if the flies presence actually toggled.
-     */
+    /** Only dirties chunk levels for FliesSound when flies presence actually toggled. */
     public static boolean shouldUpdateFlies(boolean previousHasFlies, boolean newHasFlies) {
         if (!active) return true;
         if (previousHasFlies == newHasFlies) {

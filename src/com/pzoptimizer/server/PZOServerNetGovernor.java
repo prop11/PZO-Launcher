@@ -2,10 +2,7 @@ package com.pzoptimizer.server;
 
 import com.pzoptimizer.PZOLogger;
 
-/**
- * PZO Dedicated Server Network & Packet Pacing Governor.
- * Optimizes multiplayer network throughput, Netty direct byte buffer recycling,
- */
+/** Server network tuning: Netty direct buffer pooling and UDP socket buffer sizes. */
 public final class PZOServerNetGovernor {
 
     private static volatile boolean active = false;
@@ -15,7 +12,7 @@ public final class PZOServerNetGovernor {
         active = true;
 
         try {
-            // Configure Netty Direct Memory Allocation for Zero-Copy Networking
+            // Netty direct memory allocation
             System.setProperty("io.netty.allocator.type", "pooled");
             System.setProperty("io.netty.allocator.maxOrder", "9"); // 4MB maximum chunk order
             System.setProperty("io.netty.allocator.pageSize", "8192"); // 8KB aligned pages

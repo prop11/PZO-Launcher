@@ -1,9 +1,6 @@
 package com.pzoptimizer.server;
 
-/**
- * Project Zomboid Dedicated Server - Zero-Rubberband High-Throughput Network Engine.
- * Configures off-heap direct NIO socket buffer pooling to eliminate multiplayer latency spikes.
- */
+/** Configures Netty direct buffer pooling for the server's sockets. */
 public class ServerNetworkTuner {
     public static void apply() {
         try {

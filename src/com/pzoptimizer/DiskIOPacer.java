@@ -6,13 +6,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import zombie.Lua.LuaManager;
 
 /**
- * Project Zomboid Build 42 - Disk I/O & Heartbeat Throttling Governor.
- * Throttles high-frequency file I/O operations from mods that write to disk on every frame or tick
- * (e.g. PZ_Map and PZ_Pulse creating/writing/closing heartbeat.txt at 120 writes/sec).
- * On Windows NTFS, opening, creating, and committing file journals 120 times per second triggers
- * severe I/O stalls and microstutters on the main thread.
- * This governor intercepts rapid writes to heartbeat/pulse files and rapid non-append overwrites,
- * returning a zero-overhead dummy LuaFileWriter backed by OutputStream.nullOutputStream().
+ * Throttles mods that rewrite a file every frame or tick (e.g. PZ_Map and PZ_Pulse rewriting heartbeat.txt
+ * ~120 times a second), which stalls the main thread on NTFS. Rapid writes to heartbeat/pulse files and
+ * non-append overwrites within 500 ms get a LuaFileWriter backed by OutputStream.nullOutputStream().
  */
 public final class DiskIOPacer {
 
@@ -41,7 +37,6 @@ public final class DiskIOPacer {
         if (filename == null) return false;
         String lower = filename.toLowerCase().replace('\\', '/');
 
-        // Check if heartbeat / pulse / high-frequency monitor file
         if (lower.contains("heartbeat") || lower.contains("pulse") || lower.contains("temp_print_log") || lower.contains("ping.txt")) {
             long now = System.currentTimeMillis();
             Long last = lastWriteTimestamps.get(lower);
@@ -52,7 +47,7 @@ public final class DiskIOPacer {
             return false;
         }
 
-        // Generic safeguard: throttle non-append rapid full-file overwrites (<500ms)
+        // Any non-append overwrite of the same file within 500 ms
         if (!append) {
             long now = System.currentTimeMillis();
             Long last = lastWriteTimestamps.get(lower);

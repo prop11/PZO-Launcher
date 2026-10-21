@@ -7,7 +7,6 @@ import zombie.util.IPooledObject;
 import zombie.util.Pool;
 
 /**
- * IsoGameCharacter.isRagdoll() Global Gate.
  * isRagdoll() is queried for every character many times per frame, but ragdolls are rare. The
  * AnimationPlayer redirects (RagdollController.alloc / Pool.tryRelease) keep an exact count of live
  * ragdoll controllers, so while none exist anywhere isRagdoll() is a single volatile read.

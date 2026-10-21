@@ -6,13 +6,8 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * OpenGL Pipeline Stall & GL State Query Governor.
- * Calling driver query functions like `glGetInteger(GL_CURRENT_PROGRAM)` forces the GPU
- * command buffer to drain and flushes the graphics pipeline, stalling the render thread.
- * In weather and particle passes (`WeatherParticleDrawer`), this query is invoked frequently.
- * 
- * GLPipelineGovernor intercepts current program checks and reads tracked shader state from
- * `ShaderHelper.currentlyBound` without issuing blocking driver queries.
+ * glGetInteger(GL_CURRENT_PROGRAM) forces a pipeline sync and stalls the render thread, and the weather and
+ * particle passes (WeatherParticleDrawer) call it often. This answers from ShaderHelper.currentlyBound instead.
  */
 public final class GLPipelineGovernor {
 
@@ -41,9 +36,6 @@ public final class GLPipelineGovernor {
         active = value;
     }
 
-    /**
-     * Obtains the active GL shader program without triggering a GPU pipeline stall.
-     */
     public static int getCurrentProgram() {
         if (!active || BOUND_PROGRAM_HANDLE == null) {
             return queryDriverProgram();

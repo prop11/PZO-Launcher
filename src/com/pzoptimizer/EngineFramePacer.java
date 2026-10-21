@@ -1,14 +1,12 @@
 package com.pzoptimizer;
 
 /**
- * PZO Nanosecond-Precise Engine Frame Pacer & Jitter Eraser.
- *
  * With a capped framerate, vanilla MainThread.mainLoop spins mainThreadStep() + Thread.yield() until
  * GameWindow's accumulator reaches the next frame, burning a full core between frames. The pacer is
  * called once per frame (from EngineThreadGovernor's mainThreadLoop hook) with the next frame's due
- * time and spends the slack productively:
- *   1. GcSlackGovernor may tip an imminent G1 young collection into the idle window.
- *   2. The thread sleeps until shortly before the due time, then ShortWait covers the remainder.
+ * time and uses the slack instead:
+ * - GcSlackGovernor may tip an imminent G1 young collection into the idle window
+ * - the thread sleeps until shortly before the due time, then ShortWait covers the rest
  * The last ~150us are always left to vanilla's own yield loop, so frame timing is never delayed.
  *
  * Sleeping is only used while a background calibration confirms the OS timer is precise; with the

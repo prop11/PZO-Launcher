@@ -1,9 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * PZO Async Entity Distance Matrix & Spatial Cache (Phase 3 SIMD Architecture).
- * Provides high-speed, zero-allocation squared distance math for proximity checks,
- */
+/** Squared-distance helpers for proximity checks. */
 public final class AsyncEntityDistanceCache {
 
     public static final float PROXIMITY_CLOSE_SQ = 100.0f;   // 10 tiles squared
@@ -39,10 +36,7 @@ public final class AsyncEntityDistanceCache {
         return HordeSpatialCuller.getZombieCount();
     }
 
-    /**
-     * Fast distance evaluation without square root.
-     * Returns 0 for close (<10m), 1 for medium (<30m), 2 for far (<60m), 3 for out-of-range (>80m).
-     */
+    /** Distance bucket without a square root: 0 (<=10 tiles), 1 (<=30), 2 (<=60), 3 (<=80), 4 beyond. */
     public static int classifyDistance(float playerX, float playerY, float objX, float objY) {
         float dSq = PZOFastMath.distSq(playerX, playerY, objX, objY);
         if (dSq <= PROXIMITY_CLOSE_SQ) return 0;

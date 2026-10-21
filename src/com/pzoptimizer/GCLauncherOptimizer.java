@@ -10,15 +10,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * CPU Core-Aware JVM Garbage Collector Optimizer.
- * Project Zomboid Build 42 launches by default with the Z Garbage Collector (`-XX:+UseZGC`).
- * While beneficial on high-core workstations (12+ cores), ZGC runs multiple heavy concurrent
- * background threads that aggressively compete with PZO's parallel chunk and simulation
- * workers on 4-core, 6-core, and 8-core CPUs, causing micro-stutter and lowering average FPS by 11%.
- * 
- * GCLauncherOptimizer detects CPU topology and tunes `ProjectZomboid64.json` to employ G1GC
- * with low pause targets on <= 8 core systems, preserving 2-3 dedicated CPU cores for PZO's
- * multi-core engine.
+ * B42 launches with ZGC by default. On 4-8 core CPUs its concurrent threads compete with PZO's chunk and
+ * simulation workers and cause stutter, so on those systems this switches ProjectZomboid64.json to G1GC
+ * with low pause targets, leaving cores free for the workers.
  */
 public final class GCLauncherOptimizer {
 
@@ -40,9 +34,6 @@ public final class GCLauncherOptimizer {
         return tunedApplied;
     }
 
-    /**
-     * Inspects and applies optimal GC flags to the launcher configuration.
-     */
     public static synchronized void tuneLauncherGcIfBeneficial() {
         if (!active) return;
         try {
@@ -101,7 +92,7 @@ public final class GCLauncherOptimizer {
                     continue; // Strip invalid flag
                 }
                 if (s.contains(" ")) {
-                    // Split corrupted arguments with spaces
+                    // Re-split arguments that were joined with spaces
                     String[] tokens = s.split("\\s+");
                     for (String tok : tokens) {
                         if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {

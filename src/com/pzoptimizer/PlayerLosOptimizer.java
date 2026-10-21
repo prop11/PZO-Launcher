@@ -7,13 +7,9 @@ import java.util.Stack;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * High-Speed Player Line-Of-Sight (LOS) Query Accelerator.
- * In dense hordes, player line-of-sight tracking checks `lastSpotted` for each visible
- * zombie. The stock collection is a synchronized Vector/Stack, requiring an O(N) scan per zombie,
- * causing O(N^2) comparison cascades in large hordes.
- * 
- * PlayerLosOptimizer maintains an O(1) identity-hash mirror beside the tracking stack,
- * keeping the original stack intact while answering visibility membership probes in O(1) time.
+ * Player LOS checks test lastSpotted for every visible zombie, and the stock collection is a synchronized
+ * Stack, so each test is a linear scan and big hordes go quadratic. This keeps an identity-hash mirror
+ * next to the stack (which stays intact) for O(1) membership checks.
  */
 public final class PlayerLosOptimizer {
 
@@ -62,9 +58,6 @@ public final class PlayerLosOptimizer {
         }
     }
 
-    /**
-     * Fast O(1) membership check.
-     */
     public boolean contains(Stack<?> stack, Object target) {
         if (!active || target == null || stack == null) {
             return stack != null && target != null && stack.contains(target);
@@ -74,9 +67,6 @@ public final class PlayerLosOptimizer {
         return remembered.contains(target);
     }
 
-    /**
-     * Adds an object to both the tracking stack and identity mirror.
-     */
     @SuppressWarnings("unchecked")
     public boolean add(Stack<?> rawStack, Object target) {
         if (rawStack == null || target == null) return false;
@@ -96,9 +86,6 @@ public final class PlayerLosOptimizer {
         return false;
     }
 
-    /**
-     * Clears both stack and mirror.
-     */
     public void clear(Stack<?> stack) {
         if (stack != null) {
             stack.clear();
@@ -107,8 +94,6 @@ public final class PlayerLosOptimizer {
         mirroredStack = stack;
         mirroredSize = 0;
     }
-
-    // Static facade methods for universal invocation
 
     public static boolean isObjectSpotted(Stack<?> stack, Object obj) {
         return LOCAL_INST.get().contains(stack, obj);

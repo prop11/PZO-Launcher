@@ -126,8 +126,6 @@ public final class BenchmarkHarness {
         return phase != Phase.OFF;
     }
 
-    // ------------------------------------------------------------------ watchdog
-
     private static volatile long lastTickNs;
     private static final long MAIN_STALL_NS = 45_000_000_000L;
     private static final long PHASE_STALL_NS = 240_000_000_000L;
@@ -172,8 +170,6 @@ public final class BenchmarkHarness {
             }
         } catch (Throwable ignored) {}
     }
-
-    // ------------------------------------------------------------------ helpers
 
     private static void enter(Phase p) {
         phase = p;
@@ -263,8 +259,6 @@ public final class BenchmarkHarness {
     private static String shotName(boolean ui) {
         return "pzo_bench_" + label + "_z" + Math.round(zooms[zoomIndex] * 100) + (ui ? "_ui" : "_noui") + ".png";
     }
-
-    // ------------------------------------------------------------------ main-thread tick
 
     public static void tick() {
         if (phase == Phase.OFF || phase == Phase.DONE) return;

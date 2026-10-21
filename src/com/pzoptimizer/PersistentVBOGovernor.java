@@ -8,13 +8,11 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Project Zomboid Build 42 & 41 - Persistent Mapped VBO & State Batching Governor.
- * 
- * Implements persistent buffer mapping (GL_ARB_buffer_storage / OpenGL 4.4+):
- * - Keeps vertex and index data permanently mapped in client memory (GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT).
- * - Completely eliminates per-frame driver buffer re-allocations, glBufferData re-specs, and stalling glMapBuffer calls.
- * - Uses a multi-slot ring buffer with lightweight GPU sync fences (glFenceSync) for zero-stall concurrent CPU writes & GPU draws.
- * - Graceful fallback: on macOS (OpenGL 2.1/4.1) or older GPUs without ARB_buffer_storage, seamlessly falls back to direct memory streaming.
+ * Persistent mapped vertex buffers (ARB_buffer_storage / GL 4.4+). Buffers stay mapped
+ * (GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT), so there is no per-frame glBufferData or glMapBuffer,
+ * and a ring of slots guarded by glFenceSync lets the CPU write one slot while the GPU reads another.
+ * Where buffer storage is unsupported (macOS GL 2.1/4.1, older GPUs) allocation returns null and callers
+ * stream instead.
  */
 public final class PersistentVBOGovernor {
 
@@ -22,7 +20,6 @@ public final class PersistentVBOGovernor {
     private static volatile boolean supported = false;
     private static volatile boolean initialized = false;
 
-    // Live Telemetry
     public static final AtomicLong persistentBuffersAllocated = new AtomicLong(0);
     public static final AtomicLong totalBytesMapped = new AtomicLong(0);
     public static final AtomicLong fencesCreated = new AtomicLong(0);
@@ -182,9 +179,6 @@ public final class PersistentVBOGovernor {
         }
     }
 
-    /**
-     * Managed Persistent Buffer Instance.
-     */
     public static final class PersistentBuffer {
         private final int bufferId;
         private final int target;
@@ -232,7 +226,7 @@ public final class PersistentVBOGovernor {
             if (fence != 0L) {
                 try {
                     long startNs = System.nanoTime();
-                    // 1 second timeout = 1_000_000_000L
+                    // 1 s timeout
                     int status = ((Number) glClientWaitSyncMethod.invoke(null, fence, 0, 1_000_000_000L)).intValue();
                     long elapsed = System.nanoTime() - startNs;
                     if (elapsed > 100_000L) {

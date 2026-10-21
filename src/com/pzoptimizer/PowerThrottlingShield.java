@@ -1,10 +1,6 @@
 package com.pzoptimizer;
 
-/**
- * Project Zomboid Build 42 - CPU Power, Scheduling & Hybrid Core QoS Optimizer.
- * Ensures rendering and physics threads are scheduled onto Performance Cores (P-cores),
- * configures OS multimedia scheduling (MMCSS "Games"), and disables background downclocking.
- */
+/** Moves render and physics threads onto P-cores, sets MMCSS "Games" scheduling and disables Windows power throttling. */
 public class PowerThrottlingShield {
     public static void apply() {
         try {
