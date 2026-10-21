@@ -194,3 +194,4 @@ build_native.bat
 
 scratch/
 bench/
+.vs/
