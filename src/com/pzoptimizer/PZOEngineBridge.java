@@ -399,6 +399,8 @@ public class PZOEngineBridge {
                 PathfindGovernor.setVehicleThrottle(value);
             } else if ("JVM_PathfindNativeAStar".equals(key)) {
                 PathfindGovernor.setNativeAStar(value);
+            } else if ("JVM_LoadJavaMods".equals(key)) {
+                PZOConfig.setJavaModsEnabled(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}

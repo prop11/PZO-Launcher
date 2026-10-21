@@ -75,6 +75,11 @@ public class JavaModLoader {
 
     public static void loadMods(Instrumentation inst) {
         PZOLogger.info("--------------------------------------------------------------------------------");
+        if (!PZOConfig.isJavaModsEnabled()) {
+            PZOLogger.info("[JavaModLoader] Third-party Java mod loading is disabled (F10 > JAVA). Skipping Java mod discovery.");
+            PZOLogger.info("--------------------------------------------------------------------------------");
+            return;
+        }
         PZOLogger.info("[JavaModLoader] Scanning all Steam libraries & mod directories for Java/ZombieBuddy mods...");
         boolean zbPresent = isZombieBuddyPresent();
         if (zbPresent) {
@@ -260,6 +265,8 @@ public class JavaModLoader {
 
     public static class ModMetadata {
         public final Set<String> modIds = new HashSet<>();
+        public String name = null;
+        public String primaryId = null;
         public String javaPkgName = null;
         public boolean requiresZombieBuddy = false;
         public boolean isZombieBuddyMod = false;
@@ -312,6 +319,8 @@ public class JavaModLoader {
                 return;
             }
         }
+
+        if (!isApprovedByUser(jarFile, meta)) return;
 
         long sizeKB = Math.max(1, jarFile.length() / 1024);
         PZOLogger.info(String.format("[JavaModLoader] Inspecting standalone Java mod: %s (%d KB) at %s", jarFile.getName(), sizeKB, jarFile.getPath()));
@@ -410,6 +419,67 @@ public class JavaModLoader {
         } catch (Throwable t) {
             errorCount++;
             PZOLogger.error(String.format("[JavaModLoader] [ERROR] Failed to load Java mod: %s", jarFile.getName()), t);
+        }
+    }
+
+    // A Workshop jar runs with full access to the player's PC, unlike sandboxed Lua, so each distinct
+    // jar (by SHA-256) needs explicit consent. An updated jar has a new hash and is asked about again.
+    private static boolean isApprovedByUser(File jarFile, ModMetadata meta) {
+        String sha256 = sha256Hex(jarFile);
+        if (sha256 == null) {
+            errorCount++;
+            PZOLogger.error("[JavaModLoader] Could not hash " + jarFile.getPath() + "; not loading it.");
+            return false;
+        }
+        String modName;
+        if (meta.name != null && meta.primaryId != null) modName = meta.name + " (" + meta.primaryId + ")";
+        else if (meta.name != null) modName = meta.name;
+        else if (meta.primaryId != null) modName = meta.primaryId;
+        else modName = jarFile.getName();
+        String decision = PZOConfig.getJavaModDecision(sha256);
+        if ("APPROVED".equals(decision)) {
+            PZOLogger.info(String.format("[JavaModLoader] %s (%s) previously approved, sha256 %s", modName, jarFile.getName(), sha256));
+            return true;
+        }
+        if ("BLOCKED".equals(decision)) {
+            PZOLogger.info(String.format("[JavaModLoader] %s (%s) is blocked by the user, sha256 %s", modName, jarFile.getName(), sha256));
+            return false;
+        }
+
+        String result = UpdateDialog.promptJavaModApproval(modName, getWorkshopId(jarFile), jarFile.getAbsolutePath(), sha256);
+        if ("ALLOW".equals(result)) {
+            PZOConfig.setJavaModDecision(sha256, true);
+            PZOLogger.info(String.format("[JavaModLoader] User approved %s (%s), sha256 %s", modName, jarFile.getName(), sha256));
+            return true;
+        }
+        if ("BLOCK".equals(result)) {
+            PZOConfig.setJavaModDecision(sha256, false);
+            PZOLogger.info(String.format("[JavaModLoader] User blocked %s (%s), sha256 %s", modName, jarFile.getName(), sha256));
+        } else {
+            PZOLogger.info(String.format("[JavaModLoader] Skipped %s (%s) for this launch, sha256 %s", modName, jarFile.getName(), sha256));
+        }
+        return false;
+    }
+
+    private static String getWorkshopId(File jarFile) {
+        String path = jarFile.getAbsolutePath().replace('\\', '/');
+        int idx = path.indexOf("/108600/");
+        if (idx == -1) return null;
+        int end = path.indexOf('/', idx + 8);
+        return end == -1 ? null : path.substring(idx + 8, end);
+    }
+
+    static String sha256Hex(File file) {
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) != -1) md.update(buf, 0, n);
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : md.digest()) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -611,6 +681,8 @@ public class JavaModLoader {
                     }
                 }
             }
+            // Stop at the nearest mod: walking further up reaches ~/Zomboid, whose mods/ folder holds every local mod
+            if (!meta.modIds.isEmpty()) break;
             curr = curr.getParentFile();
             levels++;
         }
@@ -649,7 +721,10 @@ public class JavaModLoader {
                     String val = trimmed.substring(eq + 1).trim();
                     if (val.endsWith(",")) val = val.substring(0, val.length() - 1).trim();
                     if (!val.isEmpty()) {
-                        if (key.equals("id")) {
+                        if (key.equals("name")) {
+                            if (meta.name == null) meta.name = val;
+                        } else if (key.equals("id")) {
+                            if (meta.primaryId == null) meta.primaryId = val;
                             meta.modIds.add(val);
                             meta.modIds.add(val.toLowerCase());
                         } else if (key.equals("javapkgname")) {

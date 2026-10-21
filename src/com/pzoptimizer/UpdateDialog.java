@@ -814,6 +814,114 @@ public class UpdateDialog {
         } catch (Throwable ignored) {}
     }
 
+    /** Asks whether a third-party Java mod jar may run. Returns "ALLOW", "BLOCK" or "SKIP"; anything unclear is "SKIP". */
+    public static String promptJavaModApproval(String modName, String workshopId, String jarPath, String sha256) {
+        String text = "A Workshop mod wants to run Java code.\n\n"
+            + "Java mods are not sandboxed like Lua mods: they run with full access to your PC. "
+            + "Only allow mods from authors you trust.\n\n"
+            + "Mod: " + modName + "\n"
+            + "Workshop ID: " + (workshopId != null ? workshopId : "none (local mod)") + "\n"
+            + "File: " + jarPath + "\n"
+            + "SHA-256: " + sha256 + "\n\n"
+            + "PZO will ask again if this file changes.";
+        String os = System.getProperty("os.name", "").toLowerCase();
+        try {
+            if (os.contains("win")) return showWindowsJavaModDialog(text);
+            if (os.contains("mac")) return showMacJavaModDialog(text);
+            return showLinuxJavaModDialog(text);
+        } catch (Throwable t) {
+            PZOLogger.error("Java mod approval dialog error: " + t.getMessage(), t);
+        }
+        return "SKIP";
+    }
+
+    // The message goes through an environment variable so mod names and paths are never parsed as script.
+    private static String runDialogProcess(ProcessBuilder pb, String text) throws Exception {
+        pb.environment().put("PZO_DIALOG_TEXT", text);
+        Process p = pb.start();
+        String last = null;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.trim().isEmpty()) last = line.trim();
+            }
+        }
+        int code = p.waitFor();
+        return code + ":" + (last != null ? last : "");
+    }
+
+    // No double quotes in the script: Java does not escape them when building the Windows command line.
+    private static String showWindowsJavaModDialog(String text) throws Exception {
+        String psCode =
+            "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
+            "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing');" +
+            "$f=New-Object Windows.Forms.Form;" +
+            "$f.Text='Project Zomboid Optimiser - Java Mod Approval';" +
+            "$f.Size=New-Object Drawing.Size(620,380);" +
+            "$f.StartPosition='CenterScreen';$f.FormBorderStyle='FixedDialog';" +
+            "$f.MaximizeBox=$false;$f.MinimizeBox=$false;$f.TopMost=$true;" +
+            "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);$f.ForeColor=[Drawing.Color]::White;" +
+            "$t=New-Object Windows.Forms.Label;$t.Text='[!] Java Mod Requires Approval';" +
+            "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
+            "$t.ForeColor=[Drawing.Color]::FromArgb(255,185,50);" +
+            "$t.Location=New-Object Drawing.Point(20,15);$t.Size=New-Object Drawing.Size(570,25);$f.Controls.Add($t);" +
+            "$i=New-Object Windows.Forms.TextBox;$i.Multiline=$true;$i.ReadOnly=$true;$i.BorderStyle='None';" +
+            "$i.Text=($env:PZO_DIALOG_TEXT -replace '\\n',[Environment]::NewLine);" +
+            "$i.Font=New-Object Drawing.Font('Segoe UI',9.5);" +
+            "$i.BackColor=[Drawing.Color]::FromArgb(30,30,30);$i.ForeColor=[Drawing.Color]::FromArgb(220,220,220);" +
+            "$i.Location=New-Object Drawing.Point(20,48);$i.Size=New-Object Drawing.Size(570,230);$f.Controls.Add($i);" +
+            "$ba=New-Object Windows.Forms.Button;$ba.Text='Allow';" +
+            "$ba.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold);$ba.BackColor=[Drawing.Color]::FromArgb(40,167,69);$ba.ForeColor=[Drawing.Color]::White;$ba.FlatStyle='Flat';" +
+            "$ba.Location=New-Object Drawing.Point(465,292);$ba.Size=New-Object Drawing.Size(125,32);$ba.DialogResult=[Windows.Forms.DialogResult]::Yes;$f.Controls.Add($ba);" +
+            "$bs=New-Object Windows.Forms.Button;$bs.Text='Skip this launch';" +
+            "$bs.Font=New-Object Drawing.Font('Segoe UI',9);$bs.BackColor=[Drawing.Color]::FromArgb(65,65,65);$bs.ForeColor=[Drawing.Color]::White;$bs.FlatStyle='Flat';" +
+            "$bs.Location=New-Object Drawing.Point(330,292);$bs.Size=New-Object Drawing.Size(125,32);$bs.DialogResult=[Windows.Forms.DialogResult]::No;$f.Controls.Add($bs);" +
+            "$bb=New-Object Windows.Forms.Button;$bb.Text='Always block';" +
+            "$bb.Font=New-Object Drawing.Font('Segoe UI',9);$bb.BackColor=[Drawing.Color]::FromArgb(150,45,45);$bb.ForeColor=[Drawing.Color]::White;$bb.FlatStyle='Flat';" +
+            "$bb.Location=New-Object Drawing.Point(195,292);$bb.Size=New-Object Drawing.Size(125,32);$bb.DialogResult=[Windows.Forms.DialogResult]::Abort;$f.Controls.Add($bb);" +
+            "$f.AcceptButton=$bs;$f.CancelButton=$bs;$f.ActiveControl=$bs;$r=$f.ShowDialog();" +
+            "if($r -eq [Windows.Forms.DialogResult]::Yes){Write-Output 'ALLOW'}elseif($r -eq [Windows.Forms.DialogResult]::Abort){Write-Output 'BLOCK'}else{Write-Output 'SKIP'}";
+        String out = runDialogProcess(new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode), text);
+        if (out.endsWith(":ALLOW")) return "ALLOW";
+        if (out.endsWith(":BLOCK")) return "BLOCK";
+        return "SKIP";
+    }
+
+    private static String showMacJavaModDialog(String text) throws Exception {
+        String script =
+            "set msg to system attribute \"PZO_DIALOG_TEXT\"\n" +
+            "set r to button returned of (display dialog msg with title \"PZO Engine - Java Mod Approval\" " +
+            "buttons {\"Always Block\", \"Skip\", \"Allow\"} default button \"Skip\" cancel button \"Skip\" with icon caution)\n" +
+            "return r";
+        String out = runDialogProcess(new ProcessBuilder("osascript", "-e", script), text);
+        if (out.endsWith(":Allow")) return "ALLOW";
+        if (out.endsWith(":Always Block")) return "BLOCK";
+        return "SKIP";
+    }
+
+    private static String showLinuxJavaModDialog(String text) {
+        try {
+            // zenity --text takes Pango markup, so escape it; exit 0 is Allow, the extra button prints its label
+            String markup = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+            String out = runDialogProcess(new ProcessBuilder("zenity", "--question", "--default-cancel", "--width=560",
+                "--title=PZO Engine - Java Mod Approval", "--text=" + markup,
+                "--ok-label=Allow", "--cancel-label=Skip this launch", "--extra-button=Always block"), text);
+            if (out.endsWith(":Always block")) return "BLOCK";
+            if (out.startsWith("0:")) return "ALLOW";
+            return "SKIP";
+        } catch (Throwable ignored) {}
+
+        try {
+            String out = runDialogProcess(new ProcessBuilder("kdialog", "--title", "PZO Engine - Java Mod Approval",
+                "--warningyesnocancel", text, "--yes-label", "Allow", "--no-label", "Always block", "--cancel-label", "Skip this launch"), text);
+            if (out.startsWith("0:")) return "ALLOW";
+            if (out.startsWith("1:")) return "BLOCK";
+        } catch (Throwable ignored) {}
+
+        PZOLogger.warn("[JavaModLoader] No dialog tool (zenity/kdialog) available to ask about a Java mod; skipping it for this launch.");
+        return "SKIP";
+    }
+
     private static boolean isVersionIgnored(String version) {
         return PZOConfig.isVersionIgnored(version);
     }
