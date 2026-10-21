@@ -34,6 +34,8 @@ public class PZOptimAgent {
                         "zombie.core.properties.PropertyContainer".equals(name) ||
                         "zombie.characters.IsoGameCharacter".equals(name) ||
                         "zombie.characters.animals.IsoAnimal".equals(name) ||
+                        "zombie.pathfind.nativeCode.PathfindNativeThread".equals(name) ||
+                        "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
@@ -277,6 +279,12 @@ public class PZOptimAgent {
             }
             if ("zombie/characters/animals/IsoAnimal".equals(className) && classfileBuffer != null) {
                 return patchIsoAnimal(classfileBuffer);
+            }
+            if ("zombie/pathfind/nativeCode/PathfindNativeThread".equals(className) && classfileBuffer != null) {
+                return patchPathfindNativeThread(classfileBuffer);
+            }
+            if ("zombie/pathfind/nativeCode/PathfindNative".equals(className) && classfileBuffer != null) {
+                return patchPathfindNative(classfileBuffer);
             }
             if ("zombie/iso/weather/fog/ImprovedFogDrawer".equals(className) && classfileBuffer != null) {
                 if (ViewpointStanddownGovernor.isStanddownActive()) {
@@ -2153,6 +2161,32 @@ public class PZOptimAgent {
         }
 
         private byte[] patchIsoAnimal(byte[] b) {
+            byte[] out = prefixSkipIfTrue(b, "updateLOS", "()V", "com/pzoptimizer/AnimalLosSkipGovernor", "shouldSkipUpdateLOS");
+            if (out != null) {
+                PZOLogger.success("[PZO Agent] Bytecode-patched IsoAnimal.updateLOS: AnimalLosSkipGovernor distant calm-animal LOS skip armed");
+            }
+            return out;
+        }
+
+        private byte[] patchPathfindNativeThread(byte[] b) {
+            byte[] out = prefixSkipIfTrue(b, "updateThread", "()V", "com/pzoptimizer/PathfindGovernor", "updateThread");
+            if (out != null) {
+                PZOLogger.success("[PZO Agent] Bytecode-patched PathfindNativeThread.updateThread: PathfindGovernor request budget and square merge armed");
+            }
+            return out;
+        }
+
+        private byte[] patchPathfindNative(byte[] b) {
+            return redirectCallSites(b, 0xB6, "zombie/pathfind/nativeCode/VehicleState", "check", "()Z",
+                "com/pzoptimizer/PathfindGovernor", "vehicleCheck", "(Ljava/lang/Object;)Z",
+                "Bytecode-patched PathfindNative.updateMain: PathfindGovernor vehicle navmesh throttle armed");
+        }
+
+        /**
+         * Prepends "if (gov(this)) return;" to an instance method with no arguments and a void return.
+         * The governor is a static (Object)Z method.
+         */
+        private byte[] prefixSkipIfTrue(byte[] b, String targetName, String targetDesc, String govClassName, String govMethodName) {
             try {
                 DataInputStream dis = new DataInputStream(new ByteArrayInputStream(b));
                 int magic = dis.readInt();
@@ -2188,13 +2222,12 @@ public class PZOptimAgent {
                     i++;
                 }
 
-                // Append AnimalLosSkipGovernor.shouldSkipUpdateLOS(Object)Z
                 int govClassUtf8 = cpCount;
-                cpDos.writeByte(1); cpDos.writeUTF("com/pzoptimizer/AnimalLosSkipGovernor");
+                cpDos.writeByte(1); cpDos.writeUTF(govClassName);
                 int govClass = cpCount + 1;
                 cpDos.writeByte(7); cpDos.writeShort(govClassUtf8);
                 int govMethodNameUtf8 = cpCount + 2;
-                cpDos.writeByte(1); cpDos.writeUTF("shouldSkipUpdateLOS");
+                cpDos.writeByte(1); cpDos.writeUTF(govMethodName);
                 int govMethodDescUtf8 = cpCount + 3;
                 cpDos.writeByte(1); cpDos.writeUTF("(Ljava/lang/Object;)Z");
                 int govNat = cpCount + 4;
@@ -2259,7 +2292,7 @@ public class PZOptimAgent {
                         int alen = dis.readInt();
                         String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
 
-                        if ("Code".equals(aname) && "updateLOS".equals(mName) && "()V".equals(mDesc)) {
+                        if ("Code".equals(aname) && targetName.equals(mName) && targetDesc.equals(mDesc) && (access & 0x0008) == 0) {
                             int maxStack = dis.readUnsignedShort();
                             int maxLocals = dis.readUnsignedShort();
                             int codeLen = dis.readInt();
@@ -2272,7 +2305,7 @@ public class PZOptimAgent {
                             byte refLo = (byte) (govMethodRef & 0xFF);
                             byte[] prefix = new byte[] {
                                 0x2A,                       // 0: aload_0
-                                (byte) 0xB8, refHi, refLo,  // 1: invokestatic AnimalLosSkipGovernor.shouldSkipUpdateLOS(Object)Z
+                                (byte) 0xB8, refHi, refLo,  // 1: invokestatic gov(Object)Z
                                 (byte) 0x99, 0x00, 0x04,    // 4: ifeq +4 -> offset 8
                                 (byte) 0xB1                 // 7: return
                             };
@@ -2327,6 +2360,8 @@ public class PZOptimAgent {
 
                                     if (numEntries > 0) {
                                         int firstTag = smDis.readUnsignedByte();
+                                        // A first frame at offset 0 cannot be shifted behind the inserted one
+                                        if (firstTag == 0 || firstTag == 64) return null;
                                         if (firstTag >= 0 && firstTag <= 63) {
                                             smDos.writeByte(firstTag - 1);
                                         } else if (firstTag >= 64 && firstTag <= 127) {
@@ -2403,11 +2438,10 @@ public class PZOptimAgent {
                 }
 
                 if (patched) {
-                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoAnimal.updateLOS: AnimalLosSkipGovernor distant calm-animal LOS skip armed");
                     return outBaos.toByteArray();
                 }
             } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoAnimal bytecode transform: " + t.getMessage());
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during " + targetName + " prefix transform: " + t.getMessage());
             }
             return null;
         }

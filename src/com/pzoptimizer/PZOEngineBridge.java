@@ -391,6 +391,14 @@ public class PZOEngineBridge {
                 GcSlackGovernor.setActive(value);
             } else if ("JVM_EngineFramePacer".equals(key)) {
                 EngineFramePacer.setEnabled(value);
+            } else if ("JVM_PathfindBudget".equals(key)) {
+                PathfindGovernor.setBudgetActive(value);
+            } else if ("JVM_PathfindSquareMerge".equals(key)) {
+                PathfindGovernor.setSquareMerge(value);
+            } else if ("JVM_PathfindVehicleThrottle".equals(key)) {
+                PathfindGovernor.setVehicleThrottle(value);
+            } else if ("JVM_PathfindNativeAStar".equals(key)) {
+                PathfindGovernor.setNativeAStar(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -402,6 +410,8 @@ public class PZOEngineBridge {
                 ChunkIngestionPacer.setMaxCachedChunks(value);
             } else if ("JVM_ChunkBudgetMs".equals(key)) {
                 ChunkIngestionPacer.setChunkBudgetMs(value);
+            } else if ("JVM_PathfindBudgetMs".equals(key)) {
+                PathfindGovernor.setBudgetMs(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}

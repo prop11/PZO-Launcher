@@ -549,4 +549,8 @@ public class PZONative {
     private static native boolean prewarmFileNative(String filePath);
     private static native int prewarmFilesNative(String[] filePaths);
     private static native boolean isDriveSSDNative(String path);
+    /** 1 active, 0 vanilla, -1 PZPathFind64 not loaded, -2 different DLL build, -3 write failed, -4 not Windows. */
+    public static native int setPathfindAStarHook(boolean enable);
+    /** out = {searches, nodes expanded, indexed decrease-keys}. */
+    public static native void getPathfindAStarStats(long[] out);
 }
