@@ -193,3 +193,4 @@ build_all.py
 build_native.bat
 
 scratch/
+bench/
