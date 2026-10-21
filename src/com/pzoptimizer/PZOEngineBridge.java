@@ -401,6 +401,8 @@ public class PZOEngineBridge {
                 PathfindGovernor.setNativeAStar(value);
             } else if ("JVM_LoadJavaMods".equals(key)) {
                 PZOConfig.setJavaModsEnabled(value);
+            } else if ("JVM_BloodCapPerTile".equals(key)) {
+                BloodCapGovernor.setCapEnabled(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -414,6 +416,8 @@ public class PZOEngineBridge {
                 ChunkIngestionPacer.setChunkBudgetMs(value);
             } else if ("JVM_PathfindBudgetMs".equals(key)) {
                 PathfindGovernor.setBudgetMs(value);
+            } else if ("JVM_BloodMaxPerTile".equals(key)) {
+                BloodCapGovernor.setMaxPerTile(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -934,6 +938,25 @@ public class PZOEngineBridge {
                                             }
                                         );
                                         tableRawset.invoke(pzoTable, "setJvmIntOption", setJvmIntFunc);
+
+                                        // setEngineTuning
+                                        Object setEngineTuningFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    Object callFrame = mArgs[0];
+                                                    Object keyArg = getArg.invoke(callFrame, 0);
+                                                    Object valArg = getArg.invoke(callFrame, 1);
+                                                    if (keyArg != null && valArg instanceof Number) {
+                                                        EngineTuning.set(keyArg.toString(), ((Number)valArg).doubleValue());
+                                                    }
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "setEngineTuning", setEngineTuningFunc);
 
                                         // isMultithreadingNoticeAcknowledged
                                         Object isNoticeAckFunc = Proxy.newProxyInstance(

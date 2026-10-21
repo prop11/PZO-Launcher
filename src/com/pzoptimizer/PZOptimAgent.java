@@ -123,21 +123,8 @@ public class PZOptimAgent {
     }
 
     public static void setBytecodeBloodCap(boolean enabled) {
-        if (bytecodeBloodCap == enabled) return;
         bytecodeBloodCap = enabled;
-        if (instrumentationInstance != null && instrumentationInstance.isRetransformClassesSupported()) {
-            for (Class<?> c : instrumentationInstance.getAllLoadedClasses()) {
-                if ("zombie.iso.IsoGridSquare".equals(c.getName())) {
-                    try {
-                        instrumentationInstance.retransformClasses(c);
-                        PZOLogger.info("[PZO Agent] Retransformed IsoGridSquare (Bytecode Blood Cap: " + enabled + ")");
-                    } catch (Throwable t) {
-                        PZOLogger.warn("[PZO Agent] Retransform failed: " + t.getMessage());
-                    }
-                    break;
-                }
-            }
-        }
+        BloodCapGovernor.setMasterEnabled(enabled);
     }
 
     static class EngineTransformer implements ClassFileTransformer {
@@ -239,10 +226,16 @@ public class PZOptimAgent {
                 return patchSpriteConfig(classfileBuffer);
             }
             if ("zombie/iso/IsoGridSquare".equals(className) && classfileBuffer != null) {
-                byte[] blood = patchIsoGridSquare(classfileBuffer);
-                byte[] base = (blood != null) ? blood : classfileBuffer;
+                byte[] wall = patchIsoGridSquare(classfileBuffer);
+                byte[] base = (wall != null) ? wall : classfileBuffer;
+                byte[] blood = prefixSkipIfTrue(base, "splatBlood", "(IF)V", "com/pzoptimizer/BloodCapGovernor", "shouldSkipSplat");
+                if (blood != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoGridSquare.splatBlood: BloodCapGovernor per-tile blood cap armed");
+                    base = blood;
+                }
                 byte[] recalc = redirectRecalcPropertiesIfNeeded(base);
-                return (recalc != null) ? recalc : blood;
+                if (recalc != null) return recalc;
+                return (base != classfileBuffer) ? base : null;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
                 return patchBaseVehicle(classfileBuffer);
@@ -747,23 +740,6 @@ public class PZOptimAgent {
                     i++;
                 }
 
-                int haveBloodRef = -1;
-                for (int k = 1; k < cpCount; k++) {
-                    if (tags[k] == 10) { // Methodref
-                        int p = tagOffsets[k] + 1;
-                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
-                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
-                            int ntp = tagOffsets[ntIdx] + 1;
-                            int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
-                            int dIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
-                            if ("haveBlood".equals(utf8Strings[nIdx]) && "()Z".equals(utf8Strings[dIdx])) {
-                                haveBloodRef = k;
-                                break;
-                            }
-                        }
-                    }
-                }
-
                 byte[] copy = b.clone();
                 int mpos = pos + 6; // access_flags (2), this_class (2), super_class (2)
                 int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
@@ -805,40 +781,6 @@ public class PZOptimAgent {
                                 // Replace istore_3 (0x3E) with ireturn (0xAC) to correctly return false upon reaching depth recursion limit
                                 copy[cstart + 7] = (byte) 0xAC;
                                 patched++;
-                            }
-                        } else if ("Code".equals(aname) && "splatBlood".equals(mname) && "(IF)V".equals(mdesc)) {
-                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
-                            int cstart = mpos + 8;
-                            if (bytecodeBloodCap && haveBloodRef != -1) {
-                                if (codeLen >= 18 && copy[cstart] == 0x24 && copy[cstart + 1] == 0x0D && copy[cstart + 2] == 0x6A && copy[cstart + 3] == 0x45) {
-                                    byte hbHi = (byte) ((haveBloodRef >> 8) & 0xFF);
-                                    byte hbLo = (byte) (haveBloodRef & 0xFF);
-                                    copy[cstart] = 0x04;            // iconst_1
-                                    copy[cstart + 1] = 0x2A;        // aload_0
-                                    copy[cstart + 2] = (byte) 0xB6; // invokevirtual
-                                    copy[cstart + 3] = hbHi;
-                                    copy[cstart + 4] = hbLo;
-                                    copy[cstart + 5] = 0x64;        // isub (1 - haveBlood)
-                                    copy[cstart + 6] = 0x1B;        // iload_1 (range)
-                                    copy[cstart + 7] = 0x68;        // imul: range = (1 - haveBlood) * range
-                                    copy[cstart + 8] = 0x3C;        // istore_1
-                                    copy[cstart + 9] = 0x0C;        // fconst_1
-                                    copy[cstart + 10] = 0x45;       // fstore_2
-                                    for (int pad = 11; pad < 18; pad++) {
-                                        copy[cstart + pad] = 0x00;  // nop fallthrough to offset 18
-                                    }
-                                    patched++;
-                                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoGridSquare.splatBlood: Real-time blood stacking guard armed (branchless 0ms combat overdraw bypass)");
-                                }
-                            } else if (!bytecodeBloodCap) {
-                                if (codeLen >= 18 && copy[cstart] == 0x04 && copy[cstart + 1] == 0x2A && copy[cstart + 2] == (byte) 0xB6) {
-                                    byte[] origBytes = new byte[] {
-                                        0x24, 0x0D, 0x6A, 0x45, 0x24, 0x13, 0x0A, (byte) 0x8E, 0x6A, 0x45, 0x24, 0x0C, (byte) 0x95, (byte) 0x9E, 0x00, 0x05, 0x0C, 0x45
-                                    };
-                                    System.arraycopy(origBytes, 0, copy, cstart, 18);
-                                    patched++;
-                                    PZOLogger.info("[PZO Agent] Bytecode-reverted IsoGridSquare.splatBlood: Vanilla execution restored");
-                                }
                             }
                         }
                         mpos += alen;
