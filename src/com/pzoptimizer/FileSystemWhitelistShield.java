@@ -15,8 +15,8 @@ import java.util.function.Supplier;
 import sun.misc.Unsafe;
 
 /**
- * B42's ZomboidFileSystem.validatePrefix(path) only allows whitelisted roots. This adds every Steam library
- * and workshop root it finds, so installs and mods on secondary drives are not rejected.
+ * B42's ZomboidFileSystem.validatePrefix(path) only allows whitelisted roots. This adds the Project Zomboid
+ * workshop folder of every Steam library it finds, so Workshop mods on secondary drives are not rejected.
  */
 public final class FileSystemWhitelistShield {
 
@@ -57,41 +57,22 @@ public final class FileSystemWhitelistShield {
         daemon.start();
     }
 
+    // Only folders the game legitimately reads mods and saves from. validatePrefix is a startsWith check, so a
+    // drive root or a whole Steam library here would let any Lua mod read and write anywhere under it.
     private static void collectAllSearchRoots() {
         try {
             File[] roots = File.listRoots();
             if (roots != null) {
                 for (File root : roots) {
-                    if (root.exists()) {
-                        addRootPath(root);
-
-                        String[] commonPaths = new String[]{
-                            "SteamLibrary",
-                            "SteamLibrary/steamapps",
-                            "SteamLibrary/steamapps/workshop",
-                            "SteamLibrary/steamapps/workshop/content/108600",
-                            "Program Files (x86)/Steam/steamapps/workshop/content/108600",
-                            "Program Files/Steam/steamapps/workshop/content/108600",
-                            "Steam/steamapps/workshop/content/108600",
-                            "Games/SteamLibrary/steamapps/workshop/content/108600",
-                            "SteamLibrary/steamapps/common/ProjectZomboid/mods"
-                        };
-
-                        for (String cp : commonPaths) {
-                            File f = new File(root, cp.replace('/', File.separatorChar));
-                            if (f.exists()) {
-                                addRootPath(f);
-                            }
-                        }
-
-                        // Parse libraryfolders.vdf
-                        File vdf1 = new File(root, "Program Files (x86)/Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
-                        if (!vdf1.exists()) {
-                            vdf1 = new File(root, "Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
-                        }
-                        if (vdf1.exists()) {
-                            parseVdf(vdf1);
-                        }
+                    if (!root.exists()) continue;
+                    String[] steamDirs = new String[]{
+                        "Program Files (x86)/Steam", "Program Files/Steam", "Steam", "SteamLibrary", "Games/SteamLibrary"
+                    };
+                    for (String sd : steamDirs) {
+                        File steam = new File(root, sd.replace('/', File.separatorChar));
+                        addWorkshopDir(steam);
+                        File vdf = new File(steam, "steamapps" + File.separator + "libraryfolders.vdf");
+                        if (vdf.isFile()) parseVdf(vdf);
                     }
                 }
             }
@@ -106,18 +87,21 @@ public final class FileSystemWhitelistShield {
         } catch (Throwable ignored) {}
 
         try {
-            File cwd = new File(".").getAbsoluteFile();
-            addRootPath(cwd);
-            File parent = cwd.getParentFile();
-            while (parent != null) {
-                addRootPath(parent);
-                File ws = new File(parent, "workshop/content/108600".replace('/', File.separatorChar));
-                if (ws.exists()) {
-                    addRootPath(ws);
-                }
-                parent = parent.getParentFile();
+            File gameDir = new File(".").getAbsoluteFile().getCanonicalFile();
+            addRootPath(gameDir);
+            // <library>/steamapps/common/ProjectZomboid -> <library>/steamapps/workshop/content/108600
+            File common = gameDir.getParentFile();
+            File steamapps = common != null ? common.getParentFile() : null;
+            if (steamapps != null) {
+                File ws = new File(steamapps, "workshop/content/108600".replace('/', File.separatorChar));
+                if (ws.isDirectory()) addRootPath(ws);
             }
         } catch (Throwable ignored) {}
+    }
+
+    private static void addWorkshopDir(File steamLibrary) {
+        File ws = new File(steamLibrary, "steamapps/workshop/content/108600".replace('/', File.separatorChar));
+        if (ws.isDirectory()) addRootPath(ws);
     }
 
     private static void addRootPath(File f) {
@@ -139,14 +123,7 @@ public final class FileSystemWhitelistShield {
                     String[] parts = line.split("\"");
                     if (parts.length >= 4) {
                         String libPath = parts[3].replace("\\\\", File.separator);
-                        File libDir = new File(libPath);
-                        if (libDir.exists()) {
-                            addRootPath(libDir);
-                            File wsDir = new File(libDir, "steamapps/workshop/content/108600".replace('/', File.separatorChar));
-                            if (wsDir.exists()) {
-                                addRootPath(wsDir);
-                            }
-                        }
+                        addWorkshopDir(new File(libPath));
                     }
                 }
             }
@@ -177,7 +154,7 @@ public final class FileSystemWhitelistShield {
                 hookLazySupplier(lazy);
                 if (!applied) {
                     applied = true;
-                    PZOLogger.success(String.format("[FileSystemWhitelistShield] Successfully injected %d drive/workshop roots into ZomboidFileSystem whitelist (Secondary drive crash protected)", discoveredRoots.size()));
+                    PZOLogger.success(String.format("[FileSystemWhitelistShield] Added %d game/workshop folders to the ZomboidFileSystem whitelist", discoveredRoots.size()));
                 }
                 return true;
             }

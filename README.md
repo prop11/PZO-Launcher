@@ -3,7 +3,7 @@
 # Multi-Threading for Project Zomboid is Here!
 
 ### Project Zomboid Optimizer (PZO)
-**Parallel entity culling • AVX2 SIMD math • Persistent VBOs • Zero-stutter chunk streaming**
+**Parallel entity culling | AVX2 SIMD math | Zero-stutter chunk streaming**
 
 </div>
 
@@ -11,7 +11,7 @@
 
 A lightweight JVM runtime agent (`-javaagent`) and native AVX2 SIMD acceleration engine for **Project Zomboid (Build 42 & Build 41)** across **Windows, Linux / Steam Deck, macOS, and Dedicated Servers**.
 
-Instead of replacing game files on disk or relying on decompiled class overrides, PZO hooks the JVM at startup to fix engine bottlenecks in rendering, chunk loading, line-of-sight calculations, and horde updates. Stock game files and `projectzomboid.jar` remain completely untouched, keeping multiplayer checksums intact and surviving game updates automatically.
+Instead of replacing game classes on disk or relying on decompiled class overrides, PZO hooks the JVM at startup and patches game bytecode in memory to fix engine bottlenecks in rendering, chunk loading and horde updates. `projectzomboid.jar` and the game's own class files are never modified; the installer adds `PZOptimEngine.jar` and the native library to the game folder and updates the launcher JSON (`ProjectZomboid64.json`) so the game loads them.
 
 | | |
 |---|---|
@@ -19,40 +19,7 @@ Instead of replacing game files on disk or relying on decompiled class overrides
 | **Wiki & Guides** | [Official PZO Wiki](https://github.com/prop11/PZO-Launcher/wiki) • [Manual Linux](https://github.com/prop11/PZO-Launcher/wiki/Manual-Linux-Installation) • [Zomdroid (Android)](https://github.com/prop11/PZO-Launcher/wiki/Zomdroid-Support-and-Installation) |
 | **Releases** | [github.com/prop11/PZO-Launcher/releases](https://github.com/prop11/PZO-Launcher/releases) (`Install.bat`, `pzo_optimizer.sh`, `pzo_optimizer.command`, `PZOptimEngine.jar`) |
 | **Supported Versions** | **Build 42 (all revisions) & Build 41.78+** on Windows 10/11, Linux (Proton & Native), Steam Deck, macOS, and Android (Zomdroid) |
-| **Multiplayer & VAC** | **Safe** — In-memory bytecode instrumentation leaves all game files stock. Dedicated server engine included. |
-
----
-
-## Technical Comparison: PZO vs. PZ_Optimization
-
-`xD3I/PZ_Optimization` introduced some great ideas (especially quarter-resolution fog rendering). Since both projects aim to improve PZ performance, here is a straightforward breakdown of how the two approaches differ under the hood:
-
-| Area | PZ_Optimization (`xD3I`) | PZO (`prop11`) |
-|---|---|---|
-| **Multi-Threading** | Worker-thread entity updates disabled by default due to single-threaded Kahlua Lua VM constraints. | Parallelizes spatial sweeps, frustum culling, FOV awareness cones, and vector math across worker threads while keeping Lua state changes safe on the main thread. |
-| **Game Patch Compatibility** | Places recompiled `.class` files in the game folder; tied to a specific game commit/build (Build 42.21). | Dynamic `-javaagent` bytecode hooks applied in memory at launch. Survives game updates across Build 42 and Build 41 without manual file replacements. |
-| **File Modifications** | Overwrites/adds `.class` files in the local game directory. | Zero file modifications. Leaves `projectzomboid.jar` and game files 100% stock. |
-| **Decompilation Safety** | Recompiles decompiled source files directly, which can occasionally risk decompiler quirks in complex game systems. | Hooks bytecode at runtime using dynamic transformers and reflection, avoiding decompiler artifacts. |
-| **Fog & Storm Rendering** | Offscreen quarter-resolution fog buffer via replaced fog drawer class. | Single-pass quarter-resolution fog buffer (`FogQuarterBufferGovernor`). Batches fog geometry into a single GPU draw call with bilinear upsampling. |
-| **Line-of-Sight (LOS)** | Optimizes LOS tracking in modified player class. | Thread-local $O(1)$ hash mirror (`PlayerLosOptimizer`), removing the linear scan in `lastSpotted.contains` without modifying player classes. |
-| **Dedicated Servers** | Client-only (not intended for dedicated servers). | Dedicated server support included (`PZOServerEngine.jar`) with multithreaded AI pathfinding and asynchronous SQLite world-saving. |
-| **Platforms & Builds** | Targets Build 42.21 on Windows. | Build 42 (all revisions) & Build 41.78+ on Windows, Linux / Steam Deck, and macOS. |
-
----
-
-## Benchmarks
-
-Uncapped runs on high-load routes (1440p / 4K, maximum zoom):
-
-| Test Scenario | Vanilla | PZ_Optimization | PZO Core | Notes / Improvement |
-|---|---|---|---|---|
-| **120 km/h Drive (Thunderstorm & Lightning)** | 70 fps / 67.0 ms p99 | 342 fps / 14.8 ms p99 | **396 fps / 9.6 ms p99** | +465% FPS (Persistent VBOs & single-call weather buffer) |
-| **120 km/h Drive (Heavy Weather Fog)** | 111 fps / 18.9 ms p99 | 228 fps / 12.4 ms p99 | **264 fps / 8.2 ms p99** | +138% FPS (Quarter-res fog fragment bypass) |
-| **Louisville Combat (2,500+ Horde)** | 23.7 fps / 94.4 ms p99 | 28.2 fps / 64.8 ms p99 | **44.8 fps / 28.2 ms p99** | +89% FPS / -70% frame time (Multi-core workers & bone culling) |
-| **Rosewood High-Speed Spin (Chunk Streaming)** | 114 fps / 31.4 ms p99 | 398 fps / 11.2 ms p99 | **486 fps / 7.8 ms p99** | +326% FPS (Spatial culler + streamer wake-up) |
-| **Chunk Queue Wait Time** | 180 ms latency | 56 ms latency | **14 ms latency** | Faster chunk streamer dispatch |
-| **Launch to Main Menu** | 7.35 s | 5.35 s | **4.80 s** | -35% Boot time |
-| **World Load Time (Continue)** | 7.50 s | 4.45 s | **3.40 s** | -55% Load time |
+| **Multiplayer & VAC** | In-memory bytecode instrumentation; the game's own class files and `projectzomboid.jar` are never modified. Dedicated server engine included. |
 
 ---
 
@@ -88,25 +55,13 @@ Stock Project Zomboid runs almost all spatial math, visibility calculations, and
 * **Frustum Bone Bypass**: Skips all 64 bone matrix transformations for offscreen entities or entities culled outside the camera frustum.
 * **Adaptive Frame Skipping**: Scales bone matrix updates for distant entities (>50 tiles away), cutting animation CPU overhead while maintaining full animation quality for nearby zombies.
 
-### 3. Visibility Caching (`PlayerLosOptimizer`)
-* **Eliminates $O(N^2)$ Scans**: In large hordes, stock PZ's synchronized tracking stack (`lastSpotted.contains(zombie)`) runs an $O(N)$ linear scan per entity, causing combat frame drops.
-* **Thread-Local Hash Mirror**: PZO maintains an $O(1)$ identity-hash mirror alongside the tracking stack, returning visibility results instantly while preserving vanilla stack behavior.
-
-### 4. Chunk Streamer Dispatch (`StreamerWake` & `MultiCoreChunkStreamer`)
+### 3. Chunk Streamer Dispatch (`StreamerWake` & `MultiCoreChunkStreamer`)
 * **Immediate Thread Dispatch**: Stock PZ throttles chunk requests on the game thread. PZO unparks and signals the background chunk streamer thread immediately upon enqueue.
 * **Direct NIO Ring**: Allocates off-heap direct memory buffers for parallel chunk decompression, reducing driving stutter at high speeds.
 
 ---
 
 ## Render Optimizations
-
-### Single-Pass Quarter-Resolution Fog (`FogQuarterBufferGovernor`)
-* **The Bottleneck**: Stock draws heavy weather fog as up to 12 overlapping screen-wide rectangles per tile row across multiple levels, running 7-octave noise texture math directly across the full scene buffer (50–100+ separate draw calls).
-* **The Optimization**: Batches all fog rectangles into a single VBO using vertex attributes for coordinates, fade bounds, and noise offsets. Dispatches all rectangles in a **single GPU draw call** into an offscreen quarter-resolution framebuffer (50% width × 50% height = 25% fragment fill rate), cutting 75% of GPU fragment shading math. Re-composites the buffer with bilinear filtering in one pass.
-
-### Persistent Mapped VBOs (`PersistentVBOGovernor`)
-* **Zero-Copy Memory Mapping**: Uses OpenGL 4.4+ / `GL_ARB_buffer_storage` (`GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT`) to keep vertex buffers permanently mapped in memory.
-* **Zero-Stall Fences**: Multi-slot ring buffers synchronized with lightweight GPU fences (`glFenceSync` / `glClientWaitSync`) eliminate per-frame `glBufferData` reallocations and driver stalls. Falls back cleanly to dynamic streaming on macOS and older OpenGL hardware.
 
 ### High-Precision Timer & GC Tuning (`HighPrecisionTimer`)
 * **Windows Multimedia Timer**: Sets the OS timer resolution to 1.0ms for consistent frame pacing and reduced micro-stutter.

@@ -14,6 +14,11 @@ public class PZOptimAgent {
     public static void premain(String agentArgs, Instrumentation inst) {
         if (instrumentationInstance != null) return;
         instrumentationInstance = inst;
+        if (IncompatibleModGuard.isPzOptimizationInstalled()) {
+            IncompatibleModGuard.reportAndWarn();
+            PZOLogger.warn("[PZO Agent] Incompatible mod installed: no transformer registered, agent idle.");
+            return;
+        }
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
 
         try {
@@ -39,10 +44,7 @@ public class PZOptimAgent {
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
-                        "zombie.core.skinnedmodel.visual.HumanVisual".equals(name) ||
-                        "zombie.core.textures.TexturePackDevice".equals(name) ||
-                        "zombie.iso.weather.fog.ImprovedFogDrawer".equals(name) ||
-                        "zombie.iso.IsoChunk$SanityCheck".equals(name)) {
+                        "zombie.fileSystem.TexturePackDevice".equals(name)) {
                         try {
                             inst.retransformClasses(c);
                             PZOLogger.success("[PZO Agent] Retransformed early-loaded class: " + name);
@@ -213,12 +215,6 @@ public class PZOptimAgent {
         }
 
         private byte[] transformSpecific(String className, byte[] classfileBuffer) {
-            if ("zombie/core/skinnedmodel/visual/HumanVisual".equals(className) && classfileBuffer != null) {
-                return patchHumanVisual(classfileBuffer);
-            }
-            if ("zombie/iso/IsoChunk$SanityCheck".equals(className) && classfileBuffer != null) {
-                return patchSanityCheck(classfileBuffer);
-            }
             if ("zombie/iso/IsoChunkMap".equals(className) && classfileBuffer != null) {
                 return patchIsoChunkMap(classfileBuffer);
             }
@@ -238,12 +234,16 @@ public class PZOptimAgent {
                 return (base != classfileBuffer) ? base : null;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
-                return patchBaseVehicle(classfileBuffer);
+                byte[] glove = prefixSkipIfTrue(classfileBuffer, "addKeyToGloveBox", "()V", "com/pzoptimizer/VehicleKeyGuard", "shouldSkipGloveBoxKey");
+                if (glove != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched BaseVehicle.addKeyToGloveBox: skipped only when the glovebox has no container");
+                }
+                return glove;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);
             }
-            if ("zombie/core/textures/TexturePackDevice".equals(className) && classfileBuffer != null) {
+            if ("zombie/fileSystem/TexturePackDevice".equals(className) && classfileBuffer != null) {
                 return patchTexturePackDevice(classfileBuffer);
             }
             if ("zombie/iso/ChunkSaveWorker".equals(className) && classfileBuffer != null) {
@@ -281,246 +281,6 @@ public class PZOptimAgent {
             }
             if ("zombie/GameProfiler".equals(className) && classfileBuffer != null) {
                 return patchGameProfiler(classfileBuffer);
-            }
-            if ("zombie/iso/weather/fog/ImprovedFogDrawer".equals(className) && classfileBuffer != null) {
-                if (ViewpointStanddownGovernor.isStanddownActive()) {
-                    PZOLogger.info("[PZO Agent] Project Viewpoint standdown active - skipping ImprovedFogDrawer bytecode transform to ensure 3D mod compatibility.");
-                    return null;
-                }
-                return patchImprovedFogDrawer(classfileBuffer);
-            }
-            return null;
-        }
-
-        private byte[] patchHumanVisual(byte[] b) {
-            try {
-                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
-                int pos = 10;
-                int skinTextureUtf8 = -1;
-                int intDescUtf8 = -1;
-
-                int[] tagOffsets = new int[cpCount];
-                int[] tags = new int[cpCount];
-                int i = 1;
-                while (i < cpCount) {
-                    tags[i] = b[pos] & 0xFF;
-                    tagOffsets[i] = pos;
-                    pos++;
-                    int tag = tags[i];
-                    if (tag == 1) { // Utf8
-                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
-                        pos += 2;
-                        if (len == 11 && b[pos] == 's' && b[pos + 1] == 'k' && b[pos + 2] == 'i' && b[pos + 3] == 'n' &&
-                            b[pos + 4] == 'T' && b[pos + 5] == 'e' && b[pos + 6] == 'x' && b[pos + 7] == 't' &&
-                            b[pos + 8] == 'u' && b[pos + 9] == 'r' && b[pos + 10] == 'e') {
-                            skinTextureUtf8 = i;
-                        } else if (len == 1 && b[pos] == 'I') {
-                            intDescUtf8 = i;
-                        }
-                        pos += len;
-                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
-                        pos += 2;
-                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
-                        pos += 4;
-                    } else if (tag == 3 || tag == 4) {
-                        pos += 4;
-                    } else if (tag == 5 || tag == 6) {
-                        pos += 8;
-                        i++;
-                    } else if (tag == 15) {
-                        pos += 3;
-                    } else {
-                        return null;
-                    }
-                    i++;
-                }
-
-                if (skinTextureUtf8 == -1 || intDescUtf8 == -1) return null;
-
-                int natIdx = -1;
-                for (int k = 1; k < cpCount; k++) {
-                    if (tags[k] == 12) {
-                        int p = tagOffsets[k] + 1;
-                        int n1 = ((b[p] & 0xFF) << 8) | (b[p + 1] & 0xFF);
-                        int n2 = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
-                        if (n1 == skinTextureUtf8 && n2 == intDescUtf8) {
-                            natIdx = k;
-                            break;
-                        }
-                    }
-                }
-                if (natIdx == -1) return null;
-
-                int fieldRefIdx = -1;
-                for (int k = 1; k < cpCount; k++) {
-                    if (tags[k] == 9) {
-                        int p = tagOffsets[k] + 1;
-                        int n2 = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
-                        if (n2 == natIdx) {
-                            fieldRefIdx = k;
-                            break;
-                        }
-                    }
-                }
-                if (fieldRefIdx == -1) return null;
-
-                byte refHigh = (byte) ((fieldRefIdx >> 8) & 0xFF);
-                byte refLow = (byte) (fieldRefIdx & 0xFF);
-
-                byte[] copy = b.clone();
-                int patchedCount = 0;
-                for (int k = pos; k < copy.length - 4; k++) {
-                    if (copy[k] == 0x2a && copy[k + 1] == 0x02 && copy[k + 2] == (byte) 0xb5 &&
-                        copy[k + 3] == refHigh && copy[k + 4] == refLow) {
-                        copy[k + 1] = 0x03; // iconst_0
-                        patchedCount++;
-                    }
-                }
-
-                if (patchedCount > 0) {
-                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched HumanVisual skinTexture initial default to 0 (%d sites)", patchedCount));
-                    return copy;
-                }
-            } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during HumanVisual bytecode transform: " + t.getMessage());
-            }
-            return null;
-        }
-
-        private byte[] patchSanityCheck(byte[] b) {
-            try {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream(b.length);
-                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(b));
-                DataOutputStream dos = new DataOutputStream(baos);
-
-                dos.writeInt(dis.readInt()); // magic
-                dos.writeShort(dis.readShort()); // minor
-                dos.writeShort(dis.readShort()); // major
-
-                int cpCount = dis.readUnsignedShort();
-                dos.writeShort(cpCount);
-
-                String[] utf8Strings = new String[cpCount];
-                int codeUtf8Index = -1;
-
-                int i = 1;
-                while (i < cpCount) {
-                    int tag = dis.readUnsignedByte();
-                    dos.writeByte(tag);
-                    if (tag == 1) { // Utf8
-                        String s = dis.readUTF();
-                        dos.writeUTF(s);
-                        utf8Strings[i] = s;
-                        if ("Code".equals(s)) codeUtf8Index = i;
-                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
-                        dos.writeShort(dis.readShort());
-                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
-                        dos.writeInt(dis.readInt());
-                    } else if (tag == 3 || tag == 4) {
-                        dos.writeInt(dis.readInt());
-                    } else if (tag == 5 || tag == 6) {
-                        dos.writeLong(dis.readLong());
-                        i++;
-                    } else if (tag == 15) {
-                        dos.writeByte(dis.readByte());
-                        dos.writeShort(dis.readShort());
-                    } else {
-                        return null;
-                    }
-                    i++;
-                }
-
-                dos.writeShort(dis.readShort()); // access_flags
-                dos.writeShort(dis.readShort()); // this_class
-                dos.writeShort(dis.readShort()); // super_class
-
-                int ifacesCount = dis.readUnsignedShort();
-                dos.writeShort(ifacesCount);
-                for (int k = 0; k < ifacesCount; k++) {
-                    dos.writeShort(dis.readShort());
-                }
-
-                int fieldsCount = dis.readUnsignedShort();
-                dos.writeShort(fieldsCount);
-                for (int f = 0; f < fieldsCount; f++) {
-                    dos.writeShort(dis.readShort());
-                    dos.writeShort(dis.readShort());
-                    dos.writeShort(dis.readShort());
-                    int attrCount = dis.readUnsignedShort();
-                    dos.writeShort(attrCount);
-                    for (int a = 0; a < attrCount; a++) {
-                        dos.writeShort(dis.readShort());
-                        int len = dis.readInt();
-                        dos.writeInt(len);
-                        byte[] data = dis.readNBytes(len);
-                        dos.write(data);
-                    }
-                }
-
-                int methodsCount = dis.readUnsignedShort();
-                dos.writeShort(methodsCount);
-                boolean patched = false;
-
-                for (int m = 0; m < methodsCount; m++) {
-                    int access = dis.readUnsignedShort();
-                    int nameIdx = dis.readUnsignedShort();
-                    int descIdx = dis.readUnsignedShort();
-                    String mName = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : null;
-
-                    dos.writeShort(access);
-                    dos.writeShort(nameIdx);
-                    dos.writeShort(descIdx);
-
-                    int attrCount = dis.readUnsignedShort();
-
-                    if ("log".equals(mName) && codeUtf8Index != -1) {
-                        // Skip original attributes (including StackMapTable)
-                        for (int a = 0; a < attrCount; a++) {
-                            dis.readShort();
-                            int len = dis.readInt();
-                            dis.skipBytes(len);
-                        }
-                        // Replace the body with a bare RETURN, so no StackMapTable is needed
-                        dos.writeShort(1); // attrCount = 1
-                        dos.writeShort(codeUtf8Index); // attr_name = "Code"
-                        dos.writeInt(13); // attr_length = 2+2+4+1+2+2 = 13
-                        dos.writeShort(0); // max_stack = 0
-                        dos.writeShort(2); // max_locals = 2
-                        dos.writeInt(1); // code_length = 1
-                        dos.writeByte(0xB1); // RETURN (0xB1)
-                        dos.writeShort(0); // exception_table_length = 0
-                        dos.writeShort(0); // attributes_count = 0
-                        patched = true;
-                    } else {
-                        dos.writeShort(attrCount);
-                        for (int a = 0; a < attrCount; a++) {
-                            dos.writeShort(dis.readShort());
-                            int len = dis.readInt();
-                            dos.writeInt(len);
-                            byte[] data = dis.readNBytes(len);
-                            dos.write(data);
-                        }
-                    }
-                }
-
-                // class attributes
-                int classAttrCount = dis.readUnsignedShort();
-                dos.writeShort(classAttrCount);
-                for (int a = 0; a < classAttrCount; a++) {
-                    dos.writeShort(dis.readShort());
-                    int len = dis.readInt();
-                    dos.writeInt(len);
-                    byte[] data = dis.readNBytes(len);
-                    dos.write(data);
-                }
-
-                dos.flush();
-                if (patched) {
-                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoChunk$SanityCheck: log() neutralized to no-op (Multi-Core chunk streaming enabled)");
-                    return baos.toByteArray();
-                }
-            } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoChunk$SanityCheck transform: " + t.getMessage());
             }
             return null;
         }
@@ -799,153 +559,6 @@ public class PZOptimAgent {
             }
             return null;
         }
-        private byte[] patchBaseVehicle(byte[] b) {
-            try {
-                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
-                int pos = 10;
-                String[] utf8Strings = new String[cpCount];
-
-                int i = 1;
-                while (i < cpCount) {
-                    int tag = b[pos] & 0xFF;
-                    pos++;
-                    if (tag == 1) {
-                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
-                        pos += 2;
-                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
-                        pos += len;
-                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
-                        pos += 2;
-                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
-                        pos += 4;
-                    } else if (tag == 3 || tag == 4) {
-                        pos += 4;
-                    } else if (tag == 5 || tag == 6) {
-                        pos += 8;
-                        i++;
-                    } else if (tag == 15) {
-                        pos += 3;
-                    } else {
-                        return null;
-                    }
-                    i++;
-                }
-
-                byte[] copy = b.clone();
-                int mpos = pos + 6;
-                int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                mpos += 2 + ifaces * 2;
-
-                int fields = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                mpos += 2;
-                for (int f = 0; f < fields; f++) {
-                    mpos += 6;
-                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                    mpos += 2;
-                    for (int a = 0; a < attrs; a++) {
-                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
-                        mpos += 6 + alen;
-                    }
-                }
-
-                int methods = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                mpos += 2;
-                int patched = 0;
-
-                for (int m = 0; m < methods; m++) {
-                    int nameIdx = ((b[mpos + 2] & 0xFF) << 8) | (b[mpos + 3] & 0xFF);
-                    int descIdx = ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
-                    String mname = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
-                    String mdesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
-                    mpos += 6;
-                    int attrs = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                    mpos += 2;
-                    for (int a = 0; a < attrs; a++) {
-                        int anameIdx = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
-                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
-                        int alen = ((b[mpos + 2] & 0xFF) << 24) | ((b[mpos + 3] & 0xFF) << 16) | ((b[mpos + 4] & 0xFF) << 8) | (b[mpos + 5] & 0xFF);
-                        mpos += 6;
-                        if ("Code".equals(aname) && "addKeyToGloveBox".equals(mname) && "()V".equals(mdesc)) {
-                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
-                            int cstart = mpos + 8;
-                            if (codeLen >= 128 && copy[cstart + 52] == 0x2b && copy[cstart + 53] == (byte) 0xb4 && copy[cstart + 60] == 0x57) {
-                                byte cpHi = copy[cstart + 54];
-                                byte cpLo = copy[cstart + 55];
-                                byte mHi = copy[cstart + 58];
-                                byte mLo = copy[cstart + 59];
-
-                                // Patch 1: offset 52 (21 bytes)
-                                copy[cstart + 52] = 0x2b;
-                                copy[cstart + 53] = (byte) 0xb4;
-                                copy[cstart + 54] = cpHi;
-                                copy[cstart + 55] = cpLo;
-                                copy[cstart + 56] = (byte) 0xc6;
-                                copy[cstart + 57] = 0x00;
-                                copy[cstart + 58] = 0x48; // ifnull 128
-                                copy[cstart + 59] = 0x2b;
-                                copy[cstart + 60] = (byte) 0xb4;
-                                copy[cstart + 61] = cpHi;
-                                copy[cstart + 62] = cpLo;
-                                copy[cstart + 63] = 0x2c;
-                                copy[cstart + 64] = (byte) 0xb6;
-                                copy[cstart + 65] = mHi;
-                                copy[cstart + 66] = mLo;
-                                copy[cstart + 67] = 0x57; // pop
-                                copy[cstart + 68] = 0x00; // nop
-                                copy[cstart + 69] = 0x00; // nop
-                                copy[cstart + 70] = (byte) 0xa7; // goto 128
-                                copy[cstart + 71] = 0x00;
-                                copy[cstart + 72] = 0x3a; // offset: 128 - 70 = 58 (0x003a)
-
-                                // Patch 2: offset 82 (19 bytes)
-                                copy[cstart + 82] = 0x2b;
-                                copy[cstart + 83] = (byte) 0xb4;
-                                copy[cstart + 84] = cpHi;
-                                copy[cstart + 85] = cpLo;
-                                copy[cstart + 86] = (byte) 0xc6;
-                                copy[cstart + 87] = 0x00;
-                                copy[cstart + 88] = 0x2a; // ifnull 128
-                                copy[cstart + 89] = 0x2b;
-                                copy[cstart + 90] = (byte) 0xb4;
-                                copy[cstart + 91] = cpHi;
-                                copy[cstart + 92] = cpLo;
-                                copy[cstart + 93] = 0x2c;
-                                copy[cstart + 94] = (byte) 0xb6;
-                                copy[cstart + 95] = mHi;
-                                copy[cstart + 96] = mLo;
-                                copy[cstart + 97] = 0x57; // pop
-                                copy[cstart + 98] = 0x00; // nop
-                                copy[cstart + 99] = 0x00; // nop
-                                copy[cstart + 100] = (byte) 0xb1; // return
-
-                                // Patch 3: offset 119 (9 bytes)
-                                copy[cstart + 119] = 0x2b;
-                                copy[cstart + 120] = (byte) 0xb4;
-                                copy[cstart + 121] = cpHi;
-                                copy[cstart + 122] = cpLo;
-                                copy[cstart + 123] = (byte) 0xc6;
-                                copy[cstart + 124] = 0x00;
-                                copy[cstart + 125] = 0x05; // ifnull 128
-                                copy[cstart + 126] = 0x00; // nop
-                                copy[cstart + 127] = 0x00; // nop
-
-                                patched++;
-                            }
-                        }
-                        mpos += alen;
-                    }
-                }
-
-                if (patched > 0) {
-                    PZOLogger.success("[PZO Agent] Bytecode-patched BaseVehicle.addKeyToGloveBox: Glovebox container null-checks armed (NullPointerException eliminated)");
-                    return copy;
-                }
-            } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during BaseVehicle bytecode transform: " + t.getMessage());
-            }
-            return null;
-        }
-
         private byte[] patchFBORenderLevels(byte[] b) {
             try {
                 int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
@@ -1217,7 +830,7 @@ public class PZOptimAgent {
                 byte oldHi = (byte) ((targetMethodRef >> 8) & 0xFF);
                 byte oldLo = (byte) (targetMethodRef & 0xFF);
 
-                byte[] utf8Bytes = "com/pzoptimizer/TexturePackIndexGovernor".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                byte[] utf8Bytes = "com/pzoptimizer/PackPageScanner".getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 ByteArrayOutputStream baos = new ByteArrayOutputStream(b.length + 64);
                 DataOutputStream dos = new DataOutputStream(baos);
 
@@ -1259,272 +872,10 @@ public class PZOptimAgent {
 
                 dos.write(rest);
                 dos.flush();
-                PZOLogger.success(String.format("[PZO Agent] Bytecode-patched TexturePackDevice.readPage: TexturePackIndexGovernor page-seek acceleration armed (%d call sites)", patched));
+                PZOLogger.success(String.format("[PZO Agent] Bytecode-patched TexturePackDevice.readPage: PackPageScanner block terminator search (%d call sites)", patched));
                 return baos.toByteArray();
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Agent] Non-fatal notice during TexturePackDevice bytecode transform: " + t.getMessage());
-            }
-            return null;
-        }
-
-        private byte[] patchImprovedFogDrawer(byte[] b) {
-            try {
-                DataInputStream dis = new DataInputStream(new ByteArrayInputStream(b));
-                int magic = dis.readInt();
-                int minor = dis.readUnsignedShort();
-                int major = dis.readUnsignedShort();
-                int cpCount = dis.readUnsignedShort();
-
-                ByteArrayOutputStream cpBaos = new ByteArrayOutputStream();
-                DataOutputStream cpDos = new DataOutputStream(cpBaos);
-
-                String[] utf8Strings = new String[cpCount + 16];
-                int codeUtf8Idx = -1;
-                int stackMapUtf8Idx = -1;
-
-                int i = 1;
-                while (i < cpCount) {
-                    int tag = dis.readUnsignedByte();
-                    cpDos.writeByte(tag);
-                    if (tag == 1) { // Utf8
-                        String s = dis.readUTF();
-                        cpDos.writeUTF(s);
-                        utf8Strings[i] = s;
-                        if ("Code".equals(s)) codeUtf8Idx = i;
-                        if ("StackMapTable".equals(s)) stackMapUtf8Idx = i;
-                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
-                        cpDos.writeShort(dis.readUnsignedShort());
-                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18 || tag == 3 || tag == 4) {
-                        cpDos.writeInt(dis.readInt());
-                    } else if (tag == 5 || tag == 6) {
-                        cpDos.writeLong(dis.readLong());
-                        i++;
-                    } else if (tag == 15) {
-                        cpDos.writeByte(dis.readUnsignedByte());
-                        cpDos.writeShort(dis.readUnsignedShort());
-                    } else {
-                        return null;
-                    }
-                    i++;
-                }
-
-                // Add constant pool entries for FogQuarterBufferGovernor.render(Object)Z
-                int govClassUtf8 = cpCount;
-                cpDos.writeByte(1); cpDos.writeUTF("com/pzoptimizer/FogQuarterBufferGovernor");
-                int govClass = cpCount + 1;
-                cpDos.writeByte(7); cpDos.writeShort(govClassUtf8);
-                int govMethodNameUtf8 = cpCount + 2;
-                cpDos.writeByte(1); cpDos.writeUTF("render");
-                int govMethodDescUtf8 = cpCount + 3;
-                cpDos.writeByte(1); cpDos.writeUTF("(Ljava/lang/Object;)Z");
-                int govNat = cpCount + 4;
-                cpDos.writeByte(12); cpDos.writeShort(govMethodNameUtf8); cpDos.writeShort(govMethodDescUtf8);
-                int govMethodRef = cpCount + 5;
-                cpDos.writeByte(10); cpDos.writeShort(govClass); cpDos.writeShort(govNat);
-
-                int newCpCount = cpCount + 6;
-
-                ByteArrayOutputStream outBaos = new ByteArrayOutputStream();
-                DataOutputStream outDos = new DataOutputStream(outBaos);
-                outDos.writeInt(magic);
-                outDos.writeShort(minor);
-                outDos.writeShort(major);
-                outDos.writeShort(newCpCount);
-                outDos.write(cpBaos.toByteArray());
-
-                // Class header info: access_flags, this_class, super_class
-                outDos.writeShort(dis.readUnsignedShort());
-                outDos.writeShort(dis.readUnsignedShort());
-                outDos.writeShort(dis.readUnsignedShort());
-
-                int ifaces = dis.readUnsignedShort();
-                outDos.writeShort(ifaces);
-                for (int k = 0; k < ifaces; k++) outDos.writeShort(dis.readUnsignedShort());
-
-                int fields = dis.readUnsignedShort();
-                outDos.writeShort(fields);
-                for (int f = 0; f < fields; f++) {
-                    outDos.writeShort(dis.readUnsignedShort());
-                    outDos.writeShort(dis.readUnsignedShort());
-                    outDos.writeShort(dis.readUnsignedShort());
-                    int attrs = dis.readUnsignedShort();
-                    outDos.writeShort(attrs);
-                    for (int a = 0; a < attrs; a++) {
-                        outDos.writeShort(dis.readUnsignedShort());
-                        int len = dis.readInt();
-                        outDos.writeInt(len);
-                        outDos.write(dis.readNBytes(len));
-                    }
-                }
-
-                int methods = dis.readUnsignedShort();
-                outDos.writeShort(methods);
-                boolean patched = false;
-
-                for (int m = 0; m < methods; m++) {
-                    int access = dis.readUnsignedShort();
-                    int nameIdx = dis.readUnsignedShort();
-                    int descIdx = dis.readUnsignedShort();
-                    outDos.writeShort(access);
-                    outDos.writeShort(nameIdx);
-                    outDos.writeShort(descIdx);
-
-                    String mName = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : "";
-                    String mDesc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : "";
-
-                    int attrs = dis.readUnsignedShort();
-                    outDos.writeShort(attrs);
-
-                    for (int a = 0; a < attrs; a++) {
-                        int anameIdx = dis.readUnsignedShort();
-                        int alen = dis.readInt();
-                        String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
-
-                        if ("Code".equals(aname) && "render".equals(mName) && "()V".equals(mDesc)) {
-                            int maxStack = dis.readUnsignedShort();
-                            int maxLocals = dis.readUnsignedShort();
-                            int codeLen = dis.readInt();
-                            byte[] origCode = dis.readNBytes(codeLen);
-                            int exTableLen = dis.readUnsignedShort();
-                            byte[] exTable = dis.readNBytes(exTableLen * 8);
-                            int codeAttrs = dis.readUnsignedShort();
-
-                            // Prefix opcodes:
-                            // 0: aload_0 (0x2A)
-                            // 1: invokestatic govMethodRef (0xB8, hi, lo)
-                            // 4: ifeq +4 (0x99, 0x00, 0x04) -> jumps to offset 8
-                            // 7: return (0xB1)
-                            // 8: <origCode>
-                            byte refHi = (byte) ((govMethodRef >> 8) & 0xFF);
-                            byte refLo = (byte) (govMethodRef & 0xFF);
-                            byte[] prefix = new byte[] {
-                                0x2A,
-                                (byte) 0xB8, refHi, refLo,
-                                (byte) 0x99, 0x00, 0x04,
-                                (byte) 0xB1
-                            };
-
-                            byte[] newCode = new byte[prefix.length + origCode.length];
-                            System.arraycopy(prefix, 0, newCode, 0, prefix.length);
-                            System.arraycopy(origCode, 0, newCode, prefix.length, origCode.length);
-
-                            ByteArrayOutputStream caBaos = new ByteArrayOutputStream();
-                            DataOutputStream caDos = new DataOutputStream(caBaos);
-                            caDos.writeShort(Math.max(maxStack, 1));
-                            caDos.writeShort(maxLocals);
-                            caDos.writeInt(newCode.length);
-                            caDos.write(newCode);
-                            caDos.writeShort(exTableLen);
-                            caDos.write(exTable);
-
-                            List<Integer> retainedAttrNames = new ArrayList<>();
-                            List<byte[]> retainedAttrPayloads = new ArrayList<>();
-
-                            for (int ca = 0; ca < codeAttrs; ca++) {
-                                int canameIdx = dis.readUnsignedShort();
-                                int calen = dis.readInt();
-                                byte[] cadata = dis.readNBytes(calen);
-                                String caname = (canameIdx > 0 && canameIdx < cpCount) ? utf8Strings[canameIdx] : "";
-
-                                // The 8-byte prefix shifts every instruction, so LocalVariableTable, LocalVariableTypeTable and
-                                // LineNumberTable would point at wrong offsets and fail class loading; drop them
-                                if ("LocalVariableTable".equals(caname) || "LocalVariableTypeTable".equals(caname) || "LineNumberTable".equals(caname)) {
-                                    continue;
-                                }
-
-                                if ("StackMapTable".equals(caname)) {
-                                    // Adjust StackMapTable: prepend same_frame(8) and decrement first frame delta by 1
-                                    DataInputStream smDis = new DataInputStream(new ByteArrayInputStream(cadata));
-                                    int numEntries = smDis.readUnsignedShort();
-                                    ByteArrayOutputStream smBaos = new ByteArrayOutputStream();
-                                    DataOutputStream smDos = new DataOutputStream(smBaos);
-                                    smDos.writeShort(numEntries + 1);
-                                    smDos.writeByte(0x08); // same_frame at offset 8
-
-                                    if (numEntries > 0) {
-                                        int firstTag = smDis.readUnsignedByte();
-                                        if (firstTag >= 0 && firstTag <= 63) {
-                                            smDos.writeByte(firstTag - 1);
-                                        } else if (firstTag >= 64 && firstTag <= 127) {
-                                            smDos.writeByte(firstTag - 1);
-                                            copyVerificationTypeInfo(smDis, smDos);
-                                        } else if (firstTag == 247) {
-                                            smDos.writeByte(247);
-                                            int delta = smDis.readUnsignedShort();
-                                            smDos.writeShort(delta - 1);
-                                            copyVerificationTypeInfo(smDis, smDos);
-                                        } else if (firstTag >= 248 && firstTag <= 251) {
-                                            smDos.writeByte(firstTag);
-                                            int delta = smDis.readUnsignedShort();
-                                            smDos.writeShort(delta - 1);
-                                        } else if (firstTag == 252 || firstTag == 253 || firstTag == 254) {
-                                            smDos.writeByte(firstTag);
-                                            int delta = smDis.readUnsignedShort();
-                                            smDos.writeShort(delta - 1);
-                                            int numLocals = firstTag - 251;
-                                            for (int l = 0; l < numLocals; l++) copyVerificationTypeInfo(smDis, smDos);
-                                        } else if (firstTag == 255) {
-                                            smDos.writeByte(255);
-                                            int delta = smDis.readUnsignedShort();
-                                            smDos.writeShort(delta - 1);
-                                            int numL = smDis.readUnsignedShort();
-                                            smDos.writeShort(numL);
-                                            for (int l = 0; l < numL; l++) copyVerificationTypeInfo(smDis, smDos);
-                                            int numS = smDis.readUnsignedShort();
-                                            smDos.writeShort(numS);
-                                            for (int s = 0; s < numS; s++) copyVerificationTypeInfo(smDis, smDos);
-                                        } else {
-                                            smDos.writeByte(firstTag);
-                                            int delta = smDis.readUnsignedShort();
-                                            smDos.writeShort(delta - 1);
-                                        }
-                                        byte[] remainingSm = smDis.readAllBytes();
-                                        smDos.write(remainingSm);
-                                    }
-                                    retainedAttrNames.add(canameIdx);
-                                    retainedAttrPayloads.add(smBaos.toByteArray());
-                                } else {
-                                    retainedAttrNames.add(canameIdx);
-                                    retainedAttrPayloads.add(cadata);
-                                }
-                            }
-
-                            caDos.writeShort(retainedAttrNames.size());
-                            for (int k = 0; k < retainedAttrNames.size(); k++) {
-                                caDos.writeShort(retainedAttrNames.get(k));
-                                caDos.writeInt(retainedAttrPayloads.get(k).length);
-                                caDos.write(retainedAttrPayloads.get(k));
-                            }
-
-                            byte[] caBytes = caBaos.toByteArray();
-                            outDos.writeShort(anameIdx);
-                            outDos.writeInt(caBytes.length);
-                            outDos.write(caBytes);
-                            patched = true;
-                        } else {
-                            outDos.writeShort(anameIdx);
-                            outDos.writeInt(alen);
-                            outDos.write(dis.readNBytes(alen));
-                        }
-                    }
-                }
-
-                // Class attributes
-                int cattrs = dis.readUnsignedShort();
-                outDos.writeShort(cattrs);
-                for (int ca = 0; ca < cattrs; ca++) {
-                    outDos.writeShort(dis.readUnsignedShort());
-                    int len = dis.readInt();
-                    outDos.writeInt(len);
-                    outDos.write(dis.readNBytes(len));
-                }
-
-                if (patched) {
-                    PZOLogger.success("[PZO Agent] Bytecode-patched ImprovedFogDrawer.render: FogQuarterBufferGovernor quarter-res pass armed (400% storm fill-rate lead erased)");
-                    return outBaos.toByteArray();
-                }
-            } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during ImprovedFogDrawer bytecode transform: " + t.getMessage());
             }
             return null;
         }

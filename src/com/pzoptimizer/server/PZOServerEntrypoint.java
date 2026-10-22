@@ -52,7 +52,6 @@ public class PZOServerEntrypoint {
         com.pzoptimizer.PZOFastMath.initialize();
         com.pzoptimizer.GenerationalHeapCleaner.startGovernor();
         com.pzoptimizer.AsyncEntityDistanceCache.initialize();
-        com.pzoptimizer.CorpseAudioGovernor.applyCorpseAudioLimits();
         com.pzoptimizer.EngineGLStateGovernor.initialize();
         com.pzoptimizer.EngineFramePacer.initialize();
         com.pzoptimizer.NativeDirectMemoryPool.initialize();

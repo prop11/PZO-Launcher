@@ -35,7 +35,6 @@ public final class EngineGLStateGovernor {
 
     public static void initialize() {
         reset();
-        PersistentVBOGovernor.initReflection();
         if (mobileGLEnvironment) {
             PZOLogger.info("[EngineGLStateGovernor] Mobile / GL4ES execution environment detected (Zomdroid)");
         }

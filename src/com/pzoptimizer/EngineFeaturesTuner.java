@@ -110,11 +110,6 @@ public class EngineFeaturesTuner {
                 ChunkCrashShield.enforceChunkGridSanity();
             } catch (Throwable ignored) {}
 
-            try {
-                enforceSilencedLogTypes();
-                PZOLogger.success("EngineFeaturesTuner: Silenced non-fatal chunk load and worldgen warning logs (Zone, WorldGen, Foraging, Clothing stalls eliminated)");
-            } catch (Throwable ignored) {}
-
         } catch (Throwable t) {
             PZOLogger.warn("EngineFeaturesTuner notice: " + t.getMessage());
         }
@@ -179,32 +174,6 @@ public class EngineFeaturesTuner {
                     if (fboGroup != null) {
                         setOptionValue(fboGroup, "corpsesInChunkTexture", false);
                         setOptionValue(fboGroup, "itemsInChunkTexture", false);
-                    }
-                } catch (Throwable ignored) {}
-            }
-            enforceSilencedLogTypes();
-        } catch (Throwable ignored) {}
-    }
-
-    public static void enforceSilencedLogTypes() {
-        try {
-            Class<?> debugTypeClass = Class.forName("zombie.debug.DebugType");
-            Class<?> logSeverityClass = Class.forName("zombie.debug.LogSeverity");
-            @SuppressWarnings("rawtypes")
-            Object errorSeverity = Enum.valueOf((Class<Enum>) logSeverityClass.asSubclass(Enum.class), "Error");
-
-            String[] typesToSilence = new String[]{
-                "General", "Entity", "Sprite", "Objects", "Mod", "ItemPicker",
-                "Zone", "WorldGen", "Foraging", "MapLoading", "Clothing",
-                "Asset", "Script", "Recipe", "IsoRegion", "FileIO"
-            };
-            for (String typeName : typesToSilence) {
-                try {
-                    Field typeField = debugTypeClass.getField(typeName);
-                    Object debugType = typeField.get(null);
-                    if (debugType != null) {
-                        Method setLogSeverity = debugTypeClass.getMethod("setLogSeverity", logSeverityClass);
-                        setLogSeverity.invoke(debugType, errorSeverity);
                     }
                 } catch (Throwable ignored) {}
             }

@@ -922,6 +922,42 @@ public class UpdateDialog {
         return "SKIP";
     }
 
+    /** Blocking OK-only warning. The title must be a fixed string; the message goes through PZO_DIALOG_TEXT. */
+    public static void showWarningNotice(String title, String text) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        try {
+            if (os.contains("win")) {
+                String psCode =
+                    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
+                    "[void][Windows.Forms.MessageBox]::Show(($env:PZO_DIALOG_TEXT -replace '\\n',[Environment]::NewLine)," +
+                    "'" + title.replace("'", "''") + "',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Warning)";
+                runDialogProcess(new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode), text);
+                return;
+            }
+            if (os.contains("mac")) {
+                String script =
+                    "set msg to system attribute \"PZO_DIALOG_TEXT\"\n" +
+                    "display dialog msg with title \"" + title.replace("\"", "") + "\" buttons {\"OK\"} default button \"OK\" with icon caution";
+                runDialogProcess(new ProcessBuilder("osascript", "-e", script), text);
+                return;
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("Warning dialog error: " + t.getMessage());
+            return;
+        }
+
+        try {
+            String markup = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+            runDialogProcess(new ProcessBuilder("zenity", "--warning", "--width=560", "--title=" + title, "--text=" + markup), text);
+            return;
+        } catch (Throwable ignored) {}
+        try {
+            runDialogProcess(new ProcessBuilder("kdialog", "--title", title, "--sorry", text), text);
+        } catch (Throwable ignored) {
+            PZOLogger.warn("No dialog tool (zenity/kdialog) available to show: " + title);
+        }
+    }
+
     private static boolean isVersionIgnored(String version) {
         return PZOConfig.isVersionIgnored(version);
     }

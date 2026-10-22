@@ -154,7 +154,7 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         }
     }
 
-    // Same resync as FogQuarterBufferGovernor: the engine caches bound texture/shader/GL state
+    // The engine caches the bound texture/shader/GL state, so it must be told everything changed under it
     private static void resyncEngineState() {
         try {
             Texture.lastTextureID = -1;

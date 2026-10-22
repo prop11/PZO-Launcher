@@ -64,7 +64,6 @@ public class EngineThreadGovernor {
 
                 if (renderThreadOptimized && mainThreadOptimized && mainThreadPacerHooked) {
                     backoffMs = 5000;
-                    TexturePackIndexGovernor.saveDirtyIndices();
                 } else {
                     backoffMs = Math.min(backoffMs + 200, 1000);
                 }
@@ -161,8 +160,6 @@ public class EngineThreadGovernor {
         private int lastFrameCount = -1;
         private static Field fsField = null;
         private static Field fcField = null;
-        private static Field cxField = null;
-        private static Field cyField = null;
         private static boolean reflectionInit = false;
 
         public MainThreadDiagnosticHook(Runnable target) {
@@ -207,8 +204,6 @@ public class EngineThreadGovernor {
                 if (sampleFs != null) {
                     Class<?> fsClass = sampleFs.getClass();
                     fcField = fsClass.getField("frameCount");
-                    cxField = fsClass.getField("camCharacterX");
-                    cyField = fsClass.getField("camCharacterY");
                 }
             } catch (Throwable ignored) {}
             reflectionInit = true;
@@ -230,8 +225,6 @@ public class EngineThreadGovernor {
                             if (fcField == null) {
                                 Class<?> fsClass = fs.getClass();
                                 fcField = fsClass.getField("frameCount");
-                                cxField = fsClass.getField("camCharacterX");
-                                cyField = fsClass.getField("camCharacterY");
                             }
                             int fc = fcField.getInt(fs);
                             if (fc != lastFrameCount) {
@@ -239,15 +232,6 @@ public class EngineThreadGovernor {
                                 ChunkIngestionPacer.onFrameBoundary(fc);
                                 FrameDropDiagnosticEngine.onFrameTick();
                                 PopmanGovernor.onFrameBoundary(fc);
-                                float cx = cxField != null ? cxField.getFloat(fs) : 0.0f;
-                                float cy = cyField != null ? cyField.getFloat(fs) : 0.0f;
-                                int pcx = (int) (cx / 8.0f);
-                                int pcy = (int) (cy / 8.0f);
-                                ChunkBakeGovernor.onFrameBoundary(fc, pcx, pcy);
-                                UIRetainedOptimizer.onFrameBoundary();
-                                PZOUniformCache.reset();
-                                UIFramePacingGovernor.onFrameBoundary(System.currentTimeMillis());
-                                AudioCadenceGovernor.isCadenceTickDue(fc);
                                 VRRDisplayGovernor.detectMonitorRefreshRate();
                                 paceToNextFrame();
                             }
