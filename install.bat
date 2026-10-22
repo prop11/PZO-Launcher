@@ -691,7 +691,7 @@ if (Test-Path $InstalledJarPath) {
             # Restore original clean stock backup if available
             $cleanBackup = $null
             if (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue) {
-                $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Ascending
+                $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
                 foreach ($bf in $bakFiles) {
                     $txt = Get-Content -LiteralPath $bf.FullName -Raw -ErrorAction SilentlyContinue
                     if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64")) {
