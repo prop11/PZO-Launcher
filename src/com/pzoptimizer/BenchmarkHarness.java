@@ -106,6 +106,15 @@ public final class BenchmarkHarness {
             + " zooms=" + Arrays.toString(zooms) + " route=" + routeTiles + " tiles @ " + routeSpeed + " tiles/s");
     }
 
+    /**
+     * stock=1 in the bench config: the run is a vanilla baseline. PZO then applies no patches or governors and only
+     * drives this harness, so the same route and sampling can be compared against a normal PZO run.
+     */
+    public static boolean isStockBaselineRequested() {
+        String v = readConfig().get("stock");
+        return v != null && (v.equals("1") || v.equalsIgnoreCase("true"));
+    }
+
     private static Map<String, String> readConfig() {
         Map<String, String> cfg = new HashMap<>();
         File f = new File(System.getProperty("user.home"), "Zomboid" + File.separator + "Lua" + File.separator + CONFIG_FILE);
@@ -284,6 +293,8 @@ public final class BenchmarkHarness {
                     finish(false);
                     return;
                 }
+                protectPlayer(p);
+                keepUnpaused(now);
             }
             switch (phase) {
                 case MENU:
@@ -315,8 +326,7 @@ public final class BenchmarkHarness {
                     }
                     if ("IngameState".equals(state) && IsoPlayer.players[0] != null) {
                         IsoPlayer p = IsoPlayer.players[0];
-                        p.setGodMod(true);
-                        p.setInvisible(true);
+                        protectPlayer(p);
                         // The start tile comes straight from the save on the first in-game frame and the player is
                         // pinned there from now on, so stray input or a moving vehicle cannot shift the scene
                         p.ensureNotInVehicle();
@@ -414,6 +424,59 @@ public final class BenchmarkHarness {
             shotName(false), shotName(true)));
     }
 
+    private static long lastUnpauseCheck;
+    private static boolean pauseNoted;
+
+    // The Survival Guide (shown on load when its option is on) and other modal panels pause single player, and a
+    // paused world renders far faster than a running one, which would make the run meaningless
+    private static void keepUnpaused(long now) {
+        if (now - lastUnpauseCheck < 250_000_000L) return;
+        lastUnpauseCheck = now;
+        try {
+            Object[] r = runLua(
+                "local fixed = false\n"
+                + "if SurvivalGuide and SurvivalGuide.instance and SurvivalGuide.instance:isVisible() then SurvivalGuide.instance:setVisible(false) fixed = true end\n"
+                + "if isGamePaused() then setGameSpeed(1) fixed = true end\n"
+                + "return fixed\n");
+            if (r.length > 0 && Boolean.TRUE.equals(r[0]) && !pauseNoted) {
+                pauseNoted = true;
+                notes.add("closed a pausing panel / unpaused in phase " + phase);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    // A recording started with -XX:StartFlightRecording is only written on a clean JVM exit, and the quit below can
+    // end in Runtime.halt, so every running recording is dumped into the run folder first
+    private static void dumpFlightRecordings() {
+        try {
+            int i = 0;
+            for (jdk.jfr.Recording r : jdk.jfr.FlightRecorder.getFlightRecorder().getRecordings()) {
+                if (r.getState() != jdk.jfr.RecordingState.RUNNING) continue;
+                File out = new File(outDir, i == 0 ? "profile.jfr" : "profile-" + i + ".jfr");
+                r.dump(out.toPath());
+                PZOLogger.info("[BenchmarkHarness] Flight recording written to " + out.getAbsolutePath());
+                i++;
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[BenchmarkHarness] Could not dump flight recording: " + t);
+        }
+    }
+
+    // Re-applied every tick: a Lua mod or save script can switch god mode off, and wounds, infection or a fall
+    // inherited from the save would otherwise kill the character mid-route and void the run
+    private static void protectPlayer(IsoPlayer p) {
+        try {
+            // The unforced setters check a debug/admin role capability and switch the cheat OFF without it
+            if (!p.isGodMod()) p.setGodMod(true, true);
+            if (!p.isInvisible()) p.setInvisible(true, true);
+            if (!p.isZombiesDontAttack()) p.getCheats().set(zombie.characters.CheatType.ZOMBIES_DONT_ATTACK, true);
+            if (p.getBodyDamage() != null && (p.getBodyDamage().isInfected() || p.getBodyDamage().getHealth() < 90.0f)) {
+                p.getBodyDamage().setInfected(false);
+                p.getBodyDamage().RestoreToFullHealth();
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private static String esc(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
@@ -438,6 +501,8 @@ public final class BenchmarkHarness {
             w.println("  \"fsr_render_scale\": " + WorldRenderScale.getRenderThreadScale() + ",");
             w.println("  \"fsr_frames_upscaled\": " + WorldUpscalerGovernor.framesUpscaled.get() + ",");
             w.println("  \"fsr_shaders_rewritten\": " + WorldRenderScale.shadersRewritten + ",");
+            w.println("  \"vehicle_anim_updates_skipped\": " + VehicleAnimSkipGovernor.updatesSkipped.get() + ",");
+            w.println("  \"vehicle_anim_updates_run\": " + VehicleAnimSkipGovernor.updatesRun.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");
@@ -447,6 +512,7 @@ public final class BenchmarkHarness {
         } catch (Throwable t) {
             PZOLogger.warn("[BenchmarkHarness] Could not write results: " + t);
         }
+        dumpFlightRecordings();
         PZOLogger.success("[BenchmarkHarness] Benchmark finished (ok=" + ok + "), quitting to desktop");
         // The save is a disposable bench copy, so a normal quit is fine; escalate if it does not happen
         try {

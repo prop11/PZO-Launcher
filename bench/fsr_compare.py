@@ -89,7 +89,7 @@ class Backups:
                     f.write(data)
 
 
-def run_game(args, mode, template, label, run_dir, extra_args):
+def run_game(args, mode, template, label, run_dir, extra_args, extra_config=None):
     exe = os.path.join(args.game_dir, "ProjectZomboid64.exe")
     os.makedirs(run_dir, exist_ok=True)
     results = os.path.join(run_dir, "results.json")
@@ -109,6 +109,8 @@ def run_game(args, mode, template, label, run_dir, extra_args):
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             f.write("out=%s\nlabel=%s\nzooms=%s\nroute_tiles=%d\nroute_speed=%s\n" % (
                 run_dir, label, args.zooms, args.route_tiles, args.route_speed))
+            for k, v in (extra_config or {}).items():
+                f.write("%s=%s\n" % (k, v))
 
         cmd = [exe] + extra_args
         print("  launching:", " ".join(cmd))

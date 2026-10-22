@@ -19,6 +19,10 @@ public class PZOptimAgent {
             PZOLogger.warn("[PZO Agent] Incompatible mod installed: no transformer registered, agent idle.");
             return;
         }
+        if (BenchmarkHarness.isStockBaselineRequested()) {
+            PZOLogger.info("[PZO Agent] Stock baseline benchmark run: no transformer registered.");
+            return;
+        }
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
 
         try {
@@ -234,11 +238,20 @@ public class PZOptimAgent {
                 return (base != classfileBuffer) ? base : null;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
-                byte[] glove = prefixSkipIfTrue(classfileBuffer, "addKeyToGloveBox", "()V", "com/pzoptimizer/VehicleKeyGuard", "shouldSkipGloveBoxKey");
+                byte[] current = classfileBuffer;
+                byte[] glove = prefixSkipIfTrue(current, "addKeyToGloveBox", "()V", "com/pzoptimizer/VehicleKeyGuard", "shouldSkipGloveBoxKey");
                 if (glove != null) {
                     PZOLogger.success("[PZO Agent] Bytecode-patched BaseVehicle.addKeyToGloveBox: skipped only when the glovebox has no container");
+                    current = glove;
                 }
-                return glove;
+                byte[] anim = BytecodeRedirect.virtualToStatic(current,
+                    "zombie/core/skinnedmodel/animation/AnimationPlayer", "Update", "(F)V",
+                    "com/pzoptimizer/VehicleAnimSkipGovernor", "update", "(Lzombie/core/skinnedmodel/animation/AnimationPlayer;F)V");
+                if (anim != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched BaseVehicle: AnimationPlayer.Update routed through VehicleAnimSkipGovernor");
+                    current = anim;
+                }
+                return current != classfileBuffer ? current : null;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);

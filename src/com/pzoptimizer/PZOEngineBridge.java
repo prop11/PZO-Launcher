@@ -257,6 +257,8 @@ public class PZOEngineBridge {
                 WorldUpscalerGovernor.setDynamicScaleActive(value);
             } else if ("JVM_PackPageScan".equals(key)) {
                 PackPageScanner.setActive(value);
+            } else if ("JVM_VehicleAnimSkip".equals(key)) {
+                VehicleAnimSkipGovernor.setActive(value);
             } else if ("JVM_HotSaveGovernor".equals(key)) {
                 HotSaveGovernor.setActive(value);
             } else if ("JVM_ChunkHandoffRecalc".equals(key)) {

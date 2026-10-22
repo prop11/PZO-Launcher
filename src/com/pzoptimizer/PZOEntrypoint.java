@@ -30,6 +30,14 @@ public class PZOEntrypoint {
             return;
         }
 
+        if (BenchmarkHarness.isStockBaselineRequested()) {
+            PZOLogger.info("[PZO] Stock baseline benchmark run: no PZO patches or governors, harness only.");
+            BenchmarkHarness.checkLaunchParams(args);
+            EngineThreadGovernor.initializeBenchmarkOnly();
+            launchGame(args);
+            return;
+        }
+
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
         LogSpamShield.initialize();

@@ -48,6 +48,29 @@ public class EngineThreadGovernor {
         PZOLogger.success("[EngineThreadGovernor] Thread and Scheduler Governor initialized");
     }
 
+    private static volatile boolean benchmarkOnly = false;
+
+    /** Stock baseline runs: only the mainThreadLoop wrapper is installed, so BenchmarkHarness ticks and nothing else runs. */
+    public static void initializeBenchmarkOnly() {
+        if (!initialized.compareAndSet(false, true)) {
+            return;
+        }
+        benchmarkOnly = true;
+        Thread hookDaemon = new Thread(() -> {
+            while (!mainThreadPacerHooked) {
+                try {
+                    installMainLoopWrapper();
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    return;
+                } catch (Throwable ignored) {}
+            }
+        }, "PZO-BenchmarkHook");
+        hookDaemon.setDaemon(true);
+        hookDaemon.start();
+        PZOLogger.info("[EngineThreadGovernor] Stock baseline: benchmark tick hook only");
+    }
+
     private static void governorLoop() {
         int backoffMs = 100;
         while (true) {
@@ -139,20 +162,24 @@ public class EngineThreadGovernor {
 
             // Wrap MainThread.mainThreadLoop so the per-frame governors and the frame pacer run after each step
             if (!mainThreadPacerHooked) {
-                try {
-                    Field loopField = mainThreadClass.getDeclaredField("mainThreadLoop");
-                    loopField.setAccessible(true);
-                    Runnable origLoop = (Runnable) loopField.get(null);
-                    if (origLoop != null && !(origLoop instanceof MainThreadDiagnosticHook)) {
-                        loopField.set(null, new MainThreadDiagnosticHook(origLoop));
-                        mainThreadPacerHooked = true;
-                        PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Zero-Lock Diagnostic Probe (Uncapped Native Clock)");
-                    }
-                } catch (Throwable t) {
-                    // Non-fatal if field not yet assigned
-                }
+                installMainLoopWrapper();
             }
         } catch (Throwable ignored) {}
+    }
+
+    private static void installMainLoopWrapper() {
+        try {
+            Field loopField = Class.forName("zombie.MainThread").getDeclaredField("mainThreadLoop");
+            loopField.setAccessible(true);
+            Runnable origLoop = (Runnable) loopField.get(null);
+            if (origLoop != null && !(origLoop instanceof MainThreadDiagnosticHook)) {
+                loopField.set(null, new MainThreadDiagnosticHook(origLoop));
+                mainThreadPacerHooked = true;
+                PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Zero-Lock Diagnostic Probe (Uncapped Native Clock)");
+            }
+        } catch (Throwable t) {
+            // Non-fatal if field not yet assigned
+        }
     }
 
     public static class MainThreadDiagnosticHook implements Runnable {
@@ -217,6 +244,7 @@ public class EngineThreadGovernor {
                 if (BenchmarkHarness.isActive()) {
                     BenchmarkHarness.tick();
                 }
+                if (benchmarkOnly) return;
                 try {
                     ensureReflection();
                     if (fsField != null) {
