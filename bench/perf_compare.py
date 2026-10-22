@@ -11,7 +11,7 @@ Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profi
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
 
 Usage:  python bench/perf_compare.py [--source Mode/SaveName] [--refresh-template] [--zooms 1.0,2.0]
-                                     [--route-tiles 40] [--route-speed 8] [--runs stock,pzo] [--repeat 1]
+                                     [--route-tiles 40] [--route-speed 8] [--runs stock,pzo] [--repeat 1] [--threat]
 """
 
 import argparse
@@ -64,6 +64,8 @@ def main():
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--runs", default="stock,pzo")
     ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--threat", action="store_true",
+                    help="zombies see and attack the player (death still prevented) so AI/combat cost is measured")
     args = ap.parse_args()
 
     if fc.game_running():
@@ -93,7 +95,9 @@ def main():
                 os.makedirs(run_dir, exist_ok=True)
                 print("[%s]" % label)
                 write_launcher_json(launcher_json, original, run, run_dir)
-                extra = {"stock": 1} if run == "stock" else None
+                extra = {"stock": 1} if run == "stock" else {}
+                if args.threat:
+                    extra["threat"] = 1
                 data = fc.run_game(args, mode, template, label, run_dir, [], extra)
                 if data is None:
                     print("  no results.json (see %s)" % run_dir)

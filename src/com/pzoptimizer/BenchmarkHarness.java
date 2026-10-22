@@ -94,6 +94,7 @@ public final class BenchmarkHarness {
             }
             if (cfg.containsKey("route_tiles")) routeTiles = Integer.parseInt(cfg.get("route_tiles").trim());
             if (cfg.containsKey("route_speed")) routeSpeed = Float.parseFloat(cfg.get("route_speed").trim());
+            threat = "1".equals(cfg.get("threat")) || "true".equalsIgnoreCase(cfg.get("threat"));
         } catch (NumberFormatException e) {
             notes.add("bad config value: " + e.getMessage());
         }
@@ -234,12 +235,18 @@ public final class BenchmarkHarness {
         runLua(paused ? "setGameSpeed(0)\nsetShowPausedMessage(false)\nreturn true\n" : "setGameSpeed(1)\nreturn true\n");
     }
 
+    private static BenchFrameEvent frameEvent;
+
     private static void sampleFrame(long now) {
         int fc = IsoCamera.frameState.frameCount;
         if (fc == lastFrameCount) return;
         if (lastFrameCount != -1) frameTimes.add(now - lastFrameNs);
         lastFrameCount = fc;
         lastFrameNs = now;
+        if (frameEvent != null) frameEvent.commit();
+        frameEvent = new BenchFrameEvent();
+        frameEvent.zoom = zooms[zoomIndex];
+        frameEvent.begin();
     }
 
     // Square loop E, S, W, N back to the start tile
@@ -286,14 +293,21 @@ public final class BenchmarkHarness {
             }
             if (phase.ordinal() >= Phase.WARMUP.ordinal()) {
                 IsoPlayer p = IsoPlayer.players[0];
+                // Heal first: several zombie hits in one frame can push BodyDamage health below zero before the
+                // game's own god-mode restore runs, and isDead() reads that transient value
+                if (p != null) protectPlayer(p);
                 // A dead player swaps the scene for the death screen (no vision cone, no lighting falloff), which
-                // makes the run incomparable; god mode does not stop deaths already in progress from the save
-                if (p == null || p.isDead()) {
+                // makes the run incomparable. Only a death that sticks after healing counts.
+                if (p != null && p.isDead() && !p.isOnDeathDone()) {
+                    deadTicks++;
+                } else {
+                    deadTicks = 0;
+                }
+                if (p == null || p.isOnDeathDone() || deadTicks > 30) {
                     notes.add("player died in phase " + phase + " - the bench save's character is not viable");
                     finish(false);
                     return;
                 }
-                protectPlayer(p);
                 keepUnpaused(now);
             }
             switch (phase) {
@@ -362,6 +376,7 @@ public final class BenchmarkHarness {
                 case ROUTE:
                     sampleFrame(now);
                     if (moveAlongRoute(now - phaseStart)) {
+                        frameEvent = null;
                         recordZoom();
                         setPaused(true);
                         UIManager.setVisibleAllUI(false);
@@ -424,6 +439,10 @@ public final class BenchmarkHarness {
             shotName(false), shotName(true)));
     }
 
+    // threat=1: zombies see, chase and attack the player (only death is prevented), so AI, pathfinding and
+    // combat cost show up the way they do in real play. Default runs keep the player invisible.
+    private static boolean threat;
+    private static int deadTicks;
     private static long lastUnpauseCheck;
     private static boolean pauseNoted;
 
@@ -468,12 +487,14 @@ public final class BenchmarkHarness {
         try {
             // The unforced setters check a debug/admin role capability and switch the cheat OFF without it
             if (!p.isGodMod()) p.setGodMod(true, true);
-            if (!p.isInvisible()) p.setInvisible(true, true);
-            if (!p.isZombiesDontAttack()) p.getCheats().set(zombie.characters.CheatType.ZOMBIES_DONT_ATTACK, true);
+            if (p.isInvisible() == threat) p.setInvisible(!threat, true);
+            if (p.isZombiesDontAttack() == threat) p.getCheats().set(zombie.characters.CheatType.ZOMBIES_DONT_ATTACK, !threat);
             if (p.getBodyDamage() != null && (p.getBodyDamage().isInfected() || p.getBodyDamage().getHealth() < 90.0f)) {
                 p.getBodyDamage().setInfected(false);
                 p.getBodyDamage().RestoreToFullHealth();
             }
+            if (p.getHealth() < 1.0f && !p.isOnDeathDone()) p.setHealth(1.0f);
+            p.setDeathDragDown(false);
         } catch (Throwable ignored) {}
     }
 
@@ -495,6 +516,7 @@ public final class BenchmarkHarness {
             w.println("  \"ok\": " + ok + ",");
             w.println("  \"screen\": [" + Core.getInstance().getScreenWidth() + ", " + Core.getInstance().getScreenHeight() + "],");
             w.println("  \"route\": {\"tiles\": " + routeTiles + ", \"tiles_per_s\": " + routeSpeed + "},");
+            w.println("  \"threat\": " + threat + ",");
             w.println("  \"fsr_requested\": " + WorldUpscalerGovernor.isRequestedAtLaunch() + ",");
             w.println("  \"fsr_active\": " + WorldUpscalerGovernor.isActive() + ",");
             w.println("  \"fsr_hooks_installed\": " + WorldRenderScale.isInstalled() + ",");
@@ -503,6 +525,8 @@ public final class BenchmarkHarness {
             w.println("  \"fsr_shaders_rewritten\": " + WorldRenderScale.shadersRewritten + ",");
             w.println("  \"vehicle_anim_updates_skipped\": " + VehicleAnimSkipGovernor.updatesSkipped.get() + ",");
             w.println("  \"vehicle_anim_updates_run\": " + VehicleAnimSkipGovernor.updatesRun.get() + ",");
+            w.println("  \"vehicle_los_tests_rejected\": " + VehicleLosGovernor.testsRejected.get() + ",");
+            w.println("  \"vehicle_los_tests_run\": " + VehicleLosGovernor.testsRun.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

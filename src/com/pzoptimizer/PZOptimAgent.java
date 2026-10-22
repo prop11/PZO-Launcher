@@ -46,6 +46,7 @@ public class PZOptimAgent {
                         "zombie.pathfind.nativeCode.PathfindNativeThread".equals(name) ||
                         "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
+                        "zombie.characters.IsoZombie".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name)) {
@@ -252,6 +253,16 @@ public class PZOptimAgent {
                     current = anim;
                 }
                 return current != classfileBuffer ? current : null;
+            }
+            if ("zombie/characters/IsoZombie".equals(className) && classfileBuffer != null) {
+                byte[] los = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "zombie/vehicles/BaseVehicle", "getIntersectPoint", "(Lorg/joml/Vector3f;Lorg/joml/Vector3f;Lorg/joml/Vector3f;)Lorg/joml/Vector3f;",
+                    "com/pzoptimizer/VehicleLosGovernor", "getIntersectPoint",
+                    "(Lzombie/vehicles/BaseVehicle;Lorg/joml/Vector3f;Lorg/joml/Vector3f;Lorg/joml/Vector3f;)Lorg/joml/Vector3f;");
+                if (los != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoZombie: vehicle sight-line test routed through VehicleLosGovernor");
+                }
+                return los;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);
