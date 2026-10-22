@@ -559,6 +559,7 @@ public final class BenchmarkHarness {
             w.println("  \"spotted_lookups_hashed\": " + SpottedListGovernor.lookupsHashed.get() + ",");
             w.println("  \"spotted_mirror_rebuilds\": " + SpottedListGovernor.rebuilds.get() + ",");
             w.println("  \"zombie_sim_levels_per_frame\": " + simLevelsJson() + ",");
+            w.println("  \"textures_downscaled_off_main\": " + TextureDownscaleGovernor.texturesDownscaled.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

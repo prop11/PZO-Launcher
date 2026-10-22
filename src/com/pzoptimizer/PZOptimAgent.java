@@ -49,6 +49,8 @@ public class PZOptimAgent {
                         "zombie.characters.IsoZombie".equals(name) ||
                         "zombie.characters.IsoPlayer".equals(name) ||
                         "zombie.MovingObjectUpdateScheduler".equals(name) ||
+                        "zombie.core.textures.TextureIDAssetManager".equals(name) ||
+                        "zombie.fileSystem.FileSystemImpl".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name)) {
@@ -265,6 +267,25 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] Bytecode-patched IsoZombie: vehicle sight-line test routed through VehicleLosGovernor");
                 }
                 return los;
+            }
+            if ("zombie/core/textures/TextureIDAssetManager".equals(className) && classfileBuffer != null) {
+                byte[] tex = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "zombie/core/textures/TextureIDAssetManager", "setTask", "(Lzombie/asset/Asset;Lzombie/asset/AssetTask;)V",
+                    "com/pzoptimizer/TextureDownscaleGovernor", "setTask",
+                    "(Lzombie/core/textures/TextureIDAssetManager;Lzombie/asset/Asset;Lzombie/asset/AssetTask;)V");
+                if (tex != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched TextureIDAssetManager: oversized texture loads tagged for worker downscale");
+                }
+                return tex;
+            }
+            if ("zombie/fileSystem/FileSystemImpl".equals(className) && classfileBuffer != null) {
+                byte[] fsb = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "zombie/fileSystem/FileSystemImpl", "runAsync", "(Lzombie/fileSystem/FileSystemImpl$AsyncItem;)I",
+                    "com/pzoptimizer/TextureDownscaleGovernor", "runAsync", "(Lzombie/fileSystem/FileSystemImpl;Ljava/lang/Object;)I");
+                if (fsb != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched FileSystemImpl: tagged texture loads downscaled on the file worker");
+                }
+                return fsb;
             }
             if ("zombie/MovingObjectUpdateScheduler".equals(className) && classfileBuffer != null) {
                 byte[] sim = BytecodeRedirect.virtualToStatic(classfileBuffer,
