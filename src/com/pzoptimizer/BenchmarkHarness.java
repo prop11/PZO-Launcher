@@ -527,6 +527,8 @@ public final class BenchmarkHarness {
             w.println("  \"vehicle_anim_updates_run\": " + VehicleAnimSkipGovernor.updatesRun.get() + ",");
             w.println("  \"vehicle_los_tests_rejected\": " + VehicleLosGovernor.testsRejected.get() + ",");
             w.println("  \"vehicle_los_tests_run\": " + VehicleLosGovernor.testsRun.get() + ",");
+            w.println("  \"spotted_lookups_hashed\": " + SpottedListGovernor.lookupsHashed.get() + ",");
+            w.println("  \"spotted_mirror_rebuilds\": " + SpottedListGovernor.rebuilds.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

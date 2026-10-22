@@ -47,6 +47,7 @@ public class PZOptimAgent {
                         "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.characters.IsoZombie".equals(name) ||
+                        "zombie.characters.IsoPlayer".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name)) {
@@ -263,6 +264,21 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] Bytecode-patched IsoZombie: vehicle sight-line test routed through VehicleLosGovernor");
                 }
                 return los;
+            }
+            if ("zombie/characters/IsoPlayer".equals(className) && classfileBuffer != null) {
+                byte[] cur = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "java/util/Stack", "contains", "(Ljava/lang/Object;)Z",
+                    "com/pzoptimizer/SpottedListGovernor", "contains", "(Ljava/util/Stack;Ljava/lang/Object;)Z");
+                if (cur != null) {
+                    byte[] added = BytecodeRedirect.virtualToStatic(cur,
+                        "java/util/Stack", "add", "(Ljava/lang/Object;)Z",
+                        "com/pzoptimizer/SpottedListGovernor", "add", "(Ljava/util/Stack;Ljava/lang/Object;)Z");
+                    if (added != null) {
+                        PZOLogger.success("[PZO Agent] Bytecode-patched IsoPlayer: spotted-list lookups routed through SpottedListGovernor");
+                        return added;
+                    }
+                }
+                return null;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);
