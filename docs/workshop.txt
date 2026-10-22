@@ -6,7 +6,7 @@ description=
 description=[hr][/hr]
 description=[h1]DOWNLOAD THE JAVA ENGINE / LAUNCHER ON GITHUB HERE:[/h1]
 description=[url=https://github.com/prop11/PZO-Launcher/releases][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_download_button.gif[/img][/url]
-description=[url=https://github.com/prop11/PZO-Launcher/releases/tag/V1.0.1-unstable][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_unstable_button.png[/img][/url]
+description=[url=https://github.com/prop11/PZO-Launcher/releases/tag/V1.0.2-unstable][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_unstable_button.png[/img][/url]
 description=[url=https://github.com/prop11/PZO-Launcher][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_repo_button.png[/img][/url]
 description=[url=https://github.com/prop11/PZO-Launcher/releases][h1]>>> CLICK HERE TO DOWNLOAD THE GITHUB JAVA ENGINE (RELEASES) <<<[/h1][/url]
 description=[url=https://github.com/prop11/PZO-Launcher][h1]>>> CLICK HERE FOR MAIN GITHUB REPOSITORY & INSTALL GUIDE <<<[/h1][/url]

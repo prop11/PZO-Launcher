@@ -34,6 +34,8 @@ public class PZOptimAgent {
                         "zombie.core.properties.PropertyContainer".equals(name) ||
                         "zombie.characters.IsoGameCharacter".equals(name) ||
                         "zombie.characters.animals.IsoAnimal".equals(name) ||
+                        "zombie.pathfind.nativeCode.PathfindNativeThread".equals(name) ||
+                        "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
@@ -121,21 +123,8 @@ public class PZOptimAgent {
     }
 
     public static void setBytecodeBloodCap(boolean enabled) {
-        if (bytecodeBloodCap == enabled) return;
         bytecodeBloodCap = enabled;
-        if (instrumentationInstance != null && instrumentationInstance.isRetransformClassesSupported()) {
-            for (Class<?> c : instrumentationInstance.getAllLoadedClasses()) {
-                if ("zombie.iso.IsoGridSquare".equals(c.getName())) {
-                    try {
-                        instrumentationInstance.retransformClasses(c);
-                        PZOLogger.info("[PZO Agent] Retransformed IsoGridSquare (Bytecode Blood Cap: " + enabled + ")");
-                    } catch (Throwable t) {
-                        PZOLogger.warn("[PZO Agent] Retransform failed: " + t.getMessage());
-                    }
-                    break;
-                }
-            }
-        }
+        BloodCapGovernor.setMasterEnabled(enabled);
     }
 
     static class EngineTransformer implements ClassFileTransformer {
@@ -237,10 +226,16 @@ public class PZOptimAgent {
                 return patchSpriteConfig(classfileBuffer);
             }
             if ("zombie/iso/IsoGridSquare".equals(className) && classfileBuffer != null) {
-                byte[] blood = patchIsoGridSquare(classfileBuffer);
-                byte[] base = (blood != null) ? blood : classfileBuffer;
+                byte[] wall = patchIsoGridSquare(classfileBuffer);
+                byte[] base = (wall != null) ? wall : classfileBuffer;
+                byte[] blood = prefixSkipIfTrue(base, "splatBlood", "(IF)V", "com/pzoptimizer/BloodCapGovernor", "shouldSkipSplat");
+                if (blood != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoGridSquare.splatBlood: BloodCapGovernor per-tile blood cap armed");
+                    base = blood;
+                }
                 byte[] recalc = redirectRecalcPropertiesIfNeeded(base);
-                return (recalc != null) ? recalc : blood;
+                if (recalc != null) return recalc;
+                return (base != classfileBuffer) ? base : null;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
                 return patchBaseVehicle(classfileBuffer);
@@ -277,6 +272,15 @@ public class PZOptimAgent {
             }
             if ("zombie/characters/animals/IsoAnimal".equals(className) && classfileBuffer != null) {
                 return patchIsoAnimal(classfileBuffer);
+            }
+            if ("zombie/pathfind/nativeCode/PathfindNativeThread".equals(className) && classfileBuffer != null) {
+                return patchPathfindNativeThread(classfileBuffer);
+            }
+            if ("zombie/pathfind/nativeCode/PathfindNative".equals(className) && classfileBuffer != null) {
+                return patchPathfindNative(classfileBuffer);
+            }
+            if ("zombie/GameProfiler".equals(className) && classfileBuffer != null) {
+                return patchGameProfiler(classfileBuffer);
             }
             if ("zombie/iso/weather/fog/ImprovedFogDrawer".equals(className) && classfileBuffer != null) {
                 if (ViewpointStanddownGovernor.isStanddownActive()) {
@@ -739,23 +743,6 @@ public class PZOptimAgent {
                     i++;
                 }
 
-                int haveBloodRef = -1;
-                for (int k = 1; k < cpCount; k++) {
-                    if (tags[k] == 10) { // Methodref
-                        int p = tagOffsets[k] + 1;
-                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
-                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) {
-                            int ntp = tagOffsets[ntIdx] + 1;
-                            int nIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
-                            int dIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
-                            if ("haveBlood".equals(utf8Strings[nIdx]) && "()Z".equals(utf8Strings[dIdx])) {
-                                haveBloodRef = k;
-                                break;
-                            }
-                        }
-                    }
-                }
-
                 byte[] copy = b.clone();
                 int mpos = pos + 6; // access_flags (2), this_class (2), super_class (2)
                 int ifaces = ((b[mpos] & 0xFF) << 8) | (b[mpos + 1] & 0xFF);
@@ -797,40 +784,6 @@ public class PZOptimAgent {
                                 // Replace istore_3 (0x3E) with ireturn (0xAC) to correctly return false upon reaching depth recursion limit
                                 copy[cstart + 7] = (byte) 0xAC;
                                 patched++;
-                            }
-                        } else if ("Code".equals(aname) && "splatBlood".equals(mname) && "(IF)V".equals(mdesc)) {
-                            int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
-                            int cstart = mpos + 8;
-                            if (bytecodeBloodCap && haveBloodRef != -1) {
-                                if (codeLen >= 18 && copy[cstart] == 0x24 && copy[cstart + 1] == 0x0D && copy[cstart + 2] == 0x6A && copy[cstart + 3] == 0x45) {
-                                    byte hbHi = (byte) ((haveBloodRef >> 8) & 0xFF);
-                                    byte hbLo = (byte) (haveBloodRef & 0xFF);
-                                    copy[cstart] = 0x04;            // iconst_1
-                                    copy[cstart + 1] = 0x2A;        // aload_0
-                                    copy[cstart + 2] = (byte) 0xB6; // invokevirtual
-                                    copy[cstart + 3] = hbHi;
-                                    copy[cstart + 4] = hbLo;
-                                    copy[cstart + 5] = 0x64;        // isub (1 - haveBlood)
-                                    copy[cstart + 6] = 0x1B;        // iload_1 (range)
-                                    copy[cstart + 7] = 0x68;        // imul: range = (1 - haveBlood) * range
-                                    copy[cstart + 8] = 0x3C;        // istore_1
-                                    copy[cstart + 9] = 0x0C;        // fconst_1
-                                    copy[cstart + 10] = 0x45;       // fstore_2
-                                    for (int pad = 11; pad < 18; pad++) {
-                                        copy[cstart + pad] = 0x00;  // nop fallthrough to offset 18
-                                    }
-                                    patched++;
-                                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoGridSquare.splatBlood: Real-time blood stacking guard armed (branchless 0ms combat overdraw bypass)");
-                                }
-                            } else if (!bytecodeBloodCap) {
-                                if (codeLen >= 18 && copy[cstart] == 0x04 && copy[cstart + 1] == 0x2A && copy[cstart + 2] == (byte) 0xB6) {
-                                    byte[] origBytes = new byte[] {
-                                        0x24, 0x0D, 0x6A, 0x45, 0x24, 0x13, 0x0A, (byte) 0x8E, 0x6A, 0x45, 0x24, 0x0C, (byte) 0x95, (byte) 0x9E, 0x00, 0x05, 0x0C, 0x45
-                                    };
-                                    System.arraycopy(origBytes, 0, copy, cstart, 18);
-                                    patched++;
-                                    PZOLogger.info("[PZO Agent] Bytecode-reverted IsoGridSquare.splatBlood: Vanilla execution restored");
-                                }
                             }
                         }
                         mpos += alen;
@@ -2153,6 +2106,44 @@ public class PZOptimAgent {
         }
 
         private byte[] patchIsoAnimal(byte[] b) {
+            byte[] out = prefixSkipIfTrue(b, "updateLOS", "()V", "com/pzoptimizer/AnimalLosSkipGovernor", "shouldSkipUpdateLOS");
+            if (out != null) {
+                PZOLogger.success("[PZO Agent] Bytecode-patched IsoAnimal.updateLOS: AnimalLosSkipGovernor distant calm-animal LOS skip armed");
+            }
+            return out;
+        }
+
+        private byte[] patchPathfindNativeThread(byte[] b) {
+            byte[] out = prefixSkipIfTrue(b, "updateThread", "()V", "com/pzoptimizer/PathfindGovernor", "updateThread");
+            if (out != null) {
+                PZOLogger.success("[PZO Agent] Bytecode-patched PathfindNativeThread.updateThread: PathfindGovernor request budget and square merge armed");
+            }
+            return out;
+        }
+
+        private byte[] patchPathfindNative(byte[] b) {
+            return redirectCallSites(b, 0xB6, "zombie/pathfind/nativeCode/VehicleState", "check", "()Z",
+                "com/pzoptimizer/PathfindGovernor", "vehicleCheck", "(Ljava/lang/Object;)Z",
+                "Bytecode-patched PathfindNative.updateMain: PathfindGovernor vehicle navmesh throttle armed");
+        }
+
+        // Both redirects pass straight through to the recorder unless a debug launch has switched PhaseProfiler on
+        private byte[] patchGameProfiler(byte[] b) {
+            byte[] spans = redirectCallSites(b, 0xB6, "zombie/GameProfileRecording", "logTimeSpan", "(Lzombie/GameProfiler$ProfileArea;)V",
+                "com/pzoptimizer/PhaseProfiler", "logTimeSpan", "(Ljava/lang/Object;Ljava/lang/Object;)V",
+                "Bytecode-patched GameProfiler.end: PhaseProfiler debug timing hook armed");
+            if (spans == null) return null;
+            byte[] lines = redirectCallSites(spans, 0xB6, "zombie/GameProfileRecording", "writeLine", "()V",
+                "com/pzoptimizer/PhaseProfiler", "writeLine", "(Ljava/lang/Object;)V",
+                "Bytecode-patched GameProfiler.startFrame: vanilla profiler CSV writes routed through PhaseProfiler");
+            return (lines != null) ? lines : spans;
+        }
+
+        /**
+         * Prepends "if (gov(this)) return;" to an instance method with no arguments and a void return.
+         * The governor is a static (Object)Z method.
+         */
+        private byte[] prefixSkipIfTrue(byte[] b, String targetName, String targetDesc, String govClassName, String govMethodName) {
             try {
                 DataInputStream dis = new DataInputStream(new ByteArrayInputStream(b));
                 int magic = dis.readInt();
@@ -2188,13 +2179,12 @@ public class PZOptimAgent {
                     i++;
                 }
 
-                // Append AnimalLosSkipGovernor.shouldSkipUpdateLOS(Object)Z
                 int govClassUtf8 = cpCount;
-                cpDos.writeByte(1); cpDos.writeUTF("com/pzoptimizer/AnimalLosSkipGovernor");
+                cpDos.writeByte(1); cpDos.writeUTF(govClassName);
                 int govClass = cpCount + 1;
                 cpDos.writeByte(7); cpDos.writeShort(govClassUtf8);
                 int govMethodNameUtf8 = cpCount + 2;
-                cpDos.writeByte(1); cpDos.writeUTF("shouldSkipUpdateLOS");
+                cpDos.writeByte(1); cpDos.writeUTF(govMethodName);
                 int govMethodDescUtf8 = cpCount + 3;
                 cpDos.writeByte(1); cpDos.writeUTF("(Ljava/lang/Object;)Z");
                 int govNat = cpCount + 4;
@@ -2259,7 +2249,7 @@ public class PZOptimAgent {
                         int alen = dis.readInt();
                         String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
 
-                        if ("Code".equals(aname) && "updateLOS".equals(mName) && "()V".equals(mDesc)) {
+                        if ("Code".equals(aname) && targetName.equals(mName) && targetDesc.equals(mDesc) && (access & 0x0008) == 0) {
                             int maxStack = dis.readUnsignedShort();
                             int maxLocals = dis.readUnsignedShort();
                             int codeLen = dis.readInt();
@@ -2272,7 +2262,7 @@ public class PZOptimAgent {
                             byte refLo = (byte) (govMethodRef & 0xFF);
                             byte[] prefix = new byte[] {
                                 0x2A,                       // 0: aload_0
-                                (byte) 0xB8, refHi, refLo,  // 1: invokestatic AnimalLosSkipGovernor.shouldSkipUpdateLOS(Object)Z
+                                (byte) 0xB8, refHi, refLo,  // 1: invokestatic gov(Object)Z
                                 (byte) 0x99, 0x00, 0x04,    // 4: ifeq +4 -> offset 8
                                 (byte) 0xB1                 // 7: return
                             };
@@ -2327,6 +2317,8 @@ public class PZOptimAgent {
 
                                     if (numEntries > 0) {
                                         int firstTag = smDis.readUnsignedByte();
+                                        // A first frame at offset 0 cannot be shifted behind the inserted one
+                                        if (firstTag == 0 || firstTag == 64) return null;
                                         if (firstTag >= 0 && firstTag <= 63) {
                                             smDos.writeByte(firstTag - 1);
                                         } else if (firstTag >= 64 && firstTag <= 127) {
@@ -2403,11 +2395,10 @@ public class PZOptimAgent {
                 }
 
                 if (patched) {
-                    PZOLogger.success("[PZO Agent] Bytecode-patched IsoAnimal.updateLOS: AnimalLosSkipGovernor distant calm-animal LOS skip armed");
                     return outBaos.toByteArray();
                 }
             } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoAnimal bytecode transform: " + t.getMessage());
+                PZOLogger.warn("[PZO Agent] Non-fatal notice during " + targetName + " prefix transform: " + t.getMessage());
             }
             return null;
         }

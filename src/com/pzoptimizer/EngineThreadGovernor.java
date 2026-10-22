@@ -21,11 +21,16 @@ public class EngineThreadGovernor {
 
         try {
             if (PZONative.isLoaded()) {
-                PZONative.lockProcessWorkingSet();
-                PZONative.setProcessPriority(2); // HIGH_PRIORITY_CLASS
                 PZONative.setHighPrecisionTimer(true); // 0.5ms kernel resolution
                 PZONative.disablePowerThrottling(); // Exemption from Windows 11 EcoQoS
-                PZOLogger.success("[EngineThreadGovernor] Process working set locked and set to HIGH_PRIORITY_CLASS");
+                if (PZONative.isLowCoreCpu()) {
+                    PZONative.setProcessPriority(0);
+                    PZOLogger.info("[EngineThreadGovernor] Low core count CPU: process left at NORMAL_PRIORITY_CLASS, working set not locked");
+                } else {
+                    PZONative.lockProcessWorkingSet();
+                    PZONative.setProcessPriority(2); // HIGH_PRIORITY_CLASS
+                    PZOLogger.success("[EngineThreadGovernor] Process working set locked and set to HIGH_PRIORITY_CLASS");
+                }
             }
         } catch (Throwable t) {
             PZOLogger.warn("[EngineThreadGovernor] Process lock notice: " + t.getMessage());
@@ -87,8 +92,9 @@ public class EngineThreadGovernor {
                     try {
                         if (PZONative.isLoaded()) {
                             try {
-                                PZONative.optimizeCallingThread(2, true, "Games");
-                                PZOLogger.success("[EngineThreadGovernor] RenderThread successfully optimized: Priority HIGHEST | MMCSS Games | P-Core Affinity");
+                                boolean lowCore = PZONative.isLowCoreCpu();
+                                PZONative.optimizeCallingThread(2, true, lowCore ? "" : "Games");
+                                PZOLogger.success("[EngineThreadGovernor] RenderThread successfully optimized: Priority HIGHEST | " + (lowCore ? "MMCSS skipped (low core count)" : "MMCSS Games") + " | P-Core Affinity");
                             } catch (Throwable t) {
                                 PZOLogger.warn("[EngineThreadGovernor] RenderThread native optimization notice: " + t.getMessage());
                             }
@@ -118,8 +124,9 @@ public class EngineThreadGovernor {
                     try {
                         if (PZONative.isLoaded()) {
                             try {
-                                PZONative.optimizeCallingThread(1, true, "Games");
-                                PZOLogger.success("[EngineThreadGovernor] MainThread successfully optimized: Priority ABOVE_NORMAL | MMCSS Games | P-Core Affinity");
+                                boolean lowCore = PZONative.isLowCoreCpu();
+                                PZONative.optimizeCallingThread(1, true, lowCore ? "" : "Games");
+                                PZOLogger.success("[EngineThreadGovernor] MainThread successfully optimized: Priority ABOVE_NORMAL | " + (lowCore ? "MMCSS skipped (low core count)" : "MMCSS Games") + " | P-Core Affinity");
                             } catch (Throwable t) {
                                 PZOLogger.warn("[EngineThreadGovernor] MainThread native optimization notice: " + t.getMessage());
                             }

@@ -217,8 +217,30 @@ public class PZOEntrypoint {
         }
     }
 
+    private static final java.util.Set<String> BROWSER_HOSTS = java.util.Set.of(
+        "github.com", "steamcommunity.com", "store.steampowered.com");
+
+    // Lua can reach this, and rundll32 FileProtocolHandler will happily launch local files, so only
+    // plain https links to known hosts get through.
+    static boolean isAllowedBrowserUrl(String url) {
+        try {
+            java.net.URI uri = new java.net.URI(url.trim());
+            String host = uri.getHost();
+            return "https".equalsIgnoreCase(uri.getScheme()) && uri.getRawUserInfo() == null
+                && host != null && BROWSER_HOSTS.contains(host.toLowerCase(java.util.Locale.ROOT))
+                && (uri.getPort() == -1 || uri.getPort() == 443);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public static void openBrowser(String url) {
         if (url == null || url.trim().isEmpty()) return;
+        if (!isAllowedBrowserUrl(url)) {
+            PZOLogger.warn("[PZO] Refused to open non-allowlisted URL: " + url);
+            return;
+        }
+        url = url.trim();
         try {
             if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) {
                 java.awt.Desktop.getDesktop().browse(new java.net.URI(url));

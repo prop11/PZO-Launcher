@@ -69,7 +69,9 @@ public final class MultiCoreChunkStreamer {
         if (initialized.get()) return;
 
         int pCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
-        workerCount = Math.max(2, Math.min(pCores, 12));
+        workerCount = PZONative.isLowCoreCpu()
+            ? Math.max(1, Runtime.getRuntime().availableProcessors() - 2)
+            : Math.max(2, Math.min(pCores, 12));
 
         workerPool = Executors.newFixedThreadPool(workerCount, new ThreadFactory() {
             private final AtomicInteger counter = new AtomicInteger(1);

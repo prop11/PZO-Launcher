@@ -391,6 +391,18 @@ public class PZOEngineBridge {
                 GcSlackGovernor.setActive(value);
             } else if ("JVM_EngineFramePacer".equals(key)) {
                 EngineFramePacer.setEnabled(value);
+            } else if ("JVM_PathfindBudget".equals(key)) {
+                PathfindGovernor.setBudgetActive(value);
+            } else if ("JVM_PathfindSquareMerge".equals(key)) {
+                PathfindGovernor.setSquareMerge(value);
+            } else if ("JVM_PathfindVehicleThrottle".equals(key)) {
+                PathfindGovernor.setVehicleThrottle(value);
+            } else if ("JVM_PathfindNativeAStar".equals(key)) {
+                PathfindGovernor.setNativeAStar(value);
+            } else if ("JVM_LoadJavaMods".equals(key)) {
+                PZOConfig.setJavaModsEnabled(value);
+            } else if ("JVM_BloodCapPerTile".equals(key)) {
+                BloodCapGovernor.setCapEnabled(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -402,6 +414,10 @@ public class PZOEngineBridge {
                 ChunkIngestionPacer.setMaxCachedChunks(value);
             } else if ("JVM_ChunkBudgetMs".equals(key)) {
                 ChunkIngestionPacer.setChunkBudgetMs(value);
+            } else if ("JVM_PathfindBudgetMs".equals(key)) {
+                PathfindGovernor.setBudgetMs(value);
+            } else if ("JVM_BloodMaxPerTile".equals(key)) {
+                BloodCapGovernor.setMaxPerTile(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -923,6 +939,25 @@ public class PZOEngineBridge {
                                         );
                                         tableRawset.invoke(pzoTable, "setJvmIntOption", setJvmIntFunc);
 
+                                        // setEngineTuning
+                                        Object setEngineTuningFunc = Proxy.newProxyInstance(
+                                            javaFuncClass.getClassLoader(),
+                                            new Class<?>[]{javaFuncClass},
+                                            (proxy, m, mArgs) -> {
+                                                if ("call".equals(m.getName())) {
+                                                    Object callFrame = mArgs[0];
+                                                    Object keyArg = getArg.invoke(callFrame, 0);
+                                                    Object valArg = getArg.invoke(callFrame, 1);
+                                                    if (keyArg != null && valArg instanceof Number) {
+                                                        EngineTuning.set(keyArg.toString(), ((Number)valArg).doubleValue());
+                                                    }
+                                                    return 0;
+                                                }
+                                                return null;
+                                            }
+                                        );
+                                        tableRawset.invoke(pzoTable, "setEngineTuning", setEngineTuningFunc);
+
                                         // isMultithreadingNoticeAcknowledged
                                         Object isNoticeAckFunc = Proxy.newProxyInstance(
                                             javaFuncClass.getClassLoader(),
@@ -1162,7 +1197,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.0.1\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.0.2.1\"\n" +
                                             "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                             "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
@@ -1425,7 +1460,7 @@ public class PZOEngineBridge {
                                             "            local btnH = hS + 10\n" +
                                             "            local x0 = 24\n" +
                                             "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0.1'\n" +
+                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0.2.1'\n" +
                                             "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                             "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                             "            if PZOEngine then\n" +
