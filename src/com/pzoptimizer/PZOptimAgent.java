@@ -279,6 +279,9 @@ public class PZOptimAgent {
             if ("zombie/pathfind/nativeCode/PathfindNative".equals(className) && classfileBuffer != null) {
                 return patchPathfindNative(classfileBuffer);
             }
+            if ("zombie/GameProfiler".equals(className) && classfileBuffer != null) {
+                return patchGameProfiler(classfileBuffer);
+            }
             if ("zombie/iso/weather/fog/ImprovedFogDrawer".equals(className) && classfileBuffer != null) {
                 if (ViewpointStanddownGovernor.isStanddownActive()) {
                     PZOLogger.info("[PZO Agent] Project Viewpoint standdown active - skipping ImprovedFogDrawer bytecode transform to ensure 3D mod compatibility.");
@@ -2122,6 +2125,18 @@ public class PZOptimAgent {
             return redirectCallSites(b, 0xB6, "zombie/pathfind/nativeCode/VehicleState", "check", "()Z",
                 "com/pzoptimizer/PathfindGovernor", "vehicleCheck", "(Ljava/lang/Object;)Z",
                 "Bytecode-patched PathfindNative.updateMain: PathfindGovernor vehicle navmesh throttle armed");
+        }
+
+        // Both redirects pass straight through to the recorder unless a debug launch has switched PhaseProfiler on
+        private byte[] patchGameProfiler(byte[] b) {
+            byte[] spans = redirectCallSites(b, 0xB6, "zombie/GameProfileRecording", "logTimeSpan", "(Lzombie/GameProfiler$ProfileArea;)V",
+                "com/pzoptimizer/PhaseProfiler", "logTimeSpan", "(Ljava/lang/Object;Ljava/lang/Object;)V",
+                "Bytecode-patched GameProfiler.end: PhaseProfiler debug timing hook armed");
+            if (spans == null) return null;
+            byte[] lines = redirectCallSites(spans, 0xB6, "zombie/GameProfileRecording", "writeLine", "()V",
+                "com/pzoptimizer/PhaseProfiler", "writeLine", "(Ljava/lang/Object;)V",
+                "Bytecode-patched GameProfiler.startFrame: vanilla profiler CSV writes routed through PhaseProfiler");
+            return (lines != null) ? lines : spans;
         }
 
         /**

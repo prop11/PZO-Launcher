@@ -124,13 +124,17 @@ public class PZONative {
             boolean timerLock = false;
             try { timerLock = setHighPrecisionTimer(true); } catch (Throwable ignored) {}
 
+            boolean lowCore = isLowCoreCpu();
             boolean mmcss = false;
-            try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
-
             boolean prio = false;
-            try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
             boolean wsLock = false;
-            try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
+            if (!lowCore) {
+                try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
+                try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
+                try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
+            } else {
+                PZOLogger.info("[PZONative] Low core count CPU detected: skipping MMCSS, raised process priority and working set lock.");
+            }
 
             int physCores = 0;
             try { physCores = getPhysicalCores(); } catch (Throwable ignored) {}
@@ -166,6 +170,14 @@ public class PZONative {
 
     public static boolean isLoaded() {
         return loaded && initialized;
+    }
+
+    /**
+     * 4 or fewer logical CPUs (e.g. i5-7300HQ). The game's main and render threads already need most of
+     * these, so HIGH priority class, MMCSS boosts and full-width worker pools starve input handling instead.
+     */
+    public static boolean isLowCoreCpu() {
+        return Runtime.getRuntime().availableProcessors() <= 4;
     }
 
     public static boolean bindCallingThreadToPCores() {

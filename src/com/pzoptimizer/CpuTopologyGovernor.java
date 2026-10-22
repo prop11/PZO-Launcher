@@ -69,8 +69,13 @@ public final class CpuTopologyGovernor {
     /**
      * Worker count for frame-synchronous parallel batches. On hybrid CPUs with more than 9 physical cores
      * (Ryzen AI 9 HX 370, Core Ultra) this caps at min(11, physicalCores - 1) to avoid E-core/SMT stragglers.
+     * On 4 or fewer logical CPUs it is logical - 2, minimum 1.
      */
     public static int getOptimalWorkerCount() {
+        // Leave two cores for the game's main and render threads
+        if (PZONative.isLowCoreCpu()) {
+            return Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
+        }
         if (IS_HYBRID_CPU && PHYSICAL_CORES > 9) {
             return Math.min(11, PHYSICAL_CORES - 1);
         }

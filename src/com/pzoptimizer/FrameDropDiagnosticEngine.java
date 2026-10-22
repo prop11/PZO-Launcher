@@ -13,10 +13,30 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/** Measures frame times and logs frame drops and stutters with their likely cause. */
+/**
+ * Measures frame times and logs frame drops and stutters with their likely cause. Only active when the
+ * game is launched with -debug; for normal players onFrameTick just drives the governors that hang off it.
+ */
 public final class FrameDropDiagnosticEngine {
 
     private static volatile boolean running = false;
+    // -1 until the first frame tick, when Core.debug has been parsed from the launch arguments
+    private static int debugState = -1;
+    private static boolean profilerRequested = false;
+
+    private static long frameGcTimeMs = 0;
+    private static int lastZombieCount = -1;
+    private static int zombieSpawnsThisFrame = 0;
+
+    private static long windowStartNanos = 0;
+    private static int windowFrames = 0;
+    private static double windowFrameMsSum = 0;
+    private static double windowWorstMs = 0;
+    private static long windowGcMs = 0;
+    private static int windowZombieSpawns = 0;
+    private static boolean windowHadPause = false;
+    private static int windowsSampled = 0;
+    private static double baselineFps = 0;
     private static long lastFrameTimeNanos = System.nanoTime();
     private static final double[] frameTimeHistory = new double[240]; // 4 seconds at 60 FPS
     private static int historyIndex = 0;
@@ -52,14 +72,33 @@ public final class FrameDropDiagnosticEngine {
     private static Field cswToSaveQField;
     private static Field lgsField;
 
+    /** The logger thread starts on the first frame tick, and only for a debug launch. */
     public static void initialize() {
+    }
+
+    private static boolean isDebugSession() {
+        if (debugState < 0) {
+            boolean dbg = false;
+            try { dbg = zombie.core.Core.debug; } catch (Throwable ignored) {}
+            debugState = dbg ? 1 : 0;
+            if (dbg) {
+                startDebugDiagnostics();
+            } else {
+                PZOLogger.info("FrameDropDiagnosticEngine: inactive (launch with -debug to enable stutter diagnostics)");
+            }
+        }
+        return debugState == 1;
+    }
+
+    private static void startDebugDiagnostics() {
         if (running) return;
         running = true;
 
         updateGcStats();
+        pendingDiagnosticLogs.offer("=== [" + DATE_FORMAT.format(new Date()) + "] PZO debug diagnostics session " + UpdateChecker.CURRENT_VERSION + " ===");
 
         Thread loggerThread = new Thread(() -> {
-            PZOLogger.success("FrameDropDiagnosticEngine: Active (Real-Time Stutter Diagnostics & Root Cause Telemetry)");
+            PZOLogger.success("FrameDropDiagnosticEngine: Active (debug launch, stutter and frame dip diagnostics)");
 
             while (running) {
                 try {
@@ -161,18 +200,114 @@ public final class FrameDropDiagnosticEngine {
             WorkerRandGovernor.ensureInstalled();
         }
 
-        Object player = getActivePlayer();
-        if (player == null) {
+        if (!isDebugSession()) {
             return;
         }
+
+        Object player = getActivePlayer();
+        if (player == null) {
+            PhaseProfiler.onFrameBoundary();
+            resetWindow(0);
+            lastZombieCount = -1;
+            return;
+        }
+
+        if (!profilerRequested) {
+            profilerRequested = true;
+            PhaseProfiler.enable();
+        }
+        PhaseProfiler.onFrameBoundary();
+
+        long gcBefore = lastGcTimeMs;
+        updateGcStats();
+        frameGcTimeMs = lastGcTimeMs - gcBefore;
+
+        int zombies = getZombieCount();
+        zombieSpawnsThisFrame = (lastZombieCount >= 0 && zombies > lastZombieCount) ? zombies - lastZombieCount : 0;
+        lastZombieCount = zombies;
 
         double avgFrameTime = getAverageFrameTime();
         if (frameTimeMs > 28.0 && frameTimeMs > avgFrameTime * 1.65) {
             diagnoseFrameDrop(player, frameTimeMs, avgFrameTime);
         }
 
+        trackWindow(now, frameTimeMs, zombies);
+
         if (totalFramesSampled % 60 == 0) {
             updateLiveTelemetry(frameTimeMs, avgFrameTime);
+        }
+    }
+
+    /**
+     * Sustained dips (165 -> 60 fps, say) never cross the single-frame stutter threshold, so frame times
+     * are also averaged per second and compared against a slow moving baseline of normal play.
+     */
+    private static void trackWindow(long now, double frameTimeMs, int zombies) {
+        if (windowStartNanos == 0) {
+            resetWindow(now);
+        }
+        windowFrames++;
+        windowFrameMsSum += frameTimeMs;
+        if (frameTimeMs > windowWorstMs) windowWorstMs = frameTimeMs;
+        windowGcMs += frameGcTimeMs;
+        windowZombieSpawns += zombieSpawnsThisFrame;
+        if (isGamePaused()) windowHadPause = true;
+
+        if (now - windowStartNanos < 1_000_000_000L) return;
+
+        double avgMs = windowFrameMsSum / Math.max(1, windowFrames);
+        double fps = 1000.0 / Math.max(0.1, avgMs);
+        String areas = PhaseProfiler.describeAndResetWindow(windowFrames);
+
+        if (!windowHadPause) {
+            windowsSampled++;
+            if (baselineFps <= 0) {
+                baselineFps = fps;
+            } else if (windowsSampled > 5 && baselineFps >= 40 && fps < baselineFps * 0.7) {
+                pendingDiagnosticLogs.offer(String.format(
+                    "[%s] DIP: %.0f fps for 1s (baseline %.0f fps | avg %.1f ms | worst %.1f ms) | Zombies: %d (+%d spawned) | GC: %dms | Main thread per frame: %s",
+                    DATE_FORMAT.format(new Date()), fps, baselineFps, avgMs, windowWorstMs, zombies, windowZombieSpawns, windowGcMs, areas));
+            } else {
+                // Only normal seconds move the baseline, so a long dip doesn't become the new normal
+                baselineFps = baselineFps * 0.9 + fps * 0.1;
+            }
+        }
+
+        resetWindow(now);
+    }
+
+    private static void resetWindow(long now) {
+        windowStartNanos = now;
+        windowFrames = 0;
+        windowFrameMsSum = 0;
+        windowWorstMs = 0;
+        windowGcMs = 0;
+        windowZombieSpawns = 0;
+        windowHadPause = false;
+        PhaseProfiler.resetWindow();
+    }
+
+    private static int getZombieCount() {
+        try {
+            if (isoWorldInstanceField != null && isoWorldCellField != null && cellGetZombieList != null) {
+                Object worldInst = isoWorldInstanceField.get(null);
+                if (worldInst != null) {
+                    Object cell = isoWorldCellField.get(worldInst);
+                    if (cell != null) {
+                        List<?> zList = (List<?>) cellGetZombieList.invoke(cell);
+                        if (zList != null) return zList.size();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return 0;
+    }
+
+    private static boolean isGamePaused() {
+        try {
+            return zombie.GameTime.isGamePaused();
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -193,11 +328,7 @@ public final class FrameDropDiagnosticEngine {
         stutterCount++;
         lastStutterMs = frameTimeMs;
 
-        long gcCountBefore = lastGcCount;
-        long gcTimeBefore = lastGcTimeMs;
-        updateGcStats();
-        long gcDeltaCount = lastGcCount - gcCountBefore;
-        long gcDeltaTimeMs = lastGcTimeMs - gcTimeBefore;
+        long gcDeltaTimeMs = frameGcTimeMs;
 
         boolean isDriving = false;
         float vehicleSpeed = 0.0f;
@@ -274,8 +405,11 @@ public final class FrameDropDiagnosticEngine {
         lastDiagnosedChunkX = chunkX;
         lastDiagnosedChunkY = chunkY;
 
+        double mainMs = PhaseProfiler.lastFrameAccountedMs();
+        boolean haveProfile = PhaseProfiler.isActive() && mainMs > 0;
+
         String cause;
-        if (gcDeltaTimeMs > 5) {
+        if (gcDeltaTimeMs > 5 && gcDeltaTimeMs >= frameTimeMs * 0.25) {
             cause = "GC_STW_PAUSE (" + gcDeltaTimeMs + "ms)";
         } else if (chunkCrossing) {
             if (isDriving) {
@@ -295,18 +429,26 @@ public final class FrameDropDiagnosticEngine {
             cause = "DISK_AUTOSAVE_SPIKE (SaveQueue: " + saveQueueSize + " chunks)";
         } else if (activeCorpses > 50) {
             cause = "CORPSE_DENSITY_BURDEN (" + activeCorpses + " corpses)";
+        } else if (zombieSpawnsThisFrame >= 5) {
+            cause = "ZOMBIE_SPAWN_IN (+" + zombieSpawnsThisFrame + " zombies this frame)";
         } else if (activeZombies > 100) {
             cause = "HORDE_PHYSICS_DENSITY (" + activeZombies + " zombies)";
+        } else if (haveProfile && mainMs < frameTimeMs * 0.4) {
+            // The main thread was mostly idle or outside any profiled area: waiting on the render thread, GPU or a lock
+            cause = String.format("RENDER_THREAD_OR_GPU_WAIT (main thread profiled %.1f of %.1f ms)", mainMs, frameTimeMs);
+        } else if (haveProfile) {
+            cause = "MAIN_THREAD_WORK";
         } else {
-            cause = "RENDER_OR_LOCK_CONTENTION";
+            cause = "UNCLASSIFIED";
         }
 
         lastStutterCause = cause;
 
         String timestamp = DATE_FORMAT.format(new Date());
         String logEntry = String.format(
-            "[%s] STUTTER: %.1f ms (Avg: %.1f ms | FPS: %.0f) -> ROOT CAUSE: [%s] | Pos: (%.0f, %.0f | Ch: %d,%d) | Driving: %b | Zombies: %d | Corpses: %d | WSQueue: %d | SaveQueue: %d | GC: %dms",
-            timestamp, frameTimeMs, avgFrameTime, (1000.0 / Math.max(1.0, frameTimeMs)), cause, playerX, playerY, chunkX, chunkY, isDriving, activeZombies, activeCorpses, wsQueueSize, saveQueueSize, gcDeltaTimeMs
+            "[%s] STUTTER: %.1f ms (Avg: %.1f ms | FPS: %.0f) -> ROOT CAUSE: [%s] | Pos: (%.0f, %.0f | Ch: %d,%d) | Driving: %b | Zombies: %d (+%d) | Corpses: %d | WSQueue: %d | SaveQueue: %d | GC: %dms | Main thread: %s",
+            timestamp, frameTimeMs, avgFrameTime, (1000.0 / Math.max(1.0, frameTimeMs)), cause, playerX, playerY, chunkX, chunkY, isDriving, activeZombies, zombieSpawnsThisFrame, activeCorpses, wsQueueSize, saveQueueSize, gcDeltaTimeMs,
+            haveProfile ? String.format("%.1fms profiled: %s", mainMs, PhaseProfiler.describeLastFrame()) : "n/a"
         );
 
         pendingDiagnosticLogs.offer(logEntry);
