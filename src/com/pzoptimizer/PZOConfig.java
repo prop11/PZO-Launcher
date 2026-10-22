@@ -6,7 +6,7 @@ import java.nio.file.Files;
 /** Persistent preferences (beta opt-in, ignored versions, Java mod approvals) in pzo_config.json. */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
-    public static final String CURRENT_NOTICE_VERSION = "1.0.2.1";
+    public static final String CURRENT_NOTICE_VERSION = "1.0.3-unstable";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
     private static volatile boolean isolateConflictingFpsMods = true;

@@ -557,7 +557,7 @@ public class PZOEngineBridge {
 
                     Field envField = lmClass.getField("env");
                     Object env = envField.get(null);
-                    if (env != null) {
+                    if (env != null && areLuaEventsRegistered(env)) {
                         Method rawset = env.getClass().getMethod("rawset", Object.class, Object.class);
 
                         rawset.invoke(env, "PZOEngineActive", Boolean.TRUE);
@@ -1197,7 +1197,7 @@ public class PZOEngineBridge {
                                             "    local modalH = math.min(540, scrH - 60)\n" +
                                             "    local modalX = (scrW - modalW) / 2\n" +
                                             "    local modalY = (scrH - modalH) / 2\n" +
-                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.0.2.1\"\n" +
+                                            "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.0.3-unstable\"\n" +
                                             "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                             "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                             "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
@@ -1460,7 +1460,7 @@ public class PZOEngineBridge {
                                             "            local btnH = hS + 10\n" +
                                             "            local x0 = 24\n" +
                                             "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0.2.1'\n" +
+                                            "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.0.3-unstable'\n" +
                                             "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                             "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                             "            if PZOEngine then\n" +
@@ -1586,7 +1586,7 @@ public class PZOEngineBridge {
                                             "    if ms.charCreationMain and ms.charCreationMain:getIsVisible() then return false end\n" +
                                             "    return true\n" +
                                             "end\n" +
-                                            "Events.OnMainMenuEnter.Add(function()\n" +
+                                            "local function pzoOnMainMenuEnter()\n" +
                                             "    addPZOBetaToggle()\n" +
                                             "    showPZOMultithreadingNotice()\n" +
                                             "    addPZOSettingsTab()\n" +
@@ -1622,8 +1622,9 @@ public class PZOEngineBridge {
                                             "            end\n" +
                                             "        end\n" +
                                             "    end\n" +
-                                            "end)\n" +
-                                            "Events.OnResolutionChange.Add(function()\n" +
+                                            "end\n" +
+                                            "if Events and Events.OnMainMenuEnter then Events.OnMainMenuEnter.Add(pzoOnMainMenuEnter) end\n" +
+                                            "local function pzoOnResolutionChange()\n" +
                                             "    if MainScreen and MainScreen.instance and MainScreen.instance.pzoBetaButton then\n" +
                                             "        local btn = MainScreen.instance.pzoBetaButton\n" +
                                             "        btn:setY((MainScreen.instance.height or getCore():getScreenHeight()) - btn.height - 18)\n" +
@@ -1638,7 +1639,8 @@ public class PZOEngineBridge {
                                             "    if MainOptions and MainOptions.instance and MainOptions.instance.tabs and not MainOptions.instance.pzoTabAdded then\n" +
                                             "        addPZOSettingsTab()\n" +
                                             "    end\n" +
-                                            "end)\n" +
+                                            "end\n" +
+                                            "if Events and Events.OnResolutionChange then Events.OnResolutionChange.Add(pzoOnResolutionChange) end\n" +
                                             "addPZOSettingsTab()\n" +
                                             "if getFileWriter and not _G.pzoFileWriterHooked then\n" +
                                             "    _G.pzoFileWriterHooked = true\n" +
@@ -1732,6 +1734,21 @@ public class PZOEngineBridge {
         bridgeHookThread.setPriority(Thread.NORM_PRIORITY - 1);
         bridgeHookThread.setName("PZO-Kahlua-Bridge-Hook");
         bridgeHookThread.start();
+    }
+
+    // LuaManager.env exists before LuaEventManager has added every event to the Events table,
+    // so injecting as soon as env is non-null can hit a nil Events.OnMainMenuEnter.
+    private static boolean areLuaEventsRegistered(Object env) {
+        try {
+            Method envGet = env.getClass().getMethod("rawget", Object.class);
+            Object events = envGet.invoke(env, "Events");
+            if (events == null) return false;
+            Method eventsGet = events.getClass().getMethod("rawget", Object.class);
+            return eventsGet.invoke(events, "OnMainMenuEnter") != null
+                && eventsGet.invoke(events, "OnResolutionChange") != null;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private static void sanitizePrototype(Object protoObj, String defaultFilename) {
