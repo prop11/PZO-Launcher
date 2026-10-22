@@ -95,6 +95,10 @@ public final class BenchmarkHarness {
             if (cfg.containsKey("route_tiles")) routeTiles = Integer.parseInt(cfg.get("route_tiles").trim());
             if (cfg.containsKey("route_speed")) routeSpeed = Float.parseFloat(cfg.get("route_speed").trim());
             threat = "1".equals(cfg.get("threat")) || "true".equalsIgnoreCase(cfg.get("threat"));
+            if ("0".equals(cfg.get("simcap"))) {
+                UnseenZombieSimGovernor.setActive(false);
+                notes.add("unseen zombie simulation cap disabled (simcap=0)");
+            }
         } catch (NumberFormatException e) {
             notes.add("bad config value: " + e.getMessage());
         }
@@ -236,10 +240,19 @@ public final class BenchmarkHarness {
     }
 
     private static BenchFrameEvent frameEvent;
+    // Simulation-level counters at the first measured frame, so loading and warmup are excluded
+    private static long[] simBase;
+    private static long simFrameBase;
 
     private static void sampleFrame(long now) {
         int fc = IsoCamera.frameState.frameCount;
         if (fc == lastFrameCount) return;
+        if (simBase == null) {
+            simBase = new long[UnseenZombieSimGovernor.zombiesPerLevel.length + 1];
+            for (int i = 0; i < simBase.length - 1; i++) simBase[i] = UnseenZombieSimGovernor.zombiesPerLevel[i].get();
+            simBase[simBase.length - 1] = UnseenZombieSimGovernor.zombiesCapped.get();
+            simFrameBase = zombie.MovingObjectUpdateScheduler.instance.getFrameCounter();
+        }
         if (lastFrameCount != -1) frameTimes.add(now - lastFrameNs);
         lastFrameCount = fc;
         lastFrameNs = now;
@@ -498,6 +511,22 @@ public final class BenchmarkHarness {
         } catch (Throwable ignored) {}
     }
 
+    // Average zombies per scheduler frame at each level (SIXTEENTH .. FULL) and how many were capped
+    private static String simLevelsJson() {
+        if (simBase == null) return "null";
+        long frames = Math.max(1, zombie.MovingObjectUpdateScheduler.instance.getFrameCounter() - simFrameBase);
+        String[] names = {"sixteenth", "eighth", "quarter", "half", "full"};
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < names.length && i < simBase.length - 1; i++) {
+            long n = UnseenZombieSimGovernor.zombiesPerLevel[i].get() - simBase[i];
+            sb.append('"').append(names[i]).append("\": ").append(String.format(java.util.Locale.ROOT, "%.1f", n / (double) frames)).append(", ");
+        }
+        long capped = UnseenZombieSimGovernor.zombiesCapped.get() - simBase[simBase.length - 1];
+        sb.append("\"capped\": ").append(String.format(java.util.Locale.ROOT, "%.1f", capped / (double) frames));
+        sb.append(", \"frames\": ").append(frames).append('}');
+        return sb.toString();
+    }
+
     private static String esc(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
@@ -529,6 +558,7 @@ public final class BenchmarkHarness {
             w.println("  \"vehicle_los_tests_run\": " + VehicleLosGovernor.testsRun.get() + ",");
             w.println("  \"spotted_lookups_hashed\": " + SpottedListGovernor.lookupsHashed.get() + ",");
             w.println("  \"spotted_mirror_rebuilds\": " + SpottedListGovernor.rebuilds.get() + ",");
+            w.println("  \"zombie_sim_levels_per_frame\": " + simLevelsJson() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

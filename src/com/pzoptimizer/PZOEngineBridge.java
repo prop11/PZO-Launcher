@@ -263,6 +263,8 @@ public class PZOEngineBridge {
                 VehicleLosGovernor.setActive(value);
             } else if ("JVM_SpottedListHash".equals(key)) {
                 SpottedListGovernor.setActive(value);
+            } else if ("JVM_UnseenZombieSimCap".equals(key)) {
+                UnseenZombieSimGovernor.setActive(value);
             } else if ("JVM_HotSaveGovernor".equals(key)) {
                 HotSaveGovernor.setActive(value);
             } else if ("JVM_ChunkHandoffRecalc".equals(key)) {

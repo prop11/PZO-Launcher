@@ -48,6 +48,7 @@ public class PZOptimAgent {
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.characters.IsoZombie".equals(name) ||
                         "zombie.characters.IsoPlayer".equals(name) ||
+                        "zombie.MovingObjectUpdateScheduler".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name)) {
@@ -264,6 +265,17 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] Bytecode-patched IsoZombie: vehicle sight-line test routed through VehicleLosGovernor");
                 }
                 return los;
+            }
+            if ("zombie/MovingObjectUpdateScheduler".equals(className) && classfileBuffer != null) {
+                byte[] sim = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "zombie/MovingObjectUpdateScheduler", "getUpdateSchedulerSimulationLevelForObject",
+                    "(Lzombie/iso/IsoMovingObject;F)Lzombie/UpdateSchedulerSimulationLevel;",
+                    "com/pzoptimizer/UnseenZombieSimGovernor", "level",
+                    "(Lzombie/MovingObjectUpdateScheduler;Lzombie/iso/IsoMovingObject;F)Lzombie/UpdateSchedulerSimulationLevel;");
+                if (sim != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched MovingObjectUpdateScheduler: unseen zombie simulation level routed through UnseenZombieSimGovernor");
+                }
+                return sim;
             }
             if ("zombie/characters/IsoPlayer".equals(className) && classfileBuffer != null) {
                 byte[] cur = BytecodeRedirect.virtualToStatic(classfileBuffer,

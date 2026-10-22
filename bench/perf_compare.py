@@ -6,6 +6,7 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   stock  vanilla JVM flags, no -agentlib; PZOEntrypoint only drives the harness (stock=1 in the bench config),
          so no bytecode patch or governor is active
   pzo    the launcher JSON exactly as installed
+  pzo_nocap  as pzo, with the unseen-zombie simulation cap disabled (simcap=0)
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -96,6 +97,8 @@ def main():
                 print("[%s]" % label)
                 write_launcher_json(launcher_json, original, run, run_dir)
                 extra = {"stock": 1} if run == "stock" else {}
+                if run == "pzo_nocap":
+                    extra["simcap"] = 0
                 if args.threat:
                     extra["threat"] = 1
                 data = fc.run_game(args, mode, template, label, run_dir, [], extra)
