@@ -14,6 +14,7 @@ import java.util.Map;
 import se.krka.kahlua.integration.LuaReturn;
 import se.krka.kahlua.luaj.compiler.LuaCompiler;
 import se.krka.kahlua.vm.LuaClosure;
+import zombie.iso.weather.ClimateManager;
 import zombie.GameWindow;
 import zombie.Lua.LuaManager;
 import zombie.ZomboidFileSystem;
@@ -56,6 +57,15 @@ public final class BenchmarkHarness {
     private static float[] zooms = {1.0f, 2.0f};
     private static int routeTiles = 40;
     private static float routeSpeed = 8.0f;
+    // route=line: one straight leg of routeTiles in routeDir (fast travel, like driving through a town);
+    // route=square (default): the 4-leg loop back to the start tile
+    private static boolean lineRoute;
+    private static char routeDir = 'W';
+    private static float timeOfDay = 12.0f;
+    // weather=storm: heavy rain, full fog and cloud, strong wind, and a lightning flash every 2 s, all forced
+    // through the climate admin overrides so every run sees the same weather
+    private static boolean storm;
+    private static long lastLightningNs;
 
     private static long phaseStart;
     private static long benchStart;
@@ -95,6 +105,10 @@ public final class BenchmarkHarness {
             if (cfg.containsKey("route_tiles")) routeTiles = Integer.parseInt(cfg.get("route_tiles").trim());
             if (cfg.containsKey("route_speed")) routeSpeed = Float.parseFloat(cfg.get("route_speed").trim());
             threat = "1".equals(cfg.get("threat")) || "true".equalsIgnoreCase(cfg.get("threat"));
+            lineRoute = "line".equalsIgnoreCase(cfg.get("route"));
+            if (cfg.containsKey("route_dir")) routeDir = Character.toUpperCase(cfg.get("route_dir").trim().charAt(0));
+            if (cfg.containsKey("time")) timeOfDay = Float.parseFloat(cfg.get("time").trim());
+            storm = "storm".equalsIgnoreCase(cfg.get("weather"));
             if ("0".equals(cfg.get("simcap"))) {
                 UnseenZombieSimGovernor.setActive(false);
                 notes.add("unseen zombie simulation cap disabled (simcap=0)");
@@ -115,6 +129,12 @@ public final class BenchmarkHarness {
      * stock=1 in the bench config: the run is a vanilla baseline. PZO then applies no patches or governors and only
      * drives this harness, so the same route and sampling can be compared against a normal PZO run.
      */
+    /** True while a benchmark config is in place (the harness will run this launch). */
+    public static boolean isConfigured() {
+        String out = readConfig().get("out");
+        return out != null && !out.isEmpty();
+    }
+
     public static boolean isStockBaselineRequested() {
         String v = readConfig().get("stock");
         return v != null && (v.equals("1") || v.equalsIgnoreCase("true"));
@@ -228,11 +248,37 @@ public final class BenchmarkHarness {
     // Same light and weather in every run: noon, no rain or fog, no wounds or infection progressing
     private static void normalizeScene() throws Exception {
         runLua(
-            "pcall(function() getGameTime():setTimeOfDay(12.0) end)\n"
+            "pcall(function() getGameTime():setTimeOfDay(" + timeOfDay + ") end)\n"
             + "pcall(function() getClimateManager():stopWeatherAndThunder() end)\n"
             + "local p = getPlayer()\n"
             + "if p then pcall(function() p:getBodyDamage():RestoreToFullHealth() end) end\n"
             + "return true\n");
+        applyWeather();
+    }
+
+    private static void applyWeather() {
+        ClimateManager cm = ClimateManager.getInstance();
+        float[][] storming = {
+            {ClimateManager.FLOAT_PRECIPITATION_INTENSITY, 1.0f},
+            {ClimateManager.FLOAT_FOG_INTENSITY, 1.0f},
+            {ClimateManager.FLOAT_CLOUD_INTENSITY, 1.0f},
+            {ClimateManager.FLOAT_WIND_INTENSITY, 0.8f},
+        };
+        for (float[] f : storming) {
+            ClimateManager.ClimateFloat cf = cm.getClimateFloat((int) f[0]);
+            cf.setAdminValue(f[1]);
+            cf.setEnableAdmin(storm);
+        }
+    }
+
+    // Lightning at the player on a fixed cadence: the flash relights the scene, which is part of the storm's cost
+    private static void stormTick(long now) {
+        if (!storm || now - lastLightningNs < 2_000_000_000L) return;
+        lastLightningNs = now;
+        IsoPlayer p = IsoPlayer.players[0];
+        if (p != null) {
+            ClimateManager.getInstance().getThunderStorm().triggerThunderEvent((int) p.getX(), (int) p.getY(), false, true, true);
+        }
     }
 
     private static void setPaused(boolean paused) throws Exception {
@@ -262,11 +308,26 @@ public final class BenchmarkHarness {
         frameEvent.begin();
     }
 
-    // Square loop E, S, W, N back to the start tile
+    // Square loop E, S, W, N back to the start tile, or route=line: straight out in routeDir
     private static boolean moveAlongRoute(long elapsedNs) {
         IsoPlayer p = IsoPlayer.players[0];
         if (p == null) return true;
         float d = routeSpeed * (elapsedNs / 1e9f);
+        if (lineRoute) {
+            if (d >= routeTiles) {
+                p.teleportTo(startX, startY, startZ);
+                return true;
+            }
+            float lx = startX, ly = startY;
+            switch (routeDir) {
+                case 'E': lx += d; break;
+                case 'N': ly -= d; break;
+                case 'S': ly += d; break;
+                default: lx -= d; break;
+            }
+            p.teleportTo(lx, ly, startZ);
+            return false;
+        }
         float total = routeTiles * 4.0f;
         if (d >= total) {
             p.teleportTo(startX, startY, startZ);
@@ -383,10 +444,12 @@ public final class BenchmarkHarness {
                     if (now - phaseStart > SETTLE_NS) {
                         frameTimes.clear();
                         lastFrameCount = -1;
+                        GpuFrameTimer.start();
                         enter(Phase.ROUTE);
                     }
                     break;
                 case ROUTE:
+                    stormTick(now);
                     sampleFrame(now);
                     if (moveAlongRoute(now - phaseStart)) {
                         frameEvent = null;
@@ -432,6 +495,7 @@ public final class BenchmarkHarness {
     }
 
     private static void recordZoom() {
+        String render = GpuFrameTimer.stopJson();
         long[] ft = new long[frameTimes.size()];
         for (int i = 0; i < ft.length; i++) ft[i] = frameTimes.get(i);
         Arrays.sort(ft);
@@ -447,9 +511,9 @@ public final class BenchmarkHarness {
         if (zoomJson.length() > 0) zoomJson.append(",\n");
         zoomJson.append(String.format(Locale.ROOT,
             "    {\"zoom\": %.2f, \"frames\": %d, \"avg_ms\": %.3f, \"avg_fps\": %.1f, \"p99_ms\": %.3f, \"low1_fps\": %.1f, "
-                + "\"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
+                + "\"render_thread\": %s, \"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
             zooms[zoomIndex], ft.length, avgMs, avgMs > 0 ? 1000.0 / avgMs : 0, p99, low > 0 ? 1000.0 / low : 0,
-            shotName(false), shotName(true)));
+            render == null ? "null" : render, shotName(false), shotName(true)));
     }
 
     // threat=1: zombies see, chase and attack the player (only death is prevented), so AI, pathfinding and
@@ -544,7 +608,9 @@ public final class BenchmarkHarness {
             w.println("  \"label\": \"" + esc(label) + "\",");
             w.println("  \"ok\": " + ok + ",");
             w.println("  \"screen\": [" + Core.getInstance().getScreenWidth() + ", " + Core.getInstance().getScreenHeight() + "],");
-            w.println("  \"route\": {\"tiles\": " + routeTiles + ", \"tiles_per_s\": " + routeSpeed + "},");
+            w.println("  \"route\": {\"tiles\": " + routeTiles + ", \"tiles_per_s\": " + routeSpeed + ", \"shape\": \""
+                + (lineRoute ? "line " + routeDir : "square") + "\"},");
+            w.println("  \"scene\": {\"weather\": \"" + (storm ? "storm" : "clear") + "\", \"time\": " + timeOfDay + "},");
             w.println("  \"threat\": " + threat + ",");
             w.println("  \"fsr_requested\": " + WorldUpscalerGovernor.isRequestedAtLaunch() + ",");
             w.println("  \"fsr_active\": " + WorldUpscalerGovernor.isActive() + ",");
@@ -560,6 +626,7 @@ public final class BenchmarkHarness {
             w.println("  \"spotted_mirror_rebuilds\": " + SpottedListGovernor.rebuilds.get() + ",");
             w.println("  \"zombie_sim_levels_per_frame\": " + simLevelsJson() + ",");
             w.println("  \"textures_downscaled_off_main\": " + TextureDownscaleGovernor.texturesDownscaled.get() + ",");
+            w.println("  \"burn_loop_forced_removals\": " + BurnLoopGuard.forcedRemovals.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

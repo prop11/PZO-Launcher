@@ -195,3 +195,7 @@ build_native.bat
 scratch/
 bench/
 .vs/
+
+# Vendored ASM (BSD), relocated at build time
+!third_party/asm/*.jar
+third_party/asm/pzo-asm-shaded.jar

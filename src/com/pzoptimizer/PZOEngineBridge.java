@@ -267,6 +267,8 @@ public class PZOEngineBridge {
                 UnseenZombieSimGovernor.setActive(value);
             } else if ("JVM_TextureDownscaleOffload".equals(key)) {
                 TextureDownscaleGovernor.setActive(value);
+            } else if ("JVM_BurnLoopGuard".equals(key)) {
+                BurnLoopGuard.setActive(value);
             } else if ("JVM_HotSaveGovernor".equals(key)) {
                 HotSaveGovernor.setActive(value);
             } else if ("JVM_ChunkHandoffRecalc".equals(key)) {

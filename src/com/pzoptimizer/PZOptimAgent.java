@@ -20,7 +20,16 @@ public class PZOptimAgent {
             return;
         }
         if (BenchmarkHarness.isStockBaselineRequested()) {
-            PZOLogger.info("[PZO Agent] Stock baseline benchmark run: no transformer registered.");
+            // Only the benchmark's render thread timer is installed, so stock and PZO runs are measured alike
+            inst.addTransformer(new java.lang.instrument.ClassFileTransformer() {
+                @Override
+                public byte[] transform(ClassLoader loader, String className, Class<?> redefined,
+                                        ProtectionDomain pd, byte[] classfileBuffer) {
+                    return "zombie/core/opengl/RenderThread".equals(className)
+                        ? AsmSupport.transform(classfileBuffer, loader, "RenderThread timing", GpuFrameTimer::patch) : null;
+                }
+            });
+            PZOLogger.info("[PZO Agent] Stock baseline benchmark run: only the benchmark frame timer is registered.");
             return;
         }
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
@@ -142,7 +151,7 @@ public class PZOptimAgent {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                  ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-            byte[] specific = transformSpecific(className, classfileBuffer);
+            byte[] specific = transformSpecific(loader, className, classfileBuffer);
             if (!fsrRenderScaleHooks || className == null || classfileBuffer == null || !className.startsWith("zombie/")) {
                 return specific;
             }
@@ -223,7 +232,7 @@ public class PZOptimAgent {
             return changed ? current : null;
         }
 
-        private byte[] transformSpecific(String className, byte[] classfileBuffer) {
+        private byte[] transformSpecific(ClassLoader loader, String className, byte[] classfileBuffer) {
             if ("zombie/iso/IsoChunkMap".equals(className) && classfileBuffer != null) {
                 return patchIsoChunkMap(classfileBuffer);
             }
@@ -239,7 +248,12 @@ public class PZOptimAgent {
                     base = blood;
                 }
                 byte[] recalc = redirectRecalcPropertiesIfNeeded(base);
-                if (recalc != null) return recalc;
+                if (recalc != null) base = recalc;
+                byte[] burn = AsmSupport.transform(base, loader, "IsoGridSquare.BurnWalls", BurnLoopGuard::patch);
+                if (burn != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGridSquare.BurnWalls: burnt-building removal loop can no longer spin forever");
+                    base = burn;
+                }
                 return (base != classfileBuffer) ? base : null;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
@@ -267,6 +281,13 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] Bytecode-patched IsoZombie: vehicle sight-line test routed through VehicleLosGovernor");
                 }
                 return los;
+            }
+            if ("zombie/core/opengl/RenderThread".equals(className) && classfileBuffer != null && BenchmarkHarness.isConfigured()) {
+                byte[] rt = AsmSupport.transform(classfileBuffer, loader, "RenderThread timing", GpuFrameTimer::patch);
+                if (rt != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched RenderThread: benchmark render frame timing armed");
+                }
+                return rt;
             }
             if ("zombie/core/textures/TextureIDAssetManager".equals(className) && classfileBuffer != null) {
                 byte[] tex = BytecodeRedirect.virtualToStatic(classfileBuffer,

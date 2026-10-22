@@ -13,6 +13,7 @@ ProjectZomboid64.json is backed up and restored around each run, like latestSave
 
 Usage:  python bench/perf_compare.py [--source Mode/SaveName] [--refresh-template] [--zooms 1.0,2.0]
                                      [--route-tiles 40] [--route-speed 8] [--runs stock,pzo] [--repeat 1] [--threat]
+                                     [--weather storm] [--time 19] [--route line --route-dir W --route-tiles 1000 --route-speed 33]
 """
 
 import argparse
@@ -36,6 +37,9 @@ STOCK_VM_ARGS = [
     "-XX:-CreateCoredumpOnCrash",
     "-XX:-OmitStackTraceInFastThrow",
     "-XX:+UseZGC",
+    # Loads the agent through PZO's native bridge, as the PZO launch does (plain -javaagent does not survive the
+    # game launcher). Stock mode then registers only the harness's render thread timer; no game patch is applied
+    "-agentlib:pzo_native64",
 ]
 
 
@@ -67,6 +71,12 @@ def main():
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--threat", action="store_true",
                     help="zombies see and attack the player (death still prevented) so AI/combat cost is measured")
+    ap.add_argument("--weather", choices=["clear", "storm"], default="clear",
+                    help="storm: forced heavy rain, full fog, wind and periodic lightning")
+    ap.add_argument("--time", type=float, default=12.0, help="time of day (hours)")
+    ap.add_argument("--route", choices=["square", "line"], default="square",
+                    help="line: one straight leg of --route-tiles at --route-speed (fast travel)")
+    ap.add_argument("--route-dir", choices=["E", "W", "N", "S"], default="W")
     args = ap.parse_args()
 
     if fc.game_running():
@@ -101,6 +111,7 @@ def main():
                     extra["simcap"] = 0
                 if args.threat:
                     extra["threat"] = 1
+                extra.update({"weather": args.weather, "time": args.time, "route": args.route, "route_dir": args.route_dir})
                 data = fc.run_game(args, mode, template, label, run_dir, [], extra)
                 if data is None:
                     print("  no results.json (see %s)" % run_dir)
