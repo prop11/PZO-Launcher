@@ -761,9 +761,14 @@ if is_proton:
         }
     }
 else:
-    # Native Linux
+    # Native Linux. The vanilla flags stripped by DROP_PREFIXES are re-added; without zomboid.steam the
+    # game skips Steam init and the Workshop mod list comes up empty
     pzo_args.extend([
         f"-Xmx{ram_mb}m",
+        "-Dzomboid.steam=1",
+        "-Dzomboid.znetlog=1",
+        "-XX:-CreateCoredumpOnCrash",
+        "-XX:-OmitStackTraceInFastThrow",
         "-XX:+UseG1GC",
         "-XX:+PerfDisableSharedMem",
         "-XX:InitiatingHeapOccupancyPercent=45",
