@@ -635,6 +635,8 @@ public final class BenchmarkHarness {
             w.println("  \"vehicle_anim_updates_run\": " + VehicleAnimSkipGovernor.updatesRun.get() + ",");
             w.println("  \"vehicle_los_tests_rejected\": " + VehicleLosGovernor.testsRejected.get() + ",");
             w.println("  \"vehicle_los_tests_run\": " + VehicleLosGovernor.testsRun.get() + ",");
+            w.println("  \"vehicle_box_checks\": " + VehicleLosGovernor.boxChecks.get() + ",");
+            w.println("  \"vehicle_box_mismatches\": " + VehicleLosGovernor.boxMismatches.get() + ",");
             w.println("  \"spotted_lookups_hashed\": " + SpottedListGovernor.lookupsHashed.get() + ",");
             w.println("  \"spotted_mirror_rebuilds\": " + SpottedListGovernor.rebuilds.get() + ",");
             w.println("  \"zombie_sim_levels_per_frame\": " + simLevelsJson() + ",");
