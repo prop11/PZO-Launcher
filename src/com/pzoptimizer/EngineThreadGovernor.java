@@ -241,6 +241,7 @@ public class EngineThreadGovernor {
             try {
                 target.run();
             } finally {
+                GameThreadQueue.drain();
                 if (BenchmarkHarness.isActive()) {
                     BenchmarkHarness.tick();
                 }
