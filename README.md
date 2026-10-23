@@ -25,8 +25,6 @@ Instead of replacing game files on disk or relying on decompiled class overrides
 
 ## Technical Comparison: PZO vs. PZ_Optimization
 
-`xD3I/PZ_Optimization` introduced some great ideas (especially quarter-resolution fog rendering). Since both projects aim to improve PZ performance, here is a straightforward breakdown of how the two approaches differ under the hood:
-
 | Area | PZ_Optimization (`xD3I`) | PZO (`prop11`) |
 |---|---|---|
 | **Multi-Threading** | Worker-thread entity updates disabled by default due to single-threaded Kahlua Lua VM constraints. | Parallelizes spatial sweeps, frustum culling, FOV awareness cones, and vector math across worker threads while keeping Lua state changes safe on the main thread. |
