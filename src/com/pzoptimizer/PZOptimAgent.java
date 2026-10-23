@@ -481,6 +481,13 @@ public class PZOptimAgent {
                 }
                 return out;
             }
+            if ("zombie/scripting/ScriptManager".equals(className) && classfileBuffer != null) {
+                byte[] sm = AsmSupport.transform(classfileBuffer, loader, "ScriptManager.FindItem memo", ScriptLookupCache::patchScriptManager);
+                if (sm != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ScriptManager.FindItem: item lookups remembered until scripts reload");
+                }
+                return sm;
+            }
             if ("zombie/iso/IsoDirections".equals(className) && classfileBuffer != null) {
                 byte[] dv = AsmSupport.transform(classfileBuffer, loader, "IsoDirections.ToVector", DirectionVectorFix::patchIsoDirections);
                 if (dv != null) {

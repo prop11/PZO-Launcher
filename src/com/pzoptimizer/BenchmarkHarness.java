@@ -117,6 +117,11 @@ public final class BenchmarkHarness {
                 PaletteBuffers.active = false;
                 notes.add("bulk matrix palette copy disabled (palette=0)");
             }
+            if ("0".equals(cfg.get("scriptcache"))) {
+                ScriptLookupCache.active = false;
+                ScriptLookupCache.invalidate();
+                notes.add("script item lookup memo disabled (scriptcache=0)");
+            }
             if ("0".equals(cfg.get("foliage"))) {
                 FoliageLod.active = false;
                 notes.add("distant foliage baking disabled (foliage=0)");
@@ -667,6 +672,8 @@ public final class BenchmarkHarness {
             w.println("  \"bone_batch_batches\": " + BoneBatch.batches.get() + ",");
             w.println("  \"skins_precomputed\": " + BoneBatch.skinsPrecomputed.sum() + ",");
             w.println("  \"foliage_chunk_flips\": " + FoliageLod.chunkFlips.get() + ",");
+            w.println("  \"script_lookup_hits\": " + ScriptLookupCache.hits.sum() + ",");
+            w.println("  \"script_lookup_fills\": " + ScriptLookupCache.fills.sum() + ",");
             w.println("  \"foliage_far_classifications\": " + FoliageLod.objectsBaked.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
