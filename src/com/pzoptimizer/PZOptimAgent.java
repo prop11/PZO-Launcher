@@ -294,6 +294,7 @@ public class PZOptimAgent {
             if ("zombie/iso/weather/fx/WeatherParticleDrawer".equals(className) && classfileBuffer != null) {
                 byte[] wd = AsmSupport.transform(classfileBuffer, loader, "WeatherParticleDrawer tiles", WeatherTileBatcher::patchDrawer);
                 if (wd != null) {
+                    WeatherTileBatcher.drawerPatched = true;
                     PZOLogger.success("[PZO Agent] ASM-patched WeatherParticleDrawer: weather tiles drawn once per screen cell on the GPU");
                 }
                 return wd;
@@ -553,7 +554,8 @@ public class PZOptimAgent {
                 byte[] smc = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter state machine cache",
                     GameThreadPatches::patchStateMachineComponent);
                 if (smc != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getStateMachineComponent: component kept per character");
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getStateMachineComponent: " + (GameThreadPatches.stateMachineInPlace
+                        ? "component read straight from the component map (class keeps its stock shape)" : "component kept per character"));
                     gc = smc;
                 }
                 byte[] split = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter postupdate split",

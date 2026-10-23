@@ -561,6 +561,14 @@ public class JavaModLoader {
         return false;
     }
 
+    /** A Viewpoint mod in the startup mod list; readable before any game class loads, unlike the in-game check. */
+    public static boolean isViewpointStartupMod() {
+        for (String id : getEnabledModIds()) {
+            if (id.toLowerCase().contains("viewpoint")) return true;
+        }
+        return false;
+    }
+
     private static final Set<String> ENABLED_MOD_IDS = new HashSet<>();
     private static volatile boolean enabledModsParsed = false;
 

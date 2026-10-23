@@ -11,6 +11,7 @@ import com.pzoptimizer.shaded.asm.tree.JumpInsnNode;
 import com.pzoptimizer.shaded.asm.tree.LabelNode;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
+import com.pzoptimizer.shaded.asm.tree.TypeInsnNode;
 import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -54,7 +55,9 @@ import zombie.iso.IsoWorld;
  * look the component up in the character's component HashMap on every call, many times per zombie per frame.
  * Each character keeps the component it last found and reuses it while the component still names that
  * character as its owner. ECSEntity's set and remove keep ownership and the map in step, so a replaced or
- * removed component fails the check and the stock lookup runs again.
+ * removed component fails the check and the stock lookup runs again. When the class must keep its stock shape (loaded
+ * before this agent saw it, or Viewpoint active), the method instead reads the component straight from the map,
+ * skipping the argument checks, the ECS class walk and the cast check, and falls back to stock.
  */
 public final class GameThreadPatches {
 
@@ -345,10 +348,27 @@ public final class GameThreadPatches {
         return stateMachineCache && ((zombie.characters.ecs.ECSComponent) component).getECSOwnerEntity() == character;
     }
 
+    // In-place variant: the component under its ECS class (StateMachineComponent extends ECSComponent directly)
+    public static Object stateMachineFromMap(java.util.HashMap<?, ?> map) {
+        if (!stateMachineCache || map == null) return null;
+        Object c = map.get(zombie.characters.component.StateMachineComponent.class);
+        return c instanceof zombie.characters.component.StateMachineComponent ? c : null;
+    }
+
+    static volatile boolean stateMachineInPlace;
+
     static boolean patchStateMachineComponent(ClassNode node) {
         String desc = "()Lzombie/characters/component/StateMachineComponent;";
         MethodNode orig = AsmSupport.findMethod(node, "getStateMachineComponent", desc);
         if (orig == null || (orig.access & Opcodes.ACC_STATIC) != 0) return false;
+        // The field version renames the stock method and adds a field: impossible in a retransform of a class
+        // loaded before this agent saw it, and stood down while Viewpoint is active (see AsmSupport.keepClassShapes)
+        Class<?> live = AsmSupport.REDEFINING.get();
+        boolean liveHasField = live != null && hasDeclaredField(live, "pzo$smc");
+        if (!liveHasField && (live != null || AsmSupport.keepClassShapes())) {
+            return patchStateMachineInPlace(node, orig);
+        }
+        stateMachineInPlace = false;
         String owner = node.name;
         String fieldDesc = "Lzombie/characters/component/StateMachineComponent;";
         int access = orig.access;
@@ -383,6 +403,38 @@ public final class GameThreadPatches {
         m.maxLocals = 2;
         m.maxStack = 2;
         node.methods.add(m);
+        return true;
+    }
+
+    private static boolean hasDeclaredField(Class<?> c, String name) {
+        for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+            if (f.getName().equals(name)) return true;
+        }
+        return false;
+    }
+
+    // Body-only, so a retransform accepts it: map lookup first, the stock body when it finds nothing
+    private static boolean patchStateMachineInPlace(ClassNode node, MethodNode m) {
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode mi && "com/pzoptimizer/GameThreadPatches".equals(mi.owner)) {
+                stateMachineInPlace = true;
+                return true;
+            }
+        }
+        InsnList pre = new InsnList();
+        LabelNode stock = new LabelNode();
+        pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        pre.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, node.name, "getECSComponentMap", "()Ljava/util/HashMap;", false));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/GameThreadPatches", "stateMachineFromMap",
+            "(Ljava/util/HashMap;)Ljava/lang/Object;", false));
+        pre.add(new InsnNode(Opcodes.DUP));
+        pre.add(new JumpInsnNode(Opcodes.IFNULL, stock));
+        pre.add(new TypeInsnNode(Opcodes.CHECKCAST, "zombie/characters/component/StateMachineComponent"));
+        pre.add(new InsnNode(Opcodes.ARETURN));
+        pre.add(stock);
+        pre.add(new InsnNode(Opcodes.POP));
+        m.instructions.insert(pre);
+        stateMachineInPlace = true;
         return true;
     }
 
