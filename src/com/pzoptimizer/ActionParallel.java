@@ -3,7 +3,6 @@ package com.pzoptimizer;
 import com.pzoptimizer.shaded.asm.Opcodes;
 import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
-import com.pzoptimizer.shaded.asm.tree.FieldNode;
 import com.pzoptimizer.shaded.asm.tree.InsnList;
 import com.pzoptimizer.shaded.asm.tree.InsnNode;
 import com.pzoptimizer.shaded.asm.tree.JumpInsnNode;
@@ -16,6 +15,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -83,31 +83,39 @@ public final class ActionParallel {
     private static Object[] resumingKeys, resumingVals;
     private static int resumingCount;
 
+    // Per-zombie phase and pre-read snapshot live here, not in fields on the character: ZombieBuddy loads
+    // IsoGameCharacter before this agent sees it, and the retransform that patches it then cannot add fields.
+    // Phases are game thread only and empty outside a collecting bucket; snapshot slots follow queue order.
+    private static final IdentityHashMap<IsoGameCharacter, Byte> phases = new IdentityHashMap<>();
+    private static Object[][] snapKeys = new Object[0][], snapVals = new Object[0][];
+
     // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
     // while one of those classes is being defined, and loading it again from there is a duplicate definition
     private static final class H {
-        private static final VarHandle PHASE, SNAP_KEYS, SNAP_VALS;
         private static final VarHandle CVC_LHS, CVC_RHS, LOOKUP_REF, REF_HANDLE, REF_SUBSOURCE, AC_CONTAINER, CONT_CURRENT, CONT_CHILDREN,
             TRANSITION_CONDITIONS;
         private static final MethodHandle RESOLVE, PARSE;
         private static final Class<?> LOOKUP_CLASS;
         static {
-            VarHandle phase = null, sk = null, sv = null, lhs = null, rhs = null, ref = null, handle = null, sub = null, cont = null,
-                cur = null, kids = null, conds = null;
+            VarHandle lhs = null, rhs = null, ref = null, handle = null, sub = null, cont = null, cur = null, kids = null, conds = null;
             MethodHandle resolve = null, parse = null;
             Class<?> lookupClass = null;
+            MethodHandles.Lookup l = MethodHandles.lookup();
+            // The condition patch calls resolve() for every character whether or not the split is active, so its
+            // handle must not depend on the lookups below succeeding
             try {
-                MethodHandles.Lookup l = MethodHandles.lookup();
-                MethodHandles.Lookup gc = MethodHandles.privateLookupIn(IsoGameCharacter.class, l);
-                phase = gc.findVarHandle(IsoGameCharacter.class, "pzo$phase", byte.class);
-                sk = gc.findVarHandle(IsoGameCharacter.class, "pzo$snapKeys", Object[].class);
-                sv = gc.findVarHandle(IsoGameCharacter.class, "pzo$snapVals", Object[].class);
                 MethodHandles.Lookup cvc = MethodHandles.privateLookupIn(CharacterVariableCondition.class, l);
-                lhs = cvc.findVarHandle(CharacterVariableCondition.class, "lhsValue", Object.class);
-                rhs = cvc.findVarHandle(CharacterVariableCondition.class, "rhsValue", Object.class);
                 resolve = cvc.findStatic(CharacterVariableCondition.class, "resolveValue",
                     MethodType.methodType(Object.class, Object.class, IAnimationVariableSource.class));
                 parse = cvc.findStatic(CharacterVariableCondition.class, "parseValue", MethodType.methodType(Object.class, String.class, boolean.class));
+            } catch (Throwable t) {
+                PZOLogger.warn("[ActionParallel] condition handles not found, disabled: " + t);
+                active = false;
+            }
+            try {
+                MethodHandles.Lookup cvc = MethodHandles.privateLookupIn(CharacterVariableCondition.class, l);
+                lhs = cvc.findVarHandle(CharacterVariableCondition.class, "lhsValue", Object.class);
+                rhs = cvc.findVarHandle(CharacterVariableCondition.class, "rhsValue", Object.class);
                 lookupClass = Class.forName("zombie.characters.action.conditions.CharacterVariableCondition$CharacterVariableLookup");
                 ref = MethodHandles.privateLookupIn(lookupClass, l).findVarHandle(lookupClass, "variableReference", AnimationVariableReference.class);
                 MethodHandles.Lookup avr = MethodHandles.privateLookupIn(AnimationVariableReference.class, l);
@@ -124,9 +132,6 @@ public final class ActionParallel {
                 PZOLogger.warn("[ActionParallel] game structure not as expected, disabled: " + t);
                 active = false;
             }
-            PHASE = phase;
-            SNAP_KEYS = sk;
-            SNAP_VALS = sv;
             CVC_LHS = lhs;
             CVC_RHS = rhs;
             LOOKUP_REF = ref;
@@ -198,21 +203,28 @@ public final class ActionParallel {
     public static boolean defer(IsoGameCharacter chr) {
         if (!collecting || !(chr instanceof IsoZombie z) || Thread.currentThread() != gameThread) return false;
         if (z.isBeingGrappled() || z.isGrappling() || z.getReanimatedPlayer() != null || z.isReanimatedForGrappleOnly()) return false;
-        H.PHASE.set(chr, DEFERRED);
+        phases.put(chr, DEFERRED);
         queue.add(z);
         return true;
     }
 
+    // Called from every character's postupdate; only the game thread ever defers, so other threads see NONE
+    private static byte phase(IsoGameCharacter chr) {
+        if (phases.isEmpty() || Thread.currentThread() != gameThread) return NONE;
+        Byte p = phases.get(chr);
+        return p == null ? NONE : p;
+    }
+
     public static boolean isDeferred(IsoGameCharacter chr) {
-        return H.PHASE != null && (byte) H.PHASE.get(chr) == DEFERRED;
+        return phase(chr) == DEFERRED;
     }
 
     public static boolean isResuming(IsoGameCharacter chr) {
-        return H.PHASE != null && (byte) H.PHASE.get(chr) == RESUMING;
+        return phase(chr) == RESUMING;
     }
 
     public static void resumed(IsoGameCharacter chr) {
-        H.PHASE.set(chr, NONE);
+        phases.remove(chr);
     }
 
     // ---- phases 2 and 3: after the bucket loop ----
@@ -232,22 +244,23 @@ public final class ActionParallel {
             for (int i = 0; i < n; i++) {
                 IsoZombie z = queue.get(i);
                 resumingZombie = z;
-                resumingKeys = read ? (Object[]) H.SNAP_KEYS.get(z) : null;
-                resumingVals = read ? (Object[]) H.SNAP_VALS.get(z) : null;
+                resumingKeys = read ? snapKeys[i] : null;
+                resumingVals = read ? snapVals[i] : null;
                 resumingCount = resumingKeys == null ? 0 : countOf(resumingKeys);
-                H.PHASE.set(z, RESUMING);
+                phases.put(z, RESUMING);
                 try {
                     z.postupdate();
                 } catch (Throwable t) {
                     PZOLogger.warn("[ActionParallel] deferred postupdate of a zombie threw: " + t);
                 } finally {
-                    H.PHASE.set(z, NONE);
+                    phases.remove(z);
                 }
             }
         } finally {
             resumingZombie = null;
             resumingKeys = resumingVals = null;
             queue.clear();
+            phases.clear();
         }
     }
 
@@ -259,6 +272,17 @@ public final class ActionParallel {
 
     private static void readOnWorkers(Set<String> keys) {
         int n = queue.size();
+        // Slots are allocated here on the game thread; each worker then writes only its own range
+        if (snapKeys.length < n) {
+            snapKeys = java.util.Arrays.copyOf(snapKeys, Math.max(n, snapKeys.length * 2));
+            snapVals = java.util.Arrays.copyOf(snapVals, snapKeys.length);
+        }
+        for (int i = 0; i < n; i++) {
+            if (snapKeys[i] == null) {
+                snapKeys[i] = new Object[64];
+                snapVals[i] = new Object[64];
+            }
+        }
         int chunks = Math.min(workerCount, (n + 15) / 16);
         CountDownLatch done = new CountDownLatch(chunks);
         for (int c = 0; c < chunks; c++) {
@@ -266,7 +290,7 @@ public final class ActionParallel {
             workers.execute(() -> {
                 try {
                     for (int i = from; i < to; i++) {
-                        preReadZombie(queue.get(i), keys);
+                        preReadZombie(queue.get(i), keys, snapKeys[i], snapVals[i]);
                     }
                 } finally {
                     done.countDown();
@@ -281,13 +305,7 @@ public final class ActionParallel {
     }
 
     // Worker: the game thread is waiting, so the zombie and its action states do not change meanwhile
-    private static void preReadZombie(IsoZombie z, Set<String> keys) {
-        Object[] k = (Object[]) H.SNAP_KEYS.get(z);
-        Object[] v = (Object[]) H.SNAP_VALS.get(z);
-        if (k == null) {
-            k = new Object[64];
-            v = new Object[64];
-        }
+    private static void preReadZombie(IsoZombie z, Set<String> keys, Object[] k, Object[] v) {
         int count = 0;
         try {
             ActionContext ctx = z.getActionContext();
@@ -304,8 +322,6 @@ public final class ActionParallel {
             count = 0; // anything unexpected: this zombie reads everything live
         }
         k[Math.min(count, k.length - 1)] = null;
-        H.SNAP_KEYS.set(z, k);
-        H.SNAP_VALS.set(z, v);
         preRead.addAndGet(count);
     }
 
@@ -414,6 +430,10 @@ public final class ActionParallel {
         MethodNode anim = AsmSupport.findMethod(node, "postUpdateAnimating", "()V");
         MethodNode internal = AsmSupport.findMethod(node, "postUpdateInternal", "()V");
         if (anim == null || internal == null) return false;
+        // Bytes this agent already patched (another agent redefined the class with them): applying again would split twice
+        for (AbstractInsnNode insn = anim.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode mi && SELF.equals(mi.owner)) return true;
+        }
 
         int animLocal = -1;
         MethodInsnNode getAnimPlayer = null;
@@ -464,12 +484,7 @@ public final class ActionParallel {
             }
         }
         if (animCall == null || prevReal(animCall) == null || prevReal(animCall).getOpcode() != Opcodes.ALOAD) return false;
-        if (!skipAndResume(internal, prevReal(animCall), animCall)) return false;
-
-        node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_TRANSIENT, "pzo$phase", "B", null, null));
-        node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_TRANSIENT, "pzo$snapKeys", "[Ljava/lang/Object;", null, null));
-        node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_TRANSIENT, "pzo$snapVals", "[Ljava/lang/Object;", null, null));
-        return true;
+        return skipAndResume(internal, prevReal(animCall), animCall);
     }
 
     // Resuming: jump straight to `resumeAt`. After `afterCall`: return while the character is deferred.
