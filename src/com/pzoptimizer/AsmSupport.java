@@ -20,14 +20,22 @@ public final class AsmSupport {
         boolean apply(ClassNode node) throws Exception;
     }
 
+    // Set by the agent around a retransform of an already loaded class, which may not add fields or methods
+    static final ThreadLocal<Boolean> REDEFINING = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     private AsmSupport() {}
 
     public static byte[] transform(byte[] classfile, ClassLoader loader, String what, NodeTransform t) {
         try {
             ClassNode node = new ClassNode();
             new ClassReader(classfile).accept(node, ClassReader.EXPAND_FRAMES);
+            int fields = node.fields.size(), methods = node.methods.size();
             if (!t.apply(node)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": target code not found, class left unchanged");
+                return null;
+            }
+            if (REDEFINING.get() && (node.fields.size() != fields || node.methods.size() != methods)) {
+                PZOLogger.warn("[AsmSupport] " + what + ": adds members, which a retransform cannot; class left unchanged");
                 return null;
             }
             ClassWriter cw = new LoaderAwareClassWriter(loader);

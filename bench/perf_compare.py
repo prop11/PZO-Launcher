@@ -14,6 +14,7 @@ ProjectZomboid64.json is backed up and restored around each run, like latestSave
 Usage:  python bench/perf_compare.py [--source Mode/SaveName] [--refresh-template] [--zooms 1.0,2.0]
                                      [--route-tiles 40] [--route-speed 8] [--runs stock,pzo] [--repeat 1] [--threat]
                                      [--weather storm] [--time 19] [--route line --route-dir W --route-tiles 1000 --route-speed 33]
+                                     [--cores 4]
 """
 
 import argparse
@@ -77,6 +78,8 @@ def main():
     ap.add_argument("--route", choices=["square", "line"], default="square",
                     help="line: one straight leg of --route-tiles at --route-speed (fast travel)")
     ap.add_argument("--route-dir", choices=["E", "W", "N", "S"], default="W")
+    ap.add_argument("--cores", type=int, default=0,
+                    help="pin the game to this many physical cores (with SMT siblings) to stand in for a smaller CPU")
     args = ap.parse_args()
 
     if fc.game_running():

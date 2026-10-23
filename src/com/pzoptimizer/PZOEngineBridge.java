@@ -269,6 +269,28 @@ public class PZOEngineBridge {
                 TextureDownscaleGovernor.setActive(value);
             } else if ("JVM_BurnLoopGuard".equals(key)) {
                 BurnLoopGuard.setActive(value);
+            } else if ("JVM_LuaTableFastGet".equals(key)) {
+                GameThreadPatches.luaFastGet = value;
+            } else if ("JVM_WorldSoundChunkClamp".equals(key)) {
+                GameThreadPatches.soundClamp = value;
+            } else if ("JVM_LightSwitchPowerCache".equals(key)) {
+                GameThreadPatches.lightSwitchCache = value;
+            } else if ("JVM_ChunkHandoffPacer".equals(key)) {
+                GameThreadPatches.handoffPacer = value;
+            } else if ("JVM_EcsClassCache".equals(key)) {
+                GameThreadPatches.ecsClassCache = value;
+            } else if ("JVM_ProfilerThreadCheck".equals(key)) {
+                GameThreadPatches.profilerThreadCheck = value;
+            } else if ("JVM_StateMachineCache".equals(key)) {
+                GameThreadPatches.stateMachineCache = value;
+            } else if ("JVM_WeatherTiles".equals(key)) {
+                WeatherTileBatcher.setActive(value);
+            } else if ("JVM_ActionReadParallel".equals(key)) {
+                ActionParallel.setActive(value);
+            } else if ("JVM_ChunkBakeBudget".equals(key)) {
+                ChunkBakeBudget.setActive(value);
+            } else if ("JVM_PuddleEarlyDepth".equals(key)) {
+                ShaderEarlyDepth.setActive(value);
             } else if ("JVM_HotSaveGovernor".equals(key)) {
                 HotSaveGovernor.setActive(value);
             } else if ("JVM_ChunkHandoffRecalc".equals(key)) {

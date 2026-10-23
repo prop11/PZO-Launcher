@@ -58,6 +58,8 @@ public class PZOptimAgent {
                         "zombie.characters.IsoZombie".equals(name) ||
                         "zombie.characters.IsoPlayer".equals(name) ||
                         "zombie.MovingObjectUpdateScheduler".equals(name) ||
+                        "se.krka.kahlua.j2se.KahluaTableImpl".equals(name) ||
+                        "zombie.WorldSoundManager".equals(name) ||
                         "zombie.core.textures.TextureIDAssetManager".equals(name) ||
                         "zombie.fileSystem.FileSystemImpl".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
@@ -151,7 +153,13 @@ public class PZOptimAgent {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                  ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-            byte[] specific = transformSpecific(loader, className, classfileBuffer);
+            AsmSupport.REDEFINING.set(classBeingRedefined != null);
+            byte[] specific;
+            try {
+                specific = transformSpecific(loader, className, classfileBuffer);
+            } finally {
+                AsmSupport.REDEFINING.set(Boolean.FALSE);
+            }
             if (!fsrRenderScaleHooks || className == null || classfileBuffer == null || !className.startsWith("zombie/")) {
                 return specific;
             }
@@ -234,7 +242,84 @@ public class PZOptimAgent {
 
         private byte[] transformSpecific(ClassLoader loader, String className, byte[] classfileBuffer) {
             if ("zombie/iso/IsoChunkMap".equals(className) && classfileBuffer != null) {
-                return patchIsoChunkMap(classfileBuffer);
+                byte[] base = patchIsoChunkMap(classfileBuffer);
+                byte[] paced = AsmSupport.transform(base != null ? base : classfileBuffer, loader,
+                    "IsoChunkMap hand-off pacer", GameThreadPatches::patchChunkMap);
+                if (paced != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoChunkMap.updateInternal: chunk hand-offs paced by a per-frame time budget");
+                    return paced;
+                }
+                return base;
+            }
+            if ("zombie/core/opengl/ShaderUnit".equals(className) && classfileBuffer != null) {
+                byte[] su = AsmSupport.transform(classfileBuffer, loader, "ShaderUnit early depth", ShaderEarlyDepth::patchShaderUnit);
+                if (su != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ShaderUnit: puddle shaders take depth from the vertex stage (early depth test on)");
+                }
+                return su;
+            }
+            if ("zombie/iso/fboRenderChunk/FBORenderCell".equals(className) && classfileBuffer != null) {
+                byte[] fc = AsmSupport.transform(classfileBuffer, loader, "FBORenderCell bake budget", ChunkBakeBudget::patchRenderCell);
+                if (fc != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderOneLevel: lighting and cosmetic re-bakes spread over frames");
+                }
+                return fc;
+            }
+            if ("zombie/core/opengl/VBORenderer".equals(className) && classfileBuffer != null) {
+                byte[] vb = AsmSupport.transform(classfileBuffer, loader, "VBORenderer batch size", RenderBatchPatches::patchVboRenderer);
+                if (vb != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched VBORenderer: 1 MB batches instead of 4 KB (about 30x fewer flushes)");
+                }
+                return vb;
+            }
+            if ("zombie/iso/weather/fx/ParticleRectangle".equals(className) && classfileBuffer != null) {
+                byte[] pr = AsmSupport.transform(classfileBuffer, loader, "ParticleRectangle tiles", WeatherTileBatcher::patchParticleRectangle);
+                if (pr != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ParticleRectangle.render: weather particles added once per frame as a tile");
+                }
+                return pr;
+            }
+            if ("zombie/iso/weather/fx/WeatherParticleDrawer".equals(className) && classfileBuffer != null) {
+                byte[] wd = AsmSupport.transform(classfileBuffer, loader, "WeatherParticleDrawer tiles", WeatherTileBatcher::patchDrawer);
+                if (wd != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched WeatherParticleDrawer: weather tiles drawn once per screen cell on the GPU");
+                }
+                return wd;
+            }
+            if ("se/krka/kahlua/j2se/KahluaTableImpl".equals(className) && classfileBuffer != null) {
+                byte[] lua = AsmSupport.transform(classfileBuffer, loader, "KahluaTableImpl.rawget", GameThreadPatches::patchKahluaTable);
+                if (lua != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched KahluaTableImpl.rawget: one hash lookup per Lua table read");
+                }
+                return lua;
+            }
+            if ("zombie/WorldSoundManager".equals(className) && classfileBuffer != null) {
+                byte[] snd = AsmSupport.transform(classfileBuffer, loader, "WorldSoundManager.addSound", GameThreadPatches::patchWorldSound);
+                if (snd != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched WorldSoundManager.addSound: chunk walk clamped to the loaded grid");
+                }
+                return snd;
+            }
+            if ("zombie/characters/ecs/ECSComponent".equals(className) && classfileBuffer != null) {
+                byte[] ecs = AsmSupport.transform(classfileBuffer, loader, "ECSComponent.getECSClass cache", GameThreadPatches::patchEcsComponent);
+                if (ecs != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ECSComponent.getECSClass: component class walk cached per type");
+                }
+                return ecs;
+            }
+            if ("zombie/GameProfiler".equals(className) && classfileBuffer != null) {
+                byte[] gp = AsmSupport.transform(classfileBuffer, loader, "GameProfiler.isValidThread", GameThreadPatches::patchGameProfiler);
+                if (gp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GameProfiler.isValidThread: game threads recognised without a name scan");
+                }
+                return gp;
+            }
+            if ("zombie/iso/objects/IsoLightSwitch".equals(className) && classfileBuffer != null) {
+                byte[] ls = AsmSupport.transform(classfileBuffer, loader, "IsoLightSwitch power cache", GameThreadPatches::patchLightSwitch);
+                if (ls != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoLightSwitch.hasElectricityAround: per-switch power answer cached for a few frames");
+                }
+                return ls;
             }
             if ("zombie/entity/components/spriteconfig/SpriteConfig".equals(className) && classfileBuffer != null) {
                 return patchSpriteConfig(classfileBuffer);
@@ -280,7 +365,18 @@ public class PZOptimAgent {
                 if (los != null) {
                     PZOLogger.success("[PZO Agent] Bytecode-patched IsoZombie: vehicle sight-line test routed through VehicleLosGovernor");
                 }
-                return los;
+                byte[] base = los != null ? los : classfileBuffer;
+                byte[] snap = AsmSupport.transform(base, loader, "IsoZombie.isVehicleBetween snapshot", VehicleLosGovernor::patchZombie);
+                if (snap != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoZombie.isVehicleBetween: vehicle spheres snapshotted once per frame");
+                    base = snap;
+                }
+                byte[] split = AsmSupport.transform(base, loader, "IsoZombie postupdate split", ActionParallel::patchZombie);
+                if (split != null) {
+                    ActionParallel.markPatched(ActionParallel.PATCH_ZOMBIE);
+                    return split;
+                }
+                return snap != null ? snap : los;
             }
             if ("zombie/core/opengl/RenderThread".equals(className) && classfileBuffer != null && BenchmarkHarness.isConfigured()) {
                 byte[] rt = AsmSupport.transform(classfileBuffer, loader, "RenderThread timing", GpuFrameTimer::patch);
@@ -362,7 +458,33 @@ public class PZOptimAgent {
                 return patchPropertyContainer(classfileBuffer);
             }
             if ("zombie/characters/IsoGameCharacter".equals(className) && classfileBuffer != null) {
-                return patchIsoGameCharacter(classfileBuffer);
+                byte[] gc = patchIsoGameCharacter(classfileBuffer);
+                byte[] smc = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter state machine cache",
+                    GameThreadPatches::patchStateMachineComponent);
+                if (smc != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getStateMachineComponent: component kept per character");
+                    gc = smc;
+                }
+                byte[] split = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter postupdate split",
+                    ActionParallel::patchCharacter);
+                if (split != null) {
+                    ActionParallel.markPatched(ActionParallel.PATCH_CHARACTER);
+                    return split;
+                }
+                return gc;
+            }
+            if ("zombie/MovingObjectUpdateSchedulerUpdateBucket".equals(className) && classfileBuffer != null) {
+                byte[] b = AsmSupport.transform(classfileBuffer, loader, "UpdateBucket postupdate flush", ActionParallel::patchBucket);
+                if (b != null) ActionParallel.markPatched(ActionParallel.PATCH_BUCKET);
+                return b;
+            }
+            if ("zombie/characters/action/conditions/CharacterVariableCondition".equals(className) && classfileBuffer != null) {
+                byte[] c = AsmSupport.transform(classfileBuffer, loader, "CharacterVariableCondition reads", ActionParallel::patchCondition);
+                if (c != null) {
+                    ActionParallel.markPatched(ActionParallel.PATCH_CONDITION);
+                    PZOLogger.success("[PZO Agent] ASM-patched zombie postupdate: action-transition variables read on worker threads");
+                }
+                return c;
             }
             if ("zombie/characters/animals/IsoAnimal".equals(className) && classfileBuffer != null) {
                 return patchIsoAnimal(classfileBuffer);

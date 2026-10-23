@@ -627,6 +627,15 @@ public final class BenchmarkHarness {
             w.println("  \"zombie_sim_levels_per_frame\": " + simLevelsJson() + ",");
             w.println("  \"textures_downscaled_off_main\": " + TextureDownscaleGovernor.texturesDownscaled.get() + ",");
             w.println("  \"burn_loop_forced_removals\": " + BurnLoopGuard.forcedRemovals.get() + ",");
+            w.println("  \"light_switch_cache_hits\": " + GameThreadPatches.lightSwitchHits.get() + ",");
+            w.println("  \"chunk_handoffs_deferred\": " + GameThreadPatches.handoffsDeferred.get() + ",");
+            w.println("  \"weather_tiles_built\": " + WeatherTileBatcher.tilesBuilt.get() + ",");
+            w.println("  \"weather_tile_draws\": " + WeatherTileBatcher.tileDraws.get() + ",");
+            w.println("  \"action_zombies_deferred\": " + ActionParallel.deferred.get() + ",");
+            w.println("  \"action_values_pre_read\": " + ActionParallel.preRead.get() + ",");
+            w.println("  \"action_pre_read_hits\": " + ActionParallel.preReadHits.get() + ",");
+            w.println("  \"chunk_bakes_held\": " + ChunkBakeBudget.bakesHeld.get() + ",");
+            w.println("  \"puddle_shader_units_rewritten\": " + ShaderEarlyDepth.unitsRewritten.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

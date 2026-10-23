@@ -89,6 +89,23 @@ class Backups:
                     f.write(data)
 
 
+def limit_cores(proc, cores):
+    """Pins the game to its first `cores` physical cores (with their SMT siblings) to stand in for a smaller CPU.
+
+    Windows numbers the two logical processors of a core next to each other, so N cores are logical 0 .. 2N-1 on an
+    SMT CPU. Threads that later ask for their own affinity can only narrow this mask, never widen it."""
+    if not cores or os.name != "nt":
+        return
+    import ctypes
+    logical = os.cpu_count() or 1
+    smt = 2 if logical >= 2 * cores else 1
+    mask = (1 << min(logical, cores * smt)) - 1
+    if not ctypes.windll.kernel32.SetProcessAffinityMask(int(proc._handle), ctypes.c_size_t(mask)):
+        print("  could not limit the game to %d cores" % cores)
+    else:
+        print("  limited to %d cores (affinity mask 0x%X)" % (cores, mask))
+
+
 def run_game(args, mode, template, label, run_dir, extra_args, extra_config=None):
     exe = os.path.join(args.game_dir, "ProjectZomboid64.exe")
     os.makedirs(run_dir, exist_ok=True)
@@ -115,6 +132,7 @@ def run_game(args, mode, template, label, run_dir, extra_args, extra_config=None
         cmd = [exe] + extra_args
         print("  launching:", " ".join(cmd))
         proc = subprocess.Popen(cmd, cwd=args.game_dir)
+        limit_cores(proc, getattr(args, "cores", 0))
         start = time.time()
         while proc.poll() is None:
             if time.time() - start > args.timeout:
