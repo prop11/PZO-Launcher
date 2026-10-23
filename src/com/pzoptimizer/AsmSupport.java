@@ -31,6 +31,7 @@ public final class AsmSupport {
             ClassNode node = new ClassNode();
             new ClassReader(classfile).accept(node, ClassReader.EXPAND_FRAMES);
             int fields = node.fields.size(), methods = node.methods.size(), interfaces = node.interfaces.size();
+            java.util.Set<String> shapeBefore = keepClassShapes() ? shapeOf(node) : null;
             if (!t.apply(node)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": target code not found, class left unchanged");
                 return null;
@@ -39,6 +40,10 @@ public final class AsmSupport {
                 // Another agent (ViewpointFPS+ via ZombieBuddy) redefined the class with bytes this agent had already
                 // patched, so the patch is in the input; adding its members again is a ClassFormatError
                 PZOLogger.warn("[AsmSupport] " + what + ": class already carries this patch, left as is");
+                return null;
+            }
+            if (shapeBefore != null && !shapeBefore.equals(shapeOf(node))) {
+                PZOLogger.info("[AsmSupport] " + what + ": stands down while Viewpoint is active (adds or renames class members)");
                 return null;
             }
             Class<?> live = REDEFINING.get();
@@ -81,6 +86,33 @@ public final class AsmSupport {
             if (!liveInterfaces.contains(node.interfaces.get(i))) return false;
         }
         return true;
+    }
+
+    private static volatile Boolean keepShapes;
+
+    /**
+     * ZombieBuddy re-patches classes for its mods in batches, and Viewpoint hooks dozens of game classes. When one
+     * of them is a class this agent reshaped (added, removed or renamed members or interfaces), the JVM rejects
+     * ZombieBuddy's version of it and drops the rest of that batch, which leaves Viewpoint's renderer, settings window
+     * and mouse hooks uninstalled (no clicks register). With Viewpoint in the startup mod list, reshaping patches
+     * stand down; body-only patches stay, and nothing changes for anyone else.
+     */
+    static boolean keepClassShapes() {
+        Boolean k = keepShapes;
+        if (k == null) {
+            k = JavaModLoader.isZombieBuddyPresent() && JavaModLoader.isViewpointStartupMod();
+            keepShapes = k;
+            if (k) PZOLogger.info("[AsmSupport] ZombieBuddy and Viewpoint at startup: patches that add or rename class members stand down");
+        }
+        return k;
+    }
+
+    private static java.util.Set<String> shapeOf(ClassNode node) {
+        java.util.Set<String> s = new java.util.HashSet<>();
+        for (FieldNode f : node.fields) s.add("F " + f.name + " " + f.desc);
+        for (MethodNode m : node.methods) s.add("M " + m.name + m.desc);
+        for (String i : node.interfaces) s.add("I " + i);
+        return s;
     }
 
     private static boolean hasDuplicateMembers(ClassNode node) {

@@ -52,6 +52,8 @@ import zombie.iso.weather.fx.WeatherParticleDrawer;
 public final class WeatherTileBatcher {
 
     private static volatile boolean active = !System.getProperty("os.name", "").toLowerCase().contains("mac");
+    // The rectangle patch only queues tiles; without the drawer's pzo$tiles field nothing would draw them
+    static volatile boolean drawerPatched;
     public static final AtomicLong tilesBuilt = new AtomicLong();
     public static final AtomicLong tileDraws = new AtomicLong();
 
@@ -139,7 +141,7 @@ public final class WeatherTileBatcher {
 
     /** Replaces the body of ParticleRectangle.render when it returns true. */
     public static boolean renderTiled(ParticleRectangle rect) {
-        if (!active || !PerformanceSettings.fboRenderChunk || (boolean) H.FX_DEBUG_BOUNDS.get()) return false;
+        if (!active || !drawerPatched || !PerformanceSettings.fboRenderChunk || (boolean) H.FX_DEBUG_BOUNDS.get()) return false;
         WeatherParticle[] particles = (WeatherParticle[]) H.PR_PARTICLES.get(rect);
         if (particles == null) return false;
         int width = (int) H.PR_WIDTH.get(rect);
