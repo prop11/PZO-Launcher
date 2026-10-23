@@ -20,8 +20,8 @@ public final class AsmSupport {
         boolean apply(ClassNode node) throws Exception;
     }
 
-    // Set by the agent around a retransform of an already loaded class, which may not add fields or methods
-    static final ThreadLocal<Boolean> REDEFINING = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    // The class being retransformed, set by the agent around the call; null for a first load
+    static final ThreadLocal<Class<?>> REDEFINING = new ThreadLocal<>();
 
     private AsmSupport() {}
 
@@ -29,12 +29,13 @@ public final class AsmSupport {
         try {
             ClassNode node = new ClassNode();
             new ClassReader(classfile).accept(node, ClassReader.EXPAND_FRAMES);
-            int fields = node.fields.size(), methods = node.methods.size();
+            int fields = node.fields.size(), methods = node.methods.size(), interfaces = node.interfaces.size();
             if (!t.apply(node)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": target code not found, class left unchanged");
                 return null;
             }
-            if (REDEFINING.get() && (node.fields.size() != fields || node.methods.size() != methods)) {
+            Class<?> live = REDEFINING.get();
+            if (live != null && !sameShape(live, node, fields, methods, interfaces)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": adds members, which a retransform cannot; class left unchanged");
                 return null;
             }
@@ -45,6 +46,34 @@ public final class AsmSupport {
             PZOLogger.warn("[AsmSupport] " + what + " failed, class left unchanged: " + e);
             return null;
         }
+    }
+
+    /**
+     * A retransform may not add or remove members. Another agent (ZombieBuddy, for one) retransforming a class this
+     * agent already patched hands over the original bytes, so the patch has to add its members again: that is fine
+     * exactly when the live class already has every one of them, i.e. the result has the shape it has now. A class
+     * that was loaded before this agent attached has none of them and keeps refusing.
+     */
+    private static boolean sameShape(Class<?> live, ClassNode node, int fields, int methods, int interfaces) {
+        java.util.Set<String> liveFields = new java.util.HashSet<>();
+        for (java.lang.reflect.Field f : live.getDeclaredFields()) liveFields.add(f.getName());
+        for (int i = fields; i < node.fields.size(); i++) {
+            if (!liveFields.contains(node.fields.get(i).name)) return false;
+        }
+        java.util.Set<String> liveMethods = new java.util.HashSet<>();
+        for (java.lang.reflect.Method m : live.getDeclaredMethods()) {
+            liveMethods.add(m.getName() + com.pzoptimizer.shaded.asm.Type.getMethodDescriptor(m));
+        }
+        for (int i = methods; i < node.methods.size(); i++) {
+            MethodNode m = node.methods.get(i);
+            if (!liveMethods.contains(m.name + m.desc)) return false;
+        }
+        java.util.Set<String> liveInterfaces = new java.util.HashSet<>();
+        for (Class<?> c : live.getInterfaces()) liveInterfaces.add(c.getName().replace('.', '/'));
+        for (int i = interfaces; i < node.interfaces.size(); i++) {
+            if (!liveInterfaces.contains(node.interfaces.get(i))) return false;
+        }
+        return true;
     }
 
     public static MethodNode findMethod(ClassNode node, String name, String desc) {

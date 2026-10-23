@@ -285,6 +285,10 @@ public class PZOEngineBridge {
                 GameThreadPatches.stateMachineCache = value;
             } else if ("JVM_BoneBatch".equals(key)) {
                 BoneBatch.setActive(value);
+            } else if ("JVM_FoliageLod".equals(key)) {
+                FoliageLod.active = value;
+            } else if ("JVM_DirectionVectorFix".equals(key)) {
+                DirectionVectorFix.active = value;
             } else if ("JVM_SkinPrecompute".equals(key)) {
                 BoneBatch.skinPrecompute = value;
             } else if ("JVM_PaletteBulkCopy".equals(key)) {

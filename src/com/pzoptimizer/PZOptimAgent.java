@@ -153,12 +153,12 @@ public class PZOptimAgent {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                  ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-            AsmSupport.REDEFINING.set(classBeingRedefined != null);
+            AsmSupport.REDEFINING.set(classBeingRedefined);
             byte[] specific;
             try {
                 specific = transformSpecific(loader, className, classfileBuffer);
             } finally {
-                AsmSupport.REDEFINING.set(Boolean.FALSE);
+                AsmSupport.REDEFINING.remove();
             }
             if (!fsrRenderScaleHooks || className == null || classfileBuffer == null || !className.startsWith("zombie/")) {
                 return specific;
@@ -262,6 +262,11 @@ public class PZOptimAgent {
                 byte[] fc = AsmSupport.transform(classfileBuffer, loader, "FBORenderCell bake budget", ChunkBakeBudget::patchRenderCell);
                 if (fc != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderOneLevel: lighting and cosmetic re-bakes spread over frames");
+                }
+                byte[] fl = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell foliage LOD", FoliageLod::patchRenderCell);
+                if (fl != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell layer tests: distant wind-swayed foliage baked into the chunk texture");
+                    return fl;
                 }
                 return fc;
             }
@@ -475,6 +480,13 @@ public class PZOptimAgent {
                         + (st != null ? "store" : "") + (st != null && ld != null ? ", " : "") + (ld != null ? "load" : "") + ")");
                 }
                 return out;
+            }
+            if ("zombie/iso/IsoDirections".equals(className) && classfileBuffer != null) {
+                byte[] dv = AsmSupport.transform(classfileBuffer, loader, "IsoDirections.ToVector", DirectionVectorFix::patchIsoDirections);
+                if (dv != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoDirections.ToVector: shared vector kept for the game thread only");
+                }
+                return dv;
             }
             if ("zombie/core/skinnedmodel/HelperFunctions".equals(className) && classfileBuffer != null) {
                 byte[] hf = AsmSupport.transform(classfileBuffer, loader, "HelperFunctions worker matrices", AnimationThreadingPatches::patchHelperFunctions);
