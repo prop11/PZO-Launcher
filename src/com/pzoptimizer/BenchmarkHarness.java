@@ -14,6 +14,7 @@ import java.util.Map;
 import se.krka.kahlua.integration.LuaReturn;
 import se.krka.kahlua.luaj.compiler.LuaCompiler;
 import se.krka.kahlua.vm.LuaClosure;
+import zombie.iso.weather.ClimateManager;
 import zombie.GameWindow;
 import zombie.Lua.LuaManager;
 import zombie.ZomboidFileSystem;
@@ -56,6 +57,15 @@ public final class BenchmarkHarness {
     private static float[] zooms = {1.0f, 2.0f};
     private static int routeTiles = 40;
     private static float routeSpeed = 8.0f;
+    // route=line: one straight leg of routeTiles in routeDir (fast travel, like driving through a town);
+    // route=square (default): the 4-leg loop back to the start tile
+    private static boolean lineRoute;
+    private static char routeDir = 'W';
+    private static float timeOfDay = 12.0f;
+    // weather=storm: heavy rain, full fog and cloud, strong wind, and a lightning flash every 2 s, all forced
+    // through the climate admin overrides so every run sees the same weather
+    private static boolean storm;
+    private static long lastLightningNs;
 
     private static long phaseStart;
     private static long benchStart;
@@ -94,6 +104,45 @@ public final class BenchmarkHarness {
             }
             if (cfg.containsKey("route_tiles")) routeTiles = Integer.parseInt(cfg.get("route_tiles").trim());
             if (cfg.containsKey("route_speed")) routeSpeed = Float.parseFloat(cfg.get("route_speed").trim());
+            threat = "1".equals(cfg.get("threat")) || "true".equalsIgnoreCase(cfg.get("threat"));
+            lineRoute = "line".equalsIgnoreCase(cfg.get("route"));
+            if (cfg.containsKey("route_dir")) routeDir = Character.toUpperCase(cfg.get("route_dir").trim().charAt(0));
+            if (cfg.containsKey("time")) timeOfDay = Float.parseFloat(cfg.get("time").trim());
+            storm = "storm".equalsIgnoreCase(cfg.get("weather"));
+            if ("0".equals(cfg.get("simcap"))) {
+                UnseenZombieSimGovernor.setActive(false);
+                notes.add("unseen zombie simulation cap disabled (simcap=0)");
+            }
+            if ("0".equals(cfg.get("palette"))) {
+                PaletteBuffers.active = false;
+                notes.add("bulk matrix palette copy disabled (palette=0)");
+            }
+            if ("0".equals(cfg.get("scriptcache"))) {
+                ScriptLookupCache.active = false;
+                ScriptLookupCache.invalidate();
+                notes.add("script item lookup memo disabled (scriptcache=0)");
+            }
+            if ("0".equals(cfg.get("newfixes"))) {
+                FliesSoundFix.active = false;
+                ChunkMipLimit.active = false;
+                notes.add("flies fix and chunk mip cap disabled (newfixes=0)");
+            }
+            if ("0".equals(cfg.get("tsprites"))) {
+                FoliageLod.spritesActive = false;
+                notes.add("distant translucent sprite baking disabled (tsprites=0)");
+            }
+            if ("0".equals(cfg.get("foliage"))) {
+                FoliageLod.active = false;
+                notes.add("distant foliage baking disabled (foliage=0)");
+            }
+            if ("0".equals(cfg.get("skins"))) {
+                BoneBatch.skinPrecompute = false;
+                notes.add("skin transform precompute disabled (skins=0)");
+            }
+            if ("0".equals(cfg.get("bones"))) {
+                BoneBatch.setActive(false);
+                notes.add("zombie bone batch disabled (bones=0)");
+            }
         } catch (NumberFormatException e) {
             notes.add("bad config value: " + e.getMessage());
         }
@@ -104,6 +153,21 @@ public final class BenchmarkHarness {
         startWatchdog();
         PZOLogger.success("[BenchmarkHarness] Benchmark mode '" + label + "': output -> " + outDir.getAbsolutePath()
             + " zooms=" + Arrays.toString(zooms) + " route=" + routeTiles + " tiles @ " + routeSpeed + " tiles/s");
+    }
+
+    /**
+     * stock=1 in the bench config: the run is a vanilla baseline. PZO then applies no patches or governors and only
+     * drives this harness, so the same route and sampling can be compared against a normal PZO run.
+     */
+    /** True while a benchmark config is in place (the harness will run this launch). */
+    public static boolean isConfigured() {
+        String out = readConfig().get("out");
+        return out != null && !out.isEmpty();
+    }
+
+    public static boolean isStockBaselineRequested() {
+        String v = readConfig().get("stock");
+        return v != null && (v.equals("1") || v.equalsIgnoreCase("true"));
     }
 
     private static Map<String, String> readConfig() {
@@ -214,30 +278,88 @@ public final class BenchmarkHarness {
     // Same light and weather in every run: noon, no rain or fog, no wounds or infection progressing
     private static void normalizeScene() throws Exception {
         runLua(
-            "pcall(function() getGameTime():setTimeOfDay(12.0) end)\n"
+            "pcall(function() getGameTime():setTimeOfDay(" + timeOfDay + ") end)\n"
             + "pcall(function() getClimateManager():stopWeatherAndThunder() end)\n"
             + "local p = getPlayer()\n"
             + "if p then pcall(function() p:getBodyDamage():RestoreToFullHealth() end) end\n"
             + "return true\n");
+        applyWeather();
+    }
+
+    private static void applyWeather() {
+        ClimateManager cm = ClimateManager.getInstance();
+        float[][] storming = {
+            {ClimateManager.FLOAT_PRECIPITATION_INTENSITY, 1.0f},
+            {ClimateManager.FLOAT_FOG_INTENSITY, 1.0f},
+            {ClimateManager.FLOAT_CLOUD_INTENSITY, 1.0f},
+            {ClimateManager.FLOAT_WIND_INTENSITY, 0.8f},
+        };
+        for (float[] f : storming) {
+            ClimateManager.ClimateFloat cf = cm.getClimateFloat((int) f[0]);
+            cf.setAdminValue(f[1]);
+            cf.setEnableAdmin(storm);
+        }
+    }
+
+    // Lightning at the player on a fixed cadence: the flash relights the scene, which is part of the storm's cost
+    private static void stormTick(long now) {
+        if (!storm || now - lastLightningNs < 2_000_000_000L) return;
+        lastLightningNs = now;
+        IsoPlayer p = IsoPlayer.players[0];
+        if (p != null) {
+            ClimateManager.getInstance().getThunderStorm().triggerThunderEvent((int) p.getX(), (int) p.getY(), false, true, true);
+        }
     }
 
     private static void setPaused(boolean paused) throws Exception {
         runLua(paused ? "setGameSpeed(0)\nsetShowPausedMessage(false)\nreturn true\n" : "setGameSpeed(1)\nreturn true\n");
     }
 
+    private static BenchFrameEvent frameEvent;
+    // Simulation-level counters at the first measured frame, so loading and warmup are excluded
+    private static long[] simBase;
+    private static long simFrameBase;
+
     private static void sampleFrame(long now) {
         int fc = IsoCamera.frameState.frameCount;
         if (fc == lastFrameCount) return;
+        if (simBase == null) {
+            simBase = new long[UnseenZombieSimGovernor.zombiesPerLevel.length + 1];
+            for (int i = 0; i < simBase.length - 1; i++) simBase[i] = UnseenZombieSimGovernor.zombiesPerLevel[i].get();
+            simBase[simBase.length - 1] = UnseenZombieSimGovernor.zombiesCapped.get();
+            simFrameBase = zombie.MovingObjectUpdateScheduler.instance.getFrameCounter();
+        }
         if (lastFrameCount != -1) frameTimes.add(now - lastFrameNs);
+        // An unfocused window is scheduled differently by Windows (no foreground boost, often efficiency cores)
+        if (!org.lwjglx.opengl.Display.isActive()) unfocusedFrames++;
         lastFrameCount = fc;
         lastFrameNs = now;
+        if (frameEvent != null) frameEvent.commit();
+        frameEvent = new BenchFrameEvent();
+        frameEvent.zoom = zooms[zoomIndex];
+        frameEvent.begin();
     }
 
-    // Square loop E, S, W, N back to the start tile
+    // Square loop E, S, W, N back to the start tile, or route=line: straight out in routeDir
     private static boolean moveAlongRoute(long elapsedNs) {
         IsoPlayer p = IsoPlayer.players[0];
         if (p == null) return true;
         float d = routeSpeed * (elapsedNs / 1e9f);
+        if (lineRoute) {
+            if (d >= routeTiles) {
+                p.teleportTo(startX, startY, startZ);
+                return true;
+            }
+            float lx = startX, ly = startY;
+            switch (routeDir) {
+                case 'E': lx += d; break;
+                case 'N': ly -= d; break;
+                case 'S': ly += d; break;
+                default: lx -= d; break;
+            }
+            p.teleportTo(lx, ly, startZ);
+            return false;
+        }
         float total = routeTiles * 4.0f;
         if (d >= total) {
             p.teleportTo(startX, startY, startZ);
@@ -277,13 +399,22 @@ public final class BenchmarkHarness {
             }
             if (phase.ordinal() >= Phase.WARMUP.ordinal()) {
                 IsoPlayer p = IsoPlayer.players[0];
+                // Heal first: several zombie hits in one frame can push BodyDamage health below zero before the
+                // game's own god-mode restore runs, and isDead() reads that transient value
+                if (p != null) protectPlayer(p);
                 // A dead player swaps the scene for the death screen (no vision cone, no lighting falloff), which
-                // makes the run incomparable; god mode does not stop deaths already in progress from the save
-                if (p == null || p.isDead()) {
+                // makes the run incomparable. Only a death that sticks after healing counts.
+                if (p != null && p.isDead() && !p.isOnDeathDone()) {
+                    deadTicks++;
+                } else {
+                    deadTicks = 0;
+                }
+                if (p == null || p.isOnDeathDone() || deadTicks > 30) {
                     notes.add("player died in phase " + phase + " - the bench save's character is not viable");
                     finish(false);
                     return;
                 }
+                keepUnpaused(now);
             }
             switch (phase) {
                 case MENU:
@@ -315,8 +446,7 @@ public final class BenchmarkHarness {
                     }
                     if ("IngameState".equals(state) && IsoPlayer.players[0] != null) {
                         IsoPlayer p = IsoPlayer.players[0];
-                        p.setGodMod(true);
-                        p.setInvisible(true);
+                        protectPlayer(p);
                         // The start tile comes straight from the save on the first in-game frame and the player is
                         // pinned there from now on, so stray input or a moving vehicle cannot shift the scene
                         p.ensureNotInVehicle();
@@ -345,13 +475,17 @@ public final class BenchmarkHarness {
                     }
                     if (now - phaseStart > SETTLE_NS) {
                         frameTimes.clear();
+                        unfocusedFrames = 0;
                         lastFrameCount = -1;
+                        GpuFrameTimer.start();
                         enter(Phase.ROUTE);
                     }
                     break;
                 case ROUTE:
+                    stormTick(now);
                     sampleFrame(now);
                     if (moveAlongRoute(now - phaseStart)) {
+                        frameEvent = null;
                         recordZoom();
                         setPaused(true);
                         UIManager.setVisibleAllUI(false);
@@ -394,6 +528,7 @@ public final class BenchmarkHarness {
     }
 
     private static void recordZoom() {
+        String render = GpuFrameTimer.stopJson();
         long[] ft = new long[frameTimes.size()];
         for (int i = 0; i < ft.length; i++) ft[i] = frameTimes.get(i);
         Arrays.sort(ft);
@@ -406,12 +541,93 @@ public final class BenchmarkHarness {
         double low = 0;
         for (int i = Math.max(0, ft.length - n1); i < ft.length; i++) low += ft[i] / 1e6;
         low = ft.length > 0 ? low / n1 : 0;
+        double unfocusedPct = ft.length > 0 ? 100.0 * unfocusedFrames / ft.length : 0;
+        if (unfocusedFrames > 0) {
+            notes.add(String.format(Locale.ROOT, "zoom %.2f: window unfocused for %.1f%% of measured frames", zooms[zoomIndex], unfocusedPct));
+        }
+        unfocusedFrames = 0;
         if (zoomJson.length() > 0) zoomJson.append(",\n");
         zoomJson.append(String.format(Locale.ROOT,
             "    {\"zoom\": %.2f, \"frames\": %d, \"avg_ms\": %.3f, \"avg_fps\": %.1f, \"p99_ms\": %.3f, \"low1_fps\": %.1f, "
-                + "\"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
-            zooms[zoomIndex], ft.length, avgMs, avgMs > 0 ? 1000.0 / avgMs : 0, p99, low > 0 ? 1000.0 / low : 0,
-            shotName(false), shotName(true)));
+                + "\"unfocused_pct\": %.1f, \"render_thread\": %s, \"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
+            zooms[zoomIndex], ft.length, avgMs, avgMs > 0 ? 1000.0 / avgMs : 0, p99, low > 0 ? 1000.0 / low : 0, unfocusedPct,
+            render == null ? "null" : render, shotName(false), shotName(true)));
+    }
+
+    // threat=1: zombies see, chase and attack the player (only death is prevented), so AI, pathfinding and
+    // combat cost show up the way they do in real play. Default runs keep the player invisible.
+    private static boolean threat;
+    private static int unfocusedFrames;
+    private static int deadTicks;
+    private static long lastUnpauseCheck;
+    private static boolean pauseNoted;
+
+    // The Survival Guide (shown on load when its option is on) and other modal panels pause single player, and a
+    // paused world renders far faster than a running one, which would make the run meaningless
+    private static void keepUnpaused(long now) {
+        if (now - lastUnpauseCheck < 250_000_000L) return;
+        lastUnpauseCheck = now;
+        try {
+            Object[] r = runLua(
+                "local fixed = false\n"
+                + "if SurvivalGuide and SurvivalGuide.instance and SurvivalGuide.instance:isVisible() then SurvivalGuide.instance:setVisible(false) fixed = true end\n"
+                + "if isGamePaused() then setGameSpeed(1) fixed = true end\n"
+                + "return fixed\n");
+            if (r.length > 0 && Boolean.TRUE.equals(r[0]) && !pauseNoted) {
+                pauseNoted = true;
+                notes.add("closed a pausing panel / unpaused in phase " + phase);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    // A recording started with -XX:StartFlightRecording is only written on a clean JVM exit, and the quit below can
+    // end in Runtime.halt, so every running recording is dumped into the run folder first
+    private static void dumpFlightRecordings() {
+        try {
+            int i = 0;
+            for (jdk.jfr.Recording r : jdk.jfr.FlightRecorder.getFlightRecorder().getRecordings()) {
+                if (r.getState() != jdk.jfr.RecordingState.RUNNING) continue;
+                File out = new File(outDir, i == 0 ? "profile.jfr" : "profile-" + i + ".jfr");
+                r.dump(out.toPath());
+                PZOLogger.info("[BenchmarkHarness] Flight recording written to " + out.getAbsolutePath());
+                i++;
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[BenchmarkHarness] Could not dump flight recording: " + t);
+        }
+    }
+
+    // Re-applied every tick: a Lua mod or save script can switch god mode off, and wounds, infection or a fall
+    // inherited from the save would otherwise kill the character mid-route and void the run
+    private static void protectPlayer(IsoPlayer p) {
+        try {
+            // The unforced setters check a debug/admin role capability and switch the cheat OFF without it
+            if (!p.isGodMod()) p.setGodMod(true, true);
+            if (p.isInvisible() == threat) p.setInvisible(!threat, true);
+            if (p.isZombiesDontAttack() == threat) p.getCheats().set(zombie.characters.CheatType.ZOMBIES_DONT_ATTACK, !threat);
+            if (p.getBodyDamage() != null && (p.getBodyDamage().isInfected() || p.getBodyDamage().getHealth() < 90.0f)) {
+                p.getBodyDamage().setInfected(false);
+                p.getBodyDamage().RestoreToFullHealth();
+            }
+            if (p.getHealth() < 1.0f && !p.isOnDeathDone()) p.setHealth(1.0f);
+            p.setDeathDragDown(false);
+        } catch (Throwable ignored) {}
+    }
+
+    // Average zombies per scheduler frame at each level (SIXTEENTH .. FULL) and how many were capped
+    private static String simLevelsJson() {
+        if (simBase == null) return "null";
+        long frames = Math.max(1, zombie.MovingObjectUpdateScheduler.instance.getFrameCounter() - simFrameBase);
+        String[] names = {"sixteenth", "eighth", "quarter", "half", "full"};
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < names.length && i < simBase.length - 1; i++) {
+            long n = UnseenZombieSimGovernor.zombiesPerLevel[i].get() - simBase[i];
+            sb.append('"').append(names[i]).append("\": ").append(String.format(java.util.Locale.ROOT, "%.1f", n / (double) frames)).append(", ");
+        }
+        long capped = UnseenZombieSimGovernor.zombiesCapped.get() - simBase[simBase.length - 1];
+        sb.append("\"capped\": ").append(String.format(java.util.Locale.ROOT, "%.1f", capped / (double) frames));
+        sb.append(", \"frames\": ").append(frames).append('}');
+        return sb.toString();
     }
 
     private static String esc(String s) {
@@ -431,13 +647,48 @@ public final class BenchmarkHarness {
             w.println("  \"label\": \"" + esc(label) + "\",");
             w.println("  \"ok\": " + ok + ",");
             w.println("  \"screen\": [" + Core.getInstance().getScreenWidth() + ", " + Core.getInstance().getScreenHeight() + "],");
-            w.println("  \"route\": {\"tiles\": " + routeTiles + ", \"tiles_per_s\": " + routeSpeed + "},");
+            w.println("  \"route\": {\"tiles\": " + routeTiles + ", \"tiles_per_s\": " + routeSpeed + ", \"shape\": \""
+                + (lineRoute ? "line " + routeDir : "square") + "\"},");
+            w.println("  \"scene\": {\"weather\": \"" + (storm ? "storm" : "clear") + "\", \"time\": " + timeOfDay + "},");
+            w.println("  \"threat\": " + threat + ",");
             w.println("  \"fsr_requested\": " + WorldUpscalerGovernor.isRequestedAtLaunch() + ",");
             w.println("  \"fsr_active\": " + WorldUpscalerGovernor.isActive() + ",");
             w.println("  \"fsr_hooks_installed\": " + WorldRenderScale.isInstalled() + ",");
             w.println("  \"fsr_render_scale\": " + WorldRenderScale.getRenderThreadScale() + ",");
             w.println("  \"fsr_frames_upscaled\": " + WorldUpscalerGovernor.framesUpscaled.get() + ",");
             w.println("  \"fsr_shaders_rewritten\": " + WorldRenderScale.shadersRewritten + ",");
+            w.println("  \"vehicle_anim_updates_skipped\": " + VehicleAnimSkipGovernor.updatesSkipped.get() + ",");
+            w.println("  \"vehicle_anim_updates_run\": " + VehicleAnimSkipGovernor.updatesRun.get() + ",");
+            w.println("  \"vehicle_los_tests_rejected\": " + VehicleLosGovernor.testsRejected.get() + ",");
+            w.println("  \"vehicle_los_tests_run\": " + VehicleLosGovernor.testsRun.get() + ",");
+            w.println("  \"vehicle_box_checks\": " + VehicleLosGovernor.boxChecks.get() + ",");
+            w.println("  \"vehicle_box_mismatches\": " + VehicleLosGovernor.boxMismatches.get() + ",");
+            w.println("  \"spotted_lookups_hashed\": " + SpottedListGovernor.lookupsHashed.get() + ",");
+            w.println("  \"spotted_mirror_rebuilds\": " + SpottedListGovernor.rebuilds.get() + ",");
+            w.println("  \"zombie_sim_levels_per_frame\": " + simLevelsJson() + ",");
+            w.println("  \"textures_downscaled_off_main\": " + TextureDownscaleGovernor.texturesDownscaled.get() + ",");
+            w.println("  \"burn_loop_forced_removals\": " + BurnLoopGuard.forcedRemovals.get() + ",");
+            w.println("  \"light_switch_cache_hits\": " + GameThreadPatches.lightSwitchHits.get() + ",");
+            w.println("  \"chunk_handoffs_deferred\": " + GameThreadPatches.handoffsDeferred.get() + ",");
+            w.println("  \"weather_tiles_built\": " + WeatherTileBatcher.tilesBuilt.get() + ",");
+            w.println("  \"weather_tile_draws\": " + WeatherTileBatcher.tileDraws.get() + ",");
+            w.println("  \"action_zombies_deferred\": " + ActionParallel.deferred.get() + ",");
+            w.println("  \"action_values_pre_read\": " + ActionParallel.preRead.get() + ",");
+            w.println("  \"action_pre_read_hits\": " + ActionParallel.preReadHits.get() + ",");
+            w.println("  \"chunk_bakes_held\": " + ChunkBakeBudget.bakesHeld.get() + ",");
+            w.println("  \"puddle_shader_units_rewritten\": " + ShaderEarlyDepth.unitsRewritten.get() + ",");
+            w.println("  \"bone_batch_zombies\": " + BoneBatch.deferred.get() + ",");
+            w.println("  \"bone_batch_batches\": " + BoneBatch.batches.get() + ",");
+            w.println("  \"skins_precomputed\": " + BoneBatch.skinsPrecomputed.sum() + ",");
+            w.println("  \"foliage_chunk_flips\": " + FoliageLod.chunkFlips.get() + ",");
+            w.println("  \"script_lookup_hits\": " + ScriptLookupCache.hits.sum() + ",");
+            w.println("  \"lua_handler_ms\": " + LuaEventPatches.report(40) + ",");
+            w.println("  \"translucent_draws_by_reason\": " + TranslucentStats.reasonsJson() + ",");
+            w.println("  \"translucent_draws_by_sprite\": " + TranslucentStats.spritesJson() + ",");
+            w.println("  \"script_lookup_fills\": " + ScriptLookupCache.fills.sum() + ",");
+            w.println("  \"foliage_far_classifications\": " + FoliageLod.objectsBaked.get() + ",");
+            w.println("  \"translucent_sprites_baked\": " + FoliageLod.spritesBaked.get() + ",");
+            w.println("  \"flies_toggles_avoided\": " + FliesSoundFix.togglesAvoided.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");
@@ -447,6 +698,7 @@ public final class BenchmarkHarness {
         } catch (Throwable t) {
             PZOLogger.warn("[BenchmarkHarness] Could not write results: " + t);
         }
+        dumpFlightRecordings();
         PZOLogger.success("[BenchmarkHarness] Benchmark finished (ok=" + ok + "), quitting to desktop");
         // The save is a disposable bench copy, so a normal quit is fine; escalate if it does not happen
         try {

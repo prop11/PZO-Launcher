@@ -71,18 +71,18 @@ public class PopTemplateGuard {
 
                 // maleSkins and femaleSkins must hold exactly 5 entries (MaleBody01..05), or
                 // CharacterCreationMain.lua:652 indexes self.skinColors[1..5] out of range
-                trimToSize(ptm, "maleSkins", 5, "MaleBody01");
-                trimToSize(ptm, "femaleSkins", 5, "FemaleBody01");
-                trimToSize(ptm, "maleSkinsZombie1", 4, "MaleZombie01");
-                trimToSize(ptm, "femaleSkinsZombie1", 4, "FemaleZombie01");
-                trimToSize(ptm, "maleSkinsZombie2", 4, "MaleZombie01");
-                trimToSize(ptm, "femaleSkinsZombie2", 4, "FemaleZombie01");
-                trimToSize(ptm, "maleSkinsZombie3", 4, "MaleZombie01");
-                trimToSize(ptm, "femaleSkinsZombie3", 4, "FemaleZombie01");
-                trimToSize(ptm, "skeletonMaleSkinsZombie", 3, "Skeleton");
-                trimToSize(ptm, "skeletonFemaleSkinsZombie", 3, "Skeleton");
-                trimToSize(ptm, "cowSkins", 2, "Cow_Black");
-                trimToSize(ptm, "ratSkins", 1, "Rat");
+                fillIfEmpty(ptm, "maleSkins", 5, "MaleBody01");
+                fillIfEmpty(ptm, "femaleSkins", 5, "FemaleBody01");
+                fillIfEmpty(ptm, "maleSkinsZombie1", 4, "MaleZombie01");
+                fillIfEmpty(ptm, "femaleSkinsZombie1", 4, "FemaleZombie01");
+                fillIfEmpty(ptm, "maleSkinsZombie2", 4, "MaleZombie01");
+                fillIfEmpty(ptm, "femaleSkinsZombie2", 4, "FemaleZombie01");
+                fillIfEmpty(ptm, "maleSkinsZombie3", 4, "MaleZombie01");
+                fillIfEmpty(ptm, "femaleSkinsZombie3", 4, "FemaleZombie01");
+                fillIfEmpty(ptm, "skeletonMaleSkinsZombie", 3, "Skeleton");
+                fillIfEmpty(ptm, "skeletonFemaleSkinsZombie", 3, "Skeleton");
+                fillIfEmpty(ptm, "cowSkins", 2, "Cow_Black");
+                fillIfEmpty(ptm, "ratSkins", 1, "Rat");
 
                 PZOLogger.success(String.format("[PopTemplateGuard] PopTemplateManager verified (maleSkins: %d items, femaleSkins: %d items, FBO state clean)", 
                     maleSkins != null ? maleSkins.size() : 0,
@@ -226,7 +226,8 @@ public class PopTemplateGuard {
     }
 
     @SuppressWarnings("unchecked")
-    private static void trimToSize(Object ptm, String fieldName, int expectedSize, String defaultPrefix) {
+    // Only an empty list is filled with the vanilla defaults; skins added by mods are never removed.
+    private static void fillIfEmpty(Object ptm, String fieldName, int expectedSize, String defaultPrefix) {
         try {
             Field f = ptm.getClass().getField(fieldName);
             List<String> list = (List<String>) f.get(ptm);
@@ -238,10 +239,6 @@ public class PopTemplateGuard {
                 for (int i = 1; i <= expectedSize; i++) {
                     String val = defaultPrefix.endsWith("01") ? defaultPrefix.substring(0, defaultPrefix.length() - 2) + String.format("%02d", i) : defaultPrefix;
                     list.add(val);
-                }
-            } else if (list.size() > expectedSize) {
-                while (list.size() > expectedSize) {
-                    list.remove(list.size() - 1);
                 }
             }
         } catch (Throwable ignored) {}

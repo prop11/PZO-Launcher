@@ -4,9 +4,9 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Vanilla always targets 510 3D animated models and 20 blended animations, even when a 1,000+ zombie horde
- * has the frame rate collapsing. This tracks p50 and p90 frame times and, under load, switches more zombies
- * to flat atlas sprites, stepping back up once there is headroom again.
+ * Scales the 3D model and animation-blend budgets with measured frame time: the stock budgets are fixed
+ * regardless of load. Under sustained slow frames (p50/p90 of the recent window) more distant zombies fall
+ * back to atlas sprites, and the budgets climb back to stock once frames recover.
  */
 public final class ZombieLodGovernor {
 

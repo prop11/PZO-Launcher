@@ -89,7 +89,69 @@ class Backups:
                     f.write(data)
 
 
-def run_game(args, mode, template, label, run_dir, extra_args):
+def limit_cores(proc, cores):
+    """Pins the game to its first `cores` physical cores (with their SMT siblings) to stand in for a smaller CPU.
+
+    Windows numbers the two logical processors of a core next to each other, so N cores are logical 0 .. 2N-1 on an
+    SMT CPU. Threads that later ask for their own affinity can only narrow this mask, never widen it."""
+    if not cores or os.name != "nt":
+        return
+    import ctypes
+    logical = os.cpu_count() or 1
+    smt = 2 if logical >= 2 * cores else 1
+    mask = (1 << min(logical, cores * smt)) - 1
+    if not ctypes.windll.kernel32.SetProcessAffinityMask(int(proc._handle), ctypes.c_size_t(mask)):
+        print("  could not limit the game to %d cores" % cores)
+    else:
+        print("  limited to %d cores (affinity mask 0x%X)" % (cores, mask))
+
+
+def focus_game_window(pid):
+    """Brings the game's top-level window to the front. The game opens behind whatever had focus, and an unfocused
+    window loses Windows' foreground boost and tends to land on efficiency cores, which skews every number.
+
+    Windows only lets the foreground process hand out focus, so this attaches to the foreground thread's input
+    first and falls back to a synthetic Alt press. Returns True when the game window is in front."""
+    if os.name != "nt":
+        return True
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+            found.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(visit, 0)
+    if not found:
+        return False
+    hwnd = found[0]
+    fg = user32.GetForegroundWindow()
+    if fg == hwnd:
+        return True
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    fg_thread = user32.GetWindowThreadProcessId(fg, None)
+    me = ctypes.windll.kernel32.GetCurrentThreadId()
+    attached = fg_thread and fg_thread != me and user32.AttachThreadInput(me, fg_thread, True)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    if attached:
+        user32.AttachThreadInput(me, fg_thread, False)
+    if user32.GetForegroundWindow() != hwnd:
+        user32.keybd_event(0x12, 0, 0, 0)  # Alt down/up lifts the foreground lock
+        user32.keybd_event(0x12, 0, 2, 0)
+        user32.SetForegroundWindow(hwnd)
+    return user32.GetForegroundWindow() == hwnd
+
+
+def run_game(args, mode, template, label, run_dir, extra_args, extra_config=None):
     exe = os.path.join(args.game_dir, "ProjectZomboid64.exe")
     os.makedirs(run_dir, exist_ok=True)
     results = os.path.join(run_dir, "results.json")
@@ -109,16 +171,25 @@ def run_game(args, mode, template, label, run_dir, extra_args):
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             f.write("out=%s\nlabel=%s\nzooms=%s\nroute_tiles=%d\nroute_speed=%s\n" % (
                 run_dir, label, args.zooms, args.route_tiles, args.route_speed))
+            for k, v in (extra_config or {}).items():
+                f.write("%s=%s\n" % (k, v))
 
         cmd = [exe] + extra_args
         print("  launching:", " ".join(cmd))
         proc = subprocess.Popen(cmd, cwd=args.game_dir)
+        limit_cores(proc, getattr(args, "cores", 0))
         start = time.time()
+        keep_focus = not getattr(args, "no_focus", False)
+        focus_reported = False
         while proc.poll() is None:
             if time.time() - start > args.timeout:
                 print("  timeout, terminating game")
                 subprocess.run(["taskkill", "/F", "/IM", "ProjectZomboid64.exe"], capture_output=True)
                 break
+            # Only until the window has opened and taken focus once; after that the user's desktop is left alone
+            if keep_focus and not focus_reported and focus_game_window(proc.pid):
+                print("  game window focused")
+                focus_reported = True
             time.sleep(2)
         time.sleep(3)
         if game_running():

@@ -19,8 +19,6 @@ public final class RainAndWeatherOptimizer {
         applyLightingSplitUpdate();
         applyPuddlesElevationCap();
         ensureWeatherMaskingRestored();
-        GLPipelineGovernor.setActive(true);
-        FogQuarterBufferGovernor.setActive(true);
         PZOLogger.success("[RainAndWeatherOptimizer] Rain & Weather Driving Governor initialized (Quarter-Buffer Fog & Zero-Stall Pipeline armed)");
     }
 

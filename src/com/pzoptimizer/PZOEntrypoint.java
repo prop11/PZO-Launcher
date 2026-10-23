@@ -24,6 +24,20 @@ public class PZOEntrypoint {
             PZOLogger.info(String.format("System Resources: %d CPU Cores | Max JVM Heap Allocated: %d MB", cores, maxMemMB));
         } catch (Throwable ignored) {}
 
+        if (IncompatibleModGuard.isPzOptimizationInstalled()) {
+            IncompatibleModGuard.reportAndWarn();
+            launchGame(args);
+            return;
+        }
+
+        if (BenchmarkHarness.isStockBaselineRequested()) {
+            PZOLogger.info("[PZO] Stock baseline benchmark run: no PZO patches or governors, harness only.");
+            BenchmarkHarness.checkLaunchParams(args);
+            EngineThreadGovernor.initializeBenchmarkOnly();
+            launchGame(args);
+            return;
+        }
+
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
         LogSpamShield.initialize();
@@ -72,7 +86,6 @@ public class PZOEntrypoint {
         HordeSpatialCuller.initialize();
         GenerationalHeapCleaner.startGovernor();
         AsyncEntityDistanceCache.initialize();
-        CorpseAudioGovernor.applyCorpseAudioLimits();
         EngineGLStateGovernor.initialize();
         EngineFramePacer.initialize();
         NativeDirectMemoryPool.initialize();
@@ -205,6 +218,10 @@ public class PZOEntrypoint {
             PZOLogger.warn("[PZO] Non-fatal notice on coexistence check: " + t.getMessage());
         }
 
+        launchGame(args);
+    }
+
+    private static void launchGame(String[] args) {
         PZOLogger.info("Handing execution over to Project Zomboid entrypoint (zombie.gameStates.MainScreenState)...");
         try {
             Class<?> mainClass = Class.forName("zombie.gameStates.MainScreenState");

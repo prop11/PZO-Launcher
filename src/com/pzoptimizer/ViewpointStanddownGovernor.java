@@ -7,7 +7,6 @@ import java.util.List;
 /**
  * Stands PZO's rendering changes down when a mod replaces the 3D projection, camera matrices or weather
  * shaders (Project Viewpoint: True Weathers & Lighting, IsoViewpoint, PZ3D). While active:
- * - ImprovedFogDrawer is not bytecode-patched, and FogQuarterBufferGovernor yields to vanilla/modded fog
  * - RenderFrustumCuller and HordeSpatialCuller skip 2D screen-space culling, which would hide 3D-projected objects
  * - RainAndWeatherOptimizer leaves weather masking and puddle settings alone
  */
