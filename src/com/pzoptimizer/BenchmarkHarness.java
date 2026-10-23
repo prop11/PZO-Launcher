@@ -122,6 +122,11 @@ public final class BenchmarkHarness {
                 ScriptLookupCache.invalidate();
                 notes.add("script item lookup memo disabled (scriptcache=0)");
             }
+            if ("0".equals(cfg.get("newfixes"))) {
+                FliesSoundFix.active = false;
+                ChunkMipLimit.active = false;
+                notes.add("flies fix and chunk mip cap disabled (newfixes=0)");
+            }
             if ("0".equals(cfg.get("tsprites"))) {
                 FoliageLod.spritesActive = false;
                 notes.add("distant translucent sprite baking disabled (tsprites=0)");
@@ -683,6 +688,7 @@ public final class BenchmarkHarness {
             w.println("  \"script_lookup_fills\": " + ScriptLookupCache.fills.sum() + ",");
             w.println("  \"foliage_far_classifications\": " + FoliageLod.objectsBaked.get() + ",");
             w.println("  \"translucent_sprites_baked\": " + FoliageLod.spritesBaked.get() + ",");
+            w.println("  \"flies_toggles_avoided\": " + FliesSoundFix.togglesAvoided.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

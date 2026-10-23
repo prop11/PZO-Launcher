@@ -290,6 +290,10 @@ public class PZOEngineBridge {
             } else if ("JVM_ScriptLookupCache".equals(key)) {
                 ScriptLookupCache.active = value;
                 ScriptLookupCache.invalidate();
+            } else if ("JVM_FliesSoundFix".equals(key)) {
+                FliesSoundFix.active = value;
+            } else if ("JVM_ChunkMipLimit".equals(key)) {
+                ChunkMipLimit.active = value;
             } else if ("JVM_TranslucentSpriteLod".equals(key)) {
                 FoliageLod.spritesActive = value;
             } else if ("JVM_FoliageLod".equals(key)) {

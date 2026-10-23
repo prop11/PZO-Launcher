@@ -488,6 +488,27 @@ public class PZOptimAgent {
                 }
                 return out;
             }
+            if ("zombie/Lua/LuaManager".equals(className) && classfileBuffer != null) {
+                byte[] lm = AsmSupport.transform(classfileBuffer, loader, "LuaManager lookup trace", LuaLookupTrace::patchLuaManager);
+                if (lm != null) {
+                    PZOLogger.info("[PZO Agent] LuaManager.getFunctionObject: failed Vehicles.* lookups are traced with their thread and stack");
+                }
+                return lm;
+            }
+            if ("zombie/FliesSound$ChunkLevelData".equals(className) && classfileBuffer != null) {
+                byte[] fs = AsmSupport.transform(classfileBuffer, loader, "FliesSound hasFlies toggle", FliesSoundFix::patchChunkLevelData);
+                if (fs != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FliesSound: no hasFlies clear+set (and chunk re-bake) on an unchanged square");
+                }
+                return fs;
+            }
+            if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null) {
+                byte[] mip = AsmSupport.transform(classfileBuffer, loader, "FBORenderChunk mip levels", ChunkMipLimit::patchRenderChunk);
+                if (mip != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderChunk.endRenderThread: chunk mip chain capped at " + ChunkMipLimit.maxLevel + " levels");
+                }
+                return mip;
+            }
             if ("zombie/Lua/Event".equals(className) && classfileBuffer != null) {
                 byte[] ev = AsmSupport.transform(classfileBuffer, loader, "Lua Event.trigger", LuaEventPatches::patchEvent);
                 if (ev != null) {
