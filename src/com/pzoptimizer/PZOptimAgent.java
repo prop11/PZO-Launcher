@@ -481,6 +481,15 @@ public class PZOptimAgent {
                 }
                 return out;
             }
+            if ("zombie/Lua/Event".equals(className) && classfileBuffer != null) {
+                byte[] ev = AsmSupport.transform(classfileBuffer, loader, "Lua Event.trigger", LuaEventPatches::patchEvent);
+                if (ev != null) {
+                    LuaEventPatches.timing = BenchmarkHarness.isConfigured();
+                    PZOLogger.success("[PZO Agent] ASM-patched Lua Event.trigger: cached profiler labels, no rescan after each callback"
+                        + (LuaEventPatches.timing ? ", handler timing on for this benchmark" : ""));
+                }
+                return ev;
+            }
             if ("zombie/scripting/ScriptManager".equals(className) && classfileBuffer != null) {
                 byte[] sm = AsmSupport.transform(classfileBuffer, loader, "ScriptManager.FindItem memo", ScriptLookupCache::patchScriptManager);
                 if (sm != null) {

@@ -285,6 +285,8 @@ public class PZOEngineBridge {
                 GameThreadPatches.stateMachineCache = value;
             } else if ("JVM_BoneBatch".equals(key)) {
                 BoneBatch.setActive(value);
+            } else if ("JVM_LuaEventFastPath".equals(key)) {
+                LuaEventPatches.active = value;
             } else if ("JVM_ScriptLookupCache".equals(key)) {
                 ScriptLookupCache.active = value;
                 ScriptLookupCache.invalidate();

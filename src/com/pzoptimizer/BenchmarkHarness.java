@@ -673,6 +673,7 @@ public final class BenchmarkHarness {
             w.println("  \"skins_precomputed\": " + BoneBatch.skinsPrecomputed.sum() + ",");
             w.println("  \"foliage_chunk_flips\": " + FoliageLod.chunkFlips.get() + ",");
             w.println("  \"script_lookup_hits\": " + ScriptLookupCache.hits.sum() + ",");
+            w.println("  \"lua_handler_ms\": " + LuaEventPatches.report(40) + ",");
             w.println("  \"script_lookup_fills\": " + ScriptLookupCache.fills.sum() + ",");
             w.println("  \"foliage_far_classifications\": " + FoliageLod.objectsBaked.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
