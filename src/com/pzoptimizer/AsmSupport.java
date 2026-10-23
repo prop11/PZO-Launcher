@@ -3,6 +3,7 @@ package com.pzoptimizer;
 import com.pzoptimizer.shaded.asm.ClassReader;
 import com.pzoptimizer.shaded.asm.ClassWriter;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
+import com.pzoptimizer.shaded.asm.tree.FieldNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import java.io.InputStream;
 import java.util.HashMap;
@@ -32,6 +33,12 @@ public final class AsmSupport {
             int fields = node.fields.size(), methods = node.methods.size(), interfaces = node.interfaces.size();
             if (!t.apply(node)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": target code not found, class left unchanged");
+                return null;
+            }
+            if (hasDuplicateMembers(node)) {
+                // Another agent (ViewpointFPS+ via ZombieBuddy) redefined the class with bytes this agent had already
+                // patched, so the patch is in the input; adding its members again is a ClassFormatError
+                PZOLogger.warn("[AsmSupport] " + what + ": class already carries this patch, left as is");
                 return null;
             }
             Class<?> live = REDEFINING.get();
@@ -74,6 +81,17 @@ public final class AsmSupport {
             if (!liveInterfaces.contains(node.interfaces.get(i))) return false;
         }
         return true;
+    }
+
+    private static boolean hasDuplicateMembers(ClassNode node) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (FieldNode f : node.fields) {
+            if (!seen.add("F " + f.name + " " + f.desc)) return true;
+        }
+        for (MethodNode m : node.methods) {
+            if (!seen.add("M " + m.name + m.desc)) return true;
+        }
+        return false;
     }
 
     public static MethodNode findMethod(ClassNode node, String name, String desc) {
