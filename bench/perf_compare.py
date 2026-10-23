@@ -12,6 +12,7 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   pzo_noskins  as pzo, with the worker skin transform precompute off (skins=0)
   pzo_nofoliage  as pzo, with distant foliage baking off (foliage=0)
   pzo_noscriptcache  as pzo, with the script item lookup memo off (scriptcache=0)
+  pzo_notsprites  as pzo, with distant translucent sprite baking off (tsprites=0)
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -129,6 +130,8 @@ def main():
                     extra["foliage"] = 0
                 if run == "pzo_noscriptcache":
                     extra["scriptcache"] = 0
+                if run == "pzo_notsprites":
+                    extra["tsprites"] = 0
                 if args.threat:
                     extra["threat"] = 1
                 extra.update({"weather": args.weather, "time": args.time, "route": args.route, "route_dir": args.route_dir})

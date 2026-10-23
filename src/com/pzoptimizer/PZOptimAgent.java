@@ -266,7 +266,14 @@ public class PZOptimAgent {
                 byte[] fl = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell foliage LOD", FoliageLod::patchRenderCell);
                 if (fl != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell layer tests: distant wind-swayed foliage baked into the chunk texture");
-                    return fl;
+                    fc = fl;
+                }
+                if (BenchmarkHarness.isConfigured()) {
+                    byte[] ts = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent stats", TranslucentStats::patchRenderCell);
+                    if (ts != null) {
+                        TranslucentStats.active = true;
+                        fc = ts;
+                    }
                 }
                 return fc;
             }

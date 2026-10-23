@@ -122,6 +122,10 @@ public final class BenchmarkHarness {
                 ScriptLookupCache.invalidate();
                 notes.add("script item lookup memo disabled (scriptcache=0)");
             }
+            if ("0".equals(cfg.get("tsprites"))) {
+                FoliageLod.spritesActive = false;
+                notes.add("distant translucent sprite baking disabled (tsprites=0)");
+            }
             if ("0".equals(cfg.get("foliage"))) {
                 FoliageLod.active = false;
                 notes.add("distant foliage baking disabled (foliage=0)");
@@ -674,8 +678,11 @@ public final class BenchmarkHarness {
             w.println("  \"foliage_chunk_flips\": " + FoliageLod.chunkFlips.get() + ",");
             w.println("  \"script_lookup_hits\": " + ScriptLookupCache.hits.sum() + ",");
             w.println("  \"lua_handler_ms\": " + LuaEventPatches.report(40) + ",");
+            w.println("  \"translucent_draws_by_reason\": " + TranslucentStats.reasonsJson() + ",");
+            w.println("  \"translucent_draws_by_sprite\": " + TranslucentStats.spritesJson() + ",");
             w.println("  \"script_lookup_fills\": " + ScriptLookupCache.fills.sum() + ",");
             w.println("  \"foliage_far_classifications\": " + FoliageLod.objectsBaked.get() + ",");
+            w.println("  \"translucent_sprites_baked\": " + FoliageLod.spritesBaked.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

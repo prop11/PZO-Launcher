@@ -23,12 +23,21 @@ import java.util.concurrent.atomic.AtomicLong;
  * with DIRTY_TREES, as vanilla does when the wind option is toggled, so it is re-baked with the new answer and near
  * foliage sways again.
  *
+ *
+ * The same applies to sprites flagged translucent (IsoSprite.depthFlags bit 2): chain-link fencing, scaffolding,
+ * street decorations, ornamental plants. Vanilla draws every one of them in the per-frame pass, wind or no wind;
+ * on the benchmark route they were 94% of what that pass draws, ~350 a frame. For objects of a far chunk the
+ * classifier sees the bit cleared, so those bake too. Up close nothing changes; far away, something moving behind
+ * a baked fence no longer blends through it per pixel.
+ *
  * Idea from fmac (Atmospherics), who found translucent sprites to be disproportionately expensive and caches distant
  * ones. Atmospherics ships its own version of this, so this one stands down while that mod is active.
  */
 public final class FoliageLod {
 
     public static volatile boolean active = true;
+    public static volatile boolean spritesActive = true;
+    public static final AtomicLong spritesBaked = new AtomicLong();
     public static volatile float radiusTiles = 24.0f;
     private static final float HYSTERESIS_TILES = 6.0f;
     private static final int CHUNK_TILES = 8;
@@ -72,7 +81,7 @@ public final class FoliageLod {
                 resetAll();
             }
         }
-        if (!enabled() || !zombie.core.Core.getInstance().getOptionDoWindSpriteEffects()) {
+        if (!enabled() || (!spritesActive && !zombie.core.Core.getInstance().getOptionDoWindSpriteEffects())) {
             if (!farByChunk.isEmpty()) resetAll();
             return;
         }
@@ -148,6 +157,16 @@ public final class FoliageLod {
         return ((zombie.core.Core) core).getOptionDoWindSpriteEffects();
     }
 
+    // Replaces the IsoSprite.depthFlags reads of the classifier: a far object's sprite is not treated as translucent
+    public static int depthFlags(Object sprite) {
+        int flags = ((zombie.iso.sprite.IsoSprite) sprite).depthFlags;
+        if (classifyingFar && spritesActive && (flags & 2) != 0) {
+            spritesBaked.incrementAndGet();
+            return flags & ~2;
+        }
+        return flags;
+    }
+
     // Replaces IsoObject.getWindRenderEffects() inside the two layer tests
     public static Object windEffects(Object object) {
         return classifyingFar ? null : ((zombie.iso.IsoObject) object).getWindRenderEffects();
@@ -185,6 +204,20 @@ public final class FoliageLod {
             }
         }
         if (redirected != 4) return false;
+        int depthReads = 0;
+        for (MethodNode m : new MethodNode[] {classify, minus, translucent}) {
+            for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof com.pzoptimizer.shaded.asm.tree.FieldInsnNode f && f.getOpcode() == Opcodes.GETFIELD
+                        && "zombie/iso/sprite/IsoSprite".equals(f.owner) && "depthFlags".equals(f.name) && "I".equals(f.desc)) {
+                    MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/FoliageLod", "depthFlags",
+                        "(Ljava/lang/Object;)I", false);
+                    m.instructions.set(f, call);
+                    insn = call;
+                    depthReads++;
+                }
+            }
+        }
+        if (depthReads != 3) return false;
         com.pzoptimizer.shaded.asm.tree.InsnList pre = new com.pzoptimizer.shaded.asm.tree.InsnList();
         pre.add(new VarInsnNode(Opcodes.ALOAD, 1));
         pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/FoliageLod", "classify", "(Ljava/lang/Object;)V", false));
