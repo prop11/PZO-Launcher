@@ -413,6 +413,12 @@ public class PZOptimAgent {
                 if (sim != null) {
                     PZOLogger.success("[PZO Agent] Bytecode-patched MovingObjectUpdateScheduler: unseen zombie simulation level routed through UnseenZombieSimGovernor");
                 }
+                byte[] batch = AsmSupport.transform(sim != null ? sim : classfileBuffer, loader, "MovingObjectUpdateScheduler bone batch",
+                    AnimationThreadingPatches::patchScheduler);
+                if (batch != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched MovingObjectUpdateScheduler.postupdate: bone batch runs when the loop ends");
+                    return batch;
+                }
                 return sim;
             }
             if ("zombie/characters/IsoPlayer".equals(className) && classfileBuffer != null) {
@@ -446,7 +452,21 @@ public class PZOptimAgent {
                 return patchIsoWorld(classfileBuffer);
             }
             if ("zombie/core/skinnedmodel/animation/AnimationPlayer".equals(className) && classfileBuffer != null) {
-                return patchAnimationPlayer(classfileBuffer);
+                byte[] ap = patchAnimationPlayer(classfileBuffer);
+                byte[] bb = AsmSupport.transform(ap != null ? ap : classfileBuffer, loader, "AnimationPlayer bone batch",
+                    AnimationThreadingPatches::patchAnimationPlayer);
+                if (bb != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched AnimationPlayer: zombie bone math queued for the frame workers");
+                    return bb;
+                }
+                return ap;
+            }
+            if ("zombie/core/skinnedmodel/HelperFunctions".equals(className) && classfileBuffer != null) {
+                byte[] hf = AsmSupport.transform(classfileBuffer, loader, "HelperFunctions worker matrices", AnimationThreadingPatches::patchHelperFunctions);
+                if (hf != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched HelperFunctions: frame workers use their own matrix stacks");
+                }
+                return hf;
             }
             if ("zombie/FileGuidTable".equals(className) && classfileBuffer != null) {
                 return patchFileGuidTable(classfileBuffer);

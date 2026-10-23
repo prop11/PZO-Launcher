@@ -283,6 +283,8 @@ public class PZOEngineBridge {
                 GameThreadPatches.profilerThreadCheck = value;
             } else if ("JVM_StateMachineCache".equals(key)) {
                 GameThreadPatches.stateMachineCache = value;
+            } else if ("JVM_BoneBatch".equals(key)) {
+                BoneBatch.setActive(value);
             } else if ("JVM_WeatherTiles".equals(key)) {
                 WeatherTileBatcher.setActive(value);
             } else if ("JVM_ActionReadParallel".equals(key)) {

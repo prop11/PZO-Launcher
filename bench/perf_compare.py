@@ -7,6 +7,7 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
          so no bytecode patch or governor is active
   pzo    the launcher JSON exactly as installed
   pzo_nocap  as pzo, with the unseen-zombie simulation cap disabled (simcap=0)
+  pzo_nobones  as pzo, with the zombie bone batch off (bones=0): bones computed inline on the game thread
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -112,6 +113,8 @@ def main():
                 extra = {"stock": 1} if run == "stock" else {}
                 if run == "pzo_nocap":
                     extra["simcap"] = 0
+                if run == "pzo_nobones":
+                    extra["bones"] = 0
                 if args.threat:
                     extra["threat"] = 1
                 extra.update({"weather": args.weather, "time": args.time, "route": args.route, "route_dir": args.route_dir})

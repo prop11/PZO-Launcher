@@ -113,6 +113,10 @@ public final class BenchmarkHarness {
                 UnseenZombieSimGovernor.setActive(false);
                 notes.add("unseen zombie simulation cap disabled (simcap=0)");
             }
+            if ("0".equals(cfg.get("bones"))) {
+                BoneBatch.setActive(false);
+                notes.add("zombie bone batch disabled (bones=0)");
+            }
         } catch (NumberFormatException e) {
             notes.add("bad config value: " + e.getMessage());
         }
@@ -300,6 +304,8 @@ public final class BenchmarkHarness {
             simFrameBase = zombie.MovingObjectUpdateScheduler.instance.getFrameCounter();
         }
         if (lastFrameCount != -1) frameTimes.add(now - lastFrameNs);
+        // An unfocused window is scheduled differently by Windows (no foreground boost, often efficiency cores)
+        if (!org.lwjglx.opengl.Display.isActive()) unfocusedFrames++;
         lastFrameCount = fc;
         lastFrameNs = now;
         if (frameEvent != null) frameEvent.commit();
@@ -443,6 +449,7 @@ public final class BenchmarkHarness {
                     }
                     if (now - phaseStart > SETTLE_NS) {
                         frameTimes.clear();
+                        unfocusedFrames = 0;
                         lastFrameCount = -1;
                         GpuFrameTimer.start();
                         enter(Phase.ROUTE);
@@ -508,17 +515,23 @@ public final class BenchmarkHarness {
         double low = 0;
         for (int i = Math.max(0, ft.length - n1); i < ft.length; i++) low += ft[i] / 1e6;
         low = ft.length > 0 ? low / n1 : 0;
+        double unfocusedPct = ft.length > 0 ? 100.0 * unfocusedFrames / ft.length : 0;
+        if (unfocusedFrames > 0) {
+            notes.add(String.format(Locale.ROOT, "zoom %.2f: window unfocused for %.1f%% of measured frames", zooms[zoomIndex], unfocusedPct));
+        }
+        unfocusedFrames = 0;
         if (zoomJson.length() > 0) zoomJson.append(",\n");
         zoomJson.append(String.format(Locale.ROOT,
             "    {\"zoom\": %.2f, \"frames\": %d, \"avg_ms\": %.3f, \"avg_fps\": %.1f, \"p99_ms\": %.3f, \"low1_fps\": %.1f, "
-                + "\"render_thread\": %s, \"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
-            zooms[zoomIndex], ft.length, avgMs, avgMs > 0 ? 1000.0 / avgMs : 0, p99, low > 0 ? 1000.0 / low : 0,
+                + "\"unfocused_pct\": %.1f, \"render_thread\": %s, \"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
+            zooms[zoomIndex], ft.length, avgMs, avgMs > 0 ? 1000.0 / avgMs : 0, p99, low > 0 ? 1000.0 / low : 0, unfocusedPct,
             render == null ? "null" : render, shotName(false), shotName(true)));
     }
 
     // threat=1: zombies see, chase and attack the player (only death is prevented), so AI, pathfinding and
     // combat cost show up the way they do in real play. Default runs keep the player invisible.
     private static boolean threat;
+    private static int unfocusedFrames;
     private static int deadTicks;
     private static long lastUnpauseCheck;
     private static boolean pauseNoted;
@@ -636,6 +649,8 @@ public final class BenchmarkHarness {
             w.println("  \"action_pre_read_hits\": " + ActionParallel.preReadHits.get() + ",");
             w.println("  \"chunk_bakes_held\": " + ChunkBakeBudget.bakesHeld.get() + ",");
             w.println("  \"puddle_shader_units_rewritten\": " + ShaderEarlyDepth.unitsRewritten.get() + ",");
+            w.println("  \"bone_batch_zombies\": " + BoneBatch.deferred.get() + ",");
+            w.println("  \"bone_batch_batches\": " + BoneBatch.batches.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");
