@@ -122,6 +122,59 @@ public final class BoneBatch {
         deferred.addAndGet(n);
     }
 
+    public static volatile boolean skinPrecompute = true;
+    public static final java.util.concurrent.atomic.LongAdder skinsPrecomputed = new java.util.concurrent.atomic.LongAdder();
+    private static final int MAX_SKINS = 8;
+
+    // AnimationPlayer's skin cache, read reflectively; loaded on first use, after the class rewrites are done
+    private static final class SkinHandles {
+        static final java.lang.invoke.VarHandle DATA, SKINNED_TO, NEXT;
+        static {
+            java.lang.invoke.VarHandle d = null, s = null, n = null;
+            try {
+                java.lang.invoke.MethodHandles.Lookup l = java.lang.invoke.MethodHandles.lookup();
+                Class<?> ap = zombie.core.skinnedmodel.animation.AnimationPlayer.class;
+                Class<?> std = Class.forName("zombie.core.skinnedmodel.animation.AnimationPlayer$SkinTransformData");
+                d = java.lang.invoke.MethodHandles.privateLookupIn(ap, l).findVarHandle(ap, "skinTransformData", std);
+                java.lang.invoke.MethodHandles.Lookup sl = java.lang.invoke.MethodHandles.privateLookupIn(std, l);
+                s = sl.findVarHandle(std, "skinnedTo", zombie.core.skinnedmodel.model.SkinningData.class);
+                n = sl.findVarHandle(std, "next", std);
+            } catch (Throwable t) {
+                PZOLogger.warn("[BoneBatch] skin cache not as expected, skin precompute off: " + t);
+                skinPrecompute = false;
+            }
+            DATA = d;
+            SKINNED_TO = s;
+            NEXT = n;
+        }
+    }
+
+    /**
+     * Replaces UpdateSkinTransforms() at the end of the deferred bone work. Stock resets the player's per-skeleton
+     * skin cache here and the renderer rebuilds each entry on the game thread (getSkinTransforms: one matrix
+     * multiply per bone) when it prepares the model. The skeletons cached before the reset are the ones the
+     * renderer asked for last frame, so they are rebuilt right here on the worker; the renderer then finds them
+     * current. A skeleton not seen last frame is still built by the renderer as stock.
+     */
+    public static void updateSkinTransforms(Object player) {
+        zombie.core.skinnedmodel.animation.AnimationPlayer p = (zombie.core.skinnedmodel.animation.AnimationPlayer) player;
+        if (!skinPrecompute || SkinHandles.DATA == null) {
+            p.UpdateSkinTransforms();
+            return;
+        }
+        Object[] skins = new Object[MAX_SKINS];
+        int n = 0;
+        for (Object d = SkinHandles.DATA.get(p); d != null && n < MAX_SKINS; d = SkinHandles.NEXT.get(d)) {
+            Object s = SkinHandles.SKINNED_TO.get(d);
+            if (s != null) skins[n++] = s;
+        }
+        p.UpdateSkinTransforms();
+        for (int i = 0; i < n; i++) {
+            p.getSkinTransforms((zombie.core.skinnedmodel.model.SkinningData) skins[i]);
+        }
+        if (n > 0) skinsPrecomputed.add(n);
+    }
+
     private static void runOne(Deferrable[] q, float[] dt, int i) {
         Deferrable d = q[i];
         if (d == null) return;

@@ -113,6 +113,14 @@ public final class BenchmarkHarness {
                 UnseenZombieSimGovernor.setActive(false);
                 notes.add("unseen zombie simulation cap disabled (simcap=0)");
             }
+            if ("0".equals(cfg.get("palette"))) {
+                PaletteBuffers.active = false;
+                notes.add("bulk matrix palette copy disabled (palette=0)");
+            }
+            if ("0".equals(cfg.get("skins"))) {
+                BoneBatch.skinPrecompute = false;
+                notes.add("skin transform precompute disabled (skins=0)");
+            }
             if ("0".equals(cfg.get("bones"))) {
                 BoneBatch.setActive(false);
                 notes.add("zombie bone batch disabled (bones=0)");
@@ -653,6 +661,7 @@ public final class BenchmarkHarness {
             w.println("  \"puddle_shader_units_rewritten\": " + ShaderEarlyDepth.unitsRewritten.get() + ",");
             w.println("  \"bone_batch_zombies\": " + BoneBatch.deferred.get() + ",");
             w.println("  \"bone_batch_batches\": " + BoneBatch.batches.get() + ",");
+            w.println("  \"skins_precomputed\": " + BoneBatch.skinsPrecomputed.sum() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

@@ -8,6 +8,8 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   pzo    the launcher JSON exactly as installed
   pzo_nocap  as pzo, with the unseen-zombie simulation cap disabled (simcap=0)
   pzo_nobones  as pzo, with the zombie bone batch off (bones=0): bones computed inline on the game thread
+  pzo_nopalette  as pzo, with the bulk matrix palette copy off (palette=0)
+  pzo_noskins  as pzo, with the worker skin transform precompute off (skins=0)
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -81,6 +83,8 @@ def main():
     ap.add_argument("--route-dir", choices=["E", "W", "N", "S"], default="W")
     ap.add_argument("--cores", type=int, default=0,
                     help="pin the game to this many physical cores (with SMT siblings) to stand in for a smaller CPU")
+    ap.add_argument("--no-focus", action="store_true",
+                    help="do not bring the game window to the front when it opens")
     args = ap.parse_args()
 
     if fc.game_running():
@@ -115,6 +119,10 @@ def main():
                     extra["simcap"] = 0
                 if run == "pzo_nobones":
                     extra["bones"] = 0
+                if run == "pzo_nopalette":
+                    extra["palette"] = 0
+                if run == "pzo_noskins":
+                    extra["skins"] = 0
                 if args.threat:
                     extra["threat"] = 1
                 extra.update({"weather": args.weather, "time": args.time, "route": args.route, "route_dir": args.route_dir})

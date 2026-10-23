@@ -461,6 +461,21 @@ public class PZOptimAgent {
                 }
                 return ap;
             }
+            if ("zombie/core/skinnedmodel/advancedanimation/AnimatedModel$AnimatedModelInstanceRenderData".equals(className) && classfileBuffer != null) {
+                byte[] st = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "org/lwjgl/util/vector/Matrix4f", "store", "(Ljava/nio/FloatBuffer;)Lorg/lwjgl/util/vector/Matrix;",
+                    "com/pzoptimizer/PaletteBuffers", "store", "(Lorg/lwjgl/util/vector/Matrix4f;Ljava/nio/FloatBuffer;)Lorg/lwjgl/util/vector/Matrix;");
+                byte[] base = st != null ? st : classfileBuffer;
+                byte[] ld = BytecodeRedirect.virtualToStatic(base,
+                    "org/lwjgl/util/vector/Matrix4f", "load", "(Ljava/nio/FloatBuffer;)Lorg/lwjgl/util/vector/Matrix;",
+                    "com/pzoptimizer/PaletteBuffers", "load", "(Lorg/lwjgl/util/vector/Matrix4f;Ljava/nio/FloatBuffer;)Lorg/lwjgl/util/vector/Matrix;");
+                byte[] out = ld != null ? ld : st;
+                if (out != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched AnimatedModel render data: matrix palette copied in bulk ("
+                        + (st != null ? "store" : "") + (st != null && ld != null ? ", " : "") + (ld != null ? "load" : "") + ")");
+                }
+                return out;
+            }
             if ("zombie/core/skinnedmodel/HelperFunctions".equals(className) && classfileBuffer != null) {
                 byte[] hf = AsmSupport.transform(classfileBuffer, loader, "HelperFunctions worker matrices", AnimationThreadingPatches::patchHelperFunctions);
                 if (hf != null) {

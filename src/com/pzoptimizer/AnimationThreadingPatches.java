@@ -108,7 +108,7 @@ final class AnimationThreadingPatches {
             c.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, AP, name, "()V", false));
         }
         c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, AP, "UpdateSkinTransforms", "()V", false));
+        c.add(new MethodInsnNode(Opcodes.INVOKESTATIC, ME, "updateSkinTransforms", "(Ljava/lang/Object;)V", false));
         c.add(done);
         c.add(new InsnNode(Opcodes.RETURN));
         node.methods.add(work);
