@@ -200,4 +200,4 @@ python3 package_release.py
 ---
 
 ## License
-Licensed under the [GNU General Public License v3.0 (GPL-3.0)](LICENSE).
+Source-available, all rights reserved. Versions up to and including V1.0.2.1 were released under GPL-3.0; every later version is covered by the [PZO Source-Available License](LICENSE), which prohibits redistribution, derivative works and any use of this project by AI systems.
