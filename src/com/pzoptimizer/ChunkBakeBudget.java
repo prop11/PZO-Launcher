@@ -27,12 +27,12 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
  * 50-90 ms frame per flash), and blood and corpse changes do the same on a smaller scale. Here a re-bake that is
  * only cosmetic may wait briefly while the previous texture keeps being drawn:
  *
- *  - lighting (DIRTY_LIGHTING, possibly with other cosmetic bits): scheduled. If everything waiting fits in the
- *    frame's budget it all bakes now, as in stock, so a flashlight, headlights or a switch are never late. Otherwise
- *    the groups that waited longest bake first, then the ones nearest the camera, and the budget grows with the
- *    backlog so nothing waits more than LIGHTING_MAX_WAIT_MS. LightingJNI marks a group dirty whenever one of its
- *    squares changes light, which happens every frame while walking (the vision fade), so a first-come gate or a
- *    long wait leaves neighbouring chunks lit out of step, which reads as flicker.
+ *  - lighting (DIRTY_LIGHTING, possibly with other cosmetic bits): only during a lightning flash and for
+ *    LIGHTNING_TAIL_MS after it. Then the groups that waited longest bake first, then the ones nearest the camera,
+ *    and the budget grows with the backlog so nothing waits more than LIGHTING_MAX_WAIT_MS. Any other time every
+ *    lighting re-bake starts at once, as in stock: at dusk, dawn and in fog the light changes a little every frame
+ *    on every square, and holding some groups back showed neighbouring chunks at different brightness, flickering
+ *    even while standing still.
  *  - blood, corpse changes: start only while fewer than 4 bakes started this frame, none waits more than 3 frames.
  *
  * A first bake (no texture yet) and any re-bake for an object, item, cutaway, obscuring, creation, redraw or tree
@@ -68,6 +68,47 @@ public final class ChunkBakeBudget {
     private static final java.util.ArrayList<Waiting> planScratch = new java.util.ArrayList<>();
     private static long frameStartNanos, lastFrameNanos = 16_000_000L;
     private static int newLightingAllowance;
+
+    private static final long LIGHTNING_TAIL_MS = 300;
+    private static boolean lightningWindow;
+    private static long lastFlashNanos = Long.MIN_VALUE / 2;
+
+    // ThunderStorm's per-player flash state (private there); loaded on first use, after the class rewrites
+    private static final class Storm {
+        static final VarHandle INFOS, STATE;
+        static {
+            VarHandle infos = null, state = null;
+            try {
+                MethodHandles.Lookup l = MethodHandles.lookup();
+                Class<?> storm = Class.forName("zombie.iso.weather.ThunderStorm");
+                Class<?> info = Class.forName("zombie.iso.weather.ThunderStorm$PlayerLightningInfo");
+                Class<?> stateType = Class.forName("zombie.iso.weather.ThunderStorm$LightningState");
+                infos = MethodHandles.privateLookupIn(storm, l).findVarHandle(storm, "lightningInfos", info.arrayType());
+                state = MethodHandles.privateLookupIn(info, l).findVarHandle(info, "lightningState", stateType);
+            } catch (Throwable t) {
+                PZOLogger.warn("[ChunkBakeBudget] lightning state not readable, lighting re-bakes are never held: " + t);
+            }
+            INFOS = infos;
+            STATE = state;
+        }
+    }
+
+    // Whether any player's lightning flash is being applied
+    private static boolean flashing() {
+        try {
+            if (Storm.STATE == null) return false;
+            zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+            Object storm = cm == null ? null : cm.getThunderStorm();
+            if (storm == null) return false;
+            Object[] infos = (Object[]) Storm.INFOS.get(storm);
+            if (infos == null) return false;
+            for (Object info : infos) {
+                if (info != null && ((Enum<?>) Storm.STATE.get(info)).ordinal() != 0) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
 
     // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
     // while one of those classes is being defined, and loading it again from there is a duplicate definition
@@ -128,7 +169,7 @@ public final class ChunkBakeBudget {
         boolean cosmetic = (flags & ~COSMETIC) == 0;
         boolean lighting = cosmetic && (flags & FBORenderChunk.DIRTY_LIGHTING) != 0;
         if (hasTexture && lighting) {
-            if (holdLighting(zi, chunk)) {
+            if (lightningWindow && holdLighting(zi, chunk)) {
                 heldThisFrame.put(zi, Boolean.TRUE);
                 bakesHeld.incrementAndGet();
                 return beginHidden(mgr, chunk, level, zoom, canRender, canClear, zi);
@@ -166,6 +207,8 @@ public final class ChunkBakeBudget {
         frame = now;
         bakesThisFrame = lightingBakesThisFrame = 0;
         heldThisFrame.clear();
+        if (flashing()) lastFlashNanos = t;
+        lightningWindow = t - lastFlashNanos <= LIGHTNING_TAIL_MS * 1_000_000L;
 
         planScratch.clear();
         for (java.util.Iterator<Waiting> it = waiting.values().iterator(); it.hasNext(); ) {
