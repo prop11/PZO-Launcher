@@ -27,8 +27,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * The same applies to sprites flagged translucent (IsoSprite.depthFlags bit 2): chain-link fencing, scaffolding,
  * street decorations, ornamental plants. Vanilla draws every one of them in the per-frame pass, wind or no wind;
  * on the benchmark route they were 94% of what that pass draws, ~350 a frame. For objects of a far chunk the
- * classifier sees the bit cleared, so those bake too. Up close nothing changes; far away, something moving behind
- * a baked fence no longer blends through it per pixel.
+ * classifier sees the bit cleared, so those bake too, drawn by TranslucentBake so they keep vanilla's depth and
+ * transparency; sprites it cannot bake faithfully stay per frame.
  *
  * Idea from fmac (Atmospherics), who found translucent sprites to be disproportionately expensive and caches distant
  * ones. Atmospherics ships its own version of this, so this one stands down while that mod is active.
@@ -39,7 +39,7 @@ public final class FoliageLod {
     public static volatile boolean spritesActive = true;
     public static final AtomicLong spritesBaked = new AtomicLong();
     public static volatile float radiusTiles = 24.0f;
-    private static final float HYSTERESIS_TILES = 6.0f;
+    private static final float HYSTERESIS_TILES = 8.0f;
     private static final int CHUNK_TILES = 8;
     private static final int CHECK_MODS_EVERY = 300;
 
@@ -50,6 +50,7 @@ public final class FoliageLod {
     private static Map<Long, Boolean> farByChunk = new HashMap<>();
     private static Map<Long, Boolean> nextFar = new HashMap<>();
     private static boolean classifyingFar;
+    private static Object classifyingObject;
     private static boolean otherModOwnsIt;
     private static int framesUntilModCheck;
 
@@ -89,7 +90,12 @@ public final class FoliageLod {
         if (player == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
         zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
         if (map == null) return;
-        float px = player.getX(), py = player.getY();
+        // Distance from what the camera follows (Viewpoint and spectating move it off the player)
+        float px = zombie.iso.IsoCamera.frameState.camCharacterX, py = zombie.iso.IsoCamera.frameState.camCharacterY;
+        if (px == 0.0f && py == 0.0f) {
+            px = player.getX();
+            py = player.getY();
+        }
         float r = radiusTiles, h = HYSTERESIS_TILES * 0.5f;
         Map<Long, Boolean> seen = nextFar;
         seen.clear();
@@ -140,6 +146,7 @@ public final class FoliageLod {
     // Prefix of FBORenderCell.calculateObjectRenderLayer(object)
     public static void classify(Object object) {
         classifyingFar = false;
+        classifyingObject = object;
         if (!enabled()) return;
         zombie.iso.IsoGridSquare sq = ((zombie.iso.IsoObject) object).square;
         zombie.iso.IsoChunk c = sq == null ? null : sq.chunk;
@@ -160,7 +167,7 @@ public final class FoliageLod {
     // Replaces the IsoSprite.depthFlags reads of the classifier: a far object's sprite is not treated as translucent
     public static int depthFlags(Object sprite) {
         int flags = ((zombie.iso.sprite.IsoSprite) sprite).depthFlags;
-        if (classifyingFar && spritesActive && (flags & 2) != 0) {
+        if (classifyingFar && spritesActive && (flags & 2) != 0 && TranslucentBake.canBake(classifyingObject, sprite)) {
             spritesBaked.incrementAndGet();
             return flags & ~2;
         }

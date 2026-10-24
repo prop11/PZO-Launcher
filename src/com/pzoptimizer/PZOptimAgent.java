@@ -63,6 +63,7 @@ public class PZOptimAgent {
                         "zombie.core.textures.TextureIDAssetManager".equals(name) ||
                         "zombie.fileSystem.FileSystemImpl".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
+                        "zombie.iso.sprite.IsoSprite".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name)) {
                         try {
@@ -258,6 +259,14 @@ public class PZOptimAgent {
                 }
                 return su;
             }
+            if ("zombie/iso/sprite/IsoSprite".equals(className) && classfileBuffer != null) {
+                byte[] sp = AsmSupport.transform(classfileBuffer, loader, "IsoSprite translucent bake", TranslucentBake::patchSprite);
+                TranslucentBake.spriteHooked = sp != null;
+                if (sp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoSprite depth shader setup: baked translucent sprites keep depth on solid pixels only");
+                }
+                return sp;
+            }
             if ("zombie/iso/fboRenderChunk/FBORenderCell".equals(className) && classfileBuffer != null) {
                 byte[] fc = AsmSupport.transform(classfileBuffer, loader, "FBORenderCell bake budget", ChunkBakeBudget::patchRenderCell);
                 if (fc != null) {
@@ -267,6 +276,12 @@ public class PZOptimAgent {
                 if (fl != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell layer tests: distant wind-swayed foliage baked into the chunk texture");
                     fc = fl;
+                }
+                byte[] tb = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent bake", TranslucentBake::patchRenderCell);
+                TranslucentBake.cellHooked = tb != null;
+                if (tb != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderMinusFloor: baked translucent sprites drawn in colour and depth passes");
+                    fc = tb;
                 }
                 if (BenchmarkHarness.isConfigured()) {
                     byte[] ts = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent stats", TranslucentStats::patchRenderCell);

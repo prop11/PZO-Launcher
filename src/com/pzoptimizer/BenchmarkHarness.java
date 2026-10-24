@@ -688,6 +688,8 @@ public final class BenchmarkHarness {
             w.println("  \"script_lookup_fills\": " + ScriptLookupCache.fills.sum() + ",");
             w.println("  \"foliage_far_classifications\": " + FoliageLod.objectsBaked.get() + ",");
             w.println("  \"translucent_sprites_baked\": " + FoliageLod.spritesBaked.get() + ",");
+            w.println("  \"translucent_two_pass_bakes\": " + TranslucentBake.twoPassBakes.get() + ",");
+            w.println("  \"translucent_kept_per_frame\": " + TranslucentBake.keptPerFrame.get() + ",");
             w.println("  \"flies_toggles_avoided\": " + FliesSoundFix.togglesAvoided.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
