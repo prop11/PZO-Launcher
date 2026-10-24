@@ -43,7 +43,7 @@ public final class AsmSupport {
                 return null;
             }
             if (shapeBefore != null && !shapeBefore.equals(shapeOf(node))) {
-                PZOLogger.info("[AsmSupport] " + what + ": stands down while Viewpoint is active (adds or renames class members)");
+                PZOLogger.info("[AsmSupport] " + what + ": stands down while a ZombieBuddy Java mod is active (adds or renames class members)");
                 return null;
             }
             Class<?> live = REDEFINING.get();
@@ -91,18 +91,20 @@ public final class AsmSupport {
     private static volatile Boolean keepShapes;
 
     /**
-     * ZombieBuddy re-patches classes for its mods in batches, and Viewpoint hooks dozens of game classes. When one
-     * of them is a class this agent reshaped (added, removed or renamed members or interfaces), the JVM rejects
-     * ZombieBuddy's version of it and drops the rest of that batch, which leaves Viewpoint's renderer, settings window
-     * and mouse hooks uninstalled (no clicks register). With Viewpoint in the startup mod list, reshaping patches
-     * stand down; body-only patches stay, and nothing changes for anyone else.
+     * ZombieBuddy re-patches classes for its mods in batches. When one of them is a class this agent reshaped (added,
+     * removed or renamed members or interfaces), the JVM rejects ZombieBuddy's version of it and drops the rest of
+     * that batch, so the mod's hooks are silently missing: Viewpoint got no clicks, Knox Event Expanded reported a
+     * missing Java class, Knox Inventory's menu and ShadowZ / Peek a View did nothing. With any ZombieBuddy Java mod
+     * in the startup mod list, reshaping patches stand down; body-only patches stay. ZombieBuddy installed without
+     * such a mod changes nothing.
      */
     static boolean keepClassShapes() {
         Boolean k = keepShapes;
         if (k == null) {
-            k = JavaModLoader.isZombieBuddyPresent() && JavaModLoader.isViewpointStartupMod();
+            String mod = JavaModLoader.isZombieBuddyPresent() ? JavaModLoader.findZombieBuddyJavaStartupMod() : null;
+            k = mod != null;
             keepShapes = k;
-            if (k) PZOLogger.info("[AsmSupport] ZombieBuddy and Viewpoint at startup: patches that add or rename class members stand down");
+            if (k) PZOLogger.info("[AsmSupport] ZombieBuddy Java mod at startup (" + mod + "): patches that add or rename class members stand down");
         }
         return k;
     }

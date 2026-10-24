@@ -261,7 +261,7 @@ public class PZOptimAgent {
             }
             if ("zombie/iso/sprite/IsoSprite".equals(className) && classfileBuffer != null) {
                 byte[] sp = AsmSupport.transform(classfileBuffer, loader, "IsoSprite translucent bake", TranslucentBake::patchSprite);
-                TranslucentBake.spriteHooked = sp != null;
+                if (sp != null) TranslucentBake.spriteHooked = true;
                 if (sp != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoSprite depth shader setup: baked translucent sprites keep depth on solid pixels only");
                 }
@@ -278,7 +278,7 @@ public class PZOptimAgent {
                     fc = fl;
                 }
                 byte[] tb = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent bake", TranslucentBake::patchRenderCell);
-                TranslucentBake.cellHooked = tb != null;
+                if (tb != null) TranslucentBake.cellHooked = true;
                 if (tb != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderMinusFloor: baked translucent sprites drawn in colour and depth passes");
                     fc = tb;

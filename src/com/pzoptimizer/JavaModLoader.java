@@ -561,12 +561,41 @@ public class JavaModLoader {
         return false;
     }
 
-    /** A Viewpoint mod in the startup mod list; readable before any game class loads, unlike the in-game check. */
-    public static boolean isViewpointStartupMod() {
-        for (String id : getEnabledModIds()) {
-            if (id.toLowerCase().contains("viewpoint")) return true;
+    private static volatile String zbJavaStartupMod;
+
+    /**
+     * The first mod in the startup mod list that ships a Java jar for ZombieBuddy (ZombieBuddy itself aside), or null.
+     * Readable before any game class loads, unlike the in-game check. With no readable mod list, any installed
+     * ZombieBuddy Java mod counts, since it may be enabled.
+     */
+    public static String findZombieBuddyJavaStartupMod() {
+        String found = zbJavaStartupMod;
+        if (found != null) return found.isEmpty() ? null : found;
+        found = "";
+        try {
+            Set<String> enabled = getEnabledModIds();
+            outer:
+            for (File jar : findJavaModJars()) {
+                ModMetadata meta = findModMetadataForJar(jar);
+                if (!meta.isZombieBuddyMod && meta.javaPkgName == null && !meta.requiresZombieBuddy) continue;
+                for (String id : meta.modIds) {
+                    if (id.equalsIgnoreCase("ZombieBuddy")) continue outer;
+                }
+                if (enabled.isEmpty()) {
+                    found = jar.getName();
+                    break;
+                }
+                for (String id : meta.modIds) {
+                    if (enabled.contains(id) || enabled.contains(id.toLowerCase())) {
+                        found = id;
+                        break outer;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
         }
-        return false;
+        zbJavaStartupMod = found;
+        return found.isEmpty() ? null : found;
     }
 
     private static final Set<String> ENABLED_MOD_IDS = new HashSet<>();

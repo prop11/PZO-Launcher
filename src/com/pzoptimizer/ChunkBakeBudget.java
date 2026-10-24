@@ -33,11 +33,12 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
  *    backlog so nothing waits more than LIGHTING_MAX_WAIT_MS. LightingJNI marks a group dirty whenever one of its
  *    squares changes light, which happens every frame while walking (the vision fade), so a first-come gate or a
  *    long wait leaves neighbouring chunks lit out of step, which reads as flicker.
- *  - blood, corpse, redraw, tree changes: start only while fewer than 4 bakes started this frame, none waits more
- *    than 3 frames.
+ *  - blood, corpse changes: start only while fewer than 4 bakes started this frame, none waits more than 3 frames.
  *
- * A first bake (no texture yet) and any re-bake for an object, item, cutaway, obscuring or creation change is never
- * held, so nothing the player acts on is drawn late. A held group stays dirty; for the call that would start its
+ * A first bake (no texture yet) and any re-bake for an object, item, cutaway, obscuring, creation, redraw or tree
+ * change is never held. Besides the texture, a bake rebuilds the chunk level's lists of squares drawn every frame
+ * (trees, translucent objects), so holding a redraw (chunk or neighbour finished loading) or tree change (stencil
+ * area, tree fade) left trees missing or stale for the length of the hold. A held group stays dirty; for the call that would start its
  * bake, its dirty bit is hidden so the manager draws the existing texture instead of re-baking.
  */
 public final class ChunkBakeBudget {
@@ -48,8 +49,8 @@ public final class ChunkBakeBudget {
     private static final int LIGHTING_MIN_PER_FRAME = 8;
     private static final long LIGHTING_MAX_WAIT_MS = 33;
     private static final int COSMETIC_BUDGET = 4, COSMETIC_MAX_HOLD = 3;
-    private static final long COSMETIC = FBORenderChunk.DIRTY_BLOOD | FBORenderChunk.DIRTY_CORPSE | FBORenderChunk.DIRTY_LIGHTING
-        | FBORenderChunk.DIRTY_REDRAW | FBORenderChunk.DIRTY_TREES;
+    // Only reasons that change pixels and nothing else may wait
+    private static final long COSMETIC = FBORenderChunk.DIRTY_BLOOD | FBORenderChunk.DIRTY_CORPSE | FBORenderChunk.DIRTY_LIGHTING;
 
     // Main thread only
     private static final WeakHashMap<Object, int[]> holds = new WeakHashMap<>(); // zoom info -> {frames held, last frame}

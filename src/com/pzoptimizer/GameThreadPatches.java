@@ -56,7 +56,7 @@ import zombie.iso.IsoWorld;
  * Each character keeps the component it last found and reuses it while the component still names that
  * character as its owner. ECSEntity's set and remove keep ownership and the map in step, so a replaced or
  * removed component fails the check and the stock lookup runs again. When the class must keep its stock shape (loaded
- * before this agent saw it, or Viewpoint active), the method instead reads the component straight from the map,
+ * before this agent saw it, or a ZombieBuddy Java mod active), the method instead reads the component straight from the map,
  * skipping the argument checks, the ECS class walk and the cast check, and falls back to stock.
  */
 public final class GameThreadPatches {
@@ -199,59 +199,65 @@ public final class GameThreadPatches {
 
     // ---- IsoLightSwitch.hasElectricityAround ----
 
-    public static boolean lightSwitchFresh(int frame, boolean valid) {
-        if (!lightSwitchCache || !valid) return false;
-        int d = IsoWorld.instance.getFrameNo() - frame;
+    // Switch -> (frame << 1 | answer). Kept here instead of in fields so IsoLightSwitch keeps its stock shape (see
+    // AsmSupport.keepClassShapes); IsoObject has identity equality, and the map is emptied every few hundred frames
+    private static final java.util.concurrent.ConcurrentHashMap<Object, Long> lightSwitchPower = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile int lightSwitchPurgeFrame;
+    private static final int LIGHT_SWITCH_PURGE_FRAMES = 600;
+
+    /** Prefix of hasElectricityAround: the cached answer (0 / 1) while fresh, otherwise -1 for the stock body. */
+    public static int lightSwitchCached(Object lightSwitch) {
+        if (!lightSwitchCache) return -1;
+        int now = IsoWorld.instance.getFrameNo();
+        if (now - lightSwitchPurgeFrame > LIGHT_SWITCH_PURGE_FRAMES || now < lightSwitchPurgeFrame) {
+            lightSwitchPurgeFrame = now;
+            lightSwitchPower.clear();
+            return -1;
+        }
+        Long v = lightSwitchPower.get(lightSwitch);
+        if (v == null) return -1;
+        int d = now - (int) (v >> 1);
         if (d >= 0 && d < LIGHT_SWITCH_FRAMES) {
             lightSwitchHits.incrementAndGet();
-            return true;
+            return (int) (v & 1);
         }
-        return false;
+        return -1;
     }
 
-    public static int frameNo() {
-        return IsoWorld.instance.getFrameNo();
+    /** Before each of the stock body's returns: remembers the answer it computed. */
+    public static int lightSwitchStore(int answer, Object lightSwitch) {
+        if (lightSwitchCache) lightSwitchPower.put(lightSwitch, ((long) IsoWorld.instance.getFrameNo() << 1) | (answer & 1));
+        return answer;
     }
 
     static boolean patchLightSwitch(ClassNode node) {
-        MethodNode orig = AsmSupport.findMethod(node, "hasElectricityAround", "()Z");
-        if (orig == null) return false;
-        String owner = node.name;
-        orig.name = "pzo$hasElectricityAroundNow";
-        node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT, "pzo$powerFrame", "I", null, null));
-        node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT, "pzo$powerValid", "Z", null, null));
-        node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT, "pzo$power", "Z", null, null));
-
-        MethodNode m = new MethodNode(orig.access, "hasElectricityAround", "()Z", null, null);
-        InsnList c = m.instructions;
+        MethodNode m = AsmSupport.findMethod(node, "hasElectricityAround", "()Z");
+        if (m == null) return false;
+        java.util.List<AbstractInsnNode> returns = new java.util.ArrayList<>();
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            // Already carries this patch (bytes handed back by another agent)
+            if (insn instanceof MethodInsnNode mi && "lightSwitchCached".equals(mi.name) && "com/pzoptimizer/GameThreadPatches".equals(mi.owner)) {
+                return false;
+            }
+            if (insn.getOpcode() == Opcodes.IRETURN) returns.add(insn);
+        }
+        if (returns.isEmpty()) return false;
+        for (AbstractInsnNode ret : returns) {
+            InsnList store = new InsnList();
+            store.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            store.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/GameThreadPatches", "lightSwitchStore", "(ILjava/lang/Object;)I", false));
+            m.instructions.insertBefore(ret, store);
+        }
+        InsnList head = new InsnList();
         LabelNode miss = new LabelNode();
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new FieldInsnNode(Opcodes.GETFIELD, owner, "pzo$powerFrame", "I"));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new FieldInsnNode(Opcodes.GETFIELD, owner, "pzo$powerValid", "Z"));
-        c.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/GameThreadPatches", "lightSwitchFresh", "(IZ)Z", false));
-        c.add(new JumpInsnNode(Opcodes.IFEQ, miss));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new FieldInsnNode(Opcodes.GETFIELD, owner, "pzo$power", "Z"));
-        c.add(new InsnNode(Opcodes.IRETURN));
-        c.add(miss);
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, owner, "pzo$hasElectricityAroundNow", "()Z", false));
-        c.add(new VarInsnNode(Opcodes.ISTORE, 1));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new VarInsnNode(Opcodes.ILOAD, 1));
-        c.add(new FieldInsnNode(Opcodes.PUTFIELD, owner, "pzo$power", "Z"));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/GameThreadPatches", "frameNo", "()I", false));
-        c.add(new FieldInsnNode(Opcodes.PUTFIELD, owner, "pzo$powerFrame", "I"));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new InsnNode(Opcodes.ICONST_1));
-        c.add(new FieldInsnNode(Opcodes.PUTFIELD, owner, "pzo$powerValid", "Z"));
-        c.add(new VarInsnNode(Opcodes.ILOAD, 1));
-        c.add(new InsnNode(Opcodes.IRETURN));
-        m.maxLocals = 2;
-        m.maxStack = 2;
-        node.methods.add(m);
+        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        head.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/GameThreadPatches", "lightSwitchCached", "(Ljava/lang/Object;)I", false));
+        head.add(new InsnNode(Opcodes.DUP));
+        head.add(new JumpInsnNode(Opcodes.IFLT, miss));
+        head.add(new InsnNode(Opcodes.IRETURN));
+        head.add(miss);
+        head.add(new InsnNode(Opcodes.POP));
+        m.instructions.insert(head);
         return true;
     }
 
@@ -362,7 +368,7 @@ public final class GameThreadPatches {
         MethodNode orig = AsmSupport.findMethod(node, "getStateMachineComponent", desc);
         if (orig == null || (orig.access & Opcodes.ACC_STATIC) != 0) return false;
         // The field version renames the stock method and adds a field: impossible in a retransform of a class
-        // loaded before this agent saw it, and stood down while Viewpoint is active (see AsmSupport.keepClassShapes)
+        // loaded before this agent saw it, and stood down while a ZombieBuddy Java mod is active (see AsmSupport.keepClassShapes)
         Class<?> live = AsmSupport.REDEFINING.get();
         boolean liveHasField = live != null && hasDeclaredField(live, "pzo$smc");
         if (!liveHasField && (live != null || AsmSupport.keepClassShapes())) {
