@@ -10,7 +10,7 @@ to all source code in this repository from 2026-10-23 onward.
    Some AI-generated ("vibe coded") mods have copied this project's source
    code and reworked it with automated tools at a pace no human developer
    could match, without permission or credit. For that reason, any
-   permission for artificial intelligence systems to use this project is
+   permission for artificial intelligence systems* to use this project is
    withdrawn.
 
 2. Permitted Use
@@ -55,3 +55,6 @@ to all source code in this repository from 2026-10-23 onward.
 8. No Warranty
    THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE
    COPYRIGHT HOLDER IS NOT LIABLE FOR ANY DAMAGES ARISING FROM ITS USE.
+
+
+*For purposes of this License, 'Artificial Intelligence System' includes, without limitation, large language models (LLMs), neural networks, automated generative coding agents, machine learning foundation models, and any software agent designed to parse, synthesize, transform, or generate source code.
