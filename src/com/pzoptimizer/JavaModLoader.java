@@ -35,9 +35,9 @@ public class JavaModLoader {
             File zbJar = new File(currentDir, "ZombieBuddy.jar");
             File zbDll1 = new File(currentDir, "win64/zbNative.dll");
             File zbDll2 = new File(currentDir, "zbNative.dll");
-            File zbSo1 = new File(currentDir, "linux64/zbNative.so");
-            File zbSo2 = new File(currentDir, "zbNative.so");
-            File zbDylib = new File(currentDir, "zbNative.dylib");
+            File zbSo1 = new File(currentDir, "linux64/libzbNative.so");
+            File zbSo2 = new File(currentDir, "libzbNative.so");
+            File zbDylib = new File(currentDir, "libzbNative.dylib");
             if (zbJar.exists() || zbDll1.exists() || zbDll2.exists() || zbSo1.exists() || zbSo2.exists() || zbDylib.exists()) {
                 return true;
             }

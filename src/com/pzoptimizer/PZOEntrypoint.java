@@ -197,8 +197,8 @@ public class PZOEntrypoint {
             File zbJar = new File(currentDir, "ZombieBuddy.jar");
             File zbDll1 = new File(currentDir, "win64/zbNative.dll");
             File zbDll2 = new File(currentDir, "zbNative.dll");
-            File zbSo = new File(currentDir, "zbNative.so");
-            File zbDylib = new File(currentDir, "zbNative.dylib");
+            File zbSo = new File(currentDir, "linux64/libzbNative.so");
+            File zbDylib = new File(currentDir, "libzbNative.dylib");
 
             if (zbJar.exists() || zbDll1.exists() || zbDll2.exists() || zbSo.exists() || zbDylib.exists()) {
                 zbDetected = true;
