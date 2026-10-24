@@ -243,23 +243,24 @@ public final class ZomboidConfigMigrator {
             }
         }
 
-        // Detect ZombieBuddy active presence
-        boolean zbActive = false;
-        for (String arg : rawArgs) {
-            if (arg.contains("zbNative") || arg.contains("ZombieBuddy")) {
-                zbActive = true;
-                break;
+        String os = System.getProperty("os.name", "").toLowerCase();
+        boolean isWin = os.contains("win");
+        boolean isLinux = os.contains("linux");
+
+        boolean zbInArgs = rawArgs.stream().anyMatch(arg -> arg.contains("zbNative") || arg.contains("ZombieBuddy"));
+        boolean zbLibFound = false;
+        if (gameDir != null) {
+            String lib = isWin ? "zbNative.dll" : isLinux ? "libzbNative.so" : "libzbNative.dylib";
+            for (String dir : new String[] { isWin ? "win64" : isLinux ? "linux64" : ".", "natives", "." }) {
+                if (new File(new File(gameDir, dir), lib).isFile()) {
+                    zbLibFound = true;
+                    break;
+                }
             }
         }
-        if (!zbActive && gameDir != null) {
-            File zbDll = new File(gameDir, "zbNative.dll");
-            File zbWin64 = new File(gameDir, "win64" + File.separator + "zbNative.dll");
-            File zbSo = new File(gameDir, "linux64" + File.separator + "zbNative.so");
-            File zbDylib = new File(gameDir, "zbNative.dylib");
-            if (zbDll.exists() || zbWin64.exists() || zbSo.exists() || zbDylib.exists()) {
-                zbActive = true;
-            }
-        }
+        // On Linux and macOS, -agentlib:zbNative with no loadable library stops the game from starting (issue #40),
+        // and a Windows zbNative.dll left in the folder is not one
+        boolean zbActive = zbLibFound || (zbInArgs && (isWin || gameDir == null));
 
         // Drop unwanted or superseded arguments
         List<String> userCleanArgs = new ArrayList<>();
@@ -286,10 +287,6 @@ public final class ZomboidConfigMigrator {
                 userCleanArgs.add(arg);
             }
         }
-
-        String os = System.getProperty("os.name", "").toLowerCase();
-        boolean isWin = os.contains("win");
-        boolean isLinux = os.contains("linux");
 
         List<String> targetArgs = new ArrayList<>();
 
@@ -433,10 +430,10 @@ public final class ZomboidConfigMigrator {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();
             File jsonFile = new File(gameDir, TARGET_JSON_NAME);
             if (jsonFile.exists() && isMigrationNeeded(jsonFile)) {
-                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 1.5.1 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
+                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 1.5.2 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
                 boolean ok = migrateFileInPlace(jsonFile);
                 if (ok) {
-                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v1.5.1 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
+                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v1.5.2 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
                 }
             }
         } catch (Throwable t) {
