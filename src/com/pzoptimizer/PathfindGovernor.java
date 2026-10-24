@@ -218,7 +218,7 @@ public final class PathfindGovernor {
             long key = (((long) ((int) squareX.get(task)) & 0xFFFFFFL) << 40)
                 | (((long) ((int) squareY.get(task)) & 0xFFFFFFL) << 16)
                 | ((long) ((int) squareZ.get(task)) & 0xFFFFL);
-            int h = (int) ((key * 0x9E3779B97F4A7C15L) >>> 40) & mask;
+            int h = (int) ((key * 0x539B5387C0D72013L) >>> 40) & mask;
             boolean seen = false;
             while (keys[h] != Long.MIN_VALUE) {
                 if (keys[h] == key) { seen = true; break; }
