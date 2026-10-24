@@ -111,7 +111,7 @@ public class JavaModLoader {
         PZOLogger.info("--------------------------------------------------------------------------------");
     }
 
-    private static List<File> deduplicateModJars(List<File> rawJars) {
+    static List<File> deduplicateModJars(List<File> rawJars) {
         Map<String, File> modMap = new HashMap<>();
 
         for (File jar : rawJars) {
@@ -145,7 +145,7 @@ public class JavaModLoader {
         return new ArrayList<>(modMap.values());
     }
 
-    private static List<File> findJavaModJars() {
+    static List<File> findJavaModJars() {
         List<File> result = new ArrayList<>();
         Set<String> scannedDirs = new HashSet<>();
         List<File> searchRoots = new ArrayList<>();
@@ -561,47 +561,10 @@ public class JavaModLoader {
         return false;
     }
 
-    private static volatile String zbJavaStartupMod;
-
-    /**
-     * The first mod in the startup mod list that ships a Java jar for ZombieBuddy (ZombieBuddy itself aside), or null.
-     * Readable before any game class loads, unlike the in-game check. With no readable mod list, any installed
-     * ZombieBuddy Java mod counts, since it may be enabled.
-     */
-    public static String findZombieBuddyJavaStartupMod() {
-        String found = zbJavaStartupMod;
-        if (found != null) return found.isEmpty() ? null : found;
-        found = "";
-        try {
-            Set<String> enabled = getEnabledModIds();
-            outer:
-            for (File jar : findJavaModJars()) {
-                ModMetadata meta = findModMetadataForJar(jar);
-                if (!meta.isZombieBuddyMod && meta.javaPkgName == null && !meta.requiresZombieBuddy) continue;
-                for (String id : meta.modIds) {
-                    if (id.equalsIgnoreCase("ZombieBuddy")) continue outer;
-                }
-                if (enabled.isEmpty()) {
-                    found = jar.getName();
-                    break;
-                }
-                for (String id : meta.modIds) {
-                    if (enabled.contains(id) || enabled.contains(id.toLowerCase())) {
-                        found = id;
-                        break outer;
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        zbJavaStartupMod = found;
-        return found.isEmpty() ? null : found;
-    }
-
     private static final Set<String> ENABLED_MOD_IDS = new HashSet<>();
     private static volatile boolean enabledModsParsed = false;
 
-    private static synchronized Set<String> getEnabledModIds() {
+    static synchronized Set<String> getEnabledModIds() {
         if (enabledModsParsed) return ENABLED_MOD_IDS;
         enabledModsParsed = true;
 
@@ -673,7 +636,7 @@ public class JavaModLoader {
         return newest;
     }
 
-    private static ModMetadata findModMetadataForJar(File jarFile) {
+    static ModMetadata findModMetadataForJar(File jarFile) {
         ModMetadata meta = new ModMetadata();
         if (jarFile == null) return meta;
 

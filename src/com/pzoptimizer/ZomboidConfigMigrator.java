@@ -433,10 +433,10 @@ public final class ZomboidConfigMigrator {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();
             File jsonFile = new File(gameDir, TARGET_JSON_NAME);
             if (jsonFile.exists() && isMigrationNeeded(jsonFile)) {
-                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 1.1.4 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
+                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 1.1.4.5 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
                 boolean ok = migrateFileInPlace(jsonFile);
                 if (ok) {
-                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v1.1.4 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
+                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v1.1.4.5 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
                 }
             }
         } catch (Throwable t) {

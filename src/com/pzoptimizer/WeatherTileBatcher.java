@@ -119,7 +119,7 @@ public final class WeatherTileBatcher {
         final ArrayList<Tile> tiles = new ArrayList<>();
     }
 
-    // Drawer -> batch, kept here so WeatherParticleDrawer keeps its stock shape (see AsmSupport.keepClassShapes).
+    // Drawer -> batch, kept here so WeatherParticleDrawer keeps its stock shape (see ZombieBuddyCompat).
     // There are only a few drawers, all long-lived; pairs are appended copy-on-write, so readers need no lock
     private static volatile Object[] batchPairs = new Object[0];
 

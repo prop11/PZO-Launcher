@@ -200,7 +200,7 @@ public final class GameThreadPatches {
     // ---- IsoLightSwitch.hasElectricityAround ----
 
     // Switch -> (frame << 1 | answer). Kept here instead of in fields so IsoLightSwitch keeps its stock shape (see
-    // AsmSupport.keepClassShapes); IsoObject has identity equality, and the map is emptied every few hundred frames
+    // ZombieBuddyCompat); IsoObject has identity equality, and the map is emptied every few hundred frames
     private static final java.util.concurrent.ConcurrentHashMap<Object, Long> lightSwitchPower = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile int lightSwitchPurgeFrame;
     private static final int LIGHT_SWITCH_PURGE_FRAMES = 600;
@@ -368,10 +368,10 @@ public final class GameThreadPatches {
         MethodNode orig = AsmSupport.findMethod(node, "getStateMachineComponent", desc);
         if (orig == null || (orig.access & Opcodes.ACC_STATIC) != 0) return false;
         // The field version renames the stock method and adds a field: impossible in a retransform of a class
-        // loaded before this agent saw it, and stood down while a ZombieBuddy Java mod is active (see AsmSupport.keepClassShapes)
+        // loaded before this agent saw it, and left out while a ZombieBuddy mod patches the class (see ZombieBuddyCompat)
         Class<?> live = AsmSupport.REDEFINING.get();
         boolean liveHasField = live != null && hasDeclaredField(live, "pzo$smc");
-        if (!liveHasField && (live != null || AsmSupport.keepClassShapes())) {
+        if (!liveHasField && (live != null || ZombieBuddyCompat.keepClassShape(node.name))) {
             return patchStateMachineInPlace(node, orig);
         }
         stateMachineInPlace = false;

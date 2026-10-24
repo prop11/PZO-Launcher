@@ -31,10 +31,19 @@ public final class AsmSupport {
             ClassNode node = new ClassNode();
             new ClassReader(classfile).accept(node, ClassReader.EXPAND_FRAMES);
             int fields = node.fields.size(), methods = node.methods.size(), interfaces = node.interfaces.size();
-            java.util.Set<String> shapeBefore = keepClassShapes() ? shapeOf(node) : null;
+            java.util.Set<String> shapeBefore = ZombieBuddyCompat.keepClassShape(node.name) ? shapeOf(node) : null;
+            Map<String, Integer> bodiesBefore = ZombieBuddyCompat.hasTargets(node.name) ? fingerprints(node) : null;
             if (!t.apply(node)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": target code not found, class left unchanged");
                 return null;
+            }
+            if (bodiesBefore != null) {
+                // A ZombieBuddy mod's advice or replacement of one of these methods was written against the stock body
+                String mods = ZombieBuddyCompat.conflict(node.name, changedMethods(bodiesBefore, node));
+                if (mods != null) {
+                    ZombieBuddyCompat.recordStandDown(what, "also patched by " + mods);
+                    return null;
+                }
             }
             if (hasDuplicateMembers(node)) {
                 // Another agent (ViewpointFPS+ via ZombieBuddy) redefined the class with bytes this agent had already
@@ -43,7 +52,7 @@ public final class AsmSupport {
                 return null;
             }
             if (shapeBefore != null && !shapeBefore.equals(shapeOf(node))) {
-                PZOLogger.info("[AsmSupport] " + what + ": stands down while a ZombieBuddy Java mod is active (adds or renames class members)");
+                ZombieBuddyCompat.recordStandDown(what, "adds or renames members of a class a ZombieBuddy mod patches");
                 return null;
             }
             Class<?> live = REDEFINING.get();
@@ -88,25 +97,34 @@ public final class AsmSupport {
         return true;
     }
 
-    private static volatile Boolean keepShapes;
+    // Per method (name + desc), a hash of its instructions: which methods a patch rewrote
+    private static Map<String, Integer> fingerprints(ClassNode node) {
+        Map<String, Integer> out = new HashMap<>();
+        for (MethodNode m : node.methods) out.put(m.name + m.desc, fingerprint(m));
+        return out;
+    }
 
-    /**
-     * ZombieBuddy re-patches classes for its mods in batches. When one of them is a class this agent reshaped (added,
-     * removed or renamed members or interfaces), the JVM rejects ZombieBuddy's version of it and drops the rest of
-     * that batch, so the mod's hooks are silently missing: Viewpoint got no clicks, Knox Event Expanded reported a
-     * missing Java class, Knox Inventory's menu and ShadowZ / Peek a View did nothing. With any ZombieBuddy Java mod
-     * in the startup mod list, reshaping patches stand down; body-only patches stay. ZombieBuddy installed without
-     * such a mod changes nothing.
-     */
-    static boolean keepClassShapes() {
-        Boolean k = keepShapes;
-        if (k == null) {
-            String mod = JavaModLoader.isZombieBuddyPresent() ? JavaModLoader.findZombieBuddyJavaStartupMod() : null;
-            k = mod != null;
-            keepShapes = k;
-            if (k) PZOLogger.info("[AsmSupport] ZombieBuddy Java mod at startup (" + mod + "): patches that add or rename class members stand down");
+    private static int fingerprint(MethodNode m) {
+        int h = m.instructions.size();
+        for (com.pzoptimizer.shaded.asm.tree.AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            h = 31 * h + insn.getOpcode();
+            if (insn instanceof com.pzoptimizer.shaded.asm.tree.MethodInsnNode mi) h = 31 * h + (mi.owner + mi.name + mi.desc).hashCode();
+            else if (insn instanceof com.pzoptimizer.shaded.asm.tree.FieldInsnNode fi) h = 31 * h + (fi.owner + fi.name + fi.desc).hashCode();
+            else if (insn instanceof com.pzoptimizer.shaded.asm.tree.VarInsnNode vi) h = 31 * h + vi.var;
+            else if (insn instanceof com.pzoptimizer.shaded.asm.tree.TypeInsnNode ti) h = 31 * h + ti.desc.hashCode();
+            else if (insn instanceof com.pzoptimizer.shaded.asm.tree.LdcInsnNode li) h = 31 * h + String.valueOf(li.cst).hashCode();
+            else if (insn instanceof com.pzoptimizer.shaded.asm.tree.IntInsnNode ii) h = 31 * h + ii.operand;
         }
-        return k;
+        return h;
+    }
+
+    private static java.util.Set<String> changedMethods(Map<String, Integer> before, ClassNode node) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (MethodNode m : node.methods) {
+            Integer was = before.get(m.name + m.desc);
+            if (was == null || was != fingerprint(m)) names.add(m.name);
+        }
+        return names;
     }
 
     private static java.util.Set<String> shapeOf(ClassNode node) {
