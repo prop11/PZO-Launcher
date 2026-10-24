@@ -54,6 +54,8 @@ typedef void* HANDLE;
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
 #endif
 
 #include <jni.h>
@@ -113,6 +115,8 @@ static BOOL checkCpuAvx2Support(void) {
         }
     }
     return FALSE;
+#elif defined(__aarch64__)
+    return TRUE; // ARMv8-A mandates NEON ASIMD vector instructions
 #else
     return FALSE;
 #endif
@@ -221,10 +225,46 @@ static void detectCpuTopology(void) {
     }
     g_pCoreAffinityMask = (g_logicalProcessors >= 64) ? ~(DWORD_PTR)0 : (((DWORD_PTR)1 << g_logicalProcessors) - 1);
 #else
-    // Linux
+    // Linux / Android (including ARM64 big.LITTLE / DynamIQ cpufreq detection)
     g_logicalProcessors = (int)sysconf(_SC_NPROCESSORS_ONLN);
     if (g_logicalProcessors <= 0) g_logicalProcessors = 4;
     g_physicalCores = g_logicalProcessors;
+
+    long freqs[64];
+    long minFreq = 0, maxFreq = 0;
+    int maxCheck = (g_logicalProcessors < 64) ? g_logicalProcessors : 64;
+    for (int i = 0; i < maxCheck; i++) {
+        freqs[i] = 0;
+        char path[128];
+        snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
+        FILE *fp = fopen(path, "r");
+        if (fp) {
+            long val = 0;
+            if (fscanf(fp, "%ld", &val) == 1 && val > 0) {
+                freqs[i] = val;
+                if (minFreq == 0 || val < minFreq) minFreq = val;
+                if (val > maxFreq) maxFreq = val;
+            }
+            fclose(fp);
+        }
+    }
+
+    if (maxFreq > minFreq && minFreq > 0) {
+        DWORD_PTR pMask = 0;
+        int pCount = 0;
+        for (int i = 0; i < maxCheck; i++) {
+            if (freqs[i] > minFreq) {
+                pMask |= ((DWORD_PTR)1 << i);
+                pCount++;
+            }
+        }
+        if (pCount > 0 && pMask != 0) {
+            g_pCoresCount = pCount;
+            g_pCoreAffinityMask = pMask;
+            return;
+        }
+    }
+
     g_pCoresCount = g_physicalCores;
     g_pCoreAffinityMask = (g_logicalProcessors >= 64) ? ~(DWORD_PTR)0 : (((DWORD_PTR)1 << g_logicalProcessors) - 1);
 #endif
@@ -338,13 +378,15 @@ static BOOL bindCurrentThreadToPCores(void) {
     }
     return FALSE;
 #elif defined(__linux__)
-    if (g_pCoresCount > 0) {
+    if (g_pCoreAffinityMask != 0) {
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
-        for (int i = 0; i < g_pCoresCount && i < CPU_SETSIZE; i++) {
-            CPU_SET(i, &cpuset);
+        for (int i = 0; i < 64 && i < CPU_SETSIZE; i++) {
+            if (g_pCoreAffinityMask & ((DWORD_PTR)1 << i)) {
+                CPU_SET(i, &cpuset);
+            }
         }
-        return (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) == 0);
+        return (sched_setaffinity(0, sizeof(cpu_set_t), &cpuset) == 0);
     }
     return FALSE;
 #else
@@ -384,13 +426,15 @@ static BOOL optimizeCallingThread(int priorityLevel, BOOL bindPCores, const char
     int niceVal = (priorityLevel >= 2) ? -10 : ((priorityLevel == 1) ? -5 : 0);
     setpriority(PRIO_PROCESS, 0, niceVal);
 #if defined(__linux__)
-    if (bindPCores && g_pCoresCount > 0) {
+    if (bindPCores && g_pCoreAffinityMask != 0) {
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
-        for (int i = 0; i < g_pCoresCount && i < CPU_SETSIZE; i++) {
-            CPU_SET(i, &cpuset);
+        for (int i = 0; i < 64 && i < CPU_SETSIZE; i++) {
+            if (g_pCoreAffinityMask & ((DWORD_PTR)1 << i)) {
+                CPU_SET(i, &cpuset);
+            }
         }
-        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+        sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
     }
 #else
     (void)bindPCores;
@@ -418,7 +462,7 @@ static BOOL lockProcessWorkingSet(void) {
     // Soft working set limits (flag 0), so the memory manager never suspends threads
     // on a hard quota.
     return SetProcessWorkingSetSizeEx(GetCurrentProcess(), minSize, maxSize, 0);
-#elif defined(MCL_CURRENT)
+#elif defined(MCL_CURRENT) && !defined(__ANDROID__)
     return (mlockall(MCL_CURRENT) == 0);
 #else
     return TRUE;
@@ -459,6 +503,19 @@ static int batchCalculateDistancesAVX2(const float* coords, int count, float ox,
             _mm256_storeu_ps(&outDistances[i], dist);
         }
     }
+#elif defined(__aarch64__)
+    if (count >= 4) {
+        float32x4_t vOx = vdupq_n_f32(ox);
+        float32x4_t vOy = vdupq_n_f32(oy);
+        for (; i <= count - 4; i += 4) {
+            float32x4x2_t c = vld2q_f32(&coords[i * 2]);
+            float32x4_t dx = vsubq_f32(c.val[0], vOx);
+            float32x4_t dy = vsubq_f32(c.val[1], vOy);
+            float32x4_t distSq = vfmaq_f32(vmulq_f32(dx, dx), dy, dy);
+            float32x4_t dist = vsqrtq_f32(distSq);
+            vst1q_f32(&outDistances[i], dist);
+        }
+    }
 #endif
 
     // Scalar fallback for remainder or non-AVX2 / ARM64
@@ -497,6 +554,18 @@ static int batchCalculateDistancesSqAVX2(const float* coords, int count, float o
             __m256 distSq = _mm256_add_ps(_mm256_mul_ps(dx, dx), _mm256_mul_ps(dy, dy));
 
             _mm256_storeu_ps(&outDistSq[i], distSq);
+        }
+    }
+#elif defined(__aarch64__)
+    if (count >= 4) {
+        float32x4_t vOx = vdupq_n_f32(ox);
+        float32x4_t vOy = vdupq_n_f32(oy);
+        for (; i <= count - 4; i += 4) {
+            float32x4x2_t c = vld2q_f32(&coords[i * 2]);
+            float32x4_t dx = vsubq_f32(c.val[0], vOx);
+            float32x4_t dy = vsubq_f32(c.val[1], vOy);
+            float32x4_t distSq = vfmaq_f32(vmulq_f32(dx, dx), dy, dy);
+            vst1q_f32(&outDistSq[i], distSq);
         }
     }
 #endif

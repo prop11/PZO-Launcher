@@ -10,7 +10,7 @@ public final class EngineGLStateGovernor {
     private static volatile boolean blendEnabled = false;
 
     // Mobile / GL4ES Environment Detection (Zomdroid)
-    private static volatile boolean mobileGLEnvironment = false;
+    private static volatile boolean mobileGLEnvironment = true;
 
     static {
         try {

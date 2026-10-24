@@ -63,6 +63,15 @@ def main():
     client_jar = os.path.join(dist_dir, "PZOptimEngine.jar")
     server_jar = os.path.join(dist_dir, "PZOServerEngine.jar")
 
+    so_src = os.path.join(native_dir, "libpzo_native64.so")
+    bin_so = os.path.join(bin_dir, "libpzo_native64.so")
+    if os.path.isfile(bin_so):
+        os.remove(bin_so)
+    if os.path.isdir(bin_dir) and os.path.isfile(so_src):
+        with open(so_src, "rb") as sf:
+            hdr = sf.read(20)
+        if len(hdr) >= 20 and hdr[:4] == b"\x7fELF" and int.from_bytes(hdr[18:20], "little") == 183:
+            shutil.copy2(so_src, bin_so)
     if os.path.isdir(bin_dir) and os.path.isfile(client_mf):
         create_jar(bin_dir, client_mf, client_jar)
     if os.path.isdir(bin_dir) and os.path.isfile(server_mf):

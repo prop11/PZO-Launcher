@@ -154,6 +154,7 @@ public class EngineThreadGovernor {
                             }
                         }
                         Thread.currentThread().setName("PZO-MainSimulationThread");
+                        try { EngineFeaturesTuner.initializeEngineFeatures(); WorkerRandGovernor.ensureInstalled(); } catch (Throwable ignored) {}
                     } catch (Throwable t) {
                         PZOLogger.warn("[EngineThreadGovernor] MainThread hook notice: " + t.getMessage());
                     }

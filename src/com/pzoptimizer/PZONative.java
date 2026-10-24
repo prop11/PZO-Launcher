@@ -97,6 +97,9 @@ public class PZONative {
                     }
                 } catch (Throwable ignored) {}
             }
+            if (!loaded) {
+                loaded = tryExtractAndLoadNative(candidatePaths);
+            }
         }
 
         if (loaded) {
@@ -109,9 +112,59 @@ public class PZONative {
                 PZOLogger.warn("[PZONative] initNative failed: " + t.getMessage());
             }
         } else {
-            String osLabel = IS_WINDOWS ? "Windows" : (IS_MAC ? "macOS" : "Linux");
+            String osLabel = IS_WINDOWS ? "Windows" : (IS_MAC ? "macOS" : "Linux/Android");
             PZOLogger.info("[PZONative] Native companion library (" + NATIVE_LIB_FILENAME + ") not found on " + osLabel + "; operating in pure JVM safe mode.");
         }
+    }
+
+    /**
+     * On Android (Zomdroid), /storage/emulated/0 is mounted noexec, so dlopen fails on .so files
+     * inside shared storage. This copies the library (from a bundled JAR resource or from the
+     * instance folder) into an executable app-private directory (java.io.tmpdir / user.home).
+     */
+    private static boolean tryExtractAndLoadNative(List<String> candidatePaths) {
+        String[] execDirs = new String[] {
+            System.getProperty("java.io.tmpdir", ""),
+            System.getProperty("user.home", "")
+        };
+        for (String dirPath : execDirs) {
+            if (dirPath == null || dirPath.isEmpty()) continue;
+            try {
+                File dir = new File(dirPath);
+                if (!dir.isDirectory() || !dir.canWrite()) continue;
+                File target = new File(dir, NATIVE_LIB_FILENAME);
+
+                boolean staged = false;
+                try (java.io.InputStream in = PZONative.class.getResourceAsStream("/" + NATIVE_LIB_FILENAME)) {
+                    if (in != null) {
+                        java.nio.file.Files.copy(in, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        staged = true;
+                    }
+                } catch (Throwable ignored) {}
+
+                if (!staged && candidatePaths != null) {
+                    for (String p : candidatePaths) {
+                        try {
+                            File src = new File(p);
+                            if (src.isFile() && !src.getCanonicalFile().equals(target.getCanonicalFile())) {
+                                java.nio.file.Files.copy(src.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                staged = true;
+                                break;
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                }
+
+                if (staged && target.isFile()) {
+                    target.setReadable(true, false);
+                    target.setExecutable(true, false);
+                    System.load(target.getAbsolutePath());
+                    PZOLogger.success("[PZONative] Staged and loaded " + NATIVE_LIB_FILENAME + " from executable dir: " + target.getAbsolutePath());
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
     }
 
     private static void applyKernelGovernors() {

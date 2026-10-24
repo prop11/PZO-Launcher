@@ -65,6 +65,7 @@ public class PZOptimAgent {
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
+                        "zombie.core.IndieFileLoader".equals(name) ||
                         "zombie.core.textures.TextureIDAssetManager".equals(name)) {
                         try {
                             inst.retransformClasses(c);
@@ -84,6 +85,7 @@ public class PZOptimAgent {
             WorldUpscalerGovernor.checkLaunchParams(null);
             PZOEngineBridge.initialize();
             HighPrecisionTimer.initialize();
+            PZOEntrypoint.bootstrapEngineFromAgent(null, false);
         } catch (Throwable ignored) {}
 
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
@@ -252,14 +254,24 @@ public class PZOptimAgent {
                 }
                 return base;
             }
-            if ("zombie/core/opengl/ShaderUnit".equals(className) && classfileBuffer != null) {
+            if ("zombie/core/IndieFileLoader".equals(className) && classfileBuffer != null) {
+                byte[] sh = BytecodeRedirect.virtualToStatic(classfileBuffer,
+                    "zombie/ZomboidFileSystem", "getString", "(Ljava/lang/String;)Ljava/lang/String;",
+                    "com/pzoptimizer/ZomdroidShaderShield", "resolveFilePath",
+                    "(Lzombie/ZomboidFileSystem;Ljava/lang/String;)Ljava/lang/String;");
+                if (sh != null) {
+                    PZOLogger.success("[PZO Agent] Bytecode-patched IndieFileLoader: ZomdroidShaderShield armed against Workshop shader overrides");
+                }
+                return sh;
+            }
+            if ("zombie/core/opengl/ShaderUnit".equals(className) && classfileBuffer != null && !EngineGLStateGovernor.isMobileGLEnvironment()) {
                 byte[] su = AsmSupport.transform(classfileBuffer, loader, "ShaderUnit early depth", ShaderEarlyDepth::patchShaderUnit);
                 if (su != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched ShaderUnit: puddle shaders take depth from the vertex stage (early depth test on)");
                 }
                 return su;
             }
-            if ("zombie/iso/sprite/IsoSprite".equals(className) && classfileBuffer != null) {
+            if ("zombie/iso/sprite/IsoSprite".equals(className) && classfileBuffer != null && !EngineGLStateGovernor.isMobileGLEnvironment()) {
                 byte[] sp = AsmSupport.transform(classfileBuffer, loader, "IsoSprite translucent bake", TranslucentBake::patchSprite);
                 if (sp != null) TranslucentBake.spriteHooked = true;
                 if (sp != null) {
@@ -277,7 +289,9 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell layer tests: distant wind-swayed foliage baked into the chunk texture");
                     fc = fl;
                 }
-                byte[] tb = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent bake", TranslucentBake::patchRenderCell);
+                byte[] tb = !EngineGLStateGovernor.isMobileGLEnvironment()
+                    ? AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent bake", TranslucentBake::patchRenderCell)
+                    : null;
                 if (tb != null) TranslucentBake.cellHooked = true;
                 if (tb != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderMinusFloor: baked translucent sprites drawn in colour and depth passes");
@@ -299,14 +313,14 @@ public class PZOptimAgent {
                 }
                 return vb;
             }
-            if ("zombie/iso/weather/fx/ParticleRectangle".equals(className) && classfileBuffer != null) {
+            if ("zombie/iso/weather/fx/ParticleRectangle".equals(className) && classfileBuffer != null && !EngineGLStateGovernor.isMobileGLEnvironment()) {
                 byte[] pr = AsmSupport.transform(classfileBuffer, loader, "ParticleRectangle tiles", WeatherTileBatcher::patchParticleRectangle);
                 if (pr != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched ParticleRectangle.render: weather particles added once per frame as a tile");
                 }
                 return pr;
             }
-            if ("zombie/iso/weather/fx/WeatherParticleDrawer".equals(className) && classfileBuffer != null) {
+            if ("zombie/iso/weather/fx/WeatherParticleDrawer".equals(className) && classfileBuffer != null && !EngineGLStateGovernor.isMobileGLEnvironment()) {
                 byte[] wd = AsmSupport.transform(classfileBuffer, loader, "WeatherParticleDrawer tiles", WeatherTileBatcher::patchDrawer);
                 if (wd != null) {
                     WeatherTileBatcher.drawerPatched = true;

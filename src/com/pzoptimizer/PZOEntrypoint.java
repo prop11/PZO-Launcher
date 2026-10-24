@@ -2,27 +2,21 @@ package com.pzoptimizer;
 
 import java.io.File;
 import java.lang.reflect.Method;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Launcher entry point: runs PZO's startup tuning, then hands over to the game's main class. */
+/** Launcher entry point and shared runtime bootstrap for both -javaagent and mainClass modes. */
 public class PZOEntrypoint {
 
-    public static void main(String[] args) {
-        // Ensure AWT/Swing is allowed for Pre-Menu dialogs
-        try {
-            System.setProperty("java.awt.headless", "false");
-        } catch (Throwable ignored) {}
-        PZOLogger.info("================================================================================");
-        PZOLogger.info("Project Zomboid Build 42 - Config & Engine Optimizer (PZO)");
-        PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + ")");
-        PZOLogger.info("Log File: " + PZOLogger.getLogFilePath());
-        PZOLogger.info("================================================================================");
+    private static final AtomicBoolean engineBootstrapped = new AtomicBoolean(false);
 
-        try {
-            Runtime rt = Runtime.getRuntime();
-            long maxMemMB = rt.maxMemory() / (1024 * 1024);
-            int cores = rt.availableProcessors();
-            PZOLogger.info(String.format("System Resources: %d CPU Cores | Max JVM Heap Allocated: %d MB", cores, maxMemMB));
-        } catch (Throwable ignored) {}
+    public static void main(String[] args) {
+        boolean isMobile = EngineGLStateGovernor.isMobileGLEnvironment();
+        if (!isMobile) {
+            // Ensure AWT/Swing is allowed for Pre-Menu dialogs on desktop only
+            try {
+                System.setProperty("java.awt.headless", "false");
+            } catch (Throwable ignored) {}
+        }
 
         if (IncompatibleModGuard.isPzOptimizationInstalled()) {
             IncompatibleModGuard.reportAndWarn();
@@ -38,16 +32,51 @@ public class PZOEntrypoint {
             return;
         }
 
+        bootstrapEngineFromAgent(args, !isMobile);
+        launchGame(args);
+    }
+
+    /**
+     * Starts all PZO engine governors, pools, and multi-core workers.
+     * Safe to invoke from PZOptimAgent.premain (when the launcher uses its own main class, e.g. Zomdroid)
+     * as well as from PZOEntrypoint.main; guarded by engineBootstrapped so it executes once per JVM.
+     */
+    public static void bootstrapEngineFromAgent(String[] args, boolean allowDesktopUi) {
+        if (!engineBootstrapped.compareAndSet(false, true)) {
+            if (args != null && args.length > 0) {
+                WorldUpscalerGovernor.checkLaunchParams(args);
+                BenchmarkHarness.checkLaunchParams(args);
+            }
+            return;
+        }
+
+        String[] safeArgs = args != null ? args : new String[0];
+        boolean isMobile = EngineGLStateGovernor.isMobileGLEnvironment();
+
+        PZOLogger.info("================================================================================");
+        PZOLogger.info("Project Zomboid Build 42/41 - Config & Engine Optimizer (PZO" + (isMobile ? " Zomdroid Edition" : "") + ")");
+        PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + " / " + System.getProperty("os.arch") + ")");
+        PZOLogger.info("Log File: " + PZOLogger.getLogFilePath());
+        PZOLogger.info("================================================================================");
+
+        try {
+            Runtime rt = Runtime.getRuntime();
+            long maxMemMB = rt.maxMemory() / (1024 * 1024);
+            int cores = rt.availableProcessors();
+            PZOLogger.info(String.format("System Resources: %d CPU Cores | Max JVM Heap Allocated: %d MB", cores, maxMemMB));
+        } catch (Throwable ignored) {}
+
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
         LogSpamShield.initialize();
-        WorldUpscalerGovernor.checkLaunchParams(args);
-        BenchmarkHarness.checkLaunchParams(args);
+        WorldUpscalerGovernor.checkLaunchParams(safeArgs);
+        BenchmarkHarness.checkLaunchParams(safeArgs);
 
-        // Migrate ProjectZomboid64.json from older PZO releases (e.g. 0.8.2 -> 0.9.5)
-        try {
-            ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
-        } catch (Throwable ignored) {}
+        if (!isMobile) {
+            try {
+                ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
+            } catch (Throwable ignored) {}
+        }
 
         boolean isNative = false;
         double timerMs = 15.6;
@@ -58,9 +87,8 @@ public class PZOEntrypoint {
             }
         } catch (Throwable ignored) {}
 
-        // Create the Zomboid user directories and write pzo_status.json to every discovered Zomboid path
         try {
-            TelemetryReporter.refreshDiscoveredDirectories(args);
+            TelemetryReporter.refreshDiscoveredDirectories(safeArgs);
             long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
             int ramGb = Math.max(2, (int) Math.round(maxMemMB / 1024.0));
             String json = String.format("{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\",\"native\":%s,\"timer_ms\":%.2f}",
@@ -72,6 +100,7 @@ public class PZOEntrypoint {
         HotSpotJITCompilerTuner.tuneRuntimeProperties();
 
         PZOEngineBridge.initialize();
+        HighPrecisionTimer.initialize();
         EngineFeaturesTuner.initializeEngineFeatures();
         EngineThreadGovernor.initialize();
         VehicleTravelOptimizer.initialize();
@@ -100,7 +129,7 @@ public class PZOEntrypoint {
         DiskIOPacer.initialize();
         com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
         if (UnstableChannelGuard.isUnstableBuild()) {
-            PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD AVX2 Batch Horde Spatial Culler & Skeletal LOD Armed");
+            PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD Batch Horde Spatial Culler & Skeletal LOD Armed");
             PZOLogger.success("[PZO Unstable Engine] RenderFrustumCuller, ZOcclusionCuller & ModelSkinningGovernor Armed");
             PZOLogger.success("[PZO Unstable Engine] EnhancedRenderTelemetry Active");
         }
@@ -113,7 +142,6 @@ public class PZOEntrypoint {
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
         AssetCachePrewarmer.startPrewarmingAsync();
-        // Pre-touch native libs into page cache & disable LWJGL vertex array bounds checks
         NativeLibraryPreloader.startPreloadingAsync();
         SpriteBatchOptimizer.apply();
 
@@ -124,7 +152,6 @@ public class PZOEntrypoint {
         } catch (Throwable t) {
             PZOLogger.warn("Non-fatal notice on StreamBufferBooster: " + t.getMessage());
         }
-
 
         try {
             FastMath.sin(0.5f);
@@ -147,27 +174,28 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on ResourceInterner: " + t.getMessage());
         }
 
-        boolean fullUpdateHandled = false;
-        String resolvedNativeUrl = null;
-        try {
-            UpdateChecker.UpdateResult ur = UpdateChecker.checkForUpdatesSync(2500);
-            if (ur != null) {
-                resolvedNativeUrl = ur.dllDownloadUrl;
-                if (ur.hasUpdate) {
-                    PZOLogger.info("New update detected (v" + ur.latestVersion + "). Opening Pre-Menu update prompt...");
-                    fullUpdateHandled = UpdateDialog.promptIfUpdateAvailable(ur.latestVersion, ur.downloadUrl, ur.dllDownloadUrl);
-                }
-            }
-        } catch (Throwable t) {
-            PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
-        }
-
-        // Native library version check
-        if (!fullUpdateHandled) {
+        if (allowDesktopUi && !isMobile) {
+            boolean fullUpdateHandled = false;
+            String resolvedNativeUrl = null;
             try {
-                UpdateDialog.checkAndPromptNativeMismatch(resolvedNativeUrl);
+                UpdateChecker.UpdateResult ur = UpdateChecker.checkForUpdatesSync(2500);
+                if (ur != null) {
+                    resolvedNativeUrl = ur.dllDownloadUrl;
+                    if (ur.hasUpdate) {
+                        PZOLogger.info("New update detected (v" + ur.latestVersion + "). Opening Pre-Menu update prompt...");
+                        fullUpdateHandled = UpdateDialog.promptIfUpdateAvailable(ur.latestVersion, ur.downloadUrl, ur.dllDownloadUrl);
+                    }
+                }
             } catch (Throwable t) {
-                PZOLogger.warn("Non-fatal notice on Native Governor version verification: " + t.getMessage());
+                PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
+            }
+
+            if (!fullUpdateHandled) {
+                try {
+                    UpdateDialog.checkAndPromptNativeMismatch(resolvedNativeUrl);
+                } catch (Throwable t) {
+                    PZOLogger.warn("Non-fatal notice on Native Governor version verification: " + t.getMessage());
+                }
             }
         }
 
@@ -217,8 +245,6 @@ public class PZOEntrypoint {
         } catch (Throwable t) {
             PZOLogger.warn("[PZO] Non-fatal notice on coexistence check: " + t.getMessage());
         }
-
-        launchGame(args);
     }
 
     private static void launchGame(String[] args) {

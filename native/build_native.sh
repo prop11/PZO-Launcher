@@ -8,7 +8,7 @@ OS_NAME="$(uname -s)"
 ARCH_NAME="$(uname -m)"
 
 echo "================================================================================"
-echo " Project Zomboid Optimiser (PZO) - Native Build"
+echo " Project Zomboid Optimiser (PZO Zomdroid Edition) - Native Build"
 echo " Platform: $OS_NAME ($ARCH_NAME)"
 echo "================================================================================"
 
@@ -36,96 +36,56 @@ if [ -z "$JAVA_HOME" ]; then
 fi
 
 if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME/include" ]; then
-    for cand in /usr/lib/jvm/java-*-openjdk*/; do
-        if [ -d "${cand}include" ]; then
-            JAVA_HOME="${cand%/}"
-            break
-        fi
-    done
-fi
-
-if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME/include" ]; then
     echo "[!] Error: JAVA_HOME not found or missing include directory."
-    echo "    Please set JAVA_HOME to an installed JDK (e.g. OpenJDK 17 or 21)."
     exit 1
 fi
 
 echo "[+] Using JAVA_HOME: $JAVA_HOME"
+mkdir -p "$SCRIPT_DIR/../dist" "$SCRIPT_DIR/../bin"
 
-CC="${CC:-}"
-if [ -z "$CC" ]; then
-    if command -v clang >/dev/null 2>&1; then
-        CC="clang"
-    elif command -v gcc >/dev/null 2>&1; then
-        CC="gcc"
-    else
-        echo "[!] Error: Neither clang nor gcc compiler was found."
-        exit 1
+TARGET_LIB="libpzo_native64.so"
+JNI_MD_DIR="$JAVA_HOME/include/linux"
+
+# Prefer Android NDK aarch64-linux-android clang for Zomdroid ARM64 Bionic compatibility
+NDK_CLANG=""
+for ndk_dir in "${ANDROID_NDK_LATEST_HOME:-}" "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}" /usr/local/lib/android/sdk/ndk/*; do
+    if [ -n "$ndk_dir" ] && [ -d "$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then
+        for api in 24 26 28 29 30 33 34; do
+            cand="$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${api}-clang"
+            if [ -x "$cand" ]; then
+                NDK_CLANG="$cand"
+                break 2
+            fi
+        done
     fi
+done
+
+if [ -z "$NDK_CLANG" ] && command -v aarch64-linux-android24-clang >/dev/null 2>&1; then
+    NDK_CLANG="aarch64-linux-android24-clang"
 fi
 
-echo "[+] Using Compiler: $CC"
-
-mkdir -p "$SCRIPT_DIR/../dist"
-
-if [ "$OS_NAME" = "Darwin" ]; then
-    TARGET_LIB="libpzo_native64.dylib"
-    JNI_MD_DIR="$JAVA_HOME/include/darwin"
-    
-    echo "[*] Compiling macOS arm64 slice (Apple Silicon scalar)..."
-    $CC -O3 -dynamiclib -arch arm64 \
+if [ -n "$NDK_CLANG" ]; then
+    echo "[+] Compiling $TARGET_LIB for Android ARM64 (Bionic + NEON) via $NDK_CLANG..."
+    "$NDK_CLANG" -O3 -shared -fPIC -march=armv8-a+simd \
         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
-        pzo_native.c -o "libpzo_native64_arm64.dylib" -lm -lpthread -ldl
-
-    echo "[*] Compiling macOS x86_64 slice (Intel / Rosetta AVX2)..."
-    $CC -O3 -dynamiclib -arch x86_64 -mavx2 \
-        -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
-        pzo_native.c -o "libpzo_native64_x86_64.dylib" -lm -lpthread -ldl
-
-    echo "[*] Combining slices into Universal Mach-O binary via lipo..."
-    lipo -create -output "$TARGET_LIB" "libpzo_native64_arm64.dylib" "libpzo_native64_x86_64.dylib"
-    rm -f "libpzo_native64_arm64.dylib" "libpzo_native64_x86_64.dylib"
-
-    echo "[+] Universal binary created successfully:"
-    lipo -info "$TARGET_LIB"
-        
-    cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
-    echo "[+] Successfully built: $TARGET_LIB -> dist/$TARGET_LIB"
-
-elif [ "$OS_NAME" = "Linux" ]; then
-    TARGET_LIB="libpzo_native64.so"
-    JNI_MD_DIR="$JAVA_HOME/include/linux"
-    
-    COMPILER="$CC"
-    if [ "$ARCH_NAME" != "x86_64" ] && command -v x86_64-linux-gnu-gcc >/dev/null 2>&1; then
-        COMPILER="x86_64-linux-gnu-gcc"
-        echo "[+] Cross-compiling for x86_64 using $COMPILER"
-    fi
-
-    ARCH_FLAGS="-mavx2"
-    
-    echo "[*] Compiling $TARGET_LIB for Linux (x86_64 AVX2)..."
-    $COMPILER -O3 -shared -fPIC $ARCH_FLAGS \
+        pzo_native.c -o "$TARGET_LIB" -lm -ldl
+elif [ "$ARCH_NAME" = "aarch64" ] || [ "$ARCH_NAME" = "arm64" ]; then
+    CC="${CC:-clang}"
+    echo "[+] Compiling $TARGET_LIB natively for ARM64 ($CC)..."
+    $CC -O3 -shared -fPIC -march=armv8-a+simd \
         -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
         pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl
-        
-    cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
-    echo "[+] Successfully built: $TARGET_LIB -> dist/$TARGET_LIB"
-
-    if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
-        echo "[*] Cross-compiling pzo_native64.dll for Windows (x86_64 AVX2)..."
-        x86_64-w64-mingw32-gcc -O3 -shared -mavx2 \
-            -I"$JAVA_HOME/include" -I"$SCRIPT_DIR/win32" \
-            pzo_native.c -o "pzo_native64.dll" -lpsapi -lwinmm -lavrt
-        cp -f "pzo_native64.dll" "$SCRIPT_DIR/../dist/pzo_native64.dll"
-        echo "[+] Successfully built: pzo_native64.dll -> dist/pzo_native64.dll"
-    fi
-
+elif command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+    echo "[+] Cross-compiling $TARGET_LIB for ARM64 via aarch64-linux-gnu-gcc..."
+    aarch64-linux-gnu-gcc -O3 -shared -fPIC -march=armv8-a+simd \
+        -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" \
+        pzo_native.c -o "$TARGET_LIB" -lm -lpthread -ldl
 else
-    echo "[!] Unsupported OS: $OS_NAME. Use build_native.bat on Windows."
+    echo "[!] Error: No Android NDK (aarch64-linux-android-clang) or ARM64 compiler found."
     exit 1
 fi
 
-echo "================================================================================"
-echo " Native Compilation Complete: $TARGET_LIB"
+cp -f "$TARGET_LIB" "$SCRIPT_DIR/../dist/$TARGET_LIB"
+cp -f "$TARGET_LIB" "$SCRIPT_DIR/../bin/$TARGET_LIB"
+echo "[+] Successfully built Android ARM64 native library: $TARGET_LIB"
 echo "================================================================================"
