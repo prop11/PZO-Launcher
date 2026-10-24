@@ -36,9 +36,11 @@ public class EngineThreadGovernor {
             PZOLogger.warn("[EngineThreadGovernor] Process lock notice: " + t.getMessage());
         }
 
-        try {
-            GCLauncherOptimizer.tuneLauncherGcIfBeneficial();
-        } catch (Throwable ignored) {}
+        if (!EngineGLStateGovernor.isMobileGLEnvironment()) {
+            try {
+                GCLauncherOptimizer.tuneLauncherGcIfBeneficial();
+            } catch (Throwable ignored) {}
+        }
 
         Thread governorDaemon = new Thread(EngineThreadGovernor::governorLoop, "PZO-ThreadGovernor");
         governorDaemon.setDaemon(true);
@@ -121,7 +123,7 @@ public class EngineThreadGovernor {
                                 PZOLogger.warn("[EngineThreadGovernor] RenderThread native optimization notice: " + t.getMessage());
                             }
                         }
-                        Thread.currentThread().setName("PZO-RenderThread");
+                        // Preserve stock "Render Thread" name so GameProfiler and Zomdroid recognize it
                     } catch (Throwable t) {
                         PZOLogger.warn("[EngineThreadGovernor] RenderThread hook notice: " + t.getMessage());
                     }
@@ -153,7 +155,7 @@ public class EngineThreadGovernor {
                                 PZOLogger.warn("[EngineThreadGovernor] MainThread native optimization notice: " + t.getMessage());
                             }
                         }
-                        Thread.currentThread().setName("PZO-MainSimulationThread");
+                        // Preserve stock "MainThread" name so DirectionVectorFix, GameProfiler, and Zomdroid recognize it
                         try { EngineFeaturesTuner.initializeEngineFeatures(); WorkerRandGovernor.ensureInstalled(); } catch (Throwable ignored) {}
                     } catch (Throwable t) {
                         PZOLogger.warn("[EngineThreadGovernor] MainThread hook notice: " + t.getMessage());

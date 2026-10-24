@@ -35,7 +35,7 @@ public final class GCLauncherOptimizer {
     }
 
     public static synchronized void tuneLauncherGcIfBeneficial() {
-        if (!active) return;
+        if (!active || EngineGLStateGovernor.isMobileGLEnvironment()) return;
         try {
             int cores = Runtime.getRuntime().availableProcessors();
             File gameDir = new File(System.getProperty("user.dir", "."));

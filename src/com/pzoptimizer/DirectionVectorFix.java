@@ -29,9 +29,12 @@ public final class DirectionVectorFix {
         if (!active) return true;
         Thread t = Thread.currentThread();
         Thread g = gameThread;
-        if (g == null && "MainThread".equals(t.getName())) {
-            gameThread = t;
-            return true;
+        if (g == null) {
+            String n = t.getName();
+            if ("MainThread".equals(n) || "PZO-MainSimulationThread".equals(n)) {
+                gameThread = t;
+                return true;
+            }
         }
         return t == g;
     }

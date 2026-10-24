@@ -28,9 +28,10 @@ public final class MultiCoreChunkStreamer {
     private static Thread dispatcherThread;
     private static int workerCount = 4;
 
-    // Per-thread 1 MB heap buffers (heap, so .array() works for CRC32)
+    // Per-thread heap buffers (256 KB on mobile to conserve RAM, 1 MB on desktop; heap so .array() works for CRC32)
+    private static final int CHUNK_BUFFER_BYTES = com.pzoptimizer.EngineGLStateGovernor.isMobileGLEnvironment() ? 262144 : 1048576;
     private static final ThreadLocal<ByteBuffer> DIRECT_CHUNK_BUFFER = ThreadLocal.withInitial(() -> {
-        return ByteBuffer.allocate(1048576);
+        return ByteBuffer.allocate(CHUNK_BUFFER_BYTES);
     });
 
     // Chunks currently being loaded, so two workers never load the same one
@@ -68,10 +69,13 @@ public final class MultiCoreChunkStreamer {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        int pCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
+        int pCores = com.pzoptimizer.CpuTopologyGovernor.PERFORMANCE_CORES > 0
+            ? com.pzoptimizer.CpuTopologyGovernor.PERFORMANCE_CORES
+            : (PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors());
+        int maxChunkWorkers = com.pzoptimizer.EngineGLStateGovernor.isMobileGLEnvironment() ? 2 : 12;
         workerCount = PZONative.isLowCoreCpu()
             ? Math.max(1, Runtime.getRuntime().availableProcessors() - 2)
-            : Math.max(2, Math.min(pCores, 12));
+            : Math.max(2, Math.min(pCores, maxChunkWorkers));
 
         workerPool = Executors.newFixedThreadPool(workerCount, new ThreadFactory() {
             private final AtomicInteger counter = new AtomicInteger(1);

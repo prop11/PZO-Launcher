@@ -309,7 +309,7 @@ public class PZOptimAgent {
             if ("zombie/core/opengl/VBORenderer".equals(className) && classfileBuffer != null) {
                 byte[] vb = AsmSupport.transform(classfileBuffer, loader, "VBORenderer batch size", RenderBatchPatches::patchVboRenderer);
                 if (vb != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched VBORenderer: 1 MB batches instead of 4 KB (about 30x fewer flushes)");
+                    PZOLogger.success("[PZO Agent] ASM-patched VBORenderer: " + (RenderBatchPatches.VERTEX_BYTES >> 10) + " KB batches instead of 4 KB (fewer GL flushes)");
                 }
                 return vb;
             }
@@ -532,7 +532,7 @@ public class PZOptimAgent {
                 }
                 return fs;
             }
-            if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null) {
+            if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null && !EngineGLStateGovernor.isMobileGLEnvironment()) {
                 byte[] mip = AsmSupport.transform(classfileBuffer, loader, "FBORenderChunk mip levels", ChunkMipLimit::patchRenderChunk);
                 if (mip != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderChunk.endRenderThread: chunk mip chain capped at " + ChunkMipLimit.maxLevel + " levels");

@@ -615,6 +615,26 @@ static int batchCullRadialAVX2(const float* coords, int count, float ox, float o
             }
         }
     }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (count >= 4) {
+        float32x4_t vOx = vdupq_n_f32(ox);
+        float32x4_t vOy = vdupq_n_f32(oy);
+        float32x4_t vMaxRadSq = vdupq_n_f32(maxRadiusSq);
+        for (; i <= count - 4; i += 4) {
+            float32x4x2_t xy = vld2q_f32(&coords[i * 2]);
+            float32x4_t dx = vsubq_f32(xy.val[0], vOx);
+            float32x4_t dy = vsubq_f32(xy.val[1], vOy);
+            float32x4_t distSq = vmlaq_f32(vmulq_f32(dx, dx), dy, dy);
+            uint32x4_t cmp = vcleq_f32(distSq, vMaxRadSq);
+            uint32_t m[4];
+            vst1q_u32(m, cmp);
+            for (int b = 0; b < 4; b++) {
+                unsigned char inRad = (unsigned char)(m[b] & 1u);
+                outMask[i + b] = inRad;
+                insideCount += inRad;
+            }
+        }
+    }
 #endif
 
     for (; i < count; i++) {
@@ -662,6 +682,26 @@ static int batchCullAABBAVX2(const float* coords, int count, float minX, float m
             int mask = _mm256_movemask_ps(inAABB);
             for (int b = 0; b < 8; b++) {
                 unsigned char inBox = (unsigned char)((mask >> b) & 1);
+                outMask[i + b] = inBox;
+                insideCount += inBox;
+            }
+        }
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (count >= 4) {
+        float32x4_t vMinX = vdupq_n_f32(minX);
+        float32x4_t vMinY = vdupq_n_f32(minY);
+        float32x4_t vMaxX = vdupq_n_f32(maxX);
+        float32x4_t vMaxY = vdupq_n_f32(maxY);
+        for (; i <= count - 4; i += 4) {
+            float32x4x2_t xy = vld2q_f32(&coords[i * 2]);
+            uint32x4_t mX = vandq_u32(vcgeq_f32(xy.val[0], vMinX), vcleq_f32(xy.val[0], vMaxX));
+            uint32x4_t mY = vandq_u32(vcgeq_f32(xy.val[1], vMinY), vcleq_f32(xy.val[1], vMaxY));
+            uint32x4_t inAABB = vandq_u32(mX, mY);
+            uint32_t m[4];
+            vst1q_u32(m, inAABB);
+            for (int b = 0; b < 4; b++) {
+                unsigned char inBox = (unsigned char)(m[b] & 1u);
                 outMask[i + b] = inBox;
                 insideCount += inBox;
             }
@@ -723,6 +763,26 @@ static int batchClassifyTiersAVX2(const float* coords, int count, float ox, floa
                 } else {
                     outTiers[i + b] = 3;
                 }
+            }
+        }
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (count >= 4) {
+        float32x4_t vOx = vdupq_n_f32(ox);
+        float32x4_t vOy = vdupq_n_f32(oy);
+        for (; i <= count - 4; i += 4) {
+            float32x4x2_t xy = vld2q_f32(&coords[i * 2]);
+            float32x4_t dx = vsubq_f32(xy.val[0], vOx);
+            float32x4_t dy = vsubq_f32(xy.val[1], vOy);
+            float32x4_t distSq = vmlaq_f32(vmulq_f32(dx, dx), dy, dy);
+            float dArr[4];
+            vst1q_f32(dArr, distSq);
+            for (int b = 0; b < 4; b++) {
+                float dSq = dArr[b];
+                if (dSq <= t0Sq) outTiers[i + b] = 0;
+                else if (dSq <= t1Sq) outTiers[i + b] = 1;
+                else if (dSq <= t2Sq) outTiers[i + b] = 2;
+                else outTiers[i + b] = 3;
             }
         }
     }
@@ -795,6 +855,42 @@ static int batchCalculateFovAVX2(
             int mask = _mm256_movemask_ps(mFinal);
             for (int b = 0; b < 8; b++) {
                 unsigned char vis = (unsigned char)((mask >> b) & 1);
+                outMask[i + b] = vis;
+                visibleCount += vis;
+            }
+        }
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (count >= 4) {
+        float32x4_t vTargetX = vdupq_n_f32(targetX);
+        float32x4_t vTargetY = vdupq_n_f32(targetY);
+        float32x4_t vMaxDistSq = vdupq_n_f32(viewDistSq);
+        float32x4_t vCloseRadSq = vdupq_n_f32(closeRadiusSq);
+        float32x4_t vCosSq = vdupq_n_f32(cosSq);
+        float32x4_t vZero = vdupq_n_f32(0.0f);
+        float32x4_t vMinDist = vdupq_n_f32(0.0001f);
+        for (; i <= count - 4; i += 4) {
+            float32x4x2_t xy = vld2q_f32(&coords[i * 2]);
+            float32x4x2_t hxy = vld2q_f32(&headings[i * 2]);
+            float32x4_t dx = vsubq_f32(vTargetX, xy.val[0]);
+            float32x4_t dy = vsubq_f32(vTargetY, xy.val[1]);
+            float32x4_t distSq = vmlaq_f32(vmulq_f32(dx, dx), dy, dy);
+
+            uint32x4_t mClose = vcleq_f32(distSq, vCloseRadSq);
+            uint32x4_t mDist = vandq_u32(vcleq_f32(distSq, vMaxDistSq), vcgtq_f32(distSq, vMinDist));
+
+            float32x4_t dot = vmlaq_f32(vmulq_f32(dx, hxy.val[0]), dy, hxy.val[1]);
+            uint32x4_t mFront = vcgtq_f32(dot, vZero);
+            float32x4_t dotSq = vmulq_f32(dot, dot);
+            float32x4_t threshold = vmulq_f32(vCosSq, distSq);
+            uint32x4_t mCone = vcgeq_f32(dotSq, threshold);
+
+            uint32x4_t mFov = vandq_u32(mDist, vandq_u32(mFront, mCone));
+            uint32x4_t mFinal = vorrq_u32(mFov, mClose);
+            uint32_t m[4];
+            vst1q_u32(m, mFinal);
+            for (int b = 0; b < 4; b++) {
+                unsigned char vis = (unsigned char)(m[b] & 1u);
                 outMask[i + b] = vis;
                 visibleCount += vis;
             }
@@ -877,6 +973,60 @@ static int batchCalculateRepulsionAVX2(
             _mm256_storeu_ps(fyArr, vTotalFy);
             float accumFx = fxArr[0] + fxArr[1] + fxArr[2] + fxArr[3] + fxArr[4] + fxArr[5] + fxArr[6] + fxArr[7];
             float accumFy = fyArr[0] + fyArr[1] + fyArr[2] + fyArr[3] + fyArr[4] + fyArr[5] + fyArr[6] + fyArr[7];
+
+            for (; j < count; j++) {
+                if (i == j) continue;
+                float dx = xi - coords[j * 2];
+                float dy = yi - coords[j * 2 + 1];
+                float dSq = dx * dx + dy * dy;
+                if (dSq < radSq && dSq > 0.0001f) {
+                    float invD = 1.0f / dSq;
+                    accumFx += dx * invD;
+                    accumFy += dy * invD;
+                }
+            }
+
+            if (accumFx > maxForce) accumFx = maxForce;
+            else if (accumFx < -maxForce) accumFx = -maxForce;
+            if (accumFy > maxForce) accumFy = maxForce;
+            else if (accumFy < -maxForce) accumFy = -maxForce;
+
+            outForces[i * 2] = accumFx;
+            outForces[i * 2 + 1] = accumFy;
+        }
+        return count;
+    }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    if (count >= 4) {
+        float32x4_t vRadSq = vdupq_n_f32(radSq);
+        float32x4_t vMinDistSq = vdupq_n_f32(0.0001f);
+        float32x4_t vZero = vdupq_n_f32(0.0f);
+        for (i = 0; i < count; i++) {
+            float xi = coords[i * 2];
+            float yi = coords[i * 2 + 1];
+            float32x4_t vXi = vdupq_n_f32(xi);
+            float32x4_t vYi = vdupq_n_f32(yi);
+            float32x4_t vTotalFx = vZero;
+            float32x4_t vTotalFy = vZero;
+
+            int j = 0;
+            for (; j <= count - 4; j += 4) {
+                float32x4x2_t xyj = vld2q_f32(&coords[j * 2]);
+                float32x4_t dx = vsubq_f32(vXi, xyj.val[0]);
+                float32x4_t dy = vsubq_f32(vYi, xyj.val[1]);
+                float32x4_t dSq = vmlaq_f32(vmulq_f32(dx, dx), dy, dy);
+
+                uint32x4_t mask = vandq_u32(vcltq_f32(dSq, vRadSq), vcgtq_f32(dSq, vMinDistSq));
+                float32x4_t invDistSq = vrecpeq_f32(dSq);
+                invDistSq = vmulq_f32(vrecpsq_f32(dSq, invDistSq), invDistSq);
+                invDistSq = vbslq_f32(mask, invDistSq, vZero);
+
+                vTotalFx = vmlaq_f32(vTotalFx, dx, invDistSq);
+                vTotalFy = vmlaq_f32(vTotalFy, dy, invDistSq);
+            }
+
+            float accumFx = vaddvq_f32(vTotalFx);
+            float accumFy = vaddvq_f32(vTotalFy);
 
             for (; j < count; j++) {
                 if (i == j) continue;

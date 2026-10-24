@@ -24,7 +24,9 @@ public final class ChunkMipLimit {
 
     // Replaces GL30.glGenerateMipmap(target) in endRenderThread; render thread, the chunk texture is bound
     public static void generate(int target) {
-        org.lwjgl.opengl.GL11.glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, active ? maxLevel : STOCK_MAX_LEVEL);
+        if (!EngineGLStateGovernor.isMobileGLEnvironment()) {
+            org.lwjgl.opengl.GL11.glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, active ? maxLevel : STOCK_MAX_LEVEL);
+        }
         org.lwjgl.opengl.GL30.glGenerateMipmap(target);
     }
 

@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public final class NativeDirectMemoryPool {
 
     private static final int BUFFER_CAPACITY = 262144; // 256 KB per page-aligned buffer
-    private static final int INITIAL_POOL_SIZE = 16;
+    private static final int INITIAL_POOL_SIZE = EngineGLStateGovernor.isMobileGLEnvironment() ? 6 : 16;
     private static final ConcurrentLinkedQueue<ByteBuffer> pool = new ConcurrentLinkedQueue<>();
 
     static {
@@ -19,7 +19,7 @@ public final class NativeDirectMemoryPool {
     }
 
     public static void initialize() {
-        PZOLogger.success("NativeDirectMemoryPool: 16x 256KB Off-Heap Pinned Direct Buffer Ring Initialized");
+        PZOLogger.success("NativeDirectMemoryPool: " + INITIAL_POOL_SIZE + "x 256KB Off-Heap Pinned Direct Buffer Ring Initialized");
     }
 
     public static ByteBuffer acquireBuffer() {

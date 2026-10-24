@@ -5,8 +5,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /** Tracks chunks touched in the last 45 s, so recently visited chunks can be kept when the player crosses back over a boundary. */
 public final class ChunkRetentionRing {
 
-    private static final int MAX_RETAINED_CHUNKS = 512;
-    private static final long RETENTION_DURATION_MS = 45_000L; // 45 seconds
+    private static final int MAX_RETAINED_CHUNKS = EngineGLStateGovernor.isMobileGLEnvironment() ? 48 : 512;
+    private static final long RETENTION_DURATION_MS = EngineGLStateGovernor.isMobileGLEnvironment() ? 8_000L : 45_000L;
 
     private static final ConcurrentHashMap<Long, Long> RETAINED_CHUNKS = new ConcurrentHashMap<>(MAX_RETAINED_CHUNKS);
     private static volatile long lastSweepTime = 0;

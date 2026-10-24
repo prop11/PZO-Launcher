@@ -39,6 +39,9 @@ public final class FileSystemWhitelistShield {
     public static synchronized void initialize() {
         if (initialized) return;
         initialized = true;
+        if (EngineGLStateGovernor.isMobileGLEnvironment()) {
+            return; // Zomdroid does not use desktop Steam libraryfolders.vdf whitelist scanning
+        }
         obtainUnsafe();
         collectAllSearchRoots();
 

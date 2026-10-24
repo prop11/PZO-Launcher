@@ -18,7 +18,7 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
  */
 public final class RenderBatchPatches {
 
-    static final int VERTEX_BYTES = 1 << 20;
+    static final int VERTEX_BYTES = 1 << 18; // 256 KB on Zomdroid (64x stock 4 KB, mobile GL driver friendly)
     static final int INDEX_BYTES = VERTEX_BYTES / 4;
     private static final int MIN_VERTEX_BYTES = 28;
 

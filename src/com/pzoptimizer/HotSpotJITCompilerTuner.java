@@ -11,7 +11,9 @@ public class HotSpotJITCompilerTuner {
             System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", String.valueOf(targetParallelism));
             System.setProperty("jdk.virtualThreadScheduler.parallelism", String.valueOf(targetParallelism));
             
-            System.setProperty("sun.java2d.opengl", "true");
+            if (!EngineGLStateGovernor.isMobileGLEnvironment()) {
+                System.setProperty("sun.java2d.opengl", "true");
+            }
             System.setProperty("sun.java2d.d3d", "false");
             System.setProperty("sun.java2d.noddraw", "true");
             

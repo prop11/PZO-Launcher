@@ -165,11 +165,12 @@ public final class MultiCoreHordeGovernor {
     }
 
     private static void governorLoop() {
+        boolean mobile = com.pzoptimizer.EngineGLStateGovernor.isMobileGLEnvironment();
         while (active) {
             try {
                 boolean driving = VehicleTravelOptimizer.isPlayerDriving();
                 executeParallelSweep();
-                Thread.sleep(driving ? 125 : 250);
+                Thread.sleep(mobile ? 500 : (driving ? 125 : 250));
             } catch (InterruptedException ie) {
                 break;
             } catch (Throwable ignored) {}
@@ -327,8 +328,8 @@ public final class MultiCoreHordeGovernor {
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             }
 
-            // Crowd separation vectors for nearby entities
-            if (count >= 2) {
+            // Crowd separation vectors for nearby entities (skipped on mobile to avoid O(N^2) CPU/battery drain)
+            if (count >= 2 && !com.pzoptimizer.EngineGLStateGovernor.isMobileGLEnvironment()) {
                 PZONative.calculateRepulsionAVX2(coordBuf, count, SEPARATION_RADIUS, MAX_REPULSION_FORCE, repulsionBuf);
                 repulsionBuf.rewind();
                 repulsionBuf.get(SNAPSHOT_REPULSION, 0, count * 2);

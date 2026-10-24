@@ -143,7 +143,8 @@ public final class ChunkIngestionPacer {
 
     public static void processPendingUnloads() {
         if (isEngineLoading()) return;
-        if (isPlayerDriving()) return; // Do not unload chunks while driving to avoid collision/mesh gaps
+        // On desktop, pause unloads while driving; on mobile, always pace unloads to prevent OOM / LMK kills
+        if (isPlayerDriving() && !EngineGLStateGovernor.isMobileGLEnvironment()) return;
 
         try {
             if (zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null) return;

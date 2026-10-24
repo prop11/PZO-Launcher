@@ -50,6 +50,10 @@ public final class PredictiveChunkStreamer {
 
     public static void start() {
         if (running) return;
+        if (EngineGLStateGovernor.isMobileGLEnvironment()) {
+            PZOLogger.info("PredictiveChunkStreamer: Mobile mode active (skipping background disk prewarm to preserve Android RAM & I/O headroom)");
+            return;
+        }
         running = true;
 
         streamerThread = new Thread(() -> {

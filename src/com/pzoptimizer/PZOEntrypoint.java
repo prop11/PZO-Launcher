@@ -141,8 +141,10 @@ public class PZOEntrypoint {
         DirectMemoryTuner.initialize();
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
-        AssetCachePrewarmer.startPrewarmingAsync();
-        NativeLibraryPreloader.startPreloadingAsync();
+        if (!isMobile) {
+            AssetCachePrewarmer.startPrewarmingAsync();
+            NativeLibraryPreloader.startPreloadingAsync();
+        }
         SpriteBatchOptimizer.apply();
 
         try {
