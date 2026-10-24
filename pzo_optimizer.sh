@@ -722,7 +722,19 @@ if not has_lib_path:
 
 # Build pzo_args
 pzo_args = []
-if is_zb_active:
+# A ZombieBuddy jar/json alone does not mean its agent library exists for this platform;
+# -agentlib:zbNative with no loadable library makes the JVM refuse to start (issue #40)
+game_dir = os.path.dirname(os.path.abspath(json_file))
+if is_proton:
+    zb_agent_names = ["zbNative.dll"]
+else:
+    zb_agent_names = ["libzbNative.so", "libzbNative.dylib"]
+zb_agent_found = any(
+    os.path.isfile(os.path.join(game_dir, d, n))
+    for d in ("win64" if is_proton else "linux64", "natives", ".")
+    for n in zb_agent_names
+)
+if is_zb_active and zb_agent_found:
     pzo_args.append("-agentlib:zbNative")
 pzo_args.append("-agentlib:pzo_native64")
 
