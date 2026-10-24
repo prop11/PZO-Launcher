@@ -52,7 +52,7 @@ import zombie.iso.weather.fx.WeatherParticleDrawer;
 public final class WeatherTileBatcher {
 
     private static volatile boolean active = !System.getProperty("os.name", "").toLowerCase().contains("mac");
-    // The rectangle patch only queues tiles; without the drawer's pzo$tiles field nothing would draw them
+    // The rectangle patch only queues tiles; without the drawer patch nothing would draw them
     static volatile boolean drawerPatched;
     public static final AtomicLong tilesBuilt = new AtomicLong();
     public static final AtomicLong tileDraws = new AtomicLong();
@@ -64,9 +64,9 @@ public final class WeatherTileBatcher {
     // while one of those classes is being defined, and loading it again from there is a duplicate definition
     private static final class H {
         private static final VarHandle PR_WIDTH, PR_HEIGHT, PR_PARTICLES, PR_ID, P_ALPHA;
-        private static final VarHandle D_BUFFER, D_TEXTURES, D_BY_TEXTURE, D_TILES, FX_INSTANCE, FX_DEBUG_BOUNDS;
+        private static final VarHandle D_BUFFER, D_TEXTURES, D_BY_TEXTURE, FX_INSTANCE, FX_DEBUG_BOUNDS;
         static {
-            VarHandle w = null, h = null, parts = null, id = null, alpha = null, buf = null, tex = null, byTex = null, tiles = null;
+            VarHandle w = null, h = null, parts = null, id = null, alpha = null, buf = null, tex = null, byTex = null;
             VarHandle fxInstance = null, fxDebug = null;
             try {
                 MethodHandles.Lookup l = MethodHandles.lookup();
@@ -80,7 +80,6 @@ public final class WeatherTileBatcher {
                 buf = d.findVarHandle(WeatherParticleDrawer.class, "particleBuffer", ByteBuffer.class);
                 tex = d.findVarHandle(WeatherParticleDrawer.class, "textures", ArrayList.class);
                 byTex = d.findVarHandle(WeatherParticleDrawer.class, "particlesByTexture", TIntArrayList[].class);
-                tiles = d.findVarHandle(WeatherParticleDrawer.class, "pzo$tiles", Object.class);
                 MethodHandles.Lookup fx = MethodHandles.privateLookupIn(IsoWeatherFX.class, l);
                 fxInstance = fx.findStaticVarHandle(IsoWeatherFX.class, "instance", IsoWeatherFX.class);
                 fxDebug = fx.findStaticVarHandle(IsoWeatherFX.class, "debugBounds", boolean.class);
@@ -96,7 +95,6 @@ public final class WeatherTileBatcher {
             D_BUFFER = buf;
             D_TEXTURES = tex;
             D_BY_TEXTURE = byTex;
-            D_TILES = tiles;
             FX_INSTANCE = fxInstance;
             FX_DEBUG_BOUNDS = fxDebug;
         }
@@ -105,7 +103,7 @@ public final class WeatherTileBatcher {
     private WeatherTileBatcher() {}
 
     public static void setActive(boolean value) {
-        active = value && H.D_TILES != null;
+        active = value && H.D_BUFFER != null;
     }
 
     /** One ParticleRectangle's particles for one frame: per texture slot the particle buffer offsets, and the cell positions. */
@@ -121,20 +119,35 @@ public final class WeatherTileBatcher {
         final ArrayList<Tile> tiles = new ArrayList<>();
     }
 
+    // Drawer -> batch, kept here so WeatherParticleDrawer keeps its stock shape (see AsmSupport.keepClassShapes).
+    // There are only a few drawers, all long-lived; pairs are appended copy-on-write, so readers need no lock
+    private static volatile Object[] batchPairs = new Object[0];
+
     private static Batch batch(WeatherParticleDrawer drawer, boolean create) {
-        Object o = H.D_TILES.get(drawer);
-        if (o == null && create) {
-            o = new Batch();
-            H.D_TILES.set(drawer, o);
+        Object[] pairs = batchPairs;
+        for (int i = 0; i < pairs.length; i += 2) {
+            if (pairs[i] == drawer) return (Batch) pairs[i + 1];
         }
-        return (Batch) o;
+        if (!create) return null;
+        synchronized (WeatherTileBatcher.class) {
+            pairs = batchPairs;
+            for (int i = 0; i < pairs.length; i += 2) {
+                if (pairs[i] == drawer) return (Batch) pairs[i + 1];
+            }
+            Batch b = new Batch();
+            Object[] grown = java.util.Arrays.copyOf(pairs, pairs.length + 2);
+            grown[pairs.length] = drawer;
+            grown[pairs.length + 1] = b;
+            batchPairs = grown;
+            return b;
+        }
     }
 
     // ---- main thread ----
 
     // WeatherParticleDrawer.startFrame: the drawer's particle buffer is being reset, so are its tiles
     public static void onStartFrame(WeatherParticleDrawer drawer) {
-        if (H.D_TILES == null) return;
+        if (H.D_BUFFER == null) return;
         Batch b = batch(drawer, false);
         if (b != null) b.tiles.clear();
     }
@@ -210,7 +223,7 @@ public final class WeatherTileBatcher {
 
     // WeatherParticleDrawer.render, after its GL state is pushed and before its own VBORenderer pass
     public static void drawTiles(WeatherParticleDrawer drawer) {
-        if (H.D_TILES == null) return;
+        if (H.D_BUFFER == null) return;
         Batch b = batch(drawer, false);
         if (b == null || b.tiles.isEmpty()) return;
         ByteBuffer particles = (ByteBuffer) H.D_BUFFER.get(drawer);
@@ -329,6 +342,12 @@ public final class WeatherTileBatcher {
     static boolean patchParticleRectangle(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "render", "()V");
         if (m == null) return false;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            // Already carries this patch: a second prefix would queue every tile twice
+            if (insn instanceof MethodInsnNode mi && "renderTiled".equals(mi.name) && "com/pzoptimizer/WeatherTileBatcher".equals(mi.owner)) {
+                return false;
+            }
+        }
         InsnList head = new InsnList();
         LabelNode stock = new LabelNode();
         head.add(new VarInsnNode(Opcodes.ALOAD, 0));
@@ -347,13 +366,16 @@ public final class WeatherTileBatcher {
         if (render == null || startFrame == null) return false;
         MethodInsnNode firstVbor = null;
         for (AbstractInsnNode insn = render.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            if (insn instanceof MethodInsnNode mi && "zombie/core/opengl/VBORenderer".equals(mi.owner) && "getInstance".equals(mi.name)) {
+            // Already carries this patch (bytes handed back by another agent): a second hook would draw the tiles twice
+            if (insn instanceof MethodInsnNode mi && "drawTiles".equals(mi.name) && "com/pzoptimizer/WeatherTileBatcher".equals(mi.owner)) {
+                return false;
+            }
+            if (firstVbor == null && insn instanceof MethodInsnNode mi && "zombie/core/opengl/VBORenderer".equals(mi.owner)
+                    && "getInstance".equals(mi.name)) {
                 firstVbor = mi;
-                break;
             }
         }
         if (firstVbor == null) return false;
-        node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_TRANSIENT, "pzo$tiles", "Ljava/lang/Object;", null, null));
 
         InsnList draw = new InsnList();
         draw.add(new VarInsnNode(Opcodes.ALOAD, 0));

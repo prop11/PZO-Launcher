@@ -39,79 +39,25 @@ final class AnimationThreadingPatches {
         MethodNode bones = AsmSupport.findMethod(node, "updateMultiTrackBoneTransformsInternal", "(F)V");
         if (standard == null || bones == null) return false;
         for (String[] m : new String[][] {{"updateLayerBlendWeightings", "()V"}, {"DoAngles", "(F)V"},
-                {"calculateDeferredMovement", "()V"}, {"updateTwistBone", "()V"}, {"applyBoneReParenting", "()V"},
-                {"updateModelTransforms", "()V"}, {"UpdateSkinTransforms", "()V"}}) {
+                {"calculateDeferredMovement", "()V"}, {"isReady", "()Z"}, {"updateTwistBone", "()V"},
+                {"applyBoneReParenting", "()V"}, {"updateModelTransforms", "()V"}, {"UpdateSkinTransforms", "()V"}}) {
             if (AsmSupport.findMethod(node, m[0], m[1]) == null) return false;
         }
 
-        // pzo$bonesNoBlend(F)V: updateMultiTrackBoneTransformsInternal without its updateLayerBlendWeightings call,
-        // which the game thread already made in pzo$deferMain
-        MethodNode noBlend = new MethodNode(Opcodes.ACC_PRIVATE, "pzo$bonesNoBlend", "(F)V", null, null);
-        bones.accept(noBlend);
-        noBlend.name = "pzo$bonesNoBlend";
-        noBlend.access = Opcodes.ACC_PRIVATE;
-        int removed = 0;
-        for (AbstractInsnNode insn = noBlend.instructions.getFirst(); insn != null; ) {
-            AbstractInsnNode next = insn.getNext();
-            if (insn instanceof MethodInsnNode mi && "updateLayerBlendWeightings".equals(mi.name) && AP.equals(mi.owner)) {
-                AbstractInsnNode load = mi.getPrevious();
-                while (load != null && load.getOpcode() < 0) load = load.getPrevious();
-                if (load == null || load.getOpcode() != Opcodes.ALOAD || ((VarInsnNode) load).var != 0) return false;
-                noBlend.instructions.remove(load);
-                noBlend.instructions.remove(mi);
-                removed++;
+        // The bone pass's own blend-weight call goes through BoneBatch, which skips it for a queued player (the game
+        // thread already made it). No members are added: see BoneBatch. Finding no stock call (already patched
+        // bytes handed back by another agent) refuses the whole patch.
+        int redirected = 0;
+        for (AbstractInsnNode insn = bones.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode mi && "updateLayerBlendWeightings".equals(mi.name) && AP.equals(mi.owner)
+                    && "()V".equals(mi.desc) && mi.getOpcode() != Opcodes.INVOKESTATIC) {
+                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, ME, "blendWeightings", "(Ljava/lang/Object;)V", false);
+                bones.instructions.set(mi, call);
+                insn = call;
+                redirected++;
             }
-            insn = next;
         }
-        if (removed != 1) return false;
-        node.methods.add(noBlend);
-
-        node.interfaces.add("com/pzoptimizer/BoneBatch$Deferrable");
-        node.fields.add(new FieldNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_TRANSIENT, "pzo$queueSlot", "I", null, null));
-
-        MethodNode getSlot = new MethodNode(Opcodes.ACC_PUBLIC, "pzo$queueSlot", "()I", null, null);
-        getSlot.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        getSlot.instructions.add(new FieldInsnNode(Opcodes.GETFIELD, AP, "pzo$queueSlot", "I"));
-        getSlot.instructions.add(new InsnNode(Opcodes.IRETURN));
-        node.methods.add(getSlot);
-
-        MethodNode setSlot = new MethodNode(Opcodes.ACC_PUBLIC, "pzo$setQueueSlot", "(I)V", null, null);
-        setSlot.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        setSlot.instructions.add(new VarInsnNode(Opcodes.ILOAD, 1));
-        setSlot.instructions.add(new FieldInsnNode(Opcodes.PUTFIELD, AP, "pzo$queueSlot", "I"));
-        setSlot.instructions.add(new InsnNode(Opcodes.RETURN));
-        node.methods.add(setSlot);
-
-        MethodNode main = new MethodNode(Opcodes.ACC_PUBLIC, "pzo$deferMain", "(F)V", null, null);
-        InsnList c = main.instructions;
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, AP, "updateLayerBlendWeightings", "()V", false));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new VarInsnNode(Opcodes.FLOAD, 1));
-        c.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, AP, "DoAngles", "(F)V", false));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, AP, "calculateDeferredMovement", "()V", false));
-        c.add(new InsnNode(Opcodes.RETURN));
-        node.methods.add(main);
-
-        MethodNode work = new MethodNode(Opcodes.ACC_PUBLIC, "pzo$deferBones", "(F)V", null, null);
-        c = work.instructions;
-        LabelNode done = new LabelNode();
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKEVIRTUAL, AP, "isReady", "()Z", false));
-        c.add(new JumpInsnNode(Opcodes.IFEQ, done));
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new VarInsnNode(Opcodes.FLOAD, 1));
-        c.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, AP, "pzo$bonesNoBlend", "(F)V", false));
-        for (String name : new String[] {"updateTwistBone", "applyBoneReParenting", "updateModelTransforms"}) {
-            c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-            c.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, AP, name, "()V", false));
-        }
-        c.add(new VarInsnNode(Opcodes.ALOAD, 0));
-        c.add(new MethodInsnNode(Opcodes.INVOKESTATIC, ME, "updateSkinTransforms", "(Ljava/lang/Object;)V", false));
-        c.add(done);
-        c.add(new InsnNode(Opcodes.RETURN));
-        node.methods.add(work);
+        if (redirected != 1) return false;
 
         InsnList pre = new InsnList();
         LabelNode stock = new LabelNode();
