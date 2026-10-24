@@ -41,31 +41,31 @@ public class PZOptimAgent {
             if (inst.isRetransformClassesSupported()) {
                 for (Class<?> c : inst.getAllLoadedClasses()) {
                     String name = c.getName();
-                    if ("zombie.iso.IsoGridSquare".equals(name) ||
-                        "zombie.iso.IsoChunkMap".equals(name) ||
-                        "zombie.iso.ChunkSaveWorker".equals(name) ||
-                        "zombie.iso.WorldStreamer".equals(name) ||
-                        "zombie.iso.IsoWorld".equals(name) ||
-                        "zombie.core.skinnedmodel.animation.AnimationPlayer".equals(name) ||
-                        "zombie.FileGuidTable".equals(name) ||
-                        "zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandlePool".equals(name) ||
+                    if ("se.krka.kahlua.j2se.KahluaTableImpl".equals(name) ||
                         "zombie.core.properties.PropertyContainer".equals(name) ||
-                        "zombie.characters.IsoGameCharacter".equals(name) ||
-                        "zombie.characters.animals.IsoAnimal".equals(name) ||
-                        "zombie.pathfind.nativeCode.PathfindNativeThread".equals(name) ||
-                        "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
-                        "zombie.vehicles.BaseVehicle".equals(name) ||
-                        "zombie.characters.IsoZombie".equals(name) ||
-                        "zombie.characters.IsoPlayer".equals(name) ||
-                        "zombie.MovingObjectUpdateScheduler".equals(name) ||
-                        "se.krka.kahlua.j2se.KahluaTableImpl".equals(name) ||
-                        "zombie.WorldSoundManager".equals(name) ||
-                        "zombie.core.textures.TextureIDAssetManager".equals(name) ||
                         "zombie.fileSystem.FileSystemImpl".equals(name) ||
-                        "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
+                        "zombie.characters.IsoPlayer".equals(name) ||
+                        "zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandlePool".equals(name) ||
+                        "zombie.WorldSoundManager".equals(name) ||
+                        "zombie.iso.WorldStreamer".equals(name) ||
+                        "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
+                        "zombie.iso.ChunkSaveWorker".equals(name) ||
+                        "zombie.characters.IsoGameCharacter".equals(name) ||
                         "zombie.iso.sprite.IsoSprite".equals(name) ||
                         "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
-                        "zombie.fileSystem.TexturePackDevice".equals(name)) {
+                        "zombie.iso.IsoGridSquare".equals(name) ||
+                        "zombie.iso.IsoChunkMap".equals(name) ||
+                        "zombie.core.skinnedmodel.animation.AnimationPlayer".equals(name) ||
+                        "zombie.pathfind.nativeCode.PathfindNativeThread".equals(name) ||
+                        "zombie.iso.IsoWorld".equals(name) ||
+                        "zombie.MovingObjectUpdateScheduler".equals(name) ||
+                        "zombie.characters.IsoZombie".equals(name) ||
+                        "zombie.FileGuidTable".equals(name) ||
+                        "zombie.characters.animals.IsoAnimal".equals(name) ||
+                        "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
+                        "zombie.fileSystem.TexturePackDevice".equals(name) ||
+                        "zombie.vehicles.BaseVehicle".equals(name) ||
+                        "zombie.core.textures.TextureIDAssetManager".equals(name)) {
                         try {
                             inst.retransformClasses(c);
                             PZOLogger.success("[PZO Agent] Retransformed early-loaded class: " + name);

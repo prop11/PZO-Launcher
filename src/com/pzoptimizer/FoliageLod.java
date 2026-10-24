@@ -56,8 +56,9 @@ public final class FoliageLod {
 
     private FoliageLod() {}
 
+    // Multiplied by an odd constant: still one key per chunk, but neighbouring chunks no longer share HashMap buckets
     private static long key(int wx, int wy) {
-        return ((long) wx << 32) ^ (wy & 0xffffffffL);
+        return (((long) wx << 32) ^ (wy & 0xffffffffL)) * 0x2E41CBF68F940BCFL;
     }
 
     private static boolean enabled() {

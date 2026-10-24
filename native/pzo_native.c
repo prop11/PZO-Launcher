@@ -1586,7 +1586,7 @@ static volatile LONG64 g_pzpf_expanded = 0;
 static volatile LONG64 g_pzpf_decrease = 0;
 
 static unsigned int pzpf_hash(void *p, unsigned int mask) {
-    unsigned long long h = ((unsigned long long)(ULONG_PTR)p >> 4) * 0x9E3779B97F4A7C15ULL;
+    unsigned long long h = ((unsigned long long)(ULONG_PTR)p >> 4) * 0xDBF1E80C8D1F0601ULL;
     return (unsigned int)(h >> 32) & mask;
 }
 
