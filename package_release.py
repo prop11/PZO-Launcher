@@ -83,10 +83,14 @@ def main():
         "libpzo_native64.so",
         "libpzo_native64.dylib",
         "install.bat",
+        "downgrade.bat",
         "pzo_optimizer.sh",
+        "pzo_downgrade.sh",
         "pzo_optimizer.command",
+        "pzo_downgrade.command",
         "README.md",
         "README_SERVER.md",
+        "README_DOWNGRADE.md",
     ]
 
     for fname in files_to_copy:
@@ -110,7 +114,7 @@ def main():
 
     win_zip = os.path.join(dist_dir, "PZO-Optimizer-Windows.zip")
     with zipfile.ZipFile(win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["install.bat", "PZOptimEngine.jar", "pzo_native64.dll", "README.md"]:
+        for f in ["install.bat", "downgrade.bat", "PZOptimEngine.jar", "pzo_native64.dll", "README.md", "README_DOWNGRADE.md"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
                 add_file_to_archive(zf, fp, f)
@@ -118,11 +122,19 @@ def main():
 
     mac_linux_zip = os.path.join(dist_dir, "PZO_Optimizer_macOS_Linux.zip")
     with zipfile.ZipFile(mac_linux_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["pzo_optimizer.sh", "pzo_optimizer.command", "PZOptimEngine.jar", "README.md", "pzo_native64.dll", "libpzo_native64.so", "libpzo_native64.dylib"]:
+        for f in ["pzo_optimizer.sh", "pzo_downgrade.sh", "pzo_optimizer.command", "pzo_downgrade.command", "PZOptimEngine.jar", "README.md", "README_DOWNGRADE.md", "pzo_native64.dll", "libpzo_native64.so", "libpzo_native64.dylib"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
                 add_file_to_archive(zf, fp, f)
     print(f"[+] Packaged: PZO_Optimizer_macOS_Linux.zip ({os.path.getsize(mac_linux_zip):,} bytes)")
+
+    downgrader_zip = os.path.join(dist_dir, "PZO-Downgrader.zip")
+    with zipfile.ZipFile(downgrader_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in ["downgrade.bat", "pzo_downgrade.sh", "pzo_downgrade.command", "README_DOWNGRADE.md"]:
+            fp = os.path.join(dist_dir, f)
+            if os.path.isfile(fp):
+                add_file_to_archive(zf, fp, f)
+    print(f"[+] Packaged: PZO-Downgrader.zip ({os.path.getsize(downgrader_zip):,} bytes)")
 
     srv_win_zip = os.path.join(dist_dir, "PZO-Server-Windows.zip")
     with zipfile.ZipFile(srv_win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
