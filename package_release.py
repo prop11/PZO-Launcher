@@ -18,21 +18,28 @@ def sha256_file(filepath):
             h.update(chunk)
     return h.hexdigest()
 
+# Direct lookups only: a recursive walk of the repo found a stale dist/pzo_native64.dll before native/ and shipped it
 def find_file(fname, search_roots):
     for root_dir in search_roots:
-        if not os.path.exists(root_dir):
-            continue
-        # Direct check
         direct = os.path.join(root_dir, fname)
         if os.path.isfile(direct):
             return direct
-        # Recursive walk check
-        for current, _, files in os.walk(root_dir):
-            if fname in files:
-                return os.path.join(current, fname)
     return None
 
+# PZO targets Java 17 (build_all.py --release 17); a class built for a newer Java than the game's JRE fails to load (issue #48)
+MAX_CLASS_MAJOR = 61
+
 def create_jar(bin_dir, manifest_file, out_jar):
+    too_new = []
+    for root, _, files in os.walk(bin_dir):
+        for file in files:
+            if file.endswith(".class"):
+                with open(os.path.join(root, file), "rb") as f:
+                    header = f.read(8)
+                if len(header) == 8 and int.from_bytes(header[6:8], "big") > MAX_CLASS_MAJOR:
+                    too_new.append(os.path.relpath(os.path.join(root, file), bin_dir))
+    if too_new:
+        sys.exit(f"[!] Refusing to build {os.path.basename(out_jar)}: classes newer than Java 17 (rebuild with build_all.py): {too_new}")
     with zipfile.ZipFile(out_jar, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(manifest_file, "META-INF/MANIFEST.MF")
         for root, _, files in os.walk(bin_dir):
@@ -74,8 +81,8 @@ def main():
     if os.path.isfile(server_jar):
         shutil.copy2(server_jar, os.path.join(root_dir, "PZOServerEngine.jar"))
 
-    # Search locations for assets (prefer workspace root and native source dirs over stale dist)
-    search_dirs = [root_dir, native_dir, dist_dir]
+    # Natives come from native/ (CI builds land there), scripts and readmes from the repo root; never from dist/
+    search_dirs = [native_dir, root_dir]
 
     # Standalone binaries and scripts for dist/
     files_to_copy = [
