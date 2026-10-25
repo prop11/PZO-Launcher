@@ -24,6 +24,12 @@ public class PZOEntrypoint {
             PZOLogger.info(String.format("System Resources: %d CPU Cores | Max JVM Heap Allocated: %d MB", cores, maxMemMB));
         } catch (Throwable ignored) {}
 
+        try {
+            UpdateDialog.runDevDialogPreviews(args);
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZO Dev] Dialog preview failed: " + t.getMessage());
+        }
+
         if (IncompatibleModGuard.isPzOptimizationInstalled()) {
             IncompatibleModGuard.reportAndWarn();
             launchGame(args);

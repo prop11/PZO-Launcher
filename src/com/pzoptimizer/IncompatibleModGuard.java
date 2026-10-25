@@ -95,8 +95,11 @@ public final class IncompatibleModGuard {
                 UpdateChecker.CURRENT_VERSION));
         } catch (Throwable ignored) {}
 
-        String message =
-            "PZ_Optimization (Steam Workshop " + PZ_OPTIMIZATION_WORKSHOP_ID + ") is installed in your Project Zomboid game folder.\n\n"
+        UpdateDialog.showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", warningMessage());
+    }
+
+    static String warningMessage() {
+        return "PZ_Optimization (Steam Workshop " + PZ_OPTIMIZATION_WORKSHOP_ID + ") is installed in your Project Zomboid game folder.\n\n"
             + "This mod is not recommended: it replaces core game files with its own modified copies, "
             + "and PZO is incompatible with it.\n\n"
             + "PZO has been DISABLED for this launch and will stay disabled while PZ_Optimization is detected. "
@@ -104,6 +107,5 @@ public final class IncompatibleModGuard {
             + "To use PZO again, remove PZ_Optimization with its uninstaller "
             + "(Uninstall-PZ-Optimization.cmd in the game folder, or its in-game uninstall option), then restart the game. "
             + "Unsubscribing from the Workshop item or verifying game files in Steam does not remove its files.";
-        UpdateDialog.showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", message);
     }
 }

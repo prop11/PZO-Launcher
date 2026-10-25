@@ -6,10 +6,57 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Pre-menu update prompt and self-updater, using WinForms on Windows, AppleScript on macOS and Zenity/KDialog on Linux and Steam Deck. */
 public class UpdateDialog {
     private static final String CONFIG_FILE = "pzo_config.json";
+
+    // These dialogs block startup before the game window exists, so an unseen one must never hang the launch.
+    private static final int DIALOG_AUTO_CLOSE_MS = 60000;
+    private static final long DIALOG_PROCESS_TIMEOUT_SEC = 120;
+
+    // The PowerShell child rarely gets foreground rights, so Activate() alone often just flashes the taskbar.
+    // Attaching to the foreground window's input thread lets SetForegroundWindow through. Passed via
+    // PZO_FG_SRC because the script itself cannot contain double quotes.
+    private static final String PS_FOREGROUND_SRC = """
+        using System;
+        using System.Runtime.InteropServices;
+        public static class PzoForeground {
+            [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
+            [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+            [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+            [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hWnd);
+            [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int cmd);
+            public static void Force(IntPtr hWnd) {
+                uint fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+                uint me = GetCurrentThreadId();
+                bool attached = fg != 0 && fg != me && AttachThreadInput(me, fg, true);
+                try {
+                    ShowWindow(hWnd, 5);
+                    BringWindowToTop(hWnd);
+                    SetForegroundWindow(hWnd);
+                } finally {
+                    if (attached) AttachThreadInput(me, fg, false);
+                }
+            }
+        }
+        """;
+
+    // TopMost keeps the form above normal windows; it is pulled to the front on show and again for the next
+    // 3s in case Steam's launch window takes focus back. An unanswered form closes as Cancel (= skip).
+    private static final String PS_FORM_GUARDS =
+        "try{Add-Type -TypeDefinition $env:PZO_FG_SRC}catch{};" +
+        "$f.TopMost=$true;$f.ShowInTaskbar=$true;" +
+        "$fg={if(-not $f.ContainsFocus){try{[PzoForeground]::Force($f.Handle)}catch{$f.Activate()}}};" +
+        "$global:pzoFgTicks=0;$ft=New-Object Windows.Forms.Timer;$ft.Interval=1000;" +
+        "$ft.Add_Tick({$global:pzoFgTicks++;if($global:pzoFgTicks -ge 3){$ft.Stop()};& $fg});" +
+        "$tm=New-Object Windows.Forms.Timer;$tm.Interval=" + DIALOG_AUTO_CLOSE_MS + ";" +
+        "$tm.Add_Tick({$tm.Stop();$f.DialogResult=[Windows.Forms.DialogResult]::Cancel});" +
+        "$f.Add_Shown({& $fg;$ft.Start();$tm.Start()});";
 
     public static boolean promptIfUpdateAvailable(String latestVersion, String downloadUrl) {
         return promptIfUpdateAvailable(latestVersion, downloadUrl, null);
@@ -21,17 +68,7 @@ public class UpdateDialog {
         }
 
         try {
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String result = "SKIP";
-
-            if (os.contains("win")) {
-                result = showWindowsDialog(latestVersion);
-            } else if (os.contains("mac")) {
-                result = showMacDialog(latestVersion);
-            } else {
-                result = showLinuxDialog(latestVersion);
-            }
-
+            String result = showUpdateDialog(latestVersion);
             if ("UPDATE".equalsIgnoreCase(result)) {
                 performAutoUpdateAndExit(latestVersion, downloadUrl, dllDownloadUrl);
                 return true;
@@ -89,17 +126,7 @@ public class UpdateDialog {
         }
 
         try {
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String result = "SKIP";
-
-            if (os.contains("win")) {
-                result = showWindowsNativeMismatchDialog(installedVersion, expectedVersion);
-            } else if (os.contains("mac")) {
-                result = showMacNativeMismatchDialog(installedVersion, expectedVersion);
-            } else {
-                result = showLinuxNativeMismatchDialog(installedVersion, expectedVersion);
-            }
-
+            String result = showNativeMismatchDialog(installedVersion, expectedVersion);
             if ("UPDATE".equalsIgnoreCase(result)) {
                 performNativeAutoUpdateAndExit(expectedVersion, dllDownloadUrl);
                 return true;
@@ -110,6 +137,65 @@ public class UpdateDialog {
             PZOLogger.error("Native update dialog launch error: " + t.getMessage(), t);
         }
         return false;
+    }
+
+    private static String showUpdateDialog(String latestVersion) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) return showWindowsDialog(latestVersion);
+        if (os.contains("mac")) return showMacDialog(latestVersion);
+        return showLinuxDialog(latestVersion);
+    }
+
+    private static String showNativeMismatchDialog(String installedVersion, String expectedVersion) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) return showWindowsNativeMismatchDialog(installedVersion, expectedVersion);
+        if (os.contains("mac")) return showMacNativeMismatchDialog(installedVersion, expectedVersion);
+        return showLinuxNativeMismatchDialog(installedVersion, expectedVersion);
+    }
+
+    /**
+     * Dev launch options that open the startup dialogs with sample data so they can be checked without a real
+     * update, mismatch or mod. Answers are only logged: nothing is downloaded, ignored, allowed or blocked.
+     * -pzo_updatebox, -pzo_nativebox, -pzo_nativemissingbox, -pzo_javamodbox, -pzo_pzwarnbox, -pzo_noticebox, -pzo_alldialogs
+     */
+    public static void runDevDialogPreviews(String[] args) {
+        java.util.Set<String> flags = new java.util.HashSet<>();
+        if (args != null) {
+            for (String a : args) if (a != null) flags.add(a.trim().toLowerCase());
+        }
+        String sunCmd = System.getProperty("sun.java.command");
+        if (sunCmd != null) {
+            for (String tok : sunCmd.split("\\s+")) flags.add(tok.toLowerCase());
+        }
+        boolean all = flags.contains("-pzo_alldialogs");
+        String sample = UpdateChecker.CURRENT_VERSION;
+
+        if (all || flags.contains("-pzo_updatebox")) {
+            devResult("update", showUpdateDialog(sample + "-devpreview"));
+        }
+        if (all || flags.contains("-pzo_nativebox")) {
+            devResult("native mismatch", showNativeMismatchDialog("0.0.0-devpreview", sample));
+        }
+        if (all || flags.contains("-pzo_nativemissingbox")) {
+            devResult("native missing", showNativeMismatchDialog("Not Installed (Missing)", sample));
+        }
+        if (all || flags.contains("-pzo_javamodbox")) {
+            devResult("java mod approval", promptJavaModApproval("Dev Preview Mod", "1234567890",
+                new File("mods/DevPreview/media/java/devpreview.jar").getAbsolutePath(),
+                "0000000000000000000000000000000000000000000000000000000000000000"));
+        }
+        if (all || flags.contains("-pzo_pzwarnbox")) {
+            showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", IncompatibleModGuard.warningMessage());
+            devResult("PZ_Optimization warning", "closed");
+        }
+        if (all || flags.contains("-pzo_noticebox")) {
+            showNoticePopup("Update Notice", "Dev preview of the update failure notice.\nPlease update manually using install.bat / pzo_optimizer.sh.");
+            devResult("update notice", "closed");
+        }
+    }
+
+    private static void devResult(String dialog, String result) {
+        PZOLogger.info("[PZO Dev] " + dialog + " dialog preview returned " + result + " (not acted on)");
     }
 
     private static String showWindowsDialog(String latestVersion) {
@@ -123,7 +209,7 @@ public class UpdateDialog {
                 "$f.Size=New-Object Drawing.Size(480,240);" +
                 "$f.StartPosition='CenterScreen';" +
                 "$f.FormBorderStyle='FixedDialog';" +
-                "$f.MaximizeBox=$false;$f.MinimizeBox=$false;$f.TopMost=$true;" +
+                "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + PS_FORM_GUARDS +
                 "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);" +
                 "$f.ForeColor=[Drawing.Color]::White;" +
                 "$t=New-Object Windows.Forms.Label;" +
@@ -150,18 +236,9 @@ public class UpdateDialog {
                 UpdateChecker.CURRENT_VERSION, latestVersion, latestVersion
             );
 
-            ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode);
-            Process p = pb.start();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    line = line.trim();
-                    if ("UPDATE".equalsIgnoreCase(line) || "SKIP_IGNORE".equalsIgnoreCase(line) || "SKIP".equalsIgnoreCase(line)) {
-                        return line;
-                    }
-                }
-            }
-            p.waitFor();
+            String out = runDialogProcess(new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode), null);
+            if (out.endsWith(":UPDATE")) return "UPDATE";
+            if (out.endsWith(":SKIP_IGNORE")) return "SKIP_IGNORE";
         } catch (Throwable t) {
             PZOLogger.error("Windows update dialog error: " + t.getMessage(), t);
         }
@@ -242,7 +319,7 @@ public class UpdateDialog {
                 "$f.Size=New-Object Drawing.Size(530,280);" +
                 "$f.StartPosition='CenterScreen';" +
                 "$f.FormBorderStyle='FixedDialog';" +
-                "$f.MaximizeBox=$false;$f.MinimizeBox=$false;$f.TopMost=$true;" +
+                "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + PS_FORM_GUARDS +
                 "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);" +
                 "$f.ForeColor=[Drawing.Color]::White;" +
                 "$t=New-Object Windows.Forms.Label;" +
@@ -269,18 +346,9 @@ public class UpdateDialog {
                 formTitle, titleText, descText.replace("'", "''"), btnText
             );
 
-            ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode);
-            Process p = pb.start();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    line = line.trim();
-                    if ("UPDATE".equalsIgnoreCase(line) || "SKIP_IGNORE".equalsIgnoreCase(line) || "SKIP".equalsIgnoreCase(line)) {
-                        return line;
-                    }
-                }
-            }
-            p.waitFor();
+            String out = runDialogProcess(new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode), null);
+            if (out.endsWith(":UPDATE")) return "UPDATE";
+            if (out.endsWith(":SKIP_IGNORE")) return "SKIP_IGNORE";
         } catch (Throwable t) {
             PZOLogger.error("Windows native update dialog error: " + t.getMessage(), t);
         }
@@ -795,21 +863,15 @@ public class UpdateDialog {
         try {
             String os = System.getProperty("os.name", "").toLowerCase();
             if (os.contains("win")) {
-                String ps = String.format(
-                    "$nl=[Environment]::NewLine;" +
-                    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
-                    "[Windows.Forms.MessageBox]::Show('%s'.Replace('`n', $nl), '%s', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
-                    message.replace("'", "''"), title
-                );
-                new ProcessBuilder("powershell.exe", "-NoProfile", "-Command", ps).start().waitFor();
+                showWindowsNotice(title, message);
             } else if (os.contains("mac")) {
                 String script = String.format(
                     "display dialog \"%s\" with title \"%s\" buttons {\"OK\"} default button \"OK\"",
                     message.replace("\n", "\\n"), title
                 );
-                new ProcessBuilder("osascript", "-e", script).start().waitFor();
+                runDialogProcess(new ProcessBuilder("osascript", "-e", script), null);
             } else {
-                new ProcessBuilder("zenity", "--info", "--title=" + title, "--text=" + message).start().waitFor();
+                runDialogProcess(new ProcessBuilder("zenity", "--info", "--title=" + title, "--text=" + message), null);
             }
         } catch (Throwable ignored) {}
     }
@@ -836,18 +898,59 @@ public class UpdateDialog {
     }
 
     // The message goes through an environment variable so mod names and paths are never parsed as script.
+    // A process that outlives the timeout (AMSI scan, policy block, unseen zenity) is killed and reported as "-1:", which every caller treats as skip.
     private static String runDialogProcess(ProcessBuilder pb, String text) throws Exception {
-        pb.environment().put("PZO_DIALOG_TEXT", text);
+        if (text != null) pb.environment().put("PZO_DIALOG_TEXT", text);
+        pb.environment().put("PZO_FG_SRC", PS_FOREGROUND_SRC);
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
         Process p = pb.start();
-        String last = null;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (!line.trim().isEmpty()) last = line.trim();
-            }
+        AtomicReference<String> last = new AtomicReference<>();
+        Thread reader = new Thread(() -> {
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (!line.trim().isEmpty()) last.set(line.trim());
+                }
+            } catch (IOException ignored) {}
+        }, "PZO-DialogReader");
+        reader.setDaemon(true);
+        reader.start();
+        if (!p.waitFor(DIALOG_PROCESS_TIMEOUT_SEC, TimeUnit.SECONDS)) {
+            PZOLogger.warn("Startup dialog did not close within " + DIALOG_PROCESS_TIMEOUT_SEC + "s; killing it and continuing launch.");
+            p.destroyForcibly();
+            return "-1:";
         }
-        int code = p.waitFor();
-        return code + ":" + (last != null ? last : "");
+        reader.join(2000);
+        String out = last.get();
+        return p.exitValue() + ":" + (out != null ? out : "");
+    }
+
+    // Title and message go through environment variables so neither is parsed as script.
+    private static void showWindowsNotice(String title, String text) throws Exception {
+        String psCode =
+            "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
+            "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing');" +
+            "$f=New-Object Windows.Forms.Form;$f.Text=$env:PZO_DIALOG_TITLE;" +
+            "$f.Size=New-Object Drawing.Size(620,430);" +
+            "$f.StartPosition='CenterScreen';$f.FormBorderStyle='FixedDialog';" +
+            "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + PS_FORM_GUARDS +
+            "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);$f.ForeColor=[Drawing.Color]::White;" +
+            "$t=New-Object Windows.Forms.Label;$t.Text=('[!] ' + $env:PZO_DIALOG_TITLE);" +
+            "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
+            "$t.ForeColor=[Drawing.Color]::FromArgb(255,185,50);" +
+            "$t.Location=New-Object Drawing.Point(20,15);$t.Size=New-Object Drawing.Size(570,25);$f.Controls.Add($t);" +
+            "$i=New-Object Windows.Forms.TextBox;$i.Multiline=$true;$i.ReadOnly=$true;$i.BorderStyle='None';" +
+            "$i.Text=($env:PZO_DIALOG_TEXT -replace '\\n',[Environment]::NewLine);" +
+            "$i.Font=New-Object Drawing.Font('Segoe UI',9.5);" +
+            "$i.BackColor=[Drawing.Color]::FromArgb(30,30,30);$i.ForeColor=[Drawing.Color]::FromArgb(220,220,220);" +
+            "$i.Location=New-Object Drawing.Point(20,48);$i.Size=New-Object Drawing.Size(570,280);$f.Controls.Add($i);" +
+            "$ok=New-Object Windows.Forms.Button;$ok.Text='OK';" +
+            "$ok.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold);$ok.BackColor=[Drawing.Color]::FromArgb(65,65,65);$ok.ForeColor=[Drawing.Color]::White;$ok.FlatStyle='Flat';" +
+            "$ok.Location=New-Object Drawing.Point(465,342);$ok.Size=New-Object Drawing.Size(125,32);$ok.DialogResult=[Windows.Forms.DialogResult]::OK;$f.Controls.Add($ok);" +
+            "$f.AcceptButton=$ok;$f.CancelButton=$ok;$f.ActiveControl=$ok;[void]$f.ShowDialog()";
+        ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode);
+        pb.environment().put("PZO_DIALOG_TITLE", title);
+        runDialogProcess(pb, text);
     }
 
     // No double quotes in the script: Java does not escape them when building the Windows command line.
@@ -859,7 +962,7 @@ public class UpdateDialog {
             "$f.Text='Project Zomboid Optimiser - Java Mod Approval';" +
             "$f.Size=New-Object Drawing.Size(620,380);" +
             "$f.StartPosition='CenterScreen';$f.FormBorderStyle='FixedDialog';" +
-            "$f.MaximizeBox=$false;$f.MinimizeBox=$false;$f.TopMost=$true;" +
+            "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + PS_FORM_GUARDS +
             "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);$f.ForeColor=[Drawing.Color]::White;" +
             "$t=New-Object Windows.Forms.Label;$t.Text='[!] Java Mod Requires Approval';" +
             "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
@@ -927,11 +1030,7 @@ public class UpdateDialog {
         String os = System.getProperty("os.name", "").toLowerCase();
         try {
             if (os.contains("win")) {
-                String psCode =
-                    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
-                    "[void][Windows.Forms.MessageBox]::Show(($env:PZO_DIALOG_TEXT -replace '\\n',[Environment]::NewLine)," +
-                    "'" + title.replace("'", "''") + "',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Warning)";
-                runDialogProcess(new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode), text);
+                showWindowsNotice(title, text);
                 return;
             }
             if (os.contains("mac")) {
