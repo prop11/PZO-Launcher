@@ -11,6 +11,7 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -25,6 +26,12 @@ import java.util.jar.Manifest;
 /** Finds, deduplicates and loads third-party Java workshop mods across all Steam libraries, deferring ZombieBuddy mods to ZombieBuddy. */
 public class JavaModLoader {
     private static final Set<String> LOADED_MODS = new HashSet<>();
+    private static final Set<String> PRUNED_DIR_NAMES = new HashSet<>(Arrays.asList(
+        "textures", "texturepacks", "texturepack", "maps", "sound", "sounds", "music", "audio",
+        "lua", "scripts", "clothing", "models", "models_x", "models_2", "anims", "anims_x",
+        "ui", "fonts", "shaders", "radio", "translate", "translations", "sandbox",
+        "building", "buildings", "crafting", "loot", ".git", ".svn", ".idea", "saves", "backup", "backups"
+    ));
     private static int successCount = 0;
     private static int errorCount = 0;
     private static volatile boolean conflictingFpsModDetected = false;
@@ -86,7 +93,10 @@ public class JavaModLoader {
             PZOLogger.info("[JavaModLoader] ZombieBuddy framework detected in installation (-agentlib:zbNative / ZombieBuddy.jar).");
             PZOLogger.info("[JavaModLoader] Preserving PZO primary optimizer priority while delegating @Patch mods to ZombieBuddy runtime.");
         }
+        long scanStart = System.currentTimeMillis();
         List<File> candidateJars = findJavaModJars();
+        long scanDuration = System.currentTimeMillis() - scanStart;
+        PZOLogger.info(String.format("[JavaModLoader] Java mod scan completed in %d ms (%d candidate jars found).", scanDuration, candidateJars.size()));
 
         if (candidateJars.isEmpty()) {
             PZOLogger.info("[JavaModLoader] No external Java Workshop mods detected.");
@@ -210,11 +220,12 @@ public class JavaModLoader {
             if (macWs.exists() && macWs.isDirectory()) searchRoots.add(macWs);
         } catch (Throwable ignored) {}
 
+        Set<String> visitedScanDirs = new HashSet<>();
         for (File root : searchRoots) {
             String cPath = getCanonicalPath(root);
             if (!scannedDirs.contains(cPath)) {
                 scannedDirs.add(cPath);
-                scanDirectoryForJars(root, result, 0, 12);
+                scanDirectoryForJars(root, result, visitedScanDirs, 0, 10);
             }
         }
 
@@ -240,15 +251,22 @@ public class JavaModLoader {
         } catch (Throwable ignored) {}
     }
 
-    private static void scanDirectoryForJars(File dir, List<File> result, int depth, int maxDepth) {
+    private static void scanDirectoryForJars(File dir, List<File> result, Set<String> visitedDirs, int depth, int maxDepth) {
         if (dir == null || !dir.exists() || depth > maxDepth) return;
+
+        String cPath = getCanonicalPath(dir);
+        if (!visitedDirs.add(cPath)) return;
 
         File[] files = dir.listFiles();
         if (files == null) return;
 
         for (File f : files) {
             if (f.isDirectory()) {
-                scanDirectoryForJars(f, result, depth + 1, maxDepth);
+                String name = f.getName().toLowerCase();
+                if (PRUNED_DIR_NAMES.contains(name) || name.startsWith("models_") || name.startsWith("anims_")) {
+                    continue;
+                }
+                scanDirectoryForJars(f, result, visitedDirs, depth + 1, maxDepth);
             } else if (f.isFile() && f.getName().toLowerCase().endsWith(".jar")) {
                 if (f.getName().equalsIgnoreCase("PZOptimEngine.jar") ||
                     f.getName().equalsIgnoreCase("projectzomboid.jar") ||
@@ -681,8 +699,21 @@ public class JavaModLoader {
                     }
                 }
             }
-            // Stop at the nearest mod: walking further up reaches ~/Zomboid, whose mods/ folder holds every local mod
-            if (!meta.modIds.isEmpty()) break;
+            String currName = curr.getName().toLowerCase();
+            boolean isSubfolder = currName.equals("42") || currName.equals("common") ||
+                                  currName.equals("media") || currName.equals("java") ||
+                                  currName.equals("classes") || currName.equals("lib") || currName.equals("libs");
+
+            // Stop at the nearest mod root: walking further up reaches ~/Zomboid or workshop root
+            if (!meta.modIds.isEmpty() && !isSubfolder) {
+                if (curr.getParentFile() != null) {
+                    File pInfo = new File(curr.getParentFile(), "mod.info");
+                    if (pInfo.exists() && pInfo.isFile()) parseModInfoFile(pInfo, meta);
+                    File pCommon = new File(curr.getParentFile(), "common" + File.separator + "mod.info");
+                    if (pCommon.exists() && pCommon.isFile()) parseModInfoFile(pCommon, meta);
+                }
+                break;
+            }
             curr = curr.getParentFile();
             levels++;
         }
