@@ -17,12 +17,46 @@ public class UpdateDialog {
     private static final int DIALOG_AUTO_CLOSE_MS = 60000;
     private static final long DIALOG_PROCESS_TIMEOUT_SEC = 120;
 
-    // The PowerShell child rarely gets foreground rights from Steam, so stay TopMost; an unanswered form closes as Cancel (= skip).
+    // The PowerShell child rarely gets foreground rights, so Activate() alone often just flashes the taskbar.
+    // Attaching to the foreground window's input thread lets SetForegroundWindow through. Passed via
+    // PZO_FG_SRC because the script itself cannot contain double quotes.
+    private static final String PS_FOREGROUND_SRC = """
+        using System;
+        using System.Runtime.InteropServices;
+        public static class PzoForeground {
+            [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
+            [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+            [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+            [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hWnd);
+            [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int cmd);
+            public static void Force(IntPtr hWnd) {
+                uint fg = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+                uint me = GetCurrentThreadId();
+                bool attached = fg != 0 && fg != me && AttachThreadInput(me, fg, true);
+                try {
+                    ShowWindow(hWnd, 5);
+                    BringWindowToTop(hWnd);
+                    SetForegroundWindow(hWnd);
+                } finally {
+                    if (attached) AttachThreadInput(me, fg, false);
+                }
+            }
+        }
+        """;
+
+    // TopMost keeps the form above normal windows; it is pulled to the front on show and again for the next
+    // 3s in case Steam's launch window takes focus back. An unanswered form closes as Cancel (= skip).
     private static final String PS_FORM_GUARDS =
+        "try{Add-Type -TypeDefinition $env:PZO_FG_SRC}catch{};" +
         "$f.TopMost=$true;$f.ShowInTaskbar=$true;" +
+        "$fg={if(-not $f.ContainsFocus){try{[PzoForeground]::Force($f.Handle)}catch{$f.Activate()}}};" +
+        "$global:pzoFgTicks=0;$ft=New-Object Windows.Forms.Timer;$ft.Interval=1000;" +
+        "$ft.Add_Tick({$global:pzoFgTicks++;if($global:pzoFgTicks -ge 3){$ft.Stop()};& $fg});" +
         "$tm=New-Object Windows.Forms.Timer;$tm.Interval=" + DIALOG_AUTO_CLOSE_MS + ";" +
         "$tm.Add_Tick({$tm.Stop();$f.DialogResult=[Windows.Forms.DialogResult]::Cancel});" +
-        "$f.Add_Shown({$f.Activate();$tm.Start()});";
+        "$f.Add_Shown({& $fg;$ft.Start();$tm.Start()});";
 
     public static boolean promptIfUpdateAvailable(String latestVersion, String downloadUrl) {
         return promptIfUpdateAvailable(latestVersion, downloadUrl, null);
@@ -34,17 +68,7 @@ public class UpdateDialog {
         }
 
         try {
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String result = "SKIP";
-
-            if (os.contains("win")) {
-                result = showWindowsDialog(latestVersion);
-            } else if (os.contains("mac")) {
-                result = showMacDialog(latestVersion);
-            } else {
-                result = showLinuxDialog(latestVersion);
-            }
-
+            String result = showUpdateDialog(latestVersion);
             if ("UPDATE".equalsIgnoreCase(result)) {
                 performAutoUpdateAndExit(latestVersion, downloadUrl, dllDownloadUrl);
                 return true;
@@ -102,17 +126,7 @@ public class UpdateDialog {
         }
 
         try {
-            String os = System.getProperty("os.name", "").toLowerCase();
-            String result = "SKIP";
-
-            if (os.contains("win")) {
-                result = showWindowsNativeMismatchDialog(installedVersion, expectedVersion);
-            } else if (os.contains("mac")) {
-                result = showMacNativeMismatchDialog(installedVersion, expectedVersion);
-            } else {
-                result = showLinuxNativeMismatchDialog(installedVersion, expectedVersion);
-            }
-
+            String result = showNativeMismatchDialog(installedVersion, expectedVersion);
             if ("UPDATE".equalsIgnoreCase(result)) {
                 performNativeAutoUpdateAndExit(expectedVersion, dllDownloadUrl);
                 return true;
@@ -123,6 +137,65 @@ public class UpdateDialog {
             PZOLogger.error("Native update dialog launch error: " + t.getMessage(), t);
         }
         return false;
+    }
+
+    private static String showUpdateDialog(String latestVersion) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) return showWindowsDialog(latestVersion);
+        if (os.contains("mac")) return showMacDialog(latestVersion);
+        return showLinuxDialog(latestVersion);
+    }
+
+    private static String showNativeMismatchDialog(String installedVersion, String expectedVersion) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) return showWindowsNativeMismatchDialog(installedVersion, expectedVersion);
+        if (os.contains("mac")) return showMacNativeMismatchDialog(installedVersion, expectedVersion);
+        return showLinuxNativeMismatchDialog(installedVersion, expectedVersion);
+    }
+
+    /**
+     * Dev launch options that open the startup dialogs with sample data so they can be checked without a real
+     * update, mismatch or mod. Answers are only logged: nothing is downloaded, ignored, allowed or blocked.
+     * -pzo_updatebox, -pzo_nativebox, -pzo_nativemissingbox, -pzo_javamodbox, -pzo_pzwarnbox, -pzo_noticebox, -pzo_alldialogs
+     */
+    public static void runDevDialogPreviews(String[] args) {
+        java.util.Set<String> flags = new java.util.HashSet<>();
+        if (args != null) {
+            for (String a : args) if (a != null) flags.add(a.trim().toLowerCase());
+        }
+        String sunCmd = System.getProperty("sun.java.command");
+        if (sunCmd != null) {
+            for (String tok : sunCmd.split("\\s+")) flags.add(tok.toLowerCase());
+        }
+        boolean all = flags.contains("-pzo_alldialogs");
+        String sample = UpdateChecker.CURRENT_VERSION;
+
+        if (all || flags.contains("-pzo_updatebox")) {
+            devResult("update", showUpdateDialog(sample + "-devpreview"));
+        }
+        if (all || flags.contains("-pzo_nativebox")) {
+            devResult("native mismatch", showNativeMismatchDialog("0.0.0-devpreview", sample));
+        }
+        if (all || flags.contains("-pzo_nativemissingbox")) {
+            devResult("native missing", showNativeMismatchDialog("Not Installed (Missing)", sample));
+        }
+        if (all || flags.contains("-pzo_javamodbox")) {
+            devResult("java mod approval", promptJavaModApproval("Dev Preview Mod", "1234567890",
+                new File("mods/DevPreview/media/java/devpreview.jar").getAbsolutePath(),
+                "0000000000000000000000000000000000000000000000000000000000000000"));
+        }
+        if (all || flags.contains("-pzo_pzwarnbox")) {
+            showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", IncompatibleModGuard.warningMessage());
+            devResult("PZ_Optimization warning", "closed");
+        }
+        if (all || flags.contains("-pzo_noticebox")) {
+            showNoticePopup("Update Notice", "Dev preview of the update failure notice.\nPlease update manually using install.bat / pzo_optimizer.sh.");
+            devResult("update notice", "closed");
+        }
+    }
+
+    private static void devResult(String dialog, String result) {
+        PZOLogger.info("[PZO Dev] " + dialog + " dialog preview returned " + result + " (not acted on)");
     }
 
     private static String showWindowsDialog(String latestVersion) {
@@ -828,6 +901,7 @@ public class UpdateDialog {
     // A process that outlives the timeout (AMSI scan, policy block, unseen zenity) is killed and reported as "-1:", which every caller treats as skip.
     private static String runDialogProcess(ProcessBuilder pb, String text) throws Exception {
         if (text != null) pb.environment().put("PZO_DIALOG_TEXT", text);
+        pb.environment().put("PZO_FG_SRC", PS_FOREGROUND_SRC);
         pb.redirectError(ProcessBuilder.Redirect.DISCARD);
         Process p = pb.start();
         AtomicReference<String> last = new AtomicReference<>();
