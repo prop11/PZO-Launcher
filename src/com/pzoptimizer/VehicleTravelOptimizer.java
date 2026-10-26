@@ -11,6 +11,11 @@ public final class VehicleTravelOptimizer {
     private static volatile boolean initialized = false;
     private static volatile boolean unfairLockInstalled = false;
     private static volatile boolean simulationGovernorInstalled = false;
+    // Set when this game build lacks the fields we hook; checkAndMaintain runs every second otherwise.
+    private static volatile boolean unfairLockUnavailable = false;
+    private static volatile boolean simulationGovernorUnavailable = false;
+    private static volatile boolean unfairLockWarned = false;
+    private static volatile boolean simulationGovernorWarned = false;
 
     private static volatile Unsafe unsafeInstance = null;
     private static volatile long lastDrivingCheckTime = 0;
@@ -30,10 +35,10 @@ public final class VehicleTravelOptimizer {
     }
 
     public static void checkAndMaintain() {
-        if (!unfairLockInstalled) {
+        if (!unfairLockInstalled && !unfairLockUnavailable) {
             installUnfairChunkLock();
         }
-        if (!simulationGovernorInstalled) {
+        if (!simulationGovernorInstalled && !simulationGovernorUnavailable) {
             installSimulationGovernor();
         }
     }
@@ -52,6 +57,7 @@ public final class VehicleTravelOptimizer {
     /** Replaces the IsoChunkMap.bSettingChunk fair lock with a non-fair one. */
     public static synchronized boolean installUnfairChunkLock() {
         if (unfairLockInstalled) return true;
+        if (unfairLockUnavailable) return false;
         obtainUnsafe();
         if (unsafeInstance == null) return false;
 
@@ -76,8 +82,14 @@ public final class VehicleTravelOptimizer {
                 PZOLogger.success("[VehicleTravelOptimizer] IsoChunkMap Fair-Lock replaced with atomic Non-Fair Lock (Contention hitch eliminated)");
                 return true;
             }
+        } catch (NoSuchFieldException | ClassCastException e) {
+            unfairLockUnavailable = true;
+            PZOLogger.warn("[VehicleTravelOptimizer] Unfair lock disabled: incompatible game build (" + e + ")");
         } catch (Throwable t) {
-            PZOLogger.warn("[VehicleTravelOptimizer] Unfair lock replacement notice: " + t.getMessage());
+            if (!unfairLockWarned) {
+                unfairLockWarned = true;
+                PZOLogger.warn("[VehicleTravelOptimizer] Unfair lock replacement notice (retrying quietly): " + t);
+            }
         }
         return false;
     }
@@ -219,6 +231,7 @@ public final class VehicleTravelOptimizer {
      */
     public static synchronized boolean installSimulationGovernor() {
         if (simulationGovernorInstalled) return true;
+        if (simulationGovernorUnavailable) return false;
 
         try {
             Class<?> schedulerClass = Class.forName("zombie.MovingObjectUpdateScheduler");
@@ -264,8 +277,14 @@ public final class VehicleTravelOptimizer {
             simulationGovernorInstalled = true;
             PZOLogger.success("[VehicleTravelOptimizer] Town Zombie Simulation Governor armed (75%+ AI simulation load drop while driving)");
             return true;
+        } catch (NoSuchFieldException | ClassCastException e) {
+            simulationGovernorUnavailable = true;
+            PZOLogger.warn("[VehicleTravelOptimizer] Simulation governor disabled: incompatible game build (" + e + ")");
         } catch (Throwable t) {
-            PZOLogger.warn("[VehicleTravelOptimizer] Simulation governor install notice: " + t.getMessage());
+            if (!simulationGovernorWarned) {
+                simulationGovernorWarned = true;
+                PZOLogger.warn("[VehicleTravelOptimizer] Simulation governor install notice (retrying quietly): " + t);
+            }
         }
         return false;
     }

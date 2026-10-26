@@ -9,6 +9,9 @@ public final class ChunkIngestionPacer {
 
     private static volatile boolean active = false;
     private static volatile boolean pacerInstalled = false;
+    // Set when this game build lacks the fields we hook; the maintenance daemon retries every second otherwise.
+    private static volatile boolean pacerUnavailable = false;
+    private static volatile boolean pacerWarned = false;
 
     // 3.5 ms per frame
     public static final long FRAME_BUDGET_NANOS = 3_500_000L;
@@ -48,6 +51,7 @@ public final class ChunkIngestionPacer {
     public static synchronized boolean installPacer() {
         upgradeChunkMapLock();
         if (pacerInstalled) return true;
+        if (pacerUnavailable) return false;
 
         try {
             Class<?> chunkClass = Class.forName("zombie.iso.IsoChunk");
@@ -74,8 +78,17 @@ public final class ChunkIngestionPacer {
                 PZOLogger.success("ChunkIngestionPacer: Active (Frame-Budgeted Chunk Integration Governor Armed)");
                 return true;
             }
+
+            pacerUnavailable = true;
+            PZOLogger.warn("ChunkIngestionPacer disabled: unexpected loadGridSquare queue type " + (origQ == null ? "null" : origQ.getClass().getName()));
+        } catch (NoSuchFieldException | ClassCastException e) {
+            pacerUnavailable = true;
+            PZOLogger.warn("ChunkIngestionPacer disabled: incompatible game build (" + e + ")");
         } catch (Throwable t) {
-            PZOLogger.warn("ChunkIngestionPacer install notice: " + t.getMessage());
+            if (!pacerWarned) {
+                pacerWarned = true;
+                PZOLogger.warn("ChunkIngestionPacer install notice (retrying quietly): " + t);
+            }
         }
         return false;
     }
@@ -121,6 +134,10 @@ public final class ChunkIngestionPacer {
 
     public static boolean isPacerInstalled() {
         return pacerInstalled;
+    }
+
+    public static boolean isPacerSettled() {
+        return pacerInstalled || pacerUnavailable;
     }
 
     public static void onFrameBoundary(int frameCount) {
