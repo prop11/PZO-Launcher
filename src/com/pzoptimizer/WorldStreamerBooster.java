@@ -59,7 +59,7 @@ public class WorldStreamerBooster {
                         }
                     }
 
-                    int sleepMs = (streamBoosterInstalled && ChunkIngestionPacer.isPacerInstalled()) ? 5000 : 1000;
+                    int sleepMs = (streamBoosterInstalled && ChunkIngestionPacer.isPacerSettled()) ? 5000 : 1000;
                     Thread.sleep(sleepMs);
                 } catch (Throwable ignored) {
                     try { Thread.sleep(1500); } catch (Throwable ignored2) {}
