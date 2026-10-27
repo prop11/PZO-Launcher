@@ -23,6 +23,21 @@ Instead of replacing game classes on disk or relying on decompiled class overrid
 
 ---
 
+## Benchmarks
+
+![PZO vs stock Project Zomboid frame rates](docs/benchmarks.svg)
+
+| Scenario | Stock avg FPS | PZO avg FPS | Gain | 1% low FPS (stock -> PZO) |
+|---|---|---|---|---|
+| Horde nearby (40-tile walk, zombies attacking) | 37.5 | 69.7 | +86% | 12.7 -> 21.8 (+71%) |
+| Fast travel (1000 tiles at 33 tiles/s, dusk, zoom 200%) | 38.8 | 63.0 | +62% | 6.1 -> 11.7 (+92%) |
+| Large-area route (200 tiles at 16 tiles/s) | 234.7 | 320.3 | +36% | 20.6 -> 24.2 (+17%) |
+| Quiet walk (40-tile walk, no zombies) | 231.9 | 291.5 | +26% | 37.2 -> 44.4 (+19%) |
+
+Measured with PZO's in-engine benchmark harness on the same save, route and settings for stock and PZO, with repeated runs averaged where available. Ryzen 7 7800X3D, Radeon RX 7900 XTX, 3440x1440, Build 42, zoom 100% unless noted. Runs from 22-23 Oct 2026 on PZO 1.0.x; results will vary with hardware, mods and settings.
+
+---
+
 ## Multi-Core Architecture
 
 Stock Project Zomboid runs almost all spatial math, visibility calculations, and animation updates on a single thread. PZO offloads these calculations to a worker thread pool while keeping game state mutations thread-safe:
