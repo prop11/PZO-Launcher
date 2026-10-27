@@ -19,7 +19,7 @@ Instead of replacing game classes on disk or relying on decompiled class overrid
 | **Wiki & Guides** | [Official PZO Wiki](https://github.com/prop11/PZO-Launcher/wiki) • [Manual Linux](https://github.com/prop11/PZO-Launcher/wiki/Manual-Linux-Installation) • [Zomdroid (Android)](https://github.com/prop11/PZO-Launcher/wiki/Zomdroid-Support-and-Installation) |
 | **Releases** | [github.com/prop11/PZO-Launcher/releases](https://github.com/prop11/PZO-Launcher/releases) (`Install.bat`, `pzo_optimizer.sh`, `pzo_optimizer.command`, `PZOptimEngine.jar`) |
 | **Supported Versions** | **Build 42 (all revisions) & Build 41.78+** on Windows 10/11, Linux (Proton & Native), Steam Deck, macOS, and Android (Zomdroid) |
-| **Multiplayer & VAC** | In-memory bytecode instrumentation; the game's own class files and `projectzomboid.jar` are never modified. Dedicated server engine included. |
+| **Multiplayer** | In-memory bytecode instrumentation; the game's own class files and `projectzomboid.jar` are never modified. Dedicated server engine included. |
 
 ---
 
