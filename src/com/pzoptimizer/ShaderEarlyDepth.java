@@ -28,7 +28,9 @@ import zombie.core.opengl.ShaderUnit;
  */
 public final class ShaderEarlyDepth {
 
-    private static volatile boolean active = true;
+    // Off by default: puddles are depth-tested LEQUAL at almost the floor's own depth, and the vertex-stage depth
+    // can round a hair behind it, so puddles (and their reflections) flickered per square in rain (1.5.4.5, RTX 3080)
+    private static volatile boolean active = false;
     public static final AtomicInteger unitsRewritten = new AtomicInteger();
 
     private static final String FRAG_DEPTH = "gl_FragDepth = vDepth;";
