@@ -109,6 +109,16 @@ public final class BenchmarkHarness {
             if (cfg.containsKey("route_dir")) routeDir = Character.toUpperCase(cfg.get("route_dir").trim().charAt(0));
             if (cfg.containsKey("time")) timeOfDay = Float.parseFloat(cfg.get("time").trim());
             storm = "storm".equalsIgnoreCase(cfg.get("weather"));
+            if ("0".equals(cfg.get("mod_paced")) || "false".equalsIgnoreCase(cfg.get("mod_paced"))) {
+                notes.add("mod OnTick pacing disabled (mod_paced=0)");
+            } else if ("1".equals(cfg.get("mod_paced")) || "true".equalsIgnoreCase(cfg.get("mod_paced"))) {
+                notes.add("mod OnTick pacing enabled (mod_paced=1)");
+            }
+            if ("0".equals(cfg.get("zombie_lod")) || "false".equalsIgnoreCase(cfg.get("zombie_lod"))) {
+                notes.add("zombie script LOD disabled (zombie_lod=0)");
+            } else if ("1".equals(cfg.get("zombie_lod")) || "true".equalsIgnoreCase(cfg.get("zombie_lod"))) {
+                notes.add("zombie script LOD enabled (zombie_lod=1)");
+            }
             if ("0".equals(cfg.get("simcap"))) {
                 UnseenZombieSimGovernor.setActive(false);
                 notes.add("unseen zombie simulation cap disabled (simcap=0)");
