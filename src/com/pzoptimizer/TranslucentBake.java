@@ -187,7 +187,11 @@ public final class TranslucentBake {
 
     static boolean patchRenderCell(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "renderMinusFloor",
-            "(Lzombie/iso/IsoChunk;Lzombie/iso/IsoGridSquare;Lzombie/util/list/PZArrayList;)V");
+            "(Lzombie/iso/IsoChunk;Lzombie/iso/IsoGridSquare;Ljava/util/List;)V");
+        if (m == null) {
+            m = AsmSupport.findMethod(node, "renderMinusFloor",
+                "(Lzombie/iso/IsoChunk;Lzombie/iso/IsoGridSquare;Lzombie/util/list/PZArrayList;)V");
+        }
         if (m == null) return false;
         int n = 0;
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {

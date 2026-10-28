@@ -31,10 +31,10 @@ public final class TranslucentStats {
         zombie.iso.IsoGridSquare square = (zombie.iso.IsoGridSquare) squareObj;
         int playerIndex = zombie.iso.IsoCamera.frameState.playerIndex;
         boolean wind = zombie.core.Core.getInstance().getOptionDoWindSpriteEffects();
-        zombie.iso.IsoObject[] objects = square.getObjects().getElements();
-        int n = square.getObjects().size();
+        java.util.List<zombie.iso.IsoObject> objects = square.getObjects();
+        int n = objects.size();
         for (int i = 0; i < n; i++) {
-            zombie.iso.IsoObject o = objects[i];
+            zombie.iso.IsoObject o = objects.get(i);
             zombie.iso.fboRenderChunk.ObjectRenderInfo info = o.getRenderInfo(playerIndex);
             if (info.layer != layer) continue;
             String reason = reason(o, info, wind);

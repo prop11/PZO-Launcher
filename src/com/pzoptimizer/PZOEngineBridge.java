@@ -249,6 +249,10 @@ public class PZOEngineBridge {
                 ChunkBufferPool.setEnabled(value);
             } else if ("JVM_BytecodeBloodCap".equals(key)) {
                 PZOptimAgent.setBytecodeBloodCap(value);
+            } else if ("Mod_PacedEventRate".equals(key) || "JVM_ModPacedEventRate".equals(key)) {
+                LuaEventPatches.modPaced = value;
+            } else if ("Mod_ZombieScriptLOD".equals(key) || "JVM_ModZombieScriptLOD".equals(key)) {
+                LuaEventPatches.zombieLod = value;
             } else if ("JVM_VRRDisplayGovernor".equals(key)) {
                 VRRDisplayGovernor.setActive(value);
             } else if ("JVM_WorldUpscaler".equals(key)) {
@@ -310,6 +314,10 @@ public class PZOEngineBridge {
                 PaletteBuffers.active = value;
             } else if ("JVM_WeatherTiles".equals(key)) {
                 WeatherTileBatcher.setActive(value);
+            } else if ("JVM_RainSplashGovernor".equals(key)) {
+                RainSplashGovernor.active = value;
+            } else if ("JVM_WeatherParticleGovernor".equals(key)) {
+                WeatherParticleGovernor.active = value;
             } else if ("JVM_ActionReadParallel".equals(key)) {
                 ActionParallel.setActive(value);
             } else if ("JVM_ChunkBakeBudget".equals(key)) {

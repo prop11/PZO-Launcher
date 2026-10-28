@@ -50,6 +50,43 @@ public final class ChunkBakeBudget {
     private static final WeakHashMap<Object, int[]> holds = new WeakHashMap<>(); // zoom info -> {frames held, last frame}
     private static final IdentityHashMap<Object, Boolean> heldThisFrame = new IdentityHashMap<>();
     private static int frame = -1, bakesThisFrame;
+    private static boolean lightningActive;
+
+    // ThunderStorm's per-player flash state; loaded lazily in holder
+    private static final class Storm {
+        private static final VarHandle INFOS, STATE;
+        static {
+            VarHandle infos = null, state = null;
+            try {
+                MethodHandles.Lookup l = MethodHandles.lookup();
+                Class<?> storm = Class.forName("zombie.iso.weather.ThunderStorm");
+                Class<?> info = Class.forName("zombie.iso.weather.ThunderStorm$PlayerLightningInfo");
+                Class<?> stateType = Class.forName("zombie.iso.weather.ThunderStorm$LightningState");
+                infos = MethodHandles.privateLookupIn(storm, l).findVarHandle(storm, "lightningInfos", info.arrayType());
+                state = MethodHandles.privateLookupIn(info, l).findVarHandle(info, "lightningState", stateType);
+            } catch (Throwable t) {
+                PZOLogger.warn("[ChunkBakeBudget] lightning state not readable: " + t);
+            }
+            INFOS = infos;
+            STATE = state;
+        }
+    }
+
+    private static boolean checkFlashing() {
+        try {
+            if (Storm.STATE == null) return false;
+            zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+            Object storm = cm == null ? null : cm.getThunderStorm();
+            if (storm == null) return false;
+            Object[] infos = (Object[]) Storm.INFOS.get(storm);
+            if (infos == null) return false;
+            for (Object info : infos) {
+                if (info != null && ((Enum<?>) Storm.STATE.get(info)).ordinal() != 0) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
 
     // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
     // while one of those classes is being defined, and loading it again from there is a duplicate definition
@@ -102,15 +139,27 @@ public final class ChunkBakeBudget {
             frame = now;
             bakesThisFrame = 0;
             heldThisFrame.clear();
+            lightningActive = checkFlashing();
         }
+
+        long flags = (long) H.ZI_FLAGS.get(zi);
+        boolean hasTexture = H.ZI_CHUNK.get(zi) != null;
+
+        // During an active lightning flash, suppress pure lighting re-bakes uniformly across all chunks.
+        // Full-screen illumination is handled by WeatherShader post-processing; skipping chunk texture
+        // rebuilds prevents the 50-100 ms multi-chunk freeze without causing neighbor brightness shimmer.
+        if (hasTexture && (flags & FBORenderChunk.DIRTY_LIGHTING) != 0 && (flags & ~FBORenderChunk.DIRTY_LIGHTING) == 0 && lightningActive) {
+            H.ZI_FLAGS.set(zi, 0L);
+            H.ZI_DIRTY.set(zi, false);
+            return mgr.beginRenderChunkLevel(chunk, level, zoom, canRender, canClear);
+        }
+
         // Later levels of a group share its texture and its decision
         if (level != renderLevels.getMinLevel(level)) {
             return heldThisFrame.containsKey(zi) ? beginHidden(mgr, chunk, level, zoom, canRender, canClear, zi)
                 : mgr.beginRenderChunkLevel(chunk, level, zoom, canRender, canClear);
         }
 
-        long flags = (long) H.ZI_FLAGS.get(zi);
-        boolean hasTexture = H.ZI_CHUNK.get(zi) != null;
         boolean cosmetic = (flags & ~COSMETIC) == 0;
         if (hasTexture && cosmetic) {
             int[] h = holds.get(zi);
@@ -143,6 +192,27 @@ public final class ChunkBakeBudget {
         }
     }
 
+    public static final java.util.Comparator<IsoChunk> LIGHTING_COMPARATOR =
+        (a, b) -> Integer.compare(a.lightingUpdateCounter, b.lightingUpdateCounter);
+
+    /** Zero-allocation / fast-path sort for 42.22 chunk lighting. */
+    public static void sortChunks(java.util.ArrayList<IsoChunk> chunks, java.util.Comparator<?> ignored) {
+        int size = chunks.size();
+        if (size <= 1) return;
+        boolean sorted = true;
+        int prev = chunks.get(0).lightingUpdateCounter;
+        for (int i = 1; i < size; i++) {
+            int cur = chunks.get(i).lightingUpdateCounter;
+            if (cur < prev) {
+                sorted = false;
+                break;
+            }
+            prev = cur;
+        }
+        if (sorted) return;
+        chunks.sort(LIGHTING_COMPARATOR);
+    }
+
     static boolean patchRenderCell(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, mn -> "renderOneLevel".equals(mn.name));
         if (m == null) return false;
@@ -156,6 +226,21 @@ public final class ChunkBakeBudget {
                 m.instructions.set(mi, repl);
                 insn = repl;
                 n++;
+            }
+        }
+
+        // Optimize 42.22 per-frame chunk lighting sort
+        MethodNode ucl = AsmSupport.findMethod(node, mn -> "updateChunkLighting".equals(mn.name));
+        if (ucl != null) {
+            for (AbstractInsnNode insn = ucl.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKEVIRTUAL
+                        && ("java/util/ArrayList".equals(mi.owner) || "java/util/List".equals(mi.owner))
+                        && "sort".equals(mi.name)
+                        && "(Ljava/util/Comparator;)V".equals(mi.desc)) {
+                    ucl.instructions.set(mi, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ChunkBakeBudget", "sortChunks",
+                        "(Ljava/util/ArrayList;Ljava/util/Comparator;)V", false));
+                    break;
+                }
             }
         }
         return n == 1;
