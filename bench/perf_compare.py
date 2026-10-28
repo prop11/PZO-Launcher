@@ -59,7 +59,19 @@ def write_launcher_json(path, original, run, run_dir):
     data = json.loads(json.dumps(original))
     if run == "stock":
         data["vmArgs"] = list(STOCK_VM_ARGS)
-    data["vmArgs"] = [a for a in data["vmArgs"] if not a.startswith("-XX:StartFlightRecording")]
+    data["vmArgs"] = [a for a in data["vmArgs"] if not a.startswith("-XX:StartFlightRecording") and not a.startswith("-Dpzo.mod_paced") and not a.startswith("-Dpzo.zombie_lod")]
+    if run in ("without", "pzo_without", "pzo_nopacer_nolod"):
+        data["vmArgs"].append("-Dpzo.mod_paced=0")
+        data["vmArgs"].append("-Dpzo.zombie_lod=0")
+    elif run in ("with", "pzo_with"):
+        data["vmArgs"].append("-Dpzo.mod_paced=1")
+        data["vmArgs"].append("-Dpzo.zombie_lod=1")
+    elif run == "pzo_nopacer":
+        data["vmArgs"].append("-Dpzo.mod_paced=0")
+        data["vmArgs"].append("-Dpzo.zombie_lod=1")
+    elif run == "pzo_nolod":
+        data["vmArgs"].append("-Dpzo.mod_paced=1")
+        data["vmArgs"].append("-Dpzo.zombie_lod=0")
     data["vmArgs"].append(jfr_arg(run_dir))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -135,6 +147,18 @@ def main():
                     extra["tsprites"] = 0
                 if run == "pzo_nonewfixes":
                     extra["newfixes"] = 0
+                if run in ("without", "pzo_without", "pzo_nopacer_nolod"):
+                    extra["mod_paced"] = 0
+                    extra["zombie_lod"] = 0
+                elif run in ("with", "pzo_with"):
+                    extra["mod_paced"] = 1
+                    extra["zombie_lod"] = 1
+                elif run == "pzo_nopacer":
+                    extra["mod_paced"] = 0
+                    extra["zombie_lod"] = 1
+                elif run == "pzo_nolod":
+                    extra["mod_paced"] = 1
+                    extra["zombie_lod"] = 0
                 if args.threat:
                     extra["threat"] = 1
                 extra.update({"weather": args.weather, "time": args.time, "route": args.route, "route_dir": args.route_dir})
