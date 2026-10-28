@@ -68,6 +68,7 @@ public class PZOptimAgent {
                         "zombie.GameWindow".equals(name) ||
                         "zombie.iso.PlayerCamera".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
+                        "zombie.iso.IsoChunkLevel".equals(name) ||
                         "zombie.core.textures.TextureIDAssetManager".equals(name)) {
                         try {
                             inst.retransformClasses(c);
@@ -315,6 +316,12 @@ public class PZOptimAgent {
                     WeatherTileBatcher.drawerPatched = true;
                     PZOLogger.success("[PZO Agent] ASM-patched WeatherParticleDrawer: weather tiles drawn once per screen cell on the GPU");
                 }
+                byte[] base = wd != null ? wd : classfileBuffer;
+                byte[] nostall = AsmSupport.transform(base, loader, "WeatherParticleDrawer no glGet stall", WeatherParticleGovernor::patchDrawer);
+                if (nostall != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched WeatherParticleDrawer: glGetInteger(GL_CURRENT_PROGRAM) pipeline stall eliminated");
+                    return nostall;
+                }
                 return wd;
             }
             if ("se/krka/kahlua/j2se/KahluaTableImpl".equals(className) && classfileBuffer != null) {
@@ -369,6 +376,11 @@ public class PZOptimAgent {
                 if (burn != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoGridSquare.BurnWalls: burnt-building removal loop can no longer spin forever");
                     base = burn;
+                }
+                byte[] splash = AsmSupport.transform(base, loader, "IsoGridSquare rain splash texture cache", RainSplashGovernor::patchGridSquare);
+                if (splash != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGridSquare.renderRainSplash: cached splash textures armed");
+                    base = splash;
                 }
                 return (base != classfileBuffer) ? base : null;
             }
@@ -466,6 +478,15 @@ public class PZOptimAgent {
                     }
                 }
                 return null;
+            }
+            if ("zombie/iso/IsoChunkLevel".equals(className) && classfileBuffer != null) {
+                byte[] cl = AsmSupport.transform(classfileBuffer, loader, "IsoChunkLevel rain splashes",
+                    RainSplashGovernor::patchChunkLevel);
+                if (cl != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoChunkLevel.updateRainSplashes: non-blocking geometric splash RNG armed");
+                    return cl;
+                }
+                return classfileBuffer;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
                 return patchFBORenderLevels(classfileBuffer);

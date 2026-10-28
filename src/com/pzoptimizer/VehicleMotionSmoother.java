@@ -114,7 +114,7 @@ public final class VehicleMotionSmoother {
     public static void onPhysicsSubStep(int currentSubStep, int totalSubSteps) {
         if (!isEnabled()) return;
         if (currentSubStep == totalSubSteps - 1) {
-            readSnapshots(prevSnapshots, currentStamp);
+            readSnapshots(prevSnapshots, currentStamp + 1);
         }
     }
 
@@ -197,7 +197,7 @@ public final class VehicleMotionSmoother {
                 int id = v.vehicleId;
                 VehicleSnapshot a = prevSnapshots.get(id);
                 VehicleSnapshot b = currSnapshots.get(id);
-                if (a == null || b == null || a.stamp != currentStamp || b.stamp != currentStamp) {
+                if (a == null || b == null || b.stamp != currentStamp || a.stamp != b.stamp) {
                     continue;
                 }
 

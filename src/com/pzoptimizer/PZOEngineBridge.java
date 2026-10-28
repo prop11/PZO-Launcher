@@ -310,6 +310,10 @@ public class PZOEngineBridge {
                 PaletteBuffers.active = value;
             } else if ("JVM_WeatherTiles".equals(key)) {
                 WeatherTileBatcher.setActive(value);
+            } else if ("JVM_RainSplashGovernor".equals(key)) {
+                RainSplashGovernor.active = value;
+            } else if ("JVM_WeatherParticleGovernor".equals(key)) {
+                WeatherParticleGovernor.active = value;
             } else if ("JVM_ActionReadParallel".equals(key)) {
                 ActionParallel.setActive(value);
             } else if ("JVM_ChunkBakeBudget".equals(key)) {
