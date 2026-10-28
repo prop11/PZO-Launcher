@@ -255,7 +255,7 @@ public class PZOptimAgent {
             if ("zombie/core/opengl/ShaderUnit".equals(className) && classfileBuffer != null) {
                 byte[] su = AsmSupport.transform(classfileBuffer, loader, "ShaderUnit early depth", ShaderEarlyDepth::patchShaderUnit);
                 if (su != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched ShaderUnit: puddle early depth hook installed (rewrite off by default)");
+                    PZOLogger.success("[PZO Agent] ASM-patched ShaderUnit: puddle early depth hook installed (GL 4.2 / ARB_conservative_depth)");
                 }
                 return su;
             }
