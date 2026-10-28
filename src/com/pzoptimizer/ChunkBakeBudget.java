@@ -143,6 +143,27 @@ public final class ChunkBakeBudget {
         }
     }
 
+    public static final java.util.Comparator<IsoChunk> LIGHTING_COMPARATOR =
+        (a, b) -> Integer.compare(a.lightingUpdateCounter, b.lightingUpdateCounter);
+
+    /** Zero-allocation / fast-path sort for 42.22 chunk lighting. */
+    public static void sortChunks(java.util.ArrayList<IsoChunk> chunks, java.util.Comparator<?> ignored) {
+        int size = chunks.size();
+        if (size <= 1) return;
+        boolean sorted = true;
+        int prev = chunks.get(0).lightingUpdateCounter;
+        for (int i = 1; i < size; i++) {
+            int cur = chunks.get(i).lightingUpdateCounter;
+            if (cur < prev) {
+                sorted = false;
+                break;
+            }
+            prev = cur;
+        }
+        if (sorted) return;
+        chunks.sort(LIGHTING_COMPARATOR);
+    }
+
     static boolean patchRenderCell(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, mn -> "renderOneLevel".equals(mn.name));
         if (m == null) return false;
@@ -156,6 +177,21 @@ public final class ChunkBakeBudget {
                 m.instructions.set(mi, repl);
                 insn = repl;
                 n++;
+            }
+        }
+
+        // Optimize 42.22 per-frame chunk lighting sort
+        MethodNode ucl = AsmSupport.findMethod(node, mn -> "updateChunkLighting".equals(mn.name));
+        if (ucl != null) {
+            for (AbstractInsnNode insn = ucl.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKEVIRTUAL
+                        && ("java/util/ArrayList".equals(mi.owner) || "java/util/List".equals(mi.owner))
+                        && "sort".equals(mi.name)
+                        && "(Ljava/util/Comparator;)V".equals(mi.desc)) {
+                    ucl.instructions.set(mi, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ChunkBakeBudget", "sortChunks",
+                        "(Ljava/util/ArrayList;Ljava/util/Comparator;)V", false));
+                    break;
+                }
             }
         }
         return n == 1;
