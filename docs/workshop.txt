@@ -1,6 +1,11 @@
 [h1]Project Zomboid Optimiser (Build 42 & Build 41)[/h1]
 
 [hr][/hr]
+[url=https://prop11.github.io/PZO-Launcher/index.html][h2]Evidence of mod theft[/h2]
+[/url]
+ 
+
+[hr][/hr]
 [h1]DOWNLOAD THE OPTIONAL JAVA ENGINE / LAUNCHER ON GITHUB HERE (RECOMMENDED):[/h1]
 [url=https://github.com/prop11/PZO-Launcher/releases][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_download_button.gif[/img][/url]
 [url=https://github.com/prop11/PZO-Launcher][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_repo_button.png[/img][/url]
