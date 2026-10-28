@@ -5,7 +5,6 @@ import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import com.pzoptimizer.shaded.asm.tree.FieldInsnNode;
 import com.pzoptimizer.shaded.asm.tree.InsnList;
-import com.pzoptimizer.shaded.asm.tree.InsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
@@ -20,7 +19,6 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import zombie.characters.IsoGameCharacter;
 import zombie.characters.IsoPlayer;
-import zombie.core.physics.Bullet;
 import zombie.core.physics.Transform;
 import zombie.iso.IsoCamera;
 import zombie.iso.IsoWorld;
@@ -35,15 +33,20 @@ import zombie.vehicles.BaseVehicle.WheelInfo;
  * vs display refresh rate (120/144/165 Hz) mismatch jitter by applying transient SLERP
  * (rotation) and LERP (translation, wheels, passengers) interpolation right before
  * rendering, then restoring true physics states immediately afterwards.
+ *
+ * Vehicle snapshots are captured directly from BaseVehicle in Java memory without making
+ * premature Bullet JNI queries, preserving native contact manifold and collision flags
+ * so that crash damage to car parts and players operates normally.
  */
 public final class VehicleMotionSmoother {
 
     public static volatile boolean active = true;
 
-    // Bullet physics snapshot storage
+    // Vehicle physics snapshot storage
     private static final HashMap<Integer, VehicleSnapshot> prevSnapshots = new HashMap<>();
     private static final HashMap<Integer, VehicleSnapshot> currSnapshots = new HashMap<>();
-    private static final float[] bulletBuffer = new float[8192];
+    private static final HashMap<Integer, Long> lastCrashStamp = new HashMap<>();
+    private static volatile int lastSubSteps = 0;
     private static long currentStamp = 0;
     private static float currentAlpha = 0.0f;
 
@@ -55,6 +58,7 @@ public final class VehicleMotionSmoother {
     private static final Quaternionf scratchQuatA = new Quaternionf();
     private static final Quaternionf scratchQuatB = new Quaternionf();
     private static final Quaternionf scratchQuatOut = new Quaternionf();
+    private static final Quaternionf scratchQuatCapture = new Quaternionf();
     private static final Vector3f scratchSeatPos = new Vector3f();
 
     // Camera state preservation
@@ -108,27 +112,14 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * Hooked in WorldSimulation.updatePhysic() right before each Bullet substep simulation.
-     * When this is the final substep before completion, captures the 'prev' snapshot.
-     */
-    public static void onPhysicsSubStep(int currentSubStep, int totalSubSteps) {
-        if (!isEnabled()) return;
-        if (currentSubStep == totalSubSteps - 1) {
-            readSnapshots(prevSnapshots, currentStamp + 1);
-        }
-    }
-
-    /**
      * Hooked in WorldSimulation.updatePhysic() after all substeps complete.
-     * Captures the 'curr' snapshot, advances the stamp, and computes the fractional alpha.
+     * Records the substeps executed and computes fractional alpha without querying Bullet JNI,
+     * preserving native Bullet contact manifold and collision flags for WorldSimulation.updateInternal().
      */
     public static void afterPhysicsSteps(int totalSubSteps, float localTime, float fixedTimeStep) {
         if (!isEnabled()) return;
 
-        if (totalSubSteps > 0) {
-            currentStamp++;
-            readSnapshots(currSnapshots, currentStamp);
-        }
+        lastSubSteps = totalSubSteps;
 
         if (fixedTimeStep > 0.0001f) {
             currentAlpha = Math.max(0.0f, Math.min(1.0f, localTime / fixedTimeStep));
@@ -137,40 +128,60 @@ public final class VehicleMotionSmoother {
         }
     }
 
-    private static void readSnapshots(HashMap<Integer, VehicleSnapshot> map, long stamp) {
-        try {
-            int total = Bullet.getVehicleCount();
-            int offset = 0;
-            while (offset < total) {
-                int num = Bullet.getVehiclePhysics(offset, bulletBuffer);
-                if (num <= 0) break;
-                offset += num;
-                int idx = 0;
-                for (int i = 0; i < num; i++) {
-                    int id = (int) bulletBuffer[idx++];
-                    float x = bulletBuffer[idx++];
-                    float y = bulletBuffer[idx++];
-                    float z = bulletBuffer[idx++];
-                    float qx = bulletBuffer[idx++];
-                    float qy = bulletBuffer[idx++];
-                    float qz = bulletBuffer[idx++];
-                    float qw = bulletBuffer[idx++];
-                    idx += 3; // vx, vy, vz
-                    idx++;    // speed
-                    idx++;    // isCollide
-                    int wheelCount = (int) bulletBuffer[idx++];
+    /**
+     * Hooked in WorldSimulation.update() immediately after updateInternal() completes.
+     * Captures vehicle snapshots directly from BaseVehicle in Java memory without making redundant
+     * Bullet JNI calls, preserving native collision states and allowing crash damage to register normally.
+     */
+    public static void afterPhysicsUpdate() {
+        if (!isEnabled() || lastSubSteps == 0) return;
+        lastSubSteps = 0;
 
-                    VehicleSnapshot snap = map.get(id);
-                    if (snap == null) {
-                        snap = new VehicleSnapshot();
-                        map.put(id, snap);
-                    }
-                    snap.set(id, x, y, z, qx, qy, qz, qw, wheelCount, bulletBuffer, idx, stamp);
-                    idx += wheelCount * 4;
-                }
+        IsoWorld world = IsoWorld.instance;
+        if (world == null || world.currentCell == null) return;
+
+        Set<BaseVehicle> vehicles = world.currentCell.getVehicles();
+        if (vehicles == null || vehicles.isEmpty()) return;
+
+        currentStamp++;
+
+        for (BaseVehicle v : vehicles) {
+            if (v == null) continue;
+            int id = (int) v.vehicleId;
+
+            // Retain collision state: if vehicle collided during native physics step,
+            // record crash stamp so render interpolation avoids smearing into obstacle.
+            if (v.jniIsCollide) {
+                lastCrashStamp.put(id, currentStamp);
             }
-        } catch (Throwable t) {
-            // Ignore native read errors
+
+            VehicleSnapshot curr = currSnapshots.get(id);
+            VehicleSnapshot prev = prevSnapshots.get(id);
+            if (curr == null) {
+                curr = new VehicleSnapshot();
+                currSnapshots.put(id, curr);
+            }
+            if (prev == null) {
+                prev = new VehicleSnapshot();
+                prevSnapshots.put(id, prev);
+            }
+
+            if (curr.stamp == 0) {
+                // First initialization for this vehicle: initialize both snapshots identically
+                curr.captureFrom(v, currentStamp, scratchQuatCapture);
+                prev.copyFrom(curr);
+                prev.stamp = currentStamp - 1;
+            } else {
+                prev.copyFrom(curr);
+                curr.captureFrom(v, currentStamp, scratchQuatCapture);
+            }
+        }
+
+        if (currSnapshots.size() > 64) {
+            long threshold = currentStamp - 100;
+            currSnapshots.entrySet().removeIf(e -> e.getValue().stamp < threshold);
+            prevSnapshots.entrySet().removeIf(e -> e.getValue().stamp < threshold);
+            lastCrashStamp.entrySet().removeIf(e -> e.getValue() < threshold);
         }
     }
 
@@ -194,10 +205,20 @@ public final class VehicleMotionSmoother {
         try {
             for (BaseVehicle v : vehicles) {
                 if (v == null) continue;
-                int id = v.vehicleId;
+                int id = (int) v.vehicleId;
                 VehicleSnapshot a = prevSnapshots.get(id);
                 VehicleSnapshot b = currSnapshots.get(id);
-                if (a == null || b == null || b.stamp != currentStamp || a.stamp != b.stamp) {
+                if (a == null || b == null || b.stamp != currentStamp || a.stamp != currentStamp - 1) {
+                    continue;
+                }
+
+                // If this vehicle experienced a collision in the current physics tick,
+                // skip interpolation so the crash response and crumple display immediately
+                Long crashStamp = lastCrashStamp.get(id);
+                if (crashStamp != null && crashStamp.longValue() == currentStamp) {
+                    continue;
+                }
+                if (v.jniIsCollide) {
                     continue;
                 }
 
@@ -344,33 +365,16 @@ public final class VehicleMotionSmoother {
 
     /**
      * ASM Transformer for zombie.core.physics.WorldSimulation:
-     * Inserts onPhysicsSubStep before Bullet.stepSimulation and afterPhysicsSteps after all substeps.
+     * 1. Inserts afterPhysicsSteps after substeps in updatePhysic().
+     * 2. Inserts afterPhysicsUpdate before RETURN in update().
      */
     public static boolean patchWorldSimulation(ClassNode node) {
-        MethodNode m = AsmSupport.findMethod(node, "updatePhysic", "()V");
-        if (m == null) return false;
+        MethodNode mPhysic = AsmSupport.findMethod(node, "updatePhysic", "()V");
+        if (mPhysic == null) return false;
 
-        boolean patchedSubStep = false;
         boolean patchedAfterSteps = false;
 
-        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            if (!patchedSubStep && insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKESTATIC
-                    && "zombie/core/physics/Bullet".equals(mi.owner) && "stepSimulation".equals(mi.name)) {
-                // Insert: onPhysicsSubStep(i, numSimulationSubSteps)
-                InsnList pre = new InsnList();
-                pre.add(new VarInsnNode(Opcodes.ILOAD, 3)); // i (current substep)
-                pre.add(new VarInsnNode(Opcodes.ILOAD, 2)); // numSimulationSubSteps
-                pre.add(new MethodInsnNode(
-                    Opcodes.INVOKESTATIC,
-                    "com/pzoptimizer/VehicleMotionSmoother",
-                    "onPhysicsSubStep",
-                    "(II)V",
-                    false
-                ));
-                m.instructions.insertBefore(mi.getPrevious().getPrevious().getPrevious(), pre);
-                patchedSubStep = true;
-            }
-
+        for (AbstractInsnNode insn = mPhysic.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (!patchedAfterSteps && insn instanceof FieldInsnNode fi && fi.getOpcode() == Opcodes.GETFIELD
                     && "zombie/core/physics/WorldSimulation".equals(fi.owner) && "time".equals(fi.name) && "J".equals(fi.desc)) {
                 // Target of the substep loop exit / iflt branch:
@@ -389,13 +393,32 @@ public final class VehicleMotionSmoother {
                         "(IFF)V",
                         false
                     ));
-                    m.instructions.insertBefore(prev, post);
+                    mPhysic.instructions.insertBefore(prev, post);
                     patchedAfterSteps = true;
                 }
             }
         }
 
-        return patchedSubStep && patchedAfterSteps;
+        MethodNode mUpdate = AsmSupport.findMethod(node, "update", "()V");
+        if (mUpdate == null) return false;
+
+        boolean patchedUpdate = false;
+        for (AbstractInsnNode insn = mUpdate.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() == Opcodes.RETURN) {
+                InsnList post = new InsnList();
+                post.add(new MethodInsnNode(
+                    Opcodes.INVOKESTATIC,
+                    "com/pzoptimizer/VehicleMotionSmoother",
+                    "afterPhysicsUpdate",
+                    "()V",
+                    false
+                ));
+                mUpdate.instructions.insertBefore(insn, post);
+                patchedUpdate = true;
+            }
+        }
+
+        return patchedAfterSteps && patchedUpdate;
     }
 
     /**
@@ -450,26 +473,50 @@ public final class VehicleMotionSmoother {
         final float[] wheelSkid = new float[4];
         final float[] wheelSuspension = new float[4];
 
-        void set(int id, float x, float y, float z, float qx, float qy, float qz, float qw,
-                 int wheels, float[] buffer, int offset, long stamp) {
-            this.id = id;
-            this.posX = x;
-            this.posY = y;
-            this.posZ = z;
-            this.rotX = qx;
-            this.rotY = qy;
-            this.rotZ = qz;
-            this.rotW = qw;
-            this.wheelCount = Math.min(4, wheels);
-            this.stamp = stamp;
+        void copyFrom(VehicleSnapshot other) {
+            if (other == null) return;
+            this.id = other.id;
+            this.stamp = other.stamp;
+            this.posX = other.posX;
+            this.posY = other.posY;
+            this.posZ = other.posZ;
+            this.rotX = other.rotX;
+            this.rotY = other.rotY;
+            this.rotZ = other.rotZ;
+            this.rotW = other.rotW;
+            this.wheelCount = other.wheelCount;
+            System.arraycopy(other.wheelSteer, 0, this.wheelSteer, 0, this.wheelCount);
+            System.arraycopy(other.wheelRotation, 0, this.wheelRotation, 0, this.wheelCount);
+            System.arraycopy(other.wheelSkid, 0, this.wheelSkid, 0, this.wheelCount);
+            System.arraycopy(other.wheelSuspension, 0, this.wheelSuspension, 0, this.wheelCount);
+        }
 
-            int idx = offset;
-            for (int w = 0; w < this.wheelCount; w++) {
-                this.wheelSteer[w] = buffer[idx];
-                this.wheelRotation[w] = buffer[idx + 1];
-                this.wheelSkid[w] = buffer[idx + 2];
-                this.wheelSuspension[w] = buffer[idx + 3];
-                idx += 4;
+        void captureFrom(BaseVehicle v, long stamp, Quaternionf quat) {
+            this.id = (int) v.vehicleId;
+            this.stamp = stamp;
+            Transform jni = v.jniTransform;
+            if (jni != null) {
+                this.posX = jni.origin.x;
+                this.posY = jni.origin.y;
+                this.posZ = jni.origin.z;
+                if (quat != null) {
+                    jni.getRotation(quat);
+                    this.rotX = quat.x;
+                    this.rotY = quat.y;
+                    this.rotZ = quat.z;
+                    this.rotW = quat.w;
+                }
+            }
+            int wheels = v.wheelInfo != null ? Math.min(4, v.wheelInfo.length) : 0;
+            this.wheelCount = wheels;
+            for (int w = 0; w < wheels; w++) {
+                WheelInfo wi = v.wheelInfo[w];
+                if (wi != null) {
+                    this.wheelSteer[w] = wi.steering;
+                    this.wheelRotation[w] = wi.rotation;
+                    this.wheelSkid[w] = wi.skidInfo;
+                    this.wheelSuspension[w] = wi.suspensionLength;
+                }
             }
         }
 
