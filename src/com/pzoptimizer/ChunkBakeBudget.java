@@ -50,6 +50,43 @@ public final class ChunkBakeBudget {
     private static final WeakHashMap<Object, int[]> holds = new WeakHashMap<>(); // zoom info -> {frames held, last frame}
     private static final IdentityHashMap<Object, Boolean> heldThisFrame = new IdentityHashMap<>();
     private static int frame = -1, bakesThisFrame;
+    private static boolean lightningActive;
+
+    // ThunderStorm's per-player flash state; loaded lazily in holder
+    private static final class Storm {
+        private static final VarHandle INFOS, STATE;
+        static {
+            VarHandle infos = null, state = null;
+            try {
+                MethodHandles.Lookup l = MethodHandles.lookup();
+                Class<?> storm = Class.forName("zombie.iso.weather.ThunderStorm");
+                Class<?> info = Class.forName("zombie.iso.weather.ThunderStorm$PlayerLightningInfo");
+                Class<?> stateType = Class.forName("zombie.iso.weather.ThunderStorm$LightningState");
+                infos = MethodHandles.privateLookupIn(storm, l).findVarHandle(storm, "lightningInfos", info.arrayType());
+                state = MethodHandles.privateLookupIn(info, l).findVarHandle(info, "lightningState", stateType);
+            } catch (Throwable t) {
+                PZOLogger.warn("[ChunkBakeBudget] lightning state not readable: " + t);
+            }
+            INFOS = infos;
+            STATE = state;
+        }
+    }
+
+    private static boolean checkFlashing() {
+        try {
+            if (Storm.STATE == null) return false;
+            zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+            Object storm = cm == null ? null : cm.getThunderStorm();
+            if (storm == null) return false;
+            Object[] infos = (Object[]) Storm.INFOS.get(storm);
+            if (infos == null) return false;
+            for (Object info : infos) {
+                if (info != null && ((Enum<?>) Storm.STATE.get(info)).ordinal() != 0) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
 
     // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
     // while one of those classes is being defined, and loading it again from there is a duplicate definition
@@ -102,15 +139,27 @@ public final class ChunkBakeBudget {
             frame = now;
             bakesThisFrame = 0;
             heldThisFrame.clear();
+            lightningActive = checkFlashing();
         }
+
+        long flags = (long) H.ZI_FLAGS.get(zi);
+        boolean hasTexture = H.ZI_CHUNK.get(zi) != null;
+
+        // During an active lightning flash, suppress pure lighting re-bakes uniformly across all chunks.
+        // Full-screen illumination is handled by WeatherShader post-processing; skipping chunk texture
+        // rebuilds prevents the 50-100 ms multi-chunk freeze without causing neighbor brightness shimmer.
+        if (hasTexture && (flags & FBORenderChunk.DIRTY_LIGHTING) != 0 && (flags & ~FBORenderChunk.DIRTY_LIGHTING) == 0 && lightningActive) {
+            H.ZI_FLAGS.set(zi, 0L);
+            H.ZI_DIRTY.set(zi, false);
+            return mgr.beginRenderChunkLevel(chunk, level, zoom, canRender, canClear);
+        }
+
         // Later levels of a group share its texture and its decision
         if (level != renderLevels.getMinLevel(level)) {
             return heldThisFrame.containsKey(zi) ? beginHidden(mgr, chunk, level, zoom, canRender, canClear, zi)
                 : mgr.beginRenderChunkLevel(chunk, level, zoom, canRender, canClear);
         }
 
-        long flags = (long) H.ZI_FLAGS.get(zi);
-        boolean hasTexture = H.ZI_CHUNK.get(zi) != null;
         boolean cosmetic = (flags & ~COSMETIC) == 0;
         if (hasTexture && cosmetic) {
             int[] h = holds.get(zi);

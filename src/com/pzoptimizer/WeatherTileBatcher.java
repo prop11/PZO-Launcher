@@ -216,7 +216,9 @@ public final class WeatherTileBatcher {
     // ---- render thread ----
 
     private static VBOLinesShader shader;
-    private static int vbo;
+    private static final int VBO_RING_SIZE = 4;
+    private static int[] vboRing;
+    private static int vboIndex = 0;
     private static ByteBuffer staging;
     private static final Matrix4f BASE = new Matrix4f();
     private static final Matrix4f MVP = new Matrix4f();
@@ -243,7 +245,12 @@ public final class WeatherTileBatcher {
             return;
         }
 
-        if (vbo == 0) vbo = GL15.glGenBuffers();
+        if (vboRing == null) {
+            vboRing = new int[VBO_RING_SIZE];
+            for (int i = 0; i < VBO_RING_SIZE; i++) {
+                vboRing[i] = GL15.glGenBuffers();
+            }
+        }
         program.Start();
         VertexBufferObject.setModelViewProjection(program);
         BASE.set(program.projection).mul(program.modelView);
@@ -251,15 +258,11 @@ public final class WeatherTileBatcher {
         GL11.glDisable(2929);
         GL11.glEnable(3553);
         GL13.glActiveTexture(33984);
-        GL15.glBindBuffer(34962, vbo);
         GL20.glEnableVertexAttribArray(0);
         GL20.glEnableVertexAttribArray(1);
         GL20.glEnableVertexAttribArray(2);
         GL20.glDisableVertexAttribArray(3);
         GL20.glDisableVertexAttribArray(4);
-        GL20.glVertexAttribPointer(0, 3, 5126, false, STRIDE, 0L);
-        GL20.glVertexAttribPointer(1, 4, 5126, true, STRIDE, 12L);
-        GL20.glVertexAttribPointer(2, 2, 5126, false, STRIDE, 28L);
 
         // Texture-major, then tile, then cell, then particle: the order stock's per-texture lists hold
         for (int slot = 0; slot < SLOTS && slot < textures.size(); slot++) {
@@ -268,7 +271,12 @@ public final class WeatherTileBatcher {
                 int n = tile.counts[slot];
                 if (n <= 0) continue;
                 packQuads(particles, tile.positions[slot], n, texture);
+                int curVbo = vboRing[(vboIndex++) & (VBO_RING_SIZE - 1)];
+                GL15.glBindBuffer(34962, curVbo);
                 GL15.glBufferData(34962, staging, 35040);
+                GL20.glVertexAttribPointer(0, 3, 5126, false, STRIDE, 0L);
+                GL20.glVertexAttribPointer(1, 4, 5126, true, STRIDE, 12L);
+                GL20.glVertexAttribPointer(2, 2, 5126, false, STRIDE, 28L);
                 texture.getTextureId().bind();
                 for (int o = 0; o < tile.cellCount; o++) {
                     MVP.set(BASE).translate(tile.cellXY[o * 2], tile.cellXY[o * 2 + 1], 0.0F);
