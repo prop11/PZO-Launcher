@@ -621,7 +621,7 @@ public class JavaModLoader {
                 if (eq != -1) {
                     String key = trimmed.substring(0, eq).trim();
                     if (key.equalsIgnoreCase("mod")) {
-                        String id = trimmed.substring(eq + 1).trim();
+                        String id = trimmed.substring(eq + 1).replace("\\", "").trim();
                         if (id.endsWith(",")) id = id.substring(0, id.length() - 1).trim();
                         if (!id.isEmpty()) {
                             destination.add(id);
