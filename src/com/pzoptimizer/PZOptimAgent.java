@@ -64,6 +64,9 @@ public class PZOptimAgent {
                         "zombie.characters.animals.IsoAnimal".equals(name) ||
                         "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
                         "zombie.fileSystem.TexturePackDevice".equals(name) ||
+                        "zombie.core.physics.WorldSimulation".equals(name) ||
+                        "zombie.GameWindow".equals(name) ||
+                        "zombie.iso.PlayerCamera".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.core.textures.TextureIDAssetManager".equals(name)) {
                         try {
@@ -475,6 +478,33 @@ public class PZOptimAgent {
             }
             if ("zombie/iso/WorldStreamer".equals(className) && classfileBuffer != null) {
                 return patchWorldStreamer(classfileBuffer);
+            }
+            if ("zombie/core/physics/WorldSimulation".equals(className) && classfileBuffer != null) {
+                byte[] ws = AsmSupport.transform(classfileBuffer, loader, "WorldSimulation vehicle physics timing",
+                    VehicleMotionSmoother::patchWorldSimulation);
+                if (ws != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched WorldSimulation: VehicleMotionSmoother physics timing hooks armed");
+                    return ws;
+                }
+                return classfileBuffer;
+            }
+            if ("zombie/GameWindow".equals(className) && classfileBuffer != null) {
+                byte[] gw = AsmSupport.transform(classfileBuffer, loader, "GameWindow vehicle motion smoothing",
+                    VehicleMotionSmoother::patchGameWindow);
+                if (gw != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GameWindow: VehicleMotionSmoother transient render smoothing armed");
+                    return gw;
+                }
+                return classfileBuffer;
+            }
+            if ("zombie/iso/PlayerCamera".equals(className) && classfileBuffer != null) {
+                byte[] pc = AsmSupport.transform(classfileBuffer, loader, "PlayerCamera subpixel precision",
+                    DriveCameraGovernor::patchPlayerCamera);
+                if (pc != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched PlayerCamera: DriveCameraGovernor subpixel float precision armed");
+                    return pc;
+                }
+                return classfileBuffer;
             }
             if ("zombie/iso/IsoWorld".equals(className) && classfileBuffer != null) {
                 return patchIsoWorld(classfileBuffer);
@@ -1502,7 +1532,7 @@ public class PZOptimAgent {
 
         private byte[] patchWorldStreamer(byte[] b) {
             // Deferred hot-saves are flushed on the WorldStreamer thread, the same thread vanilla saves on
-            return redirectCallSites(
+            byte[] b1 = redirectCallSites(
                 b,
                 0xB6,
                 "zombie/iso/ChunkSaveWorker",
@@ -1513,6 +1543,35 @@ public class PZOptimAgent {
                 "(Ljava/lang/Object;Ljava/lang/Object;)V",
                 "Bytecode-patched WorldStreamer: HotSaveGovernor deferred hot-save flush armed"
             );
+            byte[] base = b1 != null ? b1 : b;
+
+            // StreamerWake: replace fixed Thread.sleep with LockSupport interruptible idle park
+            byte[] b2 = redirectCallSites(
+                base,
+                0xB8,
+                "java/lang/Thread",
+                "sleep",
+                "(J)V",
+                "com/pzoptimizer/StreamerWake",
+                "idle",
+                "(J)V",
+                "Bytecode-patched WorldStreamer: StreamerWake zero-latency park armed"
+            );
+            base = b2 != null ? b2 : base;
+
+            // StreamerWake: hook jobQueue.add to immediately signal the streamer thread
+            byte[] b3 = redirectCallSites(
+                base,
+                0xB6,
+                "java/util/concurrent/ConcurrentLinkedQueue",
+                "add",
+                "(Ljava/lang/Object;)Z",
+                "com/pzoptimizer/StreamerWake",
+                "enqueueChunk",
+                "(Ljava/util/concurrent/ConcurrentLinkedQueue;Ljava/lang/Object;)Z",
+                "Bytecode-patched WorldStreamer: StreamerWake instantaneous enqueue signal armed"
+            );
+            return b3 != null ? b3 : base;
         }
 
         private byte[] redirectRecalcPropertiesIfNeeded(byte[] b) {
