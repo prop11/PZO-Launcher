@@ -249,6 +249,10 @@ public class PZOEngineBridge {
                 ChunkBufferPool.setEnabled(value);
             } else if ("JVM_BytecodeBloodCap".equals(key)) {
                 PZOptimAgent.setBytecodeBloodCap(value);
+            } else if ("Mod_PacedEventRate".equals(key) || "JVM_ModPacedEventRate".equals(key)) {
+                LuaEventPatches.modPaced = value;
+            } else if ("Mod_ZombieScriptLOD".equals(key) || "JVM_ModZombieScriptLOD".equals(key)) {
+                LuaEventPatches.zombieLod = value;
             } else if ("JVM_VRRDisplayGovernor".equals(key)) {
                 VRRDisplayGovernor.setActive(value);
             } else if ("JVM_WorldUpscaler".equals(key)) {

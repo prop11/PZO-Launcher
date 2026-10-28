@@ -110,13 +110,17 @@ public final class BenchmarkHarness {
             if (cfg.containsKey("time")) timeOfDay = Float.parseFloat(cfg.get("time").trim());
             storm = "storm".equalsIgnoreCase(cfg.get("weather"));
             if ("0".equals(cfg.get("mod_paced")) || "false".equalsIgnoreCase(cfg.get("mod_paced"))) {
+                LuaEventPatches.modPaced = false;
                 notes.add("mod OnTick pacing disabled (mod_paced=0)");
             } else if ("1".equals(cfg.get("mod_paced")) || "true".equalsIgnoreCase(cfg.get("mod_paced"))) {
+                LuaEventPatches.modPaced = true;
                 notes.add("mod OnTick pacing enabled (mod_paced=1)");
             }
             if ("0".equals(cfg.get("zombie_lod")) || "false".equalsIgnoreCase(cfg.get("zombie_lod"))) {
+                LuaEventPatches.zombieLod = false;
                 notes.add("zombie script LOD disabled (zombie_lod=0)");
             } else if ("1".equals(cfg.get("zombie_lod")) || "true".equalsIgnoreCase(cfg.get("zombie_lod"))) {
+                LuaEventPatches.zombieLod = true;
                 notes.add("zombie script LOD enabled (zombie_lod=1)");
             }
             if ("0".equals(cfg.get("simcap"))) {
