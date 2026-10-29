@@ -20,7 +20,7 @@ public class EngineThreadGovernor {
         }
 
         try {
-            if (PZONative.isLoaded()) {
+            if (PZONative.isLoaded() && PZOConfig.isPowerShieldEnabled()) {
                 PZONative.setHighPrecisionTimer(true); // 0.5ms kernel resolution
                 PZONative.disablePowerThrottling(); // Exemption from Windows 11 EcoQoS
                 if (PZONative.isLowCoreCpu()) {

@@ -249,6 +249,12 @@ public class PZOEngineBridge {
                 GLStateOptimizer.setEnabled(value);
             } else if ("JVM_StreamBufferBoost".equals(key)) {
                 ChunkBufferPool.setEnabled(value);
+            } else if ("Horde_CullDistantAttachments".equals(key)) {
+                AttachmentCull.active = value;
+            } else if ("Horde_AudioConcurrencyLimit".equals(key)) {
+                ZombieVoiceLimit.active = value;
+            } else if ("JVM_PowerShield".equals(key)) {
+                PZOConfig.setPowerShieldEnabled(value);
             } else if ("JVM_BytecodeBloodCap".equals(key)) {
                 PZOptimAgent.setBytecodeBloodCap(value);
             } else if ("Mod_PacedEventRate".equals(key) || "JVM_ModPacedEventRate".equals(key)) {
@@ -273,9 +279,9 @@ public class PZOEngineBridge {
                 VehicleLosGovernor.setActive(value);
             } else if ("JVM_SpottedListHash".equals(key)) {
                 SpottedListGovernor.setActive(value);
-            } else if ("JVM_UnseenZombieSimCap".equals(key)) {
+            } else if ("JVM_UnseenZombieSimCap".equals(key) || "JVM_HordeHibernation".equals(key)) {
                 UnseenZombieSimGovernor.setActive(value);
-            } else if ("JVM_TextureDownscaleOffload".equals(key)) {
+            } else if ("JVM_TextureDownscaleOffload".equals(key) || "JVM_AsyncModelCompile".equals(key)) {
                 TextureDownscaleGovernor.setActive(value);
             } else if ("JVM_BurnLoopGuard".equals(key)) {
                 BurnLoopGuard.setActive(value);
@@ -306,7 +312,7 @@ public class PZOEngineBridge {
                 ChunkMipLimit.active = value;
             } else if ("JVM_TranslucentSpriteLod".equals(key)) {
                 FoliageLod.spritesActive = value;
-            } else if ("JVM_FoliageLod".equals(key)) {
+            } else if ("JVM_FoliageLod".equals(key) || "GFX_ForestCanopyCull".equals(key)) {
                 FoliageLod.active = value;
             } else if ("JVM_DirectionVectorFix".equals(key)) {
                 DirectionVectorFix.active = value;
@@ -322,7 +328,7 @@ public class PZOEngineBridge {
                 WeatherParticleGovernor.active = value;
             } else if ("JVM_ActionReadParallel".equals(key)) {
                 ActionParallel.setActive(value);
-            } else if ("JVM_ChunkBakeBudget".equals(key)) {
+            } else if ("JVM_ChunkBakeBudget".equals(key) || "Combat_BurstSmoother".equals(key)) {
                 ChunkBakeBudget.setActive(value);
             } else if ("JVM_PuddleEarlyDepth".equals(key)) {
                 ShaderEarlyDepth.setActive(value);
@@ -342,7 +348,7 @@ public class PZOEngineBridge {
                 WorkerRandGovernor.setActive(value);
             } else if ("JVM_BodyAtlasPrewarm".equals(key)) {
                 BodyAtlasPrewarmGovernor.setActive(value);
-            } else if ("JVM_GcSlackGovernor".equals(key)) {
+            } else if ("JVM_GcSlackGovernor".equals(key) || "JVM_ZeroStutterGC".equals(key)) {
                 GcSlackGovernor.setActive(value);
             } else if ("JVM_EngineFramePacer".equals(key)) {
                 EngineFramePacer.setEnabled(value);
@@ -365,8 +371,8 @@ public class PZOEngineBridge {
 
     public static void setJvmIntOption(String key, int value) {
         try {
-            if ("JVM_ChunkCacheSize".equals(key)) {
-                ChunkIngestionPacer.setMaxCachedChunks(value);
+            if ("Horde_VoiceLimit".equals(key)) {
+                ZombieVoiceLimit.setLimit(value);
             } else if ("JVM_ChunkBudgetMs".equals(key)) {
                 ChunkIngestionPacer.setChunkBudgetMs(value);
             } else if ("JVM_PathfindBudgetMs".equals(key)) {
@@ -497,6 +503,7 @@ public class PZOEngineBridge {
         initialized = true;
 
         cachedRamGb = getOptimizedRAM();
+        HardwareProbe.start();
 
         Thread bridgeHookThread = new Thread(() -> {
             boolean attached = false;
@@ -773,6 +780,20 @@ public class PZOEngineBridge {
                                 }
                             );
                             tableRawset.invoke(pzoTable, "isBetaOptIn", isBetaFunc);
+
+                            // getHardwareSummary
+                            Object getHardwareFunc = Proxy.newProxyInstance(
+                                javaFuncClass.getClassLoader(),
+                                new Class<?>[]{javaFuncClass},
+                                (proxy, m, mArgs) -> {
+                                    if ("call".equals(m.getName())) {
+                                        pushObj.invoke(mArgs[0], HardwareProbe.getSummary());
+                                        return 1;
+                                    }
+                                    return null;
+                                }
+                            );
+                            tableRawset.invoke(pzoTable, "getHardwareSummary", getHardwareFunc);
 
                             // getChannel
                             Object getChannelFunc = Proxy.newProxyInstance(
@@ -1166,17 +1187,17 @@ public class PZOEngineBridge {
                                 "            PZOEngine.setBetaOptIn(newState)\n" +
                                 "        end\n" +
                                 "        button.title = newState and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
-                                "        button.borderColor = newState and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
-                                "        button.textColor = newState and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                "        button.borderColor = newState and {r=0.45, g=0.90, b=0.55, a=0.9} or {r=0.18, g=0.24, b=0.35, a=0.9}\n" +
+                                "        button.textColor = newState and {r=0.45, g=0.90, b=0.55, a=1.0} or {r=0.92, g=0.93, b=0.95, a=1.0}\n" +
                                 "        if newState and PZOEngine and PZOEngine.checkForUpdates then\n" +
                                 "            PZOEngine.checkForUpdates()\n" +
                                 "        end\n" +
                                 "    end)\n" +
                                 "    btn:initialise()\n" +
                                 "    btn:instantiate()\n" +
-                                "    btn.backgroundColor = {r=0.08, g=0.10, b=0.15, a=0.90}\n" +
-                                "    btn.borderColor = isOptedIn and {r=0.2, g=0.9, b=0.4, a=1.0} or {r=0.5, g=0.5, b=0.5, a=0.8}\n" +
-                                "    btn.textColor = isOptedIn and {r=0.3, g=1.0, b=0.5, a=1.0} or {r=0.8, g=0.8, b=0.8, a=0.9}\n" +
+                                "    btn.backgroundColor = {r=0.11, g=0.13, b=0.18, a=0.95}\n" +
+                                "    btn.borderColor = isOptedIn and {r=0.45, g=0.90, b=0.55, a=0.9} or {r=0.18, g=0.24, b=0.35, a=0.9}\n" +
+                                "    btn.textColor = isOptedIn and {r=0.45, g=0.90, b=0.55, a=1.0} or {r=0.92, g=0.93, b=0.95, a=1.0}\n" +
                                 "    btn:setAnchorLeft(true)\n" +
                                 "    btn:setAnchorRight(false)\n" +
                                 "    btn:setAnchorTop(false)\n" +
@@ -1198,8 +1219,14 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.7.2\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.8\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
+                                "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
+                                "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
+                                "            if PZOEngine and PZOEngine.acknowledgeMultithreadingNotice then PZOEngine.acknowledgeMultithreadingNotice() end\n" +
+                                "        end)\n" +
+                                "        return\n" +
+                                "    end\n" +
                                 "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                 "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
                                 "        \"<SIZE:large> <RGB:1,1,1> Multi-Threading Optimizations Active! <LINE> <LINE> \" ..\n" +
@@ -1461,7 +1488,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.7.2'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.8'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

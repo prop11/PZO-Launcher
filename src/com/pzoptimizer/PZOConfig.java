@@ -6,7 +6,7 @@ import java.nio.file.Files;
 /** Persistent preferences (beta opt-in, ignored versions, Java mod approvals) in pzo_config.json. */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
-    public static final String CURRENT_NOTICE_VERSION = "1.5.7.2";
+    public static final String CURRENT_NOTICE_VERSION = "1.5.8";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
     private static volatile boolean isolateConflictingFpsMods = true;
@@ -14,6 +14,7 @@ public final class PZOConfig {
     private static volatile String viewpointStanddownMode = "AUTO";
     private static volatile boolean javaModsEnabled = true;
     private static volatile boolean fsrEnabled = false;
+    private static volatile boolean powerShieldEnabled = true;
     private static final java.util.Set<String> approvedJavaMods = new java.util.LinkedHashSet<>();
     private static final java.util.Set<String> blockedJavaMods = new java.util.LinkedHashSet<>();
     private static volatile boolean loaded = false;
@@ -46,6 +47,7 @@ public final class PZOConfig {
                 }
                 javaModsEnabled = !(content.contains("\"java_mods_enabled\":false") || content.contains("\"java_mods_enabled\": false"));
                 fsrEnabled = content.contains("\"fsr_enabled\":true") || content.contains("\"fsr_enabled\": true");
+                powerShieldEnabled = !(content.contains("\"power_shield\":false") || content.contains("\"power_shield\": false"));
                 parseHashList(extractJsonField(content, "approved_java_mods"), approvedJavaMods);
                 parseHashList(extractJsonField(content, "blocked_java_mods"), blockedJavaMods);
             }
@@ -55,11 +57,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -171,6 +173,20 @@ public final class PZOConfig {
         javaModsEnabled = enabled;
         save();
         PZOLogger.info("[PZO Config] Third-party Java mod loading set to: " + enabled + " (applies on next launch)");
+    }
+
+    /** Kernel QoS (timer, power throttling exemption, MMCSS, priority): applied at launch, so a change applies on the next one. */
+    public static boolean isPowerShieldEnabled() {
+        load();
+        return powerShieldEnabled;
+    }
+
+    public static synchronized void setPowerShieldEnabled(boolean enabled) {
+        load();
+        if (powerShieldEnabled == enabled) return;
+        powerShieldEnabled = enabled;
+        save();
+        PZOLogger.info("[PZO Config] CPU power shield set to: " + enabled + " (applies on next launch)");
     }
 
     /** FSR world upscaling switched on in the JAVA tab; read at launch, since the render hooks go in before the game starts. */
