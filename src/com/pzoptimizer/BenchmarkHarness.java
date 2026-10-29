@@ -123,6 +123,34 @@ public final class BenchmarkHarness {
                 LuaEventPatches.zombieLod = true;
                 notes.add("zombie script LOD enabled (zombie_lod=1)");
             }
+            if ("0".equals(cfg.get("fsr")) || "false".equalsIgnoreCase(cfg.get("fsr"))) {
+                WorldUpscalerGovernor.setUserEnabled(false);
+                notes.add("fsr upscaler disabled (fsr=0)");
+            } else if ("1".equals(cfg.get("fsr")) || "true".equalsIgnoreCase(cfg.get("fsr"))) {
+                WorldUpscalerGovernor.setUserEnabled(true);
+                notes.add("fsr upscaler enabled (fsr=1)");
+            }
+            if (cfg.containsKey("fsr_scale")) {
+                try {
+                    int sc = Integer.parseInt(cfg.get("fsr_scale").trim());
+                    WorldUpscalerGovernor.setUserScale(sc / 100.0f);
+                    notes.add("fsr scale set to " + sc + "%");
+                } catch (NumberFormatException ignored) {}
+            }
+            if (cfg.containsKey("fsr_sharpness")) {
+                try {
+                    int sh = Integer.parseInt(cfg.get("fsr_sharpness").trim());
+                    WorldUpscalerGovernor.setSharpness(sh / 100.0f);
+                    notes.add("fsr sharpness set to " + sh + "%");
+                } catch (NumberFormatException ignored) {}
+            }
+            if ("0".equals(cfg.get("fsr_dynamic")) || "false".equalsIgnoreCase(cfg.get("fsr_dynamic"))) {
+                WorldUpscalerGovernor.setDynamicScaleActive(false);
+                notes.add("fsr dynamic resolution disabled (fsr_dynamic=0)");
+            } else if ("1".equals(cfg.get("fsr_dynamic")) || "true".equalsIgnoreCase(cfg.get("fsr_dynamic"))) {
+                WorldUpscalerGovernor.setDynamicScaleActive(true);
+                notes.add("fsr dynamic resolution enabled (fsr_dynamic=1)");
+            }
             if ("0".equals(cfg.get("simcap"))) {
                 UnseenZombieSimGovernor.setActive(false);
                 notes.add("unseen zombie simulation cap disabled (simcap=0)");
