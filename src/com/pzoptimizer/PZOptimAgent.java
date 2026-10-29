@@ -483,6 +483,19 @@ public class PZOptimAgent {
                 }
                 return null;
             }
+            if ("zombie/characters/ZombieVocalsManager".equals(className) && classfileBuffer != null) {
+                return redirectCallSites(classfileBuffer, 0xB8, "zombie/core/math/PZMath", "min", "(II)I",
+                    "com/pzoptimizer/ZombieVoiceLimit", "count", "(II)I",
+                    "Bytecode-patched ZombieVocalsManager: horde voice limit armed");
+            }
+            if ("zombie/core/skinnedmodel/model/ModelSlotRenderData".equals(className) && classfileBuffer != null) {
+                byte[] ac = AsmSupport.transform(classfileBuffer, loader, "ModelSlotRenderData attachment cull",
+                    AttachmentCull::patchRenderData);
+                if (ac != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ModelSlotRenderData.initModelInst: distant zombie attachment models skipped");
+                }
+                return ac;
+            }
             if ("zombie/iso/IsoChunkLevel".equals(className) && classfileBuffer != null) {
                 byte[] cl = AsmSupport.transform(classfileBuffer, loader, "IsoChunkLevel rain splashes",
                     RainSplashGovernor::patchChunkLevel);

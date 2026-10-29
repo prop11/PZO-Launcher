@@ -16,16 +16,7 @@ public final class ChunkIngestionPacer {
     // 3.5 ms per frame
     public static final long FRAME_BUDGET_NANOS = 3_500_000L;
     public static final int MAX_CHUNKS_PER_FRAME = 3;
-    private static volatile int maxCachedChunks = 1000;
     private static volatile int chunkBudgetMs = 6;
-
-    public static void setMaxCachedChunks(int max) {
-        maxCachedChunks = Math.max(100, max);
-    }
-
-    public static int getMaxCachedChunks() {
-        return maxCachedChunks;
-    }
 
     public static void setChunkBudgetMs(int ms) {
         chunkBudgetMs = Math.max(1, Math.min(32, ms));

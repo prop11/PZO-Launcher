@@ -118,17 +118,21 @@ public class PZONative {
         if (!initialized) return;
 
         try {
+            // The JAVA tab's CPU power shield switch; it is read at launch
+            boolean shield = PZOConfig.isPowerShieldEnabled();
             boolean powerShield = false;
-            try { powerShield = disablePowerThrottling(); } catch (Throwable ignored) {}
+            if (shield) try { powerShield = disablePowerThrottling(); } catch (Throwable ignored) {}
 
             boolean timerLock = false;
-            try { timerLock = setHighPrecisionTimer(true); } catch (Throwable ignored) {}
+            if (shield) try { timerLock = setHighPrecisionTimer(true); } catch (Throwable ignored) {}
 
             boolean lowCore = isLowCoreCpu();
             boolean mmcss = false;
             boolean prio = false;
             boolean wsLock = false;
-            if (!lowCore) {
+            if (!shield) {
+                PZOLogger.info("[PZONative] CPU power shield switched off in the JAVA tab: timer, power throttling, MMCSS and priority left as stock.");
+            } else if (!lowCore) {
                 try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
                 try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
                 try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
