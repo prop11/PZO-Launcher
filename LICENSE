@@ -13,12 +13,19 @@ to all source code in this repository from 2026-10-23 onward.
    permission for artificial intelligence systems to use this project is
    withdrawn.
 
-2. Permitted Use
+2. Definitions
+   For purposes of this License, "Artificial Intelligence System" includes,
+   without limitation, large language models (LLMs), neural networks,
+   automated generative coding agents, machine learning foundation models,
+   and any software agent designed to parse, synthesize, transform, or
+   generate source code.
+
+3. Permitted Use
    You may download, install and run the official releases of this project
    for personal, non-commercial use, and you may read the source code to
    review it, audit it or report issues.
 
-3. Prohibited Use
+4. Prohibited Use
    Without prior written permission from the copyright holder, you may not:
    a) redistribute, re-upload or mirror this project or any part of it,
       including on the Steam Workshop;
@@ -26,10 +33,9 @@ to all source code in this repository from 2026-10-23 onward.
       ports of it, or mods that include any of its code or assets;
    c) sell it, or use it commercially in any way.
 
-4. Artificial Intelligence Prohibition
-   No artificial intelligence system, machine learning model, large
-   language model, coding assistant or automated agent, and no person or
-   organization operating one, is permitted to:
+5. Artificial Intelligence Prohibition
+   No Artificial Intelligence System, and no person or organization
+   operating one, is permitted to:
    a) read, ingest, index, scrape, analyze or summarize this project's
       source code, assets or documentation;
    b) write, edit, refactor, translate or generate code from or based on
@@ -41,17 +47,27 @@ to all source code in this repository from 2026-10-23 onward.
    repository, from a release, from the Steam Workshop or from any other
    source.
 
-5. Exception for the Copyright Holder
+6. Exception for the Copyright Holder
    None of these restrictions apply to the copyright holder, who may use
    any tools on their own work.
 
-6. Third-Party Components
+7. Platform Terms
+   Nothing in this license limits the rights granted directly by the
+   copyright holder to Valve Corporation pursuant to the Steam Subscriber
+   Agreement for official Workshop distribution.
+
+8. Third-Party Components
    Files under third_party/ (including the ASM library) remain under their
    own licenses, which are included alongside them.
 
-7. Termination
+9. Termination
    Any breach of this license ends your rights under it immediately.
 
-8. No Warranty
-   THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE
-   COPYRIGHT HOLDER IS NOT LIABLE FOR ANY DAMAGES ARISING FROM ITS USE.
+10. Severability
+    If any provision of this license is found invalid or unenforceable under
+    applicable law, the remaining provisions shall remain in full force
+    and effect.
+
+11. No Warranty
+    THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE
+    COPYRIGHT HOLDER IS NOT LIABLE FOR ANY DAMAGES ARISING FROM ITS USE.
