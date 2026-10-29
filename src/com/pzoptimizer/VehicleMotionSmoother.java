@@ -5,6 +5,7 @@ import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import com.pzoptimizer.shaded.asm.tree.FieldInsnNode;
 import com.pzoptimizer.shaded.asm.tree.InsnList;
+import com.pzoptimizer.shaded.asm.tree.LdcInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
@@ -373,6 +374,19 @@ public final class VehicleMotionSmoother {
         MethodNode mPhysic = AsmSupport.findMethod(node, "updatePhysic", "()V");
         if (mPhysic == null) return false;
 
+        // numSimulationSubSteps = (int)(localTime / 0.01F). Its slot differs between builds (2 on 42.22, 3 on 42.21),
+        // and loading the wrong one fails verification and stops the world from loading.
+        int stepsSlot = -1;
+        for (AbstractInsnNode insn = mPhysic.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() == Opcodes.F2I) {
+                AbstractInsnNode next = insn.getNext();
+                while (next != null && next.getOpcode() < 0) next = next.getNext();
+                if (next instanceof VarInsnNode vi && vi.getOpcode() == Opcodes.ISTORE) stepsSlot = vi.var;
+                break;
+            }
+        }
+        if (stepsSlot < 0) return false;
+
         boolean patchedAfterSteps = false;
 
         for (AbstractInsnNode insn = mPhysic.instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -383,10 +397,10 @@ public final class VehicleMotionSmoother {
                 AbstractInsnNode prev = fi.getPrevious(); // aload_0
                 if (prev != null && prev.getOpcode() == Opcodes.ALOAD) {
                     InsnList post = new InsnList();
-                    post.add(new VarInsnNode(Opcodes.ILOAD, 2)); // numSimulationSubSteps
+                    post.add(new VarInsnNode(Opcodes.ILOAD, stepsSlot));
                     post.add(new VarInsnNode(Opcodes.ALOAD, 0)); // this
                     post.add(new FieldInsnNode(Opcodes.GETFIELD, "zombie/core/physics/WorldSimulation", "localTime", "F"));
-                    post.add(new VarInsnNode(Opcodes.FLOAD, 1)); // fixedTimeStep (0.01f)
+                    post.add(new LdcInsnNode(0.01F)); // fixedTimeStep, a constant in every build
                     post.add(new MethodInsnNode(
                         Opcodes.INVOKESTATIC,
                         "com/pzoptimizer/VehicleMotionSmoother",
