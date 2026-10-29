@@ -36,7 +36,7 @@ public final class BurnLoopGuard {
 
     public static int removeTileObject(IsoGridSquare square, IsoObject obj) {
         int r = square.RemoveTileObject(obj);
-        if (active && obj != null && square.getObjects().contains(obj)) {
+        if (active && obj != null && GameCompat.objects(square).contains(obj)) {
             forcedRemovals.incrementAndGet();
             r = square.RemoveTileObject(obj, false);
         }

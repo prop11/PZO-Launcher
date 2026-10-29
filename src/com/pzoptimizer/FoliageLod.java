@@ -72,7 +72,7 @@ public final class FoliageLod {
             framesUntilModCheck = CHECK_MODS_EVERY;
             boolean atmospherics = false;
             try {
-                atmospherics = zombie.ZomboidFileSystem.instance.getModIDs().contains("Atmospherics");
+                atmospherics = GameCompat.modIds().contains("Atmospherics");
             } catch (Throwable ignored) {
             }
             if (atmospherics != otherModOwnsIt) {

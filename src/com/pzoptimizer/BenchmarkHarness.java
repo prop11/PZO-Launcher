@@ -389,7 +389,7 @@ public final class BenchmarkHarness {
         float d = routeSpeed * (elapsedNs / 1e9f);
         if (lineRoute) {
             if (d >= routeTiles) {
-                p.teleportTo(startX, startY, startZ);
+                GameCompat.teleport(p, startX, startY, startZ);
                 return true;
             }
             float lx = startX, ly = startY;
@@ -399,12 +399,12 @@ public final class BenchmarkHarness {
                 case 'S': ly += d; break;
                 default: lx -= d; break;
             }
-            p.teleportTo(lx, ly, startZ);
+            GameCompat.teleport(p, lx, ly, startZ);
             return false;
         }
         float total = routeTiles * 4.0f;
         if (d >= total) {
-            p.teleportTo(startX, startY, startZ);
+            GameCompat.teleport(p, startX, startY, startZ);
             return true;
         }
         int leg = (int) (d / routeTiles);
@@ -416,7 +416,7 @@ public final class BenchmarkHarness {
             case 2: x += routeTiles - o; y += routeTiles; break;
             default: y += routeTiles - o; break;
         }
-        p.teleportTo(x, y, startZ);
+        GameCompat.teleport(p, x, y, startZ);
         return false;
     }
 
@@ -516,7 +516,7 @@ public final class BenchmarkHarness {
                     }
                     break;
                 case WARMUP:
-                    IsoPlayer.players[0].teleportTo(startX, startY, startZ);
+                    GameCompat.teleport(IsoPlayer.players[0], startX, startY, startZ);
                     if (now - phaseStart > WARMUP_NS) {
                         PerformanceSettings.instance.setFramerateUncapped(true);
                         RenderThread.invokeOnRenderContext(() -> org.lwjglx.opengl.Display.setVSyncEnabled(false));
@@ -526,7 +526,7 @@ public final class BenchmarkHarness {
                     }
                     break;
                 case SETTLE:
-                    IsoPlayer.players[0].teleportTo(startX, startY, startZ);
+                    GameCompat.teleport(IsoPlayer.players[0], startX, startY, startZ);
                     if (now - phaseStart < 100_000_000L) {
                         normalizeScene();
                     }
@@ -550,7 +550,7 @@ public final class BenchmarkHarness {
                     }
                     break;
                 case SHOT_NOUI:
-                    IsoPlayer.players[0].teleportTo(startX, startY, startZ);
+                    GameCompat.teleport(IsoPlayer.players[0], startX, startY, startZ);
                     if (now - phaseStart > SHOT_DELAY_NS) {
                         notes.add(String.format(Locale.ROOT, "zoom %.2f: camera zoom at screenshot %.3f, player %.1f,%.1f",
                             zooms[zoomIndex], Core.getInstance().getZoom(0), IsoPlayer.players[0].getX(), IsoPlayer.players[0].getY()));

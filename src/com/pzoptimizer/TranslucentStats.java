@@ -31,7 +31,7 @@ public final class TranslucentStats {
         zombie.iso.IsoGridSquare square = (zombie.iso.IsoGridSquare) squareObj;
         int playerIndex = zombie.iso.IsoCamera.frameState.playerIndex;
         boolean wind = zombie.core.Core.getInstance().getOptionDoWindSpriteEffects();
-        java.util.List<zombie.iso.IsoObject> objects = square.getObjects();
+        java.util.List<zombie.iso.IsoObject> objects = GameCompat.objects(square);
         int n = objects.size();
         for (int i = 0; i < n; i++) {
             zombie.iso.IsoObject o = objects.get(i);
