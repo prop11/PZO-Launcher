@@ -27,9 +27,9 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
  * A re-bake for blood or corpse changes only starts while fewer than 4 bakes started this frame; none waits more
  * than 3 frames, and the previous texture keeps being drawn meanwhile.
  *
- * Lighting re-bakes are never held. A lightning flash, dusk, dawn and fog change the light a little every frame on
+ * Lighting re-bakes are not budgeted. A lightning flash, dusk, dawn and fog change the light a little every frame on
  * every square, and holding some groups back showed neighbouring chunks at different brightness (the screen
- * shimmered for the length of each flash).
+ * shimmered for the length of each flash). During a flash every lighting-only re-bake is held together until it ends.
  *
  * A first bake (no texture yet) and any re-bake for an object, item, cutaway, obscuring, creation, redraw or tree
  * change is never held. Besides the texture, a bake rebuilds the chunk level's lists of squares drawn every frame
@@ -145,13 +145,14 @@ public final class ChunkBakeBudget {
         long flags = (long) H.ZI_FLAGS.get(zi);
         boolean hasTexture = H.ZI_CHUNK.get(zi) != null;
 
-        // During an active lightning flash, suppress pure lighting re-bakes uniformly across all chunks.
-        // Full-screen illumination is handled by WeatherShader post-processing; skipping chunk texture
+        // During an active lightning flash, hold pure lighting re-bakes uniformly across all chunks.
+        // Full-screen illumination is handled by WeatherShader post-processing; holding chunk texture
         // rebuilds prevents the 50-100 ms multi-chunk freeze without causing neighbor brightness shimmer.
+        // The group stays dirty and re-bakes once the flash ends: indoor squares ignore the flash, so a light
+        // switched on during it never dirties them again and would otherwise stay unbaked.
         if (hasTexture && (flags & FBORenderChunk.DIRTY_LIGHTING) != 0 && (flags & ~FBORenderChunk.DIRTY_LIGHTING) == 0 && lightningActive) {
-            H.ZI_FLAGS.set(zi, 0L);
-            H.ZI_DIRTY.set(zi, false);
-            return mgr.beginRenderChunkLevel(chunk, level, zoom, canRender, canClear);
+            bakesHeld.incrementAndGet();
+            return beginHidden(mgr, chunk, level, zoom, canRender, canClear, zi);
         }
 
         // Later levels of a group share its texture and its decision

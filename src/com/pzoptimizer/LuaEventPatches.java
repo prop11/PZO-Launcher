@@ -11,9 +11,13 @@ import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -24,9 +28,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * other case runs the scan as stock.
  *
  * In addition, LuaEventPatches provides bytecode-level rate pacing and LOD governors:
- * 1. Mod OnTick / OnPlayerUpdate 60Hz Rate Clamp: 3rd-party mod per-frame handlers are paced to 60Hz and staggered across
- *    frames, eliminating frametime spikes on 120Hz/144Hz/240Hz monitors while keeping UI and controls instant.
- * 2. Mod Zombie Script LOD: 3rd-party zombie mod scripts run every frame near the player, and are smoothly staggered
+ * 1. Mod OnTick / OnPlayerUpdate 60Hz Rate Clamp: 3rd-party mod per-frame handlers are paced to 60Hz on average and
+ *    staggered across frames, eliminating frametime spikes on 120Hz/144Hz/240Hz monitors. At 60 FPS or below nothing is
+ *    skipped, and every handler runs on a frame with a key or mouse button press or release.
+ * 2. Mod Zombie Script LOD: 3rd-party zombie mod scripts run every frame near a local player, and are smoothly staggered
  *    across frames when far away (cutting 70-80% mod overhead in large hordes).
  *
  * While a benchmark runs, every callback is also timed and the total is attributed to "event file:function", so the
@@ -46,9 +51,31 @@ public final class LuaEventPatches {
     private static int depth;
     private static final Map<String, long[]> handlerTimes = new HashMap<>(); // key -> {nanos, calls}
 
-    // 60Hz Mod Event Pacing (Main thread only)
-    private static final Map<Object, Long> lastModRunTimes = new HashMap<>();
+    // 60Hz Mod Event Pacing (Main thread only). Each handler keeps a schedule advancing by one period per run, so the
+    // average rate is 60Hz at any frame rate; the slack keeps a locked 60 FPS with frame jitter from skipping at all.
+    private static final long PACE_PERIOD_NS = 16_666_667L, PACE_SLACK_NS = 2_000_000L;
+    // Next due time per handler: OnTick uses slot 0, OnPlayerUpdate one slot per local player (split-screen)
+    private static final Map<Object, long[]> tickDue = new WeakHashMap<>(), playerDue = new WeakHashMap<>();
     private static final ConcurrentHashMap<se.krka.kahlua.vm.Prototype, Boolean> modPrototypeCache = new ConcurrentHashMap<>();
+    private static int edgeFrame = Integer.MIN_VALUE;
+    private static boolean edgeThisFrame;
+
+    // GameKeyboard keeps its key states private; held lazily so this class never loads game classes early
+    private static final class Keys {
+        static final VarHandle DOWN, LAST_DOWN;
+        static {
+            VarHandle d = null, l = null;
+            try {
+                MethodHandles.Lookup k = MethodHandles.privateLookupIn(zombie.input.GameKeyboard.class, MethodHandles.lookup());
+                d = k.findStaticVarHandle(zombie.input.GameKeyboard.class, "down", boolean[].class);
+                l = k.findStaticVarHandle(zombie.input.GameKeyboard.class, "lastDown", boolean[].class);
+            } catch (Throwable t) {
+                PZOLogger.warn("[LuaEventPatches] keyboard state not readable, mod handlers will not be paced: " + t);
+            }
+            DOWN = d;
+            LAST_DOWN = l;
+        }
+    }
 
     // Zombie Script LOD frame ticker
     private static long zombieLODTick = 0;
@@ -148,40 +175,84 @@ public final class LuaEventPatches {
         return isMod;
     }
 
+    /** True when this handler call should be skipped to hold it at 60Hz on average. */
+    private static boolean paceSkip(Map<Object, long[]> dueMap, Object closure, int slot) {
+        long now = System.nanoTime();
+        long[] due = dueMap.get(closure);
+        if (due == null) dueMap.put(closure, due = new long[4]);
+        long next = due[slot];
+        if (next == 0) {
+            // Staggered first slot so handlers registered together do not all land on the same frame
+            due[slot] = now + PACE_PERIOD_NS - (System.identityHashCode(closure) & 3) * 4_000_000L;
+            return false;
+        }
+        if (now + PACE_SLACK_NS < next) {
+            // isKeyPressed / isButtonPressed only hold for the frame of the edge, so a skipped handler would miss it;
+            // run early without moving the schedule
+            return !inputEdgeThisFrame();
+        }
+        next += PACE_PERIOD_NS;
+        due[slot] = next < now ? now + PACE_PERIOD_NS : next;
+        return false;
+    }
+
+    private static boolean inputEdgeThisFrame() {
+        zombie.iso.IsoWorld world = zombie.iso.IsoWorld.instance;
+        int frame = world != null ? world.getFrameNo() : Integer.MIN_VALUE + 1;
+        if (frame != edgeFrame) {
+            edgeFrame = frame;
+            edgeThisFrame = scanInputEdges();
+        }
+        return edgeThisFrame;
+    }
+
+    private static boolean scanInputEdges() {
+        try {
+            if (Keys.DOWN == null) return true;
+            boolean[] down = (boolean[]) Keys.DOWN.get(), last = (boolean[]) Keys.LAST_DOWN.get();
+            if (down != null && last != null && !Arrays.equals(down, last)) return true;
+            boolean[] b = zombie.input.Mouse.buttonDownStates, p = zombie.input.Mouse.buttonPrevStates;
+            return b != null && p != null && !Arrays.equals(b, p);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** Squared distance from the zombie to the nearest local player in its cell, or -1 when there is none. */
+    private static float nearestLocalPlayerDistSq(zombie.characters.IsoZombie z) {
+        zombie.characters.IsoPlayer[] players = zombie.characters.IsoPlayer.players;
+        if (players == null) return -1.0f;
+        float best = -1.0f;
+        for (zombie.characters.IsoPlayer player : players) {
+            if (player == null || player.getCell() != z.getCell()) continue;
+            float dx = z.getX() - player.getX();
+            float dy = z.getY() - player.getY();
+            float d = dx * dx + dy * dy;
+            if (best < 0.0f || d < best) best = d;
+        }
+        return best;
+    }
+
     public static void call(se.krka.kahlua.integration.LuaCaller caller, se.krka.kahlua.vm.KahluaThread thread, Object closure,
                             Object[] params) {
         String event = depth > 0 && depth <= eventStack.length ? eventStack[depth - 1] : "?";
 
         // 1. Mod OnTick / OnPlayerUpdate 60Hz Rate Clamp & Frame Spreading
-        if (modPaced && ("OnTick".equals(event) || "OnPlayerUpdate".equals(event))) {
-            if (isModClosure(closure)) {
-                long now = System.nanoTime();
-                Long last = lastModRunTimes.get(closure);
-                if (last == null) {
-                    int phaseOffset = (Math.abs(closure.hashCode()) % 4) * 4_000_000;
-                    lastModRunTimes.put(closure, now - phaseOffset);
-                } else {
-                    long elapsed = now - last;
-                    if (elapsed < 16_000_000L) {
-                        return; // 60Hz rate clamp: skip execution on this high-FPS frame
-                    }
-                    lastModRunTimes.put(closure, now);
-                }
+        if (modPaced && isModClosure(closure)) {
+            if ("OnTick".equals(event)) {
+                if (paceSkip(tickDue, closure, 0)) return;
+            } else if ("OnPlayerUpdate".equals(event)) {
+                int slot = params != null && params.length > 0 && params[0] instanceof zombie.characters.IsoPlayer p
+                    ? p.getPlayerNum() & 3 : 0;
+                if (paceSkip(playerDue, closure, slot)) return;
             }
         }
 
-        // 2. Mod scripts on zombies LOD: every frame near player, staggered when far
+        // 2. Mod scripts on zombies LOD: every frame near a local player, staggered when far
         if (zombieLod && "OnZombieUpdate".equals(event)) {
             if (isModClosure(closure) && params != null && params.length > 0 && params[0] instanceof zombie.characters.IsoZombie z) {
-                zombie.characters.IsoPlayer player = zombie.characters.IsoPlayer.getInstance();
-                if (player == null && zombie.characters.IsoPlayer.players != null && zombie.characters.IsoPlayer.players.length > 0) {
-                    player = zombie.characters.IsoPlayer.players[0];
-                }
-                if (player != null && player.getCell() == z.getCell()) {
-                    float dx = z.getX() - player.getX();
-                    float dy = z.getY() - player.getY();
-                    float distSq = dx * dx + dy * dy;
-
+                float distSq = nearestLocalPlayerDistSq(z);
+                if (distSq >= 0.0f) {
                     // Proximity < 15 tiles: run every frame!
                     if (distSq > 225.0f) {
                         long tick = zombieLODTick;

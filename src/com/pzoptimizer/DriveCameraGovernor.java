@@ -7,11 +7,12 @@ import com.pzoptimizer.shaded.asm.tree.InsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
+import zombie.characters.IsoPlayer;
 import zombie.iso.PlayerCamera;
 
 /**
- * Eliminates 1-pixel stair-stepping judder during camera movement (especially when driving)
- * by preserving subpixel floating-point coordinates instead of casting to whole integers.
+ * Eliminates 1-pixel stair-stepping judder of the camera while driving by preserving subpixel floating-point
+ * coordinates instead of casting to whole integers. Only applies while the camera's player is in a vehicle.
  */
 public final class DriveCameraGovernor {
 
@@ -20,34 +21,27 @@ public final class DriveCameraGovernor {
     private DriveCameraGovernor() {}
 
     public static float getSmoothOffX(PlayerCamera cam) {
-        if (!active || cam == null) {
-            return (int) (cam != null ? cam.offX + cam.rightClickX : 0.0f);
-        }
-        float raw = cam.offX + cam.rightClickX;
-        float zoom = cam.zoom;
-        if (zoom < 0.999f && zoom > 0.01f) {
-            return zoom * (int) (raw / zoom);
-        }
-        return raw;
+        return cam == null ? 0.0f : offset(cam, cam.offX + cam.rightClickX);
     }
 
     public static float getSmoothOffY(PlayerCamera cam) {
-        if (!active || cam == null) {
-            return (int) (cam != null ? cam.offY + cam.rightClickY : 0.0f);
-        }
-        float raw = cam.offY + cam.rightClickY;
-        float zoom = cam.zoom;
-        if (zoom < 0.999f && zoom > 0.01f) {
-            return zoom * (int) (raw / zoom);
-        }
-        return raw;
+        return cam == null ? 0.0f : offset(cam, cam.offY + cam.rightClickY);
     }
 
     public static float getSmoothLastOffX(PlayerCamera cam) {
-        if (!active || cam == null) {
-            return (int) (cam != null ? cam.lastOffX + cam.rightClickX : 0.0f);
+        return cam == null ? 0.0f : offset(cam, cam.lastOffX + cam.rightClickX);
+    }
+
+    public static float getSmoothLastOffY(PlayerCamera cam) {
+        return cam == null ? 0.0f : offset(cam, cam.lastOffY + cam.rightClickY);
+    }
+
+    // On foot the stock whole-pixel offset stays: chunk textures and sprites drawn at fractional offsets come out
+    // filtered (soft, with seams between chunks), and only a moving vehicle's camera shows the 1-pixel judder
+    private static float offset(PlayerCamera cam, float raw) {
+        if (!active || !inVehicle(cam.playerIndex)) {
+            return (int) raw;
         }
-        float raw = cam.lastOffX + cam.rightClickX;
         float zoom = cam.zoom;
         if (zoom < 0.999f && zoom > 0.01f) {
             return zoom * (int) (raw / zoom);
@@ -55,16 +49,11 @@ public final class DriveCameraGovernor {
         return raw;
     }
 
-    public static float getSmoothLastOffY(PlayerCamera cam) {
-        if (!active || cam == null) {
-            return (int) (cam != null ? cam.lastOffY + cam.rightClickY : 0.0f);
-        }
-        float raw = cam.lastOffY + cam.rightClickY;
-        float zoom = cam.zoom;
-        if (zoom < 0.999f && zoom > 0.01f) {
-            return zoom * (int) (raw / zoom);
-        }
-        return raw;
+    private static boolean inVehicle(int playerIndex) {
+        IsoPlayer[] players = IsoPlayer.players;
+        if (players == null || playerIndex < 0 || playerIndex >= players.length) return false;
+        IsoPlayer player = players[playerIndex];
+        return player != null && player.getVehicle() != null;
     }
 
     /**
