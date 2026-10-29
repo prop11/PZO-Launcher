@@ -9,6 +9,8 @@ import java.lang.reflect.Proxy;
 public class PZOEngineBridge {
 
     private static volatile boolean initialized = false;
+    // LuaManager.init() builds a new env on every Lua reload, dropping the PZOEngine globals
+    private static volatile Object boundEnv = null;
     private static volatile int cachedRamGb = 0;
 
     public static boolean isEnginePresent() {
@@ -517,6 +519,21 @@ public class PZOEngineBridge {
 
             if (!attached) {
                 PZOLogger.info("[PZO Kahlua Bridge] LuaManager polling finished (Fallback status files active)");
+                return;
+            }
+
+            while (true) {
+                try {
+                    Thread.sleep(250);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+                try {
+                    Object env = Class.forName("zombie.Lua.LuaManager").getField("env").get(null);
+                    if (env != null && env != boundEnv) {
+                        GameThreadQueue.runOnGameThread(PZOEngineBridge::attemptAttach);
+                    }
+                } catch (Throwable ignored) {}
             }
         });
 
@@ -1181,7 +1198,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.6\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.7\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    local fsrStatus = fsrActive and \" <RGB:0.3,1.0,0.5>[ENABLED] <RGB:0.85,0.85,0.85>\" or \" <RGB:0.7,0.7,0.7>[OFF - Launch Option Available] <RGB:0.85,0.85,0.85>\"\n" +
                                 "    local text = \" <CENTRE> <SIZE:medium> <RGB:0.25,0.95,0.45> Project Zomboid Optimiser (PZO v\" .. ver .. \") <LINE> \" ..\n" +
@@ -1444,7 +1461,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.6'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.7'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +
@@ -1648,6 +1665,10 @@ public class PZOEngineBridge {
                                 "        end\n" +
                                 "        return orig_gmfw(modId, filename, createIfNull, append)\n" +
                                 "    end\n" +
+                                "end\n" +
+                                "if MPOptim and MPOptim.Config and MPOptim.Config.Load and MPOptim.Config.SyncToEngine then\n" +
+                                "    MPOptim.Config.Load()\n" +
+                                "    MPOptim.Config.SyncToEngine()\n" +
                                 "end\n";
 
                             Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
@@ -1696,6 +1717,7 @@ public class PZOEngineBridge {
                 PZOLogger.warn("[PZO Kahlua Bridge] Table binding warning: " + t.getMessage());
             }
 
+            boundEnv = env;
             PZOLogger.success("[PZO Kahlua Bridge] Native Java methods and PZOEngine globals bound to LuaManager.env");
                         return true;
         }

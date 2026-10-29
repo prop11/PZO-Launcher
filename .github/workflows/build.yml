@@ -55,6 +55,7 @@ jobs:
           path: |
             dist/PZO-Optimizer-Windows.zip
             dist/PZO_Optimizer_macOS_Linux.zip
+            dist/PZO-Downgrader.zip
             dist/PZO-Server-Windows.zip
             dist/PZO-Server-Linux.zip
 

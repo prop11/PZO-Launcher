@@ -897,7 +897,7 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_initNative(JNIEnv *env
     return JNI_TRUE;
 }
 
-#define PZO_NATIVE_VERSION "1.5.6"
+#define PZO_NATIVE_VERSION "1.5.7"
 
 JNIEXPORT jstring JNICALL Java_com_pzoptimizer_PZONative_getNativeVersion(JNIEnv *env, jclass cls) {
     (void)cls;
