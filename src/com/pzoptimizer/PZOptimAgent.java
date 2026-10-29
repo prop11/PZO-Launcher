@@ -158,6 +158,10 @@ public class PZOptimAgent {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                  ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+            if (className != null && className.startsWith("reallimbs/")) {
+                RealLimbsCompat.noteLoader(loader);
+                return null;
+            }
             AsmSupport.REDEFINING.set(classBeingRedefined);
             byte[] specific;
             try {

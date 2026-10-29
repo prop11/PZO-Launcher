@@ -305,7 +305,8 @@ public final class VehicleMotionSmoother {
     }
 
     private static void smoothCamera() throws Throwable {
-        if (IsoPlayer.numPlayers > 1) return;
+        // A 3D camera mod (Viewpoint) drives the view itself; recentring PlayerCamera here would fight it
+        if (IsoPlayer.numPlayers > 1 || ViewpointStanddownGovernor.isStanddownActive()) return;
         IsoPlayer player = IsoPlayer.players[0];
         if (player == null || player.getVehicle() == null) return;
 

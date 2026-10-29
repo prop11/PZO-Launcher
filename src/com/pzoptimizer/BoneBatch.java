@@ -106,7 +106,7 @@ public final class BoneBatch {
         zombie.core.skinnedmodel.animation.AnimationPlayer p = (zombie.core.skinnedmodel.animation.AnimationPlayer) player;
         if (p.parentPlayer != null || p.isRecording() || p.isRagdolling()) return false;
         if (p.getMultiTrack().containsAnyRagdollTracks()) return false;
-        if (!(p.getIsoGameCharacter() instanceof zombie.characters.IsoZombie)) return false;
+        if (!(p.getIsoGameCharacter() instanceof zombie.characters.IsoZombie z) || RealLimbsCompat.isBody(z)) return false;
         Integer slot = queued.get(player);
         if (slot != null && live[slot]) {
             // Updated twice in one loop: finish the queued frame first, as stock would have

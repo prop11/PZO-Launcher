@@ -171,8 +171,30 @@ public final class LuaEventPatches {
         }
         String f = file.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
         boolean isMod = (f.contains("/mods/") || f.contains("workshop")) && !f.contains("mpoptimiser");
+        // A 3D camera mod may move the camera from these events; pacing it would step the view above 60 FPS
+        if (isMod && ViewpointStanddownGovernor.getMode() != ViewpointStanddownGovernor.Mode.DISABLED
+                && ViewpointStanddownGovernor.isViewpointModId(f)) {
+            isMod = false;
+        }
+        if (isMod && isExemptMod(f)) {
+            isMod = false;
+        }
         modPrototypeCache.put(lc.prototype, Boolean.valueOf(isMod));
         return isMod;
+    }
+
+    // Mods whose handlers must run on every event, matched on the lower-cased script path:
+    // - Real Limbs times its kick hits in OnTick and runs its Java heartbeat from OnPlayerUpdate.
+    // - Project A-Life's NPCs are zombie shells: its OnZombieUpdate fence re-applies NPC behaviour on every update (a
+    //   staggered NPC runs plain zombie AI in between), and its OnTick animation client applies a fixed number of
+    //   queued NPC animations per tick before they expire.
+    private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife"};
+
+    private static boolean isExemptMod(String path) {
+        for (String p : EXEMPT_MOD_PATHS) {
+            if (path.contains(p)) return true;
+        }
+        return false;
     }
 
     /** True when this handler call should be skipped to hold it at 60Hz on average. */

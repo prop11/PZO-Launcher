@@ -74,7 +74,8 @@ public final class ViewpointStanddownGovernor {
      */
     public static boolean checkDetection() {
         long now = System.currentTimeMillis();
-        if (modDetected && (now - lastCheckTime < 3000L)) {
+        // Negative results are throttled too: without Viewpoint every per-frame caller re-ran the full class and mod-list scan
+        if (lastCheckTime != 0 && now - lastCheckTime < 3000L) {
             return modDetected;
         }
         lastCheckTime = now;

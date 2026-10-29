@@ -203,6 +203,7 @@ public final class ActionParallel {
     public static boolean defer(IsoGameCharacter chr) {
         if (!collecting || !(chr instanceof IsoZombie z) || Thread.currentThread() != gameThread) return false;
         if (z.isBeingGrappled() || z.isGrappling() || z.getReanimatedPlayer() != null || z.isReanimatedForGrappleOnly()) return false;
+        if (RealLimbsCompat.isBody(z)) return false;
         phases.put(chr, DEFERRED);
         queue.add(z);
         return true;

@@ -39,7 +39,7 @@ public final class DriveCameraGovernor {
     // On foot the stock whole-pixel offset stays: chunk textures and sprites drawn at fractional offsets come out
     // filtered (soft, with seams between chunks), and only a moving vehicle's camera shows the 1-pixel judder
     private static float offset(PlayerCamera cam, float raw) {
-        if (!active || !inVehicle(cam.playerIndex)) {
+        if (!active || !inVehicle(cam.playerIndex) || ViewpointStanddownGovernor.isStanddownActive()) {
             return (int) raw;
         }
         float zoom = cam.zoom;
