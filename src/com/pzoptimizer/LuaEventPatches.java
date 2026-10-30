@@ -176,14 +176,20 @@ public final class LuaEventPatches {
                 && ViewpointStanddownGovernor.isViewpointModId(f)) {
             isMod = false;
         }
-        if (isMod && isExemptMod(f)) {
+        if (isMod && (isExemptMod(f) || ModApi.isExemptPath(f) || ModApi.isExemptPrototype(lc.prototype))) {
             isMod = false;
         }
         modPrototypeCache.put(lc.prototype, Boolean.valueOf(isMod));
         return isMod;
     }
 
-    // Mods whose handlers must run on every event, matched on the lower-cased script path:
+    /** Forgets which handlers are mods' ones; ModApi calls it when a mod's exemption changes. */
+    static void clearModCache() {
+        modPrototypeCache.clear();
+    }
+
+    // Mods whose handlers must run on every event, matched on the lower-cased script path (other mods ask through
+    // PZOApi.exemptMod instead):
     // - Real Limbs times its kick hits in OnTick and runs its Java heartbeat from OnPlayerUpdate.
     // - Project A-Life's NPCs are zombie shells: its OnZombieUpdate fence re-applies NPC behaviour on every update (a
     //   staggered NPC runs plain zombie AI in between), and its OnTick animation client applies a fixed number of
@@ -272,7 +278,8 @@ public final class LuaEventPatches {
 
         // 2. Mod scripts on zombies LOD: every frame near a local player, staggered when far
         if (zombieLod && "OnZombieUpdate".equals(event)) {
-            if (isModClosure(closure) && params != null && params.length > 0 && params[0] instanceof zombie.characters.IsoZombie z) {
+            if (isModClosure(closure) && params != null && params.length > 0 && params[0] instanceof zombie.characters.IsoZombie z
+                    && !ModApi.isFullRate(z)) {
                 float distSq = nearestLocalPlayerDistSq(z);
                 if (distSq >= 0.0f) {
                     // Proximity < 15 tiles: run every frame!

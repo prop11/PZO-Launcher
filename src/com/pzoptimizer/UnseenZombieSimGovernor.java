@@ -61,7 +61,7 @@ public final class UnseenZombieSimGovernor {
             float cap = capFps;
             // A Real Limbs body steps its physics in the zombie's update, so a capped rate would stall it
             if (active && averageFps > cap && sim != UpdateSchedulerSimulationLevel.minimum() && isUnseen(obj)
-                    && !RealLimbsCompat.isBody(obj)) {
+                    && !RealLimbsCompat.isBody(obj) && !ModApi.isFullRate((IsoZombie) obj)) {
                 UpdateSchedulerSimulationLevel capped = (UpdateSchedulerSimulationLevel) VANILLA.invokeExact(scheduler, obj, cap);
                 if (capped.ordinal() < sim.ordinal()) {
                     sim = capped;

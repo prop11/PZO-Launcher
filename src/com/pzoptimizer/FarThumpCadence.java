@@ -29,7 +29,7 @@ public final class FarThumpCadence {
     public static boolean probe(IsoZombie z, IsoGridSquare square) {
         if (active && square == null && FrameStamp.onGameThread()) {
             long tick = FrameStamp.tick();
-            if (tick >= 0 && ((System.identityHashCode(z) ^ tick) & 1L) != 0L && farFromPlayers(z)) {
+            if (tick >= 0 && ((System.identityHashCode(z) ^ tick) & 1L) != 0L && farFromPlayers(z) && !ModApi.isFullRate(z)) {
                 skipped.incrementAndGet();
                 return false;
             }
