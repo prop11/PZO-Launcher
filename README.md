@@ -156,6 +156,7 @@ When using the [PZO Steam Workshop Mod](https://steamcommunity.com/sharedfiles/f
 
 * **Mod Compatibility**: 100% compatible with all standard Lua mods, vehicle packs, weapon overhauls, tilepacks, and custom maps.
 * **ZombieBuddy Coexistence**: Fully compatible with **ZombieBuddy** (`zbNative`). PZO automatically detects and preserves `"-agentlib:zbNative"` in `ProjectZomboid64.json`.
+* **For mod authors - PZOApi**: if your mod counts frames, drives zombies from Lua or keeps special corpses or items, a few lines with `PZOApi` tell PZO to leave it alone, without making PZO a requirement. See the [PZOApi reference](docs/MODDING_API.md).
 * **Zomdroid (Android Mobile)**: Fully supported on ARM64 Android devices via [Zomdroid](https://github.com/udarmolota/zomdroid). The dedicated `zomdroid` branch resolves mobile OpenGL ES / GL4ES shader limits (including red models and vehicle texture units). See the [Zomdroid Support & Installation Guide](https://github.com/prop11/PZO-Launcher/wiki/Zomdroid-Support-and-Installation).
 
 ---

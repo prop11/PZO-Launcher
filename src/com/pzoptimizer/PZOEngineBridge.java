@@ -245,6 +245,11 @@ public class PZOEngineBridge {
 
     public static void setJvmOption(String key, boolean value) {
         try {
+            String heldBy = value ? ModApi.standdownOf(key) : null;
+            if (heldBy != null) {
+                value = false;
+                PZOLogger.info("[PZO Bridge] " + key + " held off for " + heldBy);
+            }
             if ("JVM_GLStateOptimizer".equals(key)) {
                 GLStateOptimizer.setEnabled(value);
             } else if ("JVM_StreamBufferBoost".equals(key)) {
@@ -834,6 +839,26 @@ public class PZOEngineBridge {
                                 }
                             );
                             tableRawset.invoke(pzoTable, "getCompatStatus", getCompatFunc);
+
+                            // modApi(op, a, b, c): the Java side of the Lua PZOApi other mods use (ModApi)
+                            Object modApiFunc = Proxy.newProxyInstance(
+                                javaFuncClass.getClassLoader(),
+                                new Class<?>[]{javaFuncClass},
+                                (proxy, m, mArgs) -> {
+                                    if ("call".equals(m.getName())) {
+                                        Object callFrame = mArgs[0];
+                                        int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
+                                        Object op = n > 0 ? getArg.invoke(callFrame, 0) : null;
+                                        Object a = n > 1 ? getArg.invoke(callFrame, 1) : null;
+                                        Object b = n > 2 ? getArg.invoke(callFrame, 2) : null;
+                                        Object c = n > 3 ? getArg.invoke(callFrame, 3) : null;
+                                        pushObj.invoke(callFrame, op == null ? Boolean.FALSE : ModApi.dispatch(op.toString(), a, b, c));
+                                        return 1;
+                                    }
+                                    return null;
+                                }
+                            );
+                            tableRawset.invoke(pzoTable, "modApi", modApiFunc);
 
                             // getChannel
                             Object getChannelFunc = Proxy.newProxyInstance(
