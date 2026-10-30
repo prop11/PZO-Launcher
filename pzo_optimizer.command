@@ -4,7 +4,7 @@
 
 set -u
 
-PZO_VERSION="1.5.8.1"
+PZO_VERSION="1.5.9"
 
 echo "================================================================="
 echo " PZO Optimizer - macOS installer ($PZO_VERSION)"
