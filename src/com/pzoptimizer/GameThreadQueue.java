@@ -12,8 +12,9 @@ import java.util.concurrent.TimeoutException;
  * the game thread reads them constantly (every LuaManager.getFunctionObject, every event), so writing them from
  * another thread can make a lookup fail for a moment ('no such function "Vehicles.Init.Default"' when a vehicle
  * spawns). Tasks are run after each MainThread loop step by EngineThreadGovernor's hook, which also ticks at the
- * main menu. If that hook is not running at all (it failed to install), a task runs on the caller after
- * NO_HOOK_FALLBACK_NS so nothing waits forever.
+ * main menu. If that hook never installed, a task runs on the caller after NO_HOOK_FALLBACK_NS so nothing waits
+ * forever. Once it is installed a task always waits for it: the first loop step only comes after every mod's Lua has
+ * loaded, which takes minutes with a large modpack, and running Lua on another thread meanwhile corrupts the load.
  */
 public final class GameThreadQueue {
 
@@ -21,8 +22,14 @@ public final class GameThreadQueue {
 
     private static final ConcurrentLinkedQueue<FutureTask<?>> tasks = new ConcurrentLinkedQueue<>();
     private static volatile long lastDrainNs;
+    private static volatile boolean hookInstalled;
 
     private GameThreadQueue() {}
+
+    /** Called by EngineThreadGovernor once its MainThread loop wrapper is in place. */
+    public static void markHookInstalled() {
+        hookInstalled = true;
+    }
 
     // Game thread, after each MainThread loop step
     public static void drain() {
@@ -44,7 +51,7 @@ public final class GameThreadQueue {
             } catch (TimeoutException e) {
                 long now = System.nanoTime(), last = lastDrainNs;
                 boolean hookSilent = last == 0 ? now - posted > NO_HOOK_FALLBACK_NS : now - last > NO_HOOK_FALLBACK_NS;
-                if (hookSilent && tasks.remove(f)) {
+                if (!hookInstalled && hookSilent && tasks.remove(f)) {
                     PZOLogger.warn("[GameThreadQueue] game thread hook not running; task runs on " + Thread.currentThread().getName());
                     f.run();
                 }
