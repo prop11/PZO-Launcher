@@ -82,7 +82,7 @@ jobs:
         run: |
           if not exist dist mkdir dist
           cd native
-          cl.exe /O2 /LD /W3 /arch:AVX2 /I"%JAVA_HOME%\include" /I"%JAVA_HOME%\include\win32" pzo_native.c /Fe:..\dist\pzo_native64.dll /link /MACHINE:X64 winmm.lib avrt.lib
+          cl.exe /O2 /LD /W3 /I"%JAVA_HOME%\include" /I"%JAVA_HOME%\include\win32" pzo_native.c /Fe:..\dist\pzo_native64.dll /link /MACHINE:X64 winmm.lib avrt.lib
           if errorlevel 1 exit /b 1
 
       - name: Upload Windows Native Artifact

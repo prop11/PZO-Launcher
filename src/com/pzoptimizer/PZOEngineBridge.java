@@ -402,6 +402,8 @@ public class PZOEngineBridge {
                 WorldUpscalerGovernor.setSharpness(value / 100.0f);
             } else if ("JVM_ChunkLoadDistance".equals(key)) {
                 ChunkLoadDistance.setWidth(value);
+            } else if ("JVM_CompatMode".equals(key)) {
+                PZOConfig.setCompatMode(value == 1 ? "on" : value == 2 ? "off" : "auto");
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -813,6 +815,20 @@ public class PZOEngineBridge {
                                 }
                             );
                             tableRawset.invoke(pzoTable, "getHardwareSummary", getHardwareFunc);
+
+                            // getCompatStatus: why compatibility mode is on this launch, "" when it is off
+                            Object getCompatFunc = Proxy.newProxyInstance(
+                                javaFuncClass.getClassLoader(),
+                                new Class<?>[]{javaFuncClass},
+                                (proxy, m, mArgs) -> {
+                                    if ("call".equals(m.getName())) {
+                                        pushObj.invoke(mArgs[0], CompatMode.isActive() ? CompatMode.getReasons() : "");
+                                        return 1;
+                                    }
+                                    return null;
+                                }
+                            );
+                            tableRawset.invoke(pzoTable, "getCompatStatus", getCompatFunc);
 
                             // getChannel
                             Object getChannelFunc = Proxy.newProxyInstance(
@@ -1238,7 +1254,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.9\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.9.1\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1507,7 +1523,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.9'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.9.1'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +
