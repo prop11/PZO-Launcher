@@ -573,6 +573,11 @@ public class PZOEngineBridge {
 
     /** One attach attempt; runs on the game thread (GameThreadQueue), since it writes Lua's tables. */
     private static boolean attemptAttach() throws Exception {
+        // Never touch Lua from another thread: the game thread may be in the middle of loading a mod's file.
+        // A dedicated server has no GameWindow thread and keeps the queue's fallback.
+        Thread gameThread = (Thread) Class.forName("zombie.GameWindow").getField("gameThread").get(null);
+        if (gameThread != null && gameThread != Thread.currentThread()) return false;
+
         Class<?> lmClass = Class.forName("zombie.Lua.LuaManager");
 
         try {
@@ -1748,25 +1753,9 @@ public class PZOEngineBridge {
                                 Field threadField = lmClass.getField("thread");
                                 Object thread = threadField.get(null);
                                 if (caller != null && thread != null) {
-                                    Field debugOwnerField = null;
-                                    Thread prevOwner = null;
-                                    try {
-                                        debugOwnerField = thread.getClass().getField("debugOwnerThread");
-                                        prevOwner = (Thread) debugOwnerField.get(thread);
-                                        debugOwnerField.set(thread, Thread.currentThread());
-                                    } catch (Throwable ignored) {}
-
-                                    try {
-                                        Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
-                                        protCall.invoke(caller, thread, closure, new Object[0]);
-                                        PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
-                                    } finally {
-                                        if (debugOwnerField != null && prevOwner != null) {
-                                            try {
-                                                debugOwnerField.set(thread, prevOwner);
-                                            } catch (Throwable ignored) {}
-                                        }
-                                    }
+                                    Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
+                                    protCall.invoke(caller, thread, closure, new Object[0]);
+                                    PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
                                 }
                             }
 

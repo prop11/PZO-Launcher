@@ -175,6 +175,7 @@ public class EngineThreadGovernor {
             if (origLoop != null && !(origLoop instanceof MainThreadDiagnosticHook)) {
                 loopField.set(null, new MainThreadDiagnosticHook(origLoop));
                 mainThreadPacerHooked = true;
+                GameThreadQueue.markHookInstalled();
                 PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Zero-Lock Diagnostic Probe (Uncapped Native Clock)");
             }
         } catch (Throwable t) {
