@@ -99,6 +99,7 @@ def main():
     ap.add_argument("--route-dir", choices=["E", "W", "N", "S"], default="W")
     ap.add_argument("--cores", type=int, default=0,
                     help="pin the game to this many physical cores (with SMT siblings) to stand in for a smaller CPU")
+    ap.add_argument("--plan", help="segments run in one launch: name,route,tiles,speed,dir,time,weather,threat;...")
     ap.add_argument("--no-focus", action="store_true",
                     help="do not bring the game window to the front when it opens")
     args = ap.parse_args()
@@ -162,6 +163,8 @@ def main():
                 if args.threat:
                     extra["threat"] = 1
                 extra.update({"weather": args.weather, "time": args.time, "route": args.route, "route_dir": args.route_dir})
+                if args.plan:
+                    extra["plan"] = args.plan
                 data = fc.run_game(args, mode, template, label, run_dir, [], extra)
                 if data is None:
                     print("  no results.json (see %s)" % run_dir)
@@ -170,7 +173,8 @@ def main():
                 if not data.get("ok"):
                     print("  run failed:", "; ".join(data.get("notes", [])))
                 for z in data.get("zooms", []):
-                    print("  zoom %.2f: %.1f fps (1%% low %.1f, p99 %.2f ms)" % (z["zoom"], z["avg_fps"], z["low1_fps"], z["p99_ms"]))
+                    seg = ("%s " % z["segment"]) if "segment" in z else ""
+                    print("  %szoom %.2f: %.1f fps (1%% low %.1f, p99 %.2f ms)" % (seg, z["zoom"], z["avg_fps"], z["low1_fps"], z["p99_ms"]))
                 summary.append((label, data))
     finally:
         with open(launcher_json, "w", encoding="utf-8") as f:

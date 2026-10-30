@@ -256,7 +256,13 @@ public class PZOptimAgent {
                     "IsoChunkMap hand-off pacer", GameThreadPatches::patchChunkMap);
                 if (paced != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoChunkMap.updateInternal: chunk hand-offs paced by a per-frame time budget");
-                    return paced;
+                    base = paced;
+                }
+                byte[] dist = AsmSupport.transform(base != null ? base : classfileBuffer, loader,
+                    "IsoChunkMap chunk load distance", ChunkLoadDistance::patchChunkMap);
+                if (dist != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoChunkMap.CalcChunkWidth: chunk load distance setting armed");
+                    return dist;
                 }
                 return base;
             }
@@ -340,6 +346,12 @@ public class PZOptimAgent {
                 if (snd != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched WorldSoundManager.addSound: chunk walk clamped to the loaded grid");
                 }
+                byte[] sweep = AsmSupport.transform(snd != null ? snd : classfileBuffer, loader, "WorldSoundManager.update noise sweep",
+                    NoiseListSweep::patchManager);
+                if (sweep != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched WorldSoundManager.update: chunk noise lists swept only when a noise expired");
+                    return sweep;
+                }
                 return snd;
             }
             if ("zombie/characters/ecs/ECSComponent".equals(className) && classfileBuffer != null) {
@@ -386,6 +398,11 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoGridSquare.renderRainSplash: cached splash textures armed");
                     base = splash;
                 }
+                byte[] edges = AsmSupport.transform(base, loader, "IsoGridSquare crowd wall memo reset", CrowdEdgeMemo::patchGridSquare);
+                if (edges != null) {
+                    CrowdEdgeMemo.gridSquareHooked = true;
+                    base = edges;
+                }
                 return (base != classfileBuffer) ? base : null;
             }
             if ("zombie/vehicles/BaseVehicle".equals(className) && classfileBuffer != null) {
@@ -421,9 +438,19 @@ public class PZOptimAgent {
                 byte[] split = AsmSupport.transform(base, loader, "IsoZombie postupdate split", ActionParallel::patchZombie);
                 if (split != null) {
                     ActionParallel.markPatched(ActionParallel.PATCH_ZOMBIE);
-                    return split;
+                    base = split;
                 }
-                return snap != null ? snap : los;
+                byte[] stats = AsmSupport.transform(base, loader, "IsoZombie travel statistics fold", ZombieTravelTally::patchZombie);
+                if (stats != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoZombie.updateMovementStatistics: travel statistics summed once per frame");
+                    base = stats;
+                }
+                byte[] thump = AsmSupport.transform(base, loader, "IsoZombie far thump cadence", FarThumpCadence::patchZombie);
+                if (thump != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoZombie.updateInternal: far zombies probe doors and windows every other frame");
+                    base = thump;
+                }
+                return base != classfileBuffer ? base : null;
             }
             if ("zombie/core/opengl/RenderThread".equals(className) && classfileBuffer != null && BenchmarkHarness.isConfigured()) {
                 byte[] rt = AsmSupport.transform(classfileBuffer, loader, "RenderThread timing", GpuFrameTimer::patch);
@@ -526,14 +553,40 @@ public class PZOptimAgent {
                 }
                 return classfileBuffer;
             }
+            if ("zombie/iso/IsoMovingObject".equals(className) && classfileBuffer != null) {
+                byte[] sep = AsmSupport.transform(classfileBuffer, loader, "IsoMovingObject.separate wall memo", CrowdEdgeMemo::patchMovingObject);
+                if (sep != null) {
+                    CrowdEdgeMemo.separateHooked = true;
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoMovingObject.separate: crowd wall answers kept for the frame");
+                }
+                return sep;
+            }
+            if ("zombie/pathfind/PolygonalMap2".equals(className) && classfileBuffer != null) {
+                byte[] pm = AsmSupport.transform(classfileBuffer, loader, "PolygonalMap2 crowd wall memo reset", CrowdEdgeMemo::patchPathfinder);
+                if (pm != null) CrowdEdgeMemo.pathfinderHooked = true;
+                return pm;
+            }
+            if ("zombie/popman/ZombiePopulationManager".equals(className) && classfileBuffer != null) {
+                byte[] zp = AsmSupport.transform(classfileBuffer, loader, "ZombiePopulationManager arrival pacing",
+                    ZombieArrivalQueue::patchPopulationManager);
+                if (zp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ZombiePopulationManager.updateMain: zombie arrivals paced over frames");
+                }
+                return zp;
+            }
             if ("zombie/GameWindow".equals(className) && classfileBuffer != null) {
                 byte[] gw = AsmSupport.transform(classfileBuffer, loader, "GameWindow vehicle motion smoothing",
                     VehicleMotionSmoother::patchGameWindow);
                 if (gw != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched GameWindow: VehicleMotionSmoother transient render smoothing armed");
-                    return gw;
                 }
-                return classfileBuffer;
+                byte[] sv = AsmSupport.transform(gw != null ? gw : classfileBuffer, loader, "GameWindow.save zombie upkeep flush",
+                    ZombieArrivalQueue::patchGameWindow);
+                if (sv != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GameWindow.save: queued zombie arrivals and travel statistics flushed before saving");
+                    return sv;
+                }
+                return gw != null ? gw : classfileBuffer;
             }
             if ("zombie/iso/PlayerCamera".equals(className) && classfileBuffer != null) {
                 byte[] pc = AsmSupport.transform(classfileBuffer, loader, "PlayerCamera subpixel precision",
@@ -645,7 +698,13 @@ public class PZOptimAgent {
                     ActionParallel::patchCharacter);
                 if (split != null) {
                     ActionParallel.markPatched(ActionParallel.PATCH_CHARACTER);
-                    return split;
+                    gc = split;
+                }
+                byte[] quiet = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter silent zombie audio",
+                    SilentZombieAudio::patchCharacter);
+                if (quiet != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.updateEmitter: silent zombies skip sound parameter and emitter upkeep");
+                    gc = quiet;
                 }
                 return gc;
             }

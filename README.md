@@ -25,16 +25,24 @@ Instead of replacing game classes on disk or relying on decompiled class overrid
 
 ## Benchmarks
 
-![PZO vs stock Project Zomboid frame rates](docs/benchmarks.svg)
+![PZO vs stock Project Zomboid frame rates](docs/benchmark_b42_22_pzo_158.svg)
 
-| Scenario | Stock avg FPS | PZO avg FPS | Gain | 1% low FPS (stock -> PZO) |
-|---|---|---|---|---|
-| Horde nearby (40-tile walk, zombies attacking) | 37.5 | 69.7 | +86% | 12.7 -> 21.8 (+71%) |
-| Fast travel (1000 tiles at 33 tiles/s, dusk, zoom 200%) | 38.8 | 63.0 | +62% | 6.1 -> 11.7 (+92%) |
-| Large-area route (200 tiles at 16 tiles/s) | 234.7 | 320.3 | +36% | 20.6 -> 24.2 (+17%) |
-| Quiet walk (40-tile walk, no zombies) | 231.9 | 291.5 | +26% | 37.2 -> 44.4 (+19%) |
+| Scenario | Zoom | Stock avg FPS | PZO avg FPS | Gain | 1% low FPS (stock -> PZO) |
+|---|---|---|---|---|---|
+| Horde walk (40-tile loop, zombies attacking, clear) | 100% | 214 | 520 | +143% | 36 -> 68 (+91%) |
+| Horde walk (40-tile loop, zombies attacking, clear) | 200% | 204 | 441 | +116% | 60 -> 107 (+80%) |
+| Horde walk, storm (same loop in heavy rain, fog and lightning) | 100% | 215 | 502 | +133% | 65 -> 123 (+89%) |
+| Horde walk, storm (same loop in heavy rain, fog and lightning) | 200% | 111 | 262 | +136% | 43 -> 78 (+81%) |
+| Large-area route (200-tile loop at 16 tiles/s, clear) | 100% | 304 | 598 | +97% | 44 -> 80 (+82%) |
+| Large-area route (200-tile loop at 16 tiles/s, clear) | 200% | 242 | 450 | +86% | 59 -> 93 (+57%) |
+| Large-area route, storm (same route in heavy rain, fog and lightning) | 100% | 239 | 481 | +101% | 62 -> 124 (+99%) |
+| Large-area route, storm (same route in heavy rain, fog and lightning) | 200% | 105 | 238 | +127% | 39 -> 68 (+77%) |
+| Fast travel (1000 tiles at 33 tiles/s, dusk, clear) | 100% | 182 | 263 | +44% | 22 -> 35 (+61%) |
+| Fast travel (1000 tiles at 33 tiles/s, dusk, clear) | 200% | 122 | 180 | +48% | 26 -> 35 (+33%) |
+| Fast travel, storm (same run in heavy rain, fog and lightning) | 100% | 162 | 262 | +62% | 35 -> 56 (+59%) |
+| Fast travel, storm (same run in heavy rain, fog and lightning) | 200% | 58 | 109 | +87% | 18 -> 31 (+74%) |
 
-Measured with PZO's in-engine benchmark harness on the same save, route and settings for stock and PZO, with repeated runs averaged where available. Ryzen 7 7800X3D, Radeon RX 7900 XTX, 3440x1440, Build 42, zoom 100% unless noted. Runs from 22-23 Oct 2026 on PZO 1.0.x; results will vary with hardware, mods and settings.
+Measured with PZO's in-engine benchmark harness: one launch of stock Project Zomboid and one with PZO, each running every scenario in turn on the same save next to the Louisville mall horde (zombies attacking throughout), first in clear weather and then in a forced storm (heavy rain, fog, wind and lightning), at zoom 100% and 200%. Ryzen 7 7800X3D, Radeon RX 7900 XTX, 3440x1440, Build 42.22, FSR off. Runs from 30 Oct 2026 on PZO 1.5.8.1 with the current Unstable changes; results will vary with hardware, mods and settings.
 
 ---
 

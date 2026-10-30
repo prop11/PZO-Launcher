@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *    through a SRC_ALPHA blend, so a half-transparent pixel with nothing under it in the texture (water is drawn
  *    separately) is darkened twice and shows black. Sprites with water in the squares they cover stay per frame.
  *
- * Also per frame, as in vanilla: lit light fixtures, mirrors, glass and decals lying on the floor (puddles are drawn
- * over the chunk texture, and vanilla draws those decals after the puddles).
+ * Also per frame, as in vanilla: lit light fixtures, mirrors, glass, curtains and decals lying on the floor (puddles
+ * are drawn over the chunk texture, and vanilla draws those decals after the puddles).
  */
 public final class TranslucentBake {
 
@@ -67,6 +67,11 @@ public final class TranslucentBake {
     /** Whether a far object's translucent sprite may be baked; asked while its render layer is calculated. */
     static boolean canBake(Object object, Object sprite) {
         if (!ready()) return false;
+        // A window stays per frame (glass), so a curtain baked under it would end up behind the glass
+        if (object instanceof zombie.iso.objects.IsoCurtain) {
+            keptPerFrame.incrementAndGet();
+            return false;
+        }
         Boolean ok = spriteVerdicts.get(sprite);
         if (ok == null) {
             ok = spriteAllowed((zombie.iso.sprite.IsoSprite) sprite);
