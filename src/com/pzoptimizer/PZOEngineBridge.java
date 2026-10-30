@@ -364,6 +364,23 @@ public class PZOEngineBridge {
                 PZOConfig.setJavaModsEnabled(value);
             } else if ("JVM_BloodCapPerTile".equals(key)) {
                 BloodCapGovernor.setCapEnabled(value);
+            } else if (BenchmarkHarness.upkeepForcedOff && ("JVM_SilentZombieAudio".equals(key) || "JVM_CrowdEdgeMemo".equals(key)
+                    || "JVM_ZombieArrivalPacing".equals(key) || "JVM_ZombieTravelStats".equals(key) || "JVM_FarThumpCadence".equals(key)
+                    || "JVM_NoiseSweep".equals(key))) {
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (upkeep=0)");
+            } else if ("JVM_SilentZombieAudio".equals(key)) {
+                SilentZombieAudio.active = value;
+            } else if ("JVM_CrowdEdgeMemo".equals(key)) {
+                CrowdEdgeMemo.active = value;
+            } else if ("JVM_ZombieArrivalPacing".equals(key)) {
+                ZombieArrivalQueue.active = value;
+            } else if ("JVM_ZombieTravelStats".equals(key)) {
+                ZombieTravelTally.active = value;
+                if (!value) ZombieTravelTally.flush();
+            } else if ("JVM_FarThumpCadence".equals(key)) {
+                FarThumpCadence.active = value;
+            } else if ("JVM_NoiseSweep".equals(key)) {
+                NoiseListSweep.active = value;
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -383,6 +400,8 @@ public class PZOEngineBridge {
                 WorldUpscalerGovernor.setUserScale(value / 100.0f);
             } else if ("JVM_FSRSharpness".equals(key)) {
                 WorldUpscalerGovernor.setSharpness(value / 100.0f);
+            } else if ("JVM_ChunkLoadDistance".equals(key)) {
+                ChunkLoadDistance.setWidth(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}

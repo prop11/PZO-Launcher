@@ -2,9 +2,17 @@ package com.pzoptimizer;
 
 import com.pzoptimizer.shaded.asm.ClassReader;
 import com.pzoptimizer.shaded.asm.ClassWriter;
+import com.pzoptimizer.shaded.asm.Opcodes;
+import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import com.pzoptimizer.shaded.asm.tree.FieldNode;
+import com.pzoptimizer.shaded.asm.tree.InsnList;
+import com.pzoptimizer.shaded.asm.tree.InsnNode;
+import com.pzoptimizer.shaded.asm.tree.JumpInsnNode;
+import com.pzoptimizer.shaded.asm.tree.LabelNode;
+import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
+import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
@@ -153,6 +161,42 @@ public final class AsmSupport {
             }
         }
         return null;
+    }
+
+    /**
+     * Inside one method only, turns every call to owner.name desc into a static call; the static method takes the
+     * receiver first for an instance call. Returns how many call sites changed.
+     */
+    public static int redirectCalls(MethodNode m, String owner, String name, String desc, String toOwner, String toName, String toDesc) {
+        int n = 0;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode mi && mi.owner.equals(owner) && mi.name.equals(name) && mi.desc.equals(desc)
+                    && mi.getOpcode() != Opcodes.INVOKESTATIC) {
+                m.instructions.set(mi, new MethodInsnNode(Opcodes.INVOKESTATIC, toOwner, toName, toDesc, false));
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** Puts "toOwner.toName(this)" at the start of an instance method; desc is (Lowner;)V. */
+    public static void prependCall(MethodNode m, String toOwner, String toName, String toDesc) {
+        InsnList pre = new InsnList();
+        pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, toOwner, toName, toDesc, false));
+        m.instructions.insert(pre);
+    }
+
+    /** Puts "if (toOwner.toName(this)) return;" at the start of an instance void method; desc is (Lowner;)Z. */
+    public static void prependSkip(MethodNode m, String toOwner, String toName, String toDesc) {
+        LabelNode go = new LabelNode();
+        InsnList pre = new InsnList();
+        pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, toOwner, toName, toDesc, false));
+        pre.add(new JumpInsnNode(Opcodes.IFEQ, go));
+        pre.add(new InsnNode(Opcodes.RETURN));
+        pre.add(go);
+        m.instructions.insert(pre);
     }
 
     public static MethodNode findMethod(ClassNode node, Predicate<MethodNode> p) {

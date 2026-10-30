@@ -39,6 +39,10 @@ import zombie.ui.UIManager;
  *   per zoom: SETTLE at the start tile -> ROUTE (square loop, fixed tiles/second, frame times sampled)
  *             -> SHOTS (paused at the start tile: screenshot without UI, then with UI)
  *   DONE     results.json, then Core.quitToDesktop() with a halt fallback
+ *
+ * plan=<segment>;<segment>;... runs several scenarios in one launch, each through every zoom, in order. A segment is
+ * name,route,tiles,speed,dir,time,weather,threat (e.g. horde_storm,square,40,8,W,12,storm,1). Between segments the
+ * player goes back to the start tile and the next segment's time, weather and threat are applied before it settles.
  */
 public final class BenchmarkHarness {
 
@@ -50,6 +54,20 @@ public final class BenchmarkHarness {
     private static final long SHOT_DELAY_NS = 1_500_000_000L;
     private static final long MENU_REQUEUE_NS = 20_000_000_000L;
     private static final long TIMEOUT_NS = 600_000_000_000L;
+    private static final long PLAN_TIMEOUT_NS = 3_600_000_000_000L;
+    // First settle of a segment: after a long line route the start area has to stream back in
+    private static final long SEGMENT_SETTLE_NS = 10_000_000_000L;
+
+    private static final class Segment {
+        String name;
+        boolean line, storm, threat;
+        int tiles;
+        float speed, time;
+        char dir;
+    }
+
+    private static final List<Segment> plan = new ArrayList<>();
+    private static int segIndex;
 
     private static volatile Phase phase = Phase.OFF;
     private static File outDir;
@@ -109,6 +127,7 @@ public final class BenchmarkHarness {
             if (cfg.containsKey("route_dir")) routeDir = Character.toUpperCase(cfg.get("route_dir").trim().charAt(0));
             if (cfg.containsKey("time")) timeOfDay = Float.parseFloat(cfg.get("time").trim());
             storm = "storm".equalsIgnoreCase(cfg.get("weather"));
+            if (cfg.containsKey("plan")) parsePlan(cfg.get("plan"));
             if ("0".equals(cfg.get("mod_paced")) || "false".equalsIgnoreCase(cfg.get("mod_paced"))) {
                 LuaEventPatches.modPaced = false;
                 notes.add("mod OnTick pacing disabled (mod_paced=0)");
@@ -173,6 +192,22 @@ public final class BenchmarkHarness {
                 FoliageLod.spritesActive = false;
                 notes.add("distant translucent sprite baking disabled (tsprites=0)");
             }
+            if ("0".equals(cfg.get("upkeep"))) {
+                SilentZombieAudio.active = false;
+                CrowdEdgeMemo.active = false;
+                ZombieArrivalQueue.active = false;
+                ZombieTravelTally.active = false;
+                FarThumpCadence.active = false;
+                NoiseListSweep.active = false;
+                upkeepForcedOff = true;
+                notes.add("zombie upkeep patches disabled (upkeep=0)");
+            }
+            if (cfg.get("chunks") != null) {
+                try {
+                    ChunkLoadDistance.force(Integer.parseInt(cfg.get("chunks").trim()));
+                    notes.add("chunk load distance forced (chunks=" + cfg.get("chunks").trim() + ")");
+                } catch (NumberFormatException ignored) {}
+            }
             if ("0".equals(cfg.get("foliage"))) {
                 FoliageLod.active = false;
                 notes.add("distant foliage baking disabled (foliage=0)");
@@ -232,6 +267,8 @@ public final class BenchmarkHarness {
         return phase != Phase.OFF;
     }
 
+    // upkeep=0: the settings screen's values for those patches are ignored for the run
+    static volatile boolean upkeepForcedOff = false;
     private static volatile long lastTickNs;
     private static final long MAIN_STALL_NS = 45_000_000_000L;
     private static final long PHASE_STALL_NS = 240_000_000_000L;
@@ -277,10 +314,43 @@ public final class BenchmarkHarness {
         } catch (Throwable ignored) {}
     }
 
+    private static void parsePlan(String text) {
+        for (String part : text.split(";")) {
+            String[] f = part.trim().split(",");
+            if (f.length < 8) continue;
+            Segment g = new Segment();
+            g.name = f[0].trim();
+            g.line = "line".equalsIgnoreCase(f[1].trim());
+            g.tiles = Integer.parseInt(f[2].trim());
+            g.speed = Float.parseFloat(f[3].trim());
+            g.dir = Character.toUpperCase(f[4].trim().charAt(0));
+            g.time = Float.parseFloat(f[5].trim());
+            g.storm = "storm".equalsIgnoreCase(f[6].trim());
+            g.threat = "1".equals(f[7].trim()) || "true".equalsIgnoreCase(f[7].trim());
+            plan.add(g);
+        }
+        if (!plan.isEmpty()) applySegment(plan.get(0));
+    }
+
+    private static void applySegment(Segment g) {
+        lineRoute = g.line;
+        routeTiles = g.tiles;
+        routeSpeed = g.speed;
+        routeDir = g.dir;
+        timeOfDay = g.time;
+        storm = g.storm;
+        threat = g.threat;
+    }
+
+    private static String segmentName() {
+        return plan.isEmpty() ? null : plan.get(segIndex).name;
+    }
+
     private static void enter(Phase p) {
         phase = p;
         phaseStart = System.nanoTime();
-        PZOLogger.info("[BenchmarkHarness] -> " + p + (p == Phase.SETTLE ? " (zoom " + zooms[zoomIndex] + ")" : ""));
+        PZOLogger.info("[BenchmarkHarness] -> " + p + (p == Phase.SETTLE ? " (zoom " + zooms[zoomIndex]
+            + (plan.isEmpty() ? "" : ", segment " + segmentName()) + ")" : ""));
     }
 
     private static String stateName() {
@@ -340,6 +410,15 @@ public final class BenchmarkHarness {
             ClimateManager.ClimateFloat cf = cm.getClimateFloat((int) f[0]);
             cf.setAdminValue(f[1]);
             cf.setEnableAdmin(storm);
+        }
+        // Ground water pinned too: dry when clear, soaked in a storm, so a clear segment after a storm is not wet
+        zombie.iso.IsoPuddles puddles = zombie.iso.IsoPuddles.getInstance();
+        for (int id : new int[] {zombie.iso.IsoPuddles.FLOAT_WETGROUND, zombie.iso.IsoPuddles.FLOAT_MUDDYPUDDLES,
+                zombie.iso.IsoPuddles.FLOAT_PUDDLESSIZE}) {
+            zombie.iso.IsoPuddles.PuddlesFloat pf = puddles.getPuddlesFloat(id);
+            if (pf == null) continue;
+            pf.setAdminValue(storm ? 1.0f : 0.0f);
+            pf.setEnableAdmin(true);
         }
     }
 
@@ -421,7 +500,9 @@ public final class BenchmarkHarness {
     }
 
     private static String shotName(boolean ui) {
-        return "pzo_bench_" + label + "_z" + Math.round(zooms[zoomIndex] * 100) + (ui ? "_ui" : "_noui") + ".png";
+        String seg = segmentName();
+        return "pzo_bench_" + label + (seg == null ? "" : "_" + seg) + "_z" + Math.round(zooms[zoomIndex] * 100)
+            + (ui ? "_ui" : "_noui") + ".png";
     }
 
     public static void tick() {
@@ -429,7 +510,7 @@ public final class BenchmarkHarness {
         long now = System.nanoTime();
         lastTickNs = now;
         try {
-            if (now - benchStart > TIMEOUT_NS) {
+            if (now - benchStart > (plan.isEmpty() ? TIMEOUT_NS : PLAN_TIMEOUT_NS)) {
                 notes.add("timeout in phase " + phase + " (state " + stateName() + ")");
                 finish(false);
                 return;
@@ -530,7 +611,7 @@ public final class BenchmarkHarness {
                     if (now - phaseStart < 100_000_000L) {
                         normalizeScene();
                     }
-                    if (now - phaseStart > SETTLE_NS) {
+                    if (now - phaseStart > (zoomIndex == 0 && !plan.isEmpty() ? SEGMENT_SETTLE_NS : SETTLE_NS)) {
                         frameTimes.clear();
                         unfocusedFrames = 0;
                         lastFrameCount = -1;
@@ -565,6 +646,14 @@ public final class BenchmarkHarness {
                         setPaused(false);
                         zoomIndex++;
                         if (zoomIndex < zooms.length) {
+                            applyZoom();
+                            enter(Phase.SETTLE);
+                        } else if (segIndex + 1 < plan.size()) {
+                            segIndex++;
+                            applySegment(plan.get(segIndex));
+                            protectPlayer(IsoPlayer.players[0]);
+                            GameCompat.teleport(IsoPlayer.players[0], startX, startY, startZ);
+                            zoomIndex = 0;
                             applyZoom();
                             enter(Phase.SETTLE);
                         } else {
@@ -604,8 +693,10 @@ public final class BenchmarkHarness {
         }
         unfocusedFrames = 0;
         if (zoomJson.length() > 0) zoomJson.append(",\n");
+        String seg = segmentName();
         zoomJson.append(String.format(Locale.ROOT,
-            "    {\"zoom\": %.2f, \"frames\": %d, \"avg_ms\": %.3f, \"avg_fps\": %.1f, \"p99_ms\": %.3f, \"low1_fps\": %.1f, "
+            "    {" + (seg == null ? "" : "\"segment\": \"" + esc(seg) + "\", \"weather\": \"" + (storm ? "storm" : "clear")
+                + "\", \"threat\": " + threat + ", ") + "\"zoom\": %.2f, \"frames\": %d, \"avg_ms\": %.3f, \"avg_fps\": %.1f, \"p99_ms\": %.3f, \"low1_fps\": %.1f, "
                 + "\"unfocused_pct\": %.1f, \"render_thread\": %s, \"shot_noui\": \"%s\", \"shot_ui\": \"%s\"}",
             zooms[zoomIndex], ft.length, avgMs, avgMs > 0 ? 1000.0 / avgMs : 0, p99, low > 0 ? 1000.0 / low : 0, unfocusedPct,
             render == null ? "null" : render, shotName(false), shotName(true)));
@@ -748,6 +839,15 @@ public final class BenchmarkHarness {
             w.println("  \"translucent_two_pass_bakes\": " + TranslucentBake.twoPassBakes.get() + ",");
             w.println("  \"translucent_kept_per_frame\": " + TranslucentBake.keptPerFrame.get() + ",");
             w.println("  \"flies_toggles_avoided\": " + FliesSoundFix.togglesAvoided.get() + ",");
+            w.println("  \"chunk_grid_width\": " + zombie.iso.IsoChunkMap.chunkGridWidth + ",");
+            w.println("  \"silent_zombie_audio_skips\": " + SilentZombieAudio.skipped.get() + ",");
+            w.println("  \"crowd_edge_hits\": " + CrowdEdgeMemo.hits.get() + ",");
+            w.println("  \"crowd_edge_misses\": " + CrowdEdgeMemo.misses.get() + ",");
+            w.println("  \"zombie_arrivals_queued\": " + ZombieArrivalQueue.queued.get() + ",");
+            w.println("  \"zombie_arrivals_immediate\": " + ZombieArrivalQueue.immediate.get() + ",");
+            w.println("  \"travel_stats_folded\": " + ZombieTravelTally.folded.get() + ",");
+            w.println("  \"far_thump_probes_skipped\": " + FarThumpCadence.skipped.get() + ",");
+            w.println("  \"noise_sweeps_skipped\": " + NoiseListSweep.framesSkipped.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");

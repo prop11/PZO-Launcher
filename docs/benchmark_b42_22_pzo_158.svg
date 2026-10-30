@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="614" viewBox="0 0 1000 614" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<style>.t{font-size:22px;font-weight:600;fill:#1f2328}.s{font-size:13px;fill:#59636e}.h{font-size:14px;font-weight:600;fill:#1f2328}.r{font-size:15px;font-weight:600;fill:#1f2328}.rs{font-size:12px;fill:#59636e}.v{font-size:13px;fill:#59636e}.b{font-weight:600;fill:#1f2328}.g{font-weight:600;fill:#1f2328}</style>
+<rect width="100%" height="100%" rx="10" fill="#ffffff" stroke="#e6e8eb"/>
+<text x="28" y="44" class="t">PZO vs stock Project Zomboid</text>
+<text x="28" y="68" class="s">Average frames per second, higher is better. Same save next to the Louisville mall horde, same routes and settings; one run each.</text>
+<rect x="28" y="84" width="12" height="12" rx="2" fill="#7d848b"/><text x="46" y="95" class="s">Stock</text>
+<rect x="96" y="84" width="12" height="12" rx="2" fill="#1f6feb"/><text x="114" y="95" class="s">PZO</text>
+<text x="28" y="140" class="r">Horde walk</text>
+<text x="28" y="158" class="rs">40-tile loop, zombies attacking, clear</text>
+<line x1="28" x2="972" y1="184" y2="184" stroke="#e6e8eb"/>
+<text x="28" y="214" class="r">Horde walk, storm</text>
+<text x="28" y="232" class="rs">same loop in heavy rain, fog and lightning</text>
+<line x1="28" x2="972" y1="258" y2="258" stroke="#e6e8eb"/>
+<text x="28" y="288" class="r">Large-area route</text>
+<text x="28" y="306" class="rs">200-tile loop at 16 tiles/s, clear</text>
+<line x1="28" x2="972" y1="332" y2="332" stroke="#e6e8eb"/>
+<text x="28" y="362" class="r">Large-area route, storm</text>
+<text x="28" y="380" class="rs">same route in heavy rain, fog and lightning</text>
+<line x1="28" x2="972" y1="406" y2="406" stroke="#e6e8eb"/>
+<text x="28" y="436" class="r">Fast travel</text>
+<text x="28" y="454" class="rs">1000 tiles at 33 tiles/s, dusk, clear</text>
+<line x1="28" x2="972" y1="480" y2="480" stroke="#e6e8eb"/>
+<text x="28" y="510" class="r">Fast travel, storm</text>
+<text x="28" y="528" class="rs">same run in heavy rain, fog and lightning</text>
+<text x="270" y="106" class="h">Zoom 100%</text>
+<rect x="270" y="124" width="83.5" height="18" rx="3" fill="#7d848b"/>
+<text x="359.5" y="137" class="v">214</text>
+<rect x="270" y="146" width="202.7" height="18" rx="3" fill="#1f6feb"/>
+<text x="478.7" y="159" class="v"><tspan class="b">520</tspan> <tspan class="g">+143%</tspan></text>
+<rect x="270" y="198" width="83.8" height="18" rx="3" fill="#7d848b"/>
+<text x="359.8" y="211" class="v">215</text>
+<rect x="270" y="220" width="195.5" height="18" rx="3" fill="#1f6feb"/>
+<text x="471.5" y="233" class="v"><tspan class="b">502</tspan> <tspan class="g">+133%</tspan></text>
+<rect x="270" y="272" width="118.3" height="18" rx="3" fill="#7d848b"/>
+<text x="394.3" y="285" class="v">304</text>
+<rect x="270" y="294" width="233.0" height="18" rx="3" fill="#1f6feb"/>
+<text x="509.0" y="307" class="v"><tspan class="b">598</tspan> <tspan class="g">+97%</tspan></text>
+<rect x="270" y="346" width="93.2" height="18" rx="3" fill="#7d848b"/>
+<text x="369.2" y="359" class="v">239</text>
+<rect x="270" y="368" width="187.2" height="18" rx="3" fill="#1f6feb"/>
+<text x="463.2" y="381" class="v"><tspan class="b">481</tspan> <tspan class="g">+101%</tspan></text>
+<rect x="270" y="420" width="70.9" height="18" rx="3" fill="#7d848b"/>
+<text x="346.9" y="433" class="v">182</text>
+<rect x="270" y="442" width="102.3" height="18" rx="3" fill="#1f6feb"/>
+<text x="378.3" y="455" class="v"><tspan class="b">263</tspan> <tspan class="g">+44%</tspan></text>
+<rect x="270" y="494" width="63.1" height="18" rx="3" fill="#7d848b"/>
+<text x="339.1" y="507" class="v">162</text>
+<rect x="270" y="516" width="102.2" height="18" rx="3" fill="#1f6feb"/>
+<text x="378.2" y="529" class="v"><tspan class="b">262</tspan> <tspan class="g">+62%</tspan></text>
+<text x="635" y="106" class="h">Zoom 200% (zoomed out)</text>
+<rect x="635" y="124" width="105.7" height="18" rx="3" fill="#7d848b"/>
+<text x="746.7" y="137" class="v">204</text>
+<rect x="635" y="146" width="228.0" height="18" rx="3" fill="#1f6feb"/>
+<text x="869.0" y="159" class="v"><tspan class="b">441</tspan> <tspan class="g">+116%</tspan></text>
+<rect x="635" y="198" width="57.3" height="18" rx="3" fill="#7d848b"/>
+<text x="698.3" y="211" class="v">111</text>
+<rect x="635" y="220" width="135.4" height="18" rx="3" fill="#1f6feb"/>
+<text x="776.4" y="233" class="v"><tspan class="b">262</tspan> <tspan class="g">+136%</tspan></text>
+<rect x="635" y="272" width="125.1" height="18" rx="3" fill="#7d848b"/>
+<text x="766.1" y="285" class="v">242</text>
+<rect x="635" y="294" width="233.0" height="18" rx="3" fill="#1f6feb"/>
+<text x="874.0" y="307" class="v"><tspan class="b">450</tspan> <tspan class="g">+86%</tspan></text>
+<rect x="635" y="346" width="54.2" height="18" rx="3" fill="#7d848b"/>
+<text x="695.2" y="359" class="v">105</text>
+<rect x="635" y="368" width="122.9" height="18" rx="3" fill="#1f6feb"/>
+<text x="763.9" y="381" class="v"><tspan class="b">238</tspan> <tspan class="g">+127%</tspan></text>
+<rect x="635" y="420" width="63.0" height="18" rx="3" fill="#7d848b"/>
+<text x="704.0" y="433" class="v">122</text>
+<rect x="635" y="442" width="93.1" height="18" rx="3" fill="#1f6feb"/>
+<text x="734.1" y="455" class="v"><tspan class="b">180</tspan> <tspan class="g">+48%</tspan></text>
+<rect x="635" y="494" width="30.1" height="18" rx="3" fill="#7d848b"/>
+<text x="671.1" y="507" class="v">58</text>
+<rect x="635" y="516" width="56.2" height="18" rx="3" fill="#1f6feb"/>
+<text x="697.2" y="529" class="v"><tspan class="b">109</tspan> <tspan class="g">+87%</tspan></text>
+<text x="28" y="592" class="s">Ryzen 7 7800X3D, Radeon RX 7900 XTX, 3440x1440, Build 42.22, FSR off. In-engine benchmark harness, 30 Oct 2026 (PZO 1.5.8.1 + Unstable).</text>
+</svg>
