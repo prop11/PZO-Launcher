@@ -118,6 +118,11 @@ public class PZONative {
         if (!initialized) return;
 
         try {
+            boolean avx2 = false;
+            try { avx2 = isAVX2Supported(); } catch (Throwable ignored) {}
+            CompatMode.noteNativeAvx2(avx2);
+            boolean compat = CompatMode.isActive();
+
             // The JAVA tab's CPU power shield switch; it is read at launch
             boolean shield = PZOConfig.isPowerShieldEnabled();
             boolean powerShield = false;
@@ -132,12 +137,13 @@ public class PZONative {
             boolean wsLock = false;
             if (!shield) {
                 PZOLogger.info("[PZONative] CPU power shield switched off in the JAVA tab: timer, power throttling, MMCSS and priority left as stock.");
-            } else if (!lowCore) {
+            } else if (!lowCore && !compat) {
                 try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
                 try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
                 try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
             } else {
-                PZOLogger.info("[PZONative] Low core count CPU detected: skipping MMCSS, raised process priority and working set lock.");
+                PZOLogger.info("[PZONative] " + (compat ? "Compatibility mode" : "Low core count CPU")
+                    + ": skipping MMCSS, raised process priority and working set lock.");
             }
 
             int physCores = 0;
@@ -150,8 +156,6 @@ public class PZONative {
             try { pCoreMask = getPerformanceCoreMask(); } catch (Throwable ignored) {}
             int timerRes100ns = 0;
             try { timerRes100ns = getTimerResolution100ns(); } catch (Throwable ignored) {}
-            boolean avx2 = false;
-            try { avx2 = isAVX2Supported(); } catch (Throwable ignored) {}
 
             double timerMs = timerRes100ns / 10000.0;
 

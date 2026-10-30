@@ -94,25 +94,31 @@ static BOOL g_avx2Supported = FALSE;
 static BOOL g_timerLocked = FALSE;
 static ULONG g_activeTimerResolution100ns = 10000;
 
+// AVX2 needs the CPU flag and an OS that saves the YMM registers on a context switch (OSXSAVE + XCR0 bits 1 and 2);
+// without the OS part the first AVX instruction faults just like on a CPU that lacks it (issue #45)
 static BOOL checkCpuAvx2Support(void) {
 #if defined(_WIN32)
     int cpuInfo[4] = {0};
     __cpuid(cpuInfo, 0);
     int nIds = cpuInfo[0];
-    if (nIds >= 7) {
-        __cpuidex(cpuInfo, 7, 0);
-        return (cpuInfo[1] & (1 << 5)) != 0; // EBX bit 5 = AVX2
-    }
-    return FALSE;
+    if (nIds < 7) return FALSE;
+    __cpuid(cpuInfo, 1);
+    BOOL osxsave = (cpuInfo[2] & (1 << 27)) != 0;
+    BOOL avx = (cpuInfo[2] & (1 << 28)) != 0;
+    if (!osxsave || !avx) return FALSE;
+    if ((_xgetbv(0) & 0x6) != 0x6) return FALSE;
+    __cpuidex(cpuInfo, 7, 0);
+    return (cpuInfo[1] & (1 << 5)) != 0; // EBX bit 5 = AVX2
 #elif (defined(__x86_64__) || defined(__i386__))
     unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
-    if (__get_cpuid(0, &eax, &ebx, &ecx, &edx)) {
-        if (eax >= 7) {
-            __cpuid_count(7, 0, eax, ebx, ecx, edx);
-            return (ebx & (1 << 5)) != 0;
-        }
-    }
-    return FALSE;
+    if (!__get_cpuid(0, &eax, &ebx, &ecx, &edx) || eax < 7) return FALSE;
+    __get_cpuid(1, &eax, &ebx, &ecx, &edx);
+    if (!(ecx & (1u << 27)) || !(ecx & (1u << 28))) return FALSE;
+    unsigned int xlo = 0, xhi = 0;
+    __asm__ volatile ("xgetbv" : "=a"(xlo), "=d"(xhi) : "c"(0));
+    if ((xlo & 0x6) != 0x6) return FALSE;
+    __cpuid_count(7, 0, eax, ebx, ecx, edx);
+    return (ebx & (1 << 5)) != 0;
 #else
     return FALSE;
 #endif
@@ -897,7 +903,7 @@ JNIEXPORT jboolean JNICALL Java_com_pzoptimizer_PZONative_initNative(JNIEnv *env
     return JNI_TRUE;
 }
 
-#define PZO_NATIVE_VERSION "1.5.9"
+#define PZO_NATIVE_VERSION "1.5.9.1"
 
 JNIEXPORT jstring JNICALL Java_com_pzoptimizer_PZONative_getNativeVersion(JNIEnv *env, jclass cls) {
     (void)cls;

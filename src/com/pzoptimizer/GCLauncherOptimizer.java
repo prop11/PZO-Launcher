@@ -82,7 +82,7 @@ public final class GCLauncherOptimizer {
                 }
             } catch (Throwable ignored) {}
 
-            boolean wantG1 = cores <= 8 || totalRamGb < 20.0;
+            boolean wantG1 = cores <= 8 || totalRamGb < 20.0 || CompatMode.isActive();
 
             for (Object item : rawList) {
                 if (item == null) continue;

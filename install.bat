@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.5.9)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.5.9.1)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -479,6 +479,36 @@ if ((Test-Path -LiteralPath $zbFpsWorkshop) -or (Test-Path -LiteralPath $zbFpsMo
     Write-Host "    We recommend disabling Zed Better FPS NG to prevent duplicate hook overhead.`n" -ForegroundColor Yellow
 }
 
+# Older or low-end PC (issue #45): same rules as CompatMode in the engine. pzo_config.json "compat_mode" (on / off)
+# overrides the detection.
+function Get-PZOCompatMode($TotalRamBytes) {
+    $mode = "auto"
+    try {
+        $cfg = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_config.json")
+        if (Test-Path -LiteralPath $cfg -ErrorAction SilentlyContinue) {
+            $raw = Get-Content -LiteralPath $cfg -Raw -ErrorAction Stop
+            if ($raw -match '"compat_mode"\s*:\s*"(on|off|auto)"') { $mode = $Matches[1] }
+        }
+    } catch {}
+    $why = @()
+    if ($env:PROCESSOR_ARCHITECTURE -ne "ARM64" -and $env:PROCESSOR_ARCHITEW6432 -ne "ARM64") {
+        try {
+            if (-not ("PZO.CpuFeatures" -as [type])) {
+                Add-Type -Namespace PZO -Name CpuFeatures -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint feature);'
+            }
+            # PF_AVX2_INSTRUCTIONS_AVAILABLE; also false when the OS has the AVX register state switched off
+            if (-not [PZO.CpuFeatures]::IsProcessorFeaturePresent(40)) { $why += "no AVX2" }
+        } catch {}
+    }
+    $threads = [Environment]::ProcessorCount
+    if ($threads -le 4) { $why += "$threads threads" }
+    if ($TotalRamBytes -gt 0 -and ($TotalRamBytes / 1GB) -lt 7.5) { $why += ("{0:N1} GB RAM" -f ($TotalRamBytes / 1GB)) }
+    $active = $why.Count -gt 0
+    if ($mode -eq "on") { $active = $true }
+    if ($mode -eq "off") { $active = $false }
+    [pscustomobject]@{ Active = $active; Reasons = ($why -join ", ") }
+}
+
 function Apply-PZOConfiguration {
     $TotalRamBytes = 0
     try {
@@ -566,6 +596,19 @@ function Apply-PZOConfiguration {
         }
     }
 
+    # Compatibility mode: no heap pre-touch (it commits the whole starting heap before the game starts), a 1 GB
+    # starting heap that grows as needed, and G1
+    $Compat = Get-PZOCompatMode $TotalRamBytes
+    if ($Compat.Active) {
+        Write-Host "    [!] Compatibility mode for older hardware ($($Compat.Reasons)): no heap pre-touch, 1 GB starting heap, G1GC." -ForegroundColor Cyan
+        $chosenJson = $chosenJson -replace ',\s*"-XX:\+AlwaysPreTouch"', ''
+        $chosenJson = $chosenJson -replace '"-XX:\+AlwaysPreTouch",\s*', ''
+        $chosenJson = $chosenJson -replace '"-Xms\d+m"', '"-Xms1024m"'
+        $chosenJson = $chosenJson -replace '"-XX:\+UseZGC"', '"-XX:+UseG1GC"'
+        $chosenJson = $chosenJson -replace ',\s*"-XX:ZAllocationSpikeTolerance=\d+"', ''
+        $UseG1GC = $true
+    }
+
     # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside -agentlib:pzo_native64
     if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
         $chosenJson = $chosenJson.Replace('"-agentlib:pzo_native64",', '"-agentlib:zbNative",' + "`n        " + '"-agentlib:pzo_native64",')
@@ -593,9 +636,10 @@ function Apply-PZOConfiguration {
         optimized   = $true
         ram_gb      = [int]$TotalRamGB
         g1gc        = $UseG1GC
-        pretouch    = $true
+        pretouch    = -not $Compat.Active
+        compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
-        version     = "1.5.9"
+        version     = "1.5.9.1"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress

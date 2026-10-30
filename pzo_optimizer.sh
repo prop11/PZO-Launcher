@@ -4,7 +4,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v1.5.9)"
+echo " Project Zomboid Build 42 Engine Optimizer (v1.5.9.1)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -366,7 +366,7 @@ PYEOF
 
     clean_lua_bridge_files
     mkdir -p "$HOME/Zomboid/Lua" "$HOME/Zomboid/mods" "$HOME/Zomboid/db" "$HOME/Zomboid/Server"
-    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"1.5.9"}\n' "$ALLOC_RAM" \
+    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"1.5.9.1"}\n' "$ALLOC_RAM" \
         > "$HOME/Zomboid/Lua/pzo_status.json"
 
     resign_bundle
@@ -797,6 +797,46 @@ else:
     if "windows" in data:
         del data["windows"]
 
+# Older or low-end PC (issue #45), same rules as CompatMode in the engine: no heap pre-touch (it commits the whole
+# starting heap before the game starts) and a 1 GB starting heap that grows as needed. pzo_config.json "compat_mode"
+# (on / off) overrides the detection.
+def compat_reasons():
+    why = []
+    try:
+        import platform
+        if platform.machine().lower() in ("x86_64", "amd64"):
+            with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as f:
+                flags = next((l for l in f if l.startswith("flags")), "")
+            # The kernel hides avx2 when the OS has not enabled the AVX register state
+            if flags and " avx2" not in flags:
+                why.append("no AVX2")
+    except Exception:
+        pass
+    threads = os.cpu_count() or 0
+    if 0 < threads <= 4:
+        why.append("%d threads" % threads)
+    try:
+        with open("/proc/meminfo") as f:
+            kb = int(next(l for l in f if l.startswith("MemTotal")).split()[1])
+        if kb / 1024.0 / 1024.0 < 7.5:
+            why.append("%.1f GB RAM" % (kb / 1024.0 / 1024.0))
+    except Exception:
+        pass
+    return why
+
+compat_mode = "auto"
+try:
+    with open(os.path.join(os.path.expanduser("~"), "Zomboid", "Lua", "pzo_config.json"), encoding="utf-8") as f:
+        compat_mode = json.load(f).get("compat_mode", "auto")
+except Exception:
+    pass
+reasons = compat_reasons()
+compat = compat_mode == "on" or (compat_mode != "off" and bool(reasons))
+if compat:
+    print("[!] Compatibility mode for older hardware (%s): no heap pre-touch, 1 GB starting heap" % (", ".join(reasons) or "forced on"))
+    pzo_args = [a for a in pzo_args if a != "-XX:+AlwaysPreTouch"]
+    pzo_args = ["-Xms1024m" if a.startswith("-Xms") else a for a in pzo_args]
+
 data["vmArgs"] = filtered_args + pzo_args
 
 with open(json_file, 'w', encoding='utf-8') as f:
@@ -832,7 +872,9 @@ EOF
         echo "[+] Synced engine and configs to projectzomboid subfolder."
     fi
     mkdir -p "$HOME/Zomboid/Lua"
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":true,\"version\":\"1.5.9\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    PRETOUCH=false
+    grep -q "AlwaysPreTouch" "$JSON_FILE" 2>/dev/null && PRETOUCH=true
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":$PRETOUCH,\"version\":\"1.5.9.1\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 
     # Also sync to Proton prefixes across all drives & SD cards on Steam Deck

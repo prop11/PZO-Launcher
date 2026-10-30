@@ -1,33 +1,35 @@
 package com.pzoptimizer;
 
 import java.io.File;
-import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
-/** Checks and repairs ProjectZomboid64.json (and Info.plist on macOS) so the PZO launch arguments are present. */
+/**
+ * Keeps ProjectZomboid64.json launching through PZO: main class, classpath and JVM arguments.
+ *
+ * One function, buildTarget, says what the file should contain for this PC; a file needs updating exactly when that
+ * differs from what is on disk, so the check and the update can never disagree. The user's own arguments (heap
+ * size, Steam flags, other agents) are kept; only what PZO needs is added, and a few broken or superseded arguments are
+ * dropped. In compatibility mode (CompatMode) the heap is not pre-touched, starts small and the collector is G1.
+ */
 public final class ZomboidConfigMigrator {
 
     public static final String TARGET_JSON_NAME = "ProjectZomboid64.json";
     public static final String TARGET_MAIN_CLASS = "com/pzoptimizer/PZOEntrypoint";
     public static final String TARGET_AGENTLIB = "-agentlib:pzo_native64";
 
-    public static void main(String[] args) {
-        File targetDir = args != null && args.length > 0 ? new File(args[0]) : new File(".").getAbsoluteFile();
-        checkAndMigrateCurrentInstallation(targetDir);
-    }
+    private static final String PRE_TOUCH = "-XX:+AlwaysPreTouch";
 
-    private static final String[] REQUIRED_VM_ARGS = {
-        TARGET_AGENTLIB,
-        "--enable-native-access=ALL-UNNAMED",
-        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+    // Added when missing; PRE_TOUCH is added separately, except in compatibility mode
+    private static final String[] PERFORMANCE_ARGS = {
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
@@ -36,19 +38,26 @@ public final class ZomboidConfigMigrator {
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
         "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
     };
+
+    // ZGC-only tuning, dropped with ZGC in compatibility mode
+    private static final String[] ZGC_ONLY_PREFIXES = {"-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZAllocationSpikeTolerance",
+        "-XX:ZCollectionInterval", "-XX:+ZUncommit", "-XX:-ZUncommit", "-XX:ZUncommitDelay", "-XX:SoftMaxHeapSize"};
+
+    public static void main(String[] args) {
+        File targetDir = args != null && args.length > 0 ? new File(args[0]) : new File(".").getAbsoluteFile();
+        checkAndMigrateCurrentInstallation(targetDir);
+    }
 
     public static long parseHeapArgMb(String arg) {
         if (arg == null || arg.length() <= 4) return -1;
         try {
-            String val = arg.substring(4).trim().toLowerCase();
+            String val = arg.substring(4).trim().toLowerCase(Locale.ROOT);
             long mult = 1;
             if (val.endsWith("g")) {
                 mult = 1024;
                 val = val.substring(0, val.length() - 1);
             } else if (val.endsWith("m")) {
-                mult = 1;
                 val = val.substring(0, val.length() - 1);
             } else if (val.endsWith("k")) {
                 return 1;
@@ -59,320 +68,187 @@ public final class ZomboidConfigMigrator {
         }
     }
 
+    /** Maximum heap for this PC's memory: 4, 6, 8 or 12 GB. */
     public static int getRecommendedHeapMb() {
-        try {
-            OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
-            Method m = null;
-            try {
-                m = os.getClass().getMethod("getTotalMemorySize");
-            } catch (NoSuchMethodException e) {
-                try {
-                    m = os.getClass().getMethod("getTotalPhysicalMemorySize");
-                } catch (NoSuchMethodException ignored) {}
-            }
-            if (m != null) {
-                m.setAccessible(true);
-                Object val = m.invoke(os);
-                if (val instanceof Number) {
-                    long bytes = ((Number) val).longValue();
-                    double gb = bytes / (1024.0 * 1024.0 * 1024.0);
-                    if (gb >= 28.0) {
-                        return 12288;
-                    } else if (gb >= 14.0) {
-                        return 8192;
-                    } else if (gb >= 7.0) {
-                        return 6144;
-                    } else {
-                        return 4096;
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
-        return 6144;
+        double gb = CompatMode.totalRamGb();
+        if (gb <= 0) return 6144;
+        if (gb >= 28.0) return 12288;
+        if (gb >= 14.0) return 8192;
+        if (gb >= 7.0) return 6144;
+        return 4096;
     }
 
+    /** Starting heap: half the maximum, or CompatMode's small start in compatibility mode. */
     public static int getRecommendedInitialHeapMb(int maxMb) {
+        if (CompatMode.isActive()) return Math.min(CompatMode.COMPAT_INITIAL_HEAP_MB, maxMb);
         if (maxMb >= 12288) return 6144;
         if (maxMb >= 8192) return 4096;
         if (maxMb >= 6144) return 3072;
         return 2048;
     }
 
-    /** Whether the given ProjectZomboid64.json is missing any of the 0.9.5+ PZO settings. */
+    /** Whether the file differs from what buildTarget wants for this PC. */
     public static boolean isMigrationNeeded(File jsonFile) {
-        if (jsonFile == null || !jsonFile.exists() || jsonFile.length() == 0) {
-            return false;
-        }
-
+        if (jsonFile == null || !jsonFile.exists() || jsonFile.length() == 0) return false;
         try {
-            String content = Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8);
-            Object parsed = JsonMini.parse(content);
-            if (!(parsed instanceof Map)) {
-                return false;
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> map = (Map<String, Object>) parsed;
-
-            Object mainClass = map.get("mainClass");
-            if (mainClass == null || !TARGET_MAIN_CLASS.equals(mainClass.toString().trim())) {
-                return true;
-            }
-
-            Object cpObj = map.get("classpath");
-            if (!(cpObj instanceof List)) {
-                return true;
-            }
-            List<?> cpList = (List<?>) cpObj;
-            boolean hasJar = false;
-            boolean hasDot = false;
-            for (Object item : cpList) {
-                if (item != null) {
-                    String s = item.toString().trim();
-                    if ("PZOptimEngine.jar".equalsIgnoreCase(s)) hasJar = true;
-                    if (".".equals(s)) hasDot = true;
-                }
-            }
-            if (!hasJar || !hasDot) {
-                return true;
-            }
-
-            Object vmObj = map.get("vmArgs");
-            if (!(vmObj instanceof List)) {
-                return true;
-            }
-            List<?> vmList = (List<?>) vmObj;
-            List<String> vmStrings = new ArrayList<>();
-            for (Object item : vmList) {
-                if (item != null) vmStrings.add(item.toString().trim());
-            }
-
-            for (String req : REQUIRED_VM_ARGS) {
-                if (!vmStrings.contains(req)) {
-                    return true;
-                }
-            }
-
-            boolean hasLibPath = false;
-            String os = System.getProperty("os.name", "").toLowerCase();
-            for (String arg : vmStrings) {
-                if (arg.startsWith("-Djava.library.path=")) {
-                    if (os.contains("win") && arg.contains("win64")) hasLibPath = true;
-                    else if (os.contains("linux") && arg.contains("linux64")) hasLibPath = true;
-                    else if (os.contains("mac")) hasLibPath = true;
-                    else hasLibPath = true;
-                }
-            }
-            if (!hasLibPath) {
-                return true;
-            }
-
-            for (String arg : vmStrings) {
-                if (arg.startsWith("-Djava.awt.headless")) {
-                    return true;
-                }
-            }
-
-            for (String arg : vmStrings) {
-                if (arg.contains("UseCompactObjectHeaders") || arg.contains(" ")) {
-                    return true;
-                }
-            }
-
-            for (String arg : vmStrings) {
-                if (arg.startsWith("-Xmx")) {
-                    long mb = parseHeapArgMb(arg);
-                    if (mb > 0 && mb <= 3072 && getRecommendedHeapMb() > 3072) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
+            Map<String, Object> current = parseRoot(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8));
+            if (current == null) return false;
+            Map<String, Object> target = parseRoot(JsonMini.format(current));
+            buildTarget(target, jsonFile.getParentFile());
+            return !Objects.equals(current.get("mainClass"), target.get("mainClass"))
+                || !Objects.equals(strings(current.get("classpath")), strings(target.get("classpath")))
+                // Order of JVM arguments does not matter, so a hand-edited order is not rewritten
+                || !new LinkedHashSet<>(strings(current.get("vmArgs"))).equals(new LinkedHashSet<>(strings(target.get("vmArgs"))));
         } catch (Throwable t) {
             PZOLogger.warn("[ZomboidConfigMigrator] Notice checking " + jsonFile.getName() + ": " + t.getMessage());
             return false;
         }
     }
 
-    /**
-     * Migrates the provided JSON string into the updated 0.9.5 configuration format.
-     */
+    /** The file content buildTarget wants, or the input unchanged if it is not a JSON object. */
     public static String migrateJsonContent(String originalJson, File gameDir) {
-        Object parsed = JsonMini.parse(originalJson);
-        if (!(parsed instanceof Map)) {
-            return originalJson;
+        Map<String, Object> root = parseRoot(originalJson);
+        if (root == null) return originalJson;
+        buildTarget(root, gameDir);
+        return JsonMini.format(root);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseRoot(String json) {
+        Object parsed = JsonMini.parse(json);
+        return parsed instanceof Map ? (Map<String, Object>) parsed : null;
+    }
+
+    private static List<String> strings(Object listObj) {
+        List<String> out = new ArrayList<>();
+        if (listObj instanceof List) {
+            for (Object item : (List<?>) listObj) {
+                if (item != null) out.add(item.toString().trim());
+            }
         }
+        return out;
+    }
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> root = (Map<String, Object>) parsed;
-
+    private static void buildTarget(Map<String, Object> root, File gameDir) {
         root.put("mainClass", TARGET_MAIN_CLASS);
+        root.put("classpath", targetClasspath(strings(root.get("classpath"))));
+        root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir));
+    }
 
-        List<String> cpList = new ArrayList<>();
-        Object cpObj = root.get("classpath");
-        if (cpObj instanceof List) {
-            for (Object item : (List<?>) cpObj) {
-                if (item != null) {
-                    String s = item.toString().trim();
-                    if (!cpList.contains(s)) cpList.add(s);
-                }
-            }
+    // ".", then PZOptimEngine.jar, ahead of the game's jar
+    private static List<String> targetClasspath(List<String> current) {
+        List<String> cp = new ArrayList<>();
+        for (String s : current) {
+            if (!cp.contains(s)) cp.add(s);
         }
-        if (!cpList.contains(".")) {
-            cpList.add(0, ".");
-        }
-        if (!cpList.contains("PZOptimEngine.jar")) {
-            int dotIdx = cpList.indexOf(".");
-            if (dotIdx != -1) {
-                cpList.add(dotIdx + 1, "PZOptimEngine.jar");
-            } else {
-                cpList.add(0, "PZOptimEngine.jar");
-            }
-        }
-        if (!cpList.contains("projectzomboid.jar")) {
-            cpList.add("projectzomboid.jar");
-        }
-        root.put("classpath", cpList);
+        if (!cp.contains(".")) cp.add(0, ".");
+        if (!cp.contains("PZOptimEngine.jar")) cp.add(cp.indexOf(".") + 1, "PZOptimEngine.jar");
+        if (!cp.contains("projectzomboid.jar")) cp.add("projectzomboid.jar");
+        return cp;
+    }
 
-        List<String> rawArgs = new ArrayList<>();
-        Object vmObj = root.get("vmArgs");
-        if (vmObj instanceof List) {
-            for (Object item : (List<?>) vmObj) {
-                if (item != null) rawArgs.add(item.toString().trim());
-            }
-        }
-
-        String os = System.getProperty("os.name", "").toLowerCase();
+    private static List<String> targetVmArgs(List<String> rawArgs, File gameDir) {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         boolean isWin = os.contains("win");
         boolean isLinux = os.contains("linux");
+        boolean compat = CompatMode.isActive();
 
-        boolean zbInArgs = rawArgs.stream().anyMatch(arg -> arg.contains("zbNative") || arg.contains("ZombieBuddy"));
+        // On Linux and macOS, -agentlib:zbNative with no loadable library stops the game from starting (issue #40),
+        // and a Windows zbNative.dll left in the folder is not one
+        boolean zbInArgs = rawArgs.stream().anyMatch(a -> a.contains("zbNative") || a.contains("ZombieBuddy"));
         boolean zbLibFound = false;
         if (gameDir != null) {
             String lib = isWin ? "zbNative.dll" : isLinux ? "libzbNative.so" : "libzbNative.dylib";
-            for (String dir : new String[] { isWin ? "win64" : isLinux ? "linux64" : ".", "natives", "." }) {
+            for (String dir : new String[] {isWin ? "win64" : isLinux ? "linux64" : ".", "natives", "."}) {
                 if (new File(new File(gameDir, dir), lib).isFile()) {
                     zbLibFound = true;
                     break;
                 }
             }
         }
-        // On Linux and macOS, -agentlib:zbNative with no loadable library stops the game from starting (issue #40),
-        // and a Windows zbNative.dll left in the folder is not one
         boolean zbActive = zbLibFound || (zbInArgs && (isWin || gameDir == null));
 
-        // Drop unwanted or superseded arguments
-        List<String> userCleanArgs = new ArrayList<>();
+        // The user's arguments minus what is rebuilt below, broken, or superseded
+        List<String> user = new ArrayList<>();
         for (String arg : rawArgs) {
-            if (arg == null || arg.trim().isEmpty()) continue;
-            arg = arg.trim();
-            if (arg.startsWith("-Djava.awt.headless")) continue; // PZO requires GUI/AWT
-            if (arg.startsWith("-Djava.library.path=")) continue; // will normalize below
-            if (arg.equals(TARGET_AGENTLIB) || arg.contains("pzo_native64")) continue; // Strip legacy agentlib
-            if (arg.contains("zbNative")) continue; // will preserve deterministically
-            if (arg.contains("UseCompactObjectHeaders")) continue; // Incompatible with Java 17
-
-            // Repair corrupted space-separated args (e.g. "-XX:+UseG1GC -XX:MaxGCPauseMillis=16")
-            if (arg.contains(" ")) {
-                String[] tokens = arg.split("\\s+");
-                for (String tok : tokens) {
-                    if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !tok.contains("pzo_native64") && !userCleanArgs.contains(tok)) {
-                        userCleanArgs.add(tok);
-                    }
-                }
-                continue;
-            }
-            if (!userCleanArgs.contains(arg)) {
-                userCleanArgs.add(arg);
+            // Arguments once joined with spaces by hand are split back up
+            for (String tok : arg.split("\\s+")) {
+                if (tok.isEmpty() || user.contains(tok)) continue;
+                if (tok.startsWith("-Djava.awt.headless")) continue; // PZO needs AWT for its dialogs
+                if (tok.startsWith("-Djava.library.path=")) continue;
+                if (tok.equals(TARGET_AGENTLIB) || tok.contains("pzo_native64")) continue;
+                if (tok.contains("zbNative")) continue;
+                if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
+                if (compat && tok.equals(PRE_TOUCH)) continue;
+                if (compat && isZgcOnly(tok)) continue;
+                user.add(compat && tok.equals("-XX:+UseZGC") ? "-XX:+UseG1GC" : tok);
             }
         }
 
-        List<String> targetArgs = new ArrayList<>();
-
-        // Native agents: the PZO native library and third-party agents such as ZombieBuddy
-        targetArgs.add(TARGET_AGENTLIB);
+        List<String> args = new ArrayList<>();
+        args.add(TARGET_AGENTLIB);
         if (zbActive) {
-            targetArgs.add("-agentlib:zbNative");
+            args.add("-agentlib:zbNative");
             PZOLogger.info("[ZomboidConfigMigrator] Preserved ZombieBuddy bridge (-agentlib:zbNative)");
         }
-
-        // Module exports and native access flags for Java 17/21+
-        targetArgs.add("--enable-native-access=ALL-UNNAMED");
-        targetArgs.add("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED");
-
-        // Platform-specific native library search paths
+        args.add("--enable-native-access=ALL-UNNAMED");
+        args.add("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED");
         if (isWin) {
-            targetArgs.add("-Djava.library.path=win64/;.;natives/");
+            args.add("-Djava.library.path=win64/;.;natives/");
         } else if (isLinux) {
-            targetArgs.add("-Djava.library.path=linux64/:natives/:.");
+            args.add("-Djava.library.path=linux64/:natives/:.");
         } else {
-            targetArgs.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
+            args.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
         }
 
-        // Keep the user's -Xms / -Xmx and Steam args (vanilla 3 GB is upgraded)
-        boolean hasXms = false;
-        boolean hasXmx = false;
-        int recMaxMb = getRecommendedHeapMb();
-        int recMsMb = getRecommendedInitialHeapMb(recMaxMb);
-
-        for (String arg : userCleanArgs) {
+        // Heap: the user's sizes are kept; the game's stock 3 GB maximum is raised to suit this PC, and in
+        // compatibility mode the starting heap is lowered so nothing large is committed up front
+        int recMax = getRecommendedHeapMb();
+        int recStart = getRecommendedInitialHeapMb(recMax);
+        boolean hasXms = false, hasXmx = false;
+        for (String arg : user) {
             if (arg.startsWith("-Xms")) {
                 hasXms = true;
                 long mb = parseHeapArgMb(arg);
-                if (mb > 0 && mb <= 1800 && recMsMb > 1800) {
-                    PZOLogger.info("[ZomboidConfigMigrator] Upgraded vanilla initial heap (" + mb + "MB -> " + recMsMb + "MB)");
-                    arg = "-Xms" + recMsMb + "m";
+                if (compat && mb > recStart) {
+                    arg = "-Xms" + recStart + "m";
+                } else if (!compat && mb > 0 && mb <= 1800 && recStart > 1800) {
+                    arg = "-Xms" + recStart + "m";
                 }
             } else if (arg.startsWith("-Xmx")) {
                 hasXmx = true;
                 long mb = parseHeapArgMb(arg);
-                if (mb > 0 && mb <= 3072 && recMaxMb > 3072) {
-                    PZOLogger.info("[ZomboidConfigMigrator] Upgraded vanilla max heap (" + mb + "MB -> " + recMaxMb + "MB)");
-                    arg = "-Xmx" + recMaxMb + "m";
-                }
+                if (mb > 0 && mb <= 3072 && recMax > 3072) arg = "-Xmx" + recMax + "m";
             }
-            if (!targetArgs.contains(arg)) {
-                targetArgs.add(arg);
-            }
+            if (!args.contains(arg)) args.add(arg);
         }
+        if (!hasXms) args.add("-Xms" + recStart + "m");
+        if (!hasXmx) args.add("-Xmx" + recMax + "m");
 
-        // Default memory fallback if user config lacked heap sizing
-        if (!hasXms) targetArgs.add(3, "-Xms" + recMsMb + "m");
-        if (!hasXmx) targetArgs.add(4, "-Xmx" + recMaxMb + "m");
-
-        // Add any missing performance flags
-        for (String pf : REQUIRED_VM_ARGS) {
-            if (!targetArgs.contains(pf)) {
-                targetArgs.add(pf);
-            }
+        for (String pf : PERFORMANCE_ARGS) {
+            if (!args.contains(pf)) args.add(pf);
         }
-
-        root.put("vmArgs", targetArgs);
-
-        return JsonMini.format(root);
+        if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
+        return args;
     }
 
-    /**
-     * Migrates the specified JSON file in place, saving a .bak copy of the original.
-     * Safe to call while the game is running (file handle is not locked by JVM/launcher).
-     */
+    private static boolean isZgcOnly(String arg) {
+        for (String p : ZGC_ONLY_PREFIXES) {
+            if (arg.startsWith(p)) return true;
+        }
+        return false;
+    }
+
+    /** Rewrites the file in place (first run keeps a .bak of the original). */
     public static boolean migrateFileInPlace(File jsonFile) {
         if (jsonFile == null || !jsonFile.exists()) return false;
         try {
             if (!isMigrationNeeded(jsonFile)) return false;
-
-            File backup = new File(jsonFile.getAbsolutePath() + ".bak");
-            if (!backup.exists()) {
-                Files.copy(jsonFile.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                PZOLogger.info("[ZomboidConfigMigrator] Created configuration backup: " + backup.getAbsolutePath());
-            }
-
-            String original = Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8);
-            String migrated = migrateJsonContent(original, jsonFile.getParentFile());
-
+            backupOnce(jsonFile);
+            String migrated = migrateJsonContent(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8), jsonFile.getParentFile());
             Files.writeString(jsonFile.toPath(), migrated, StandardCharsets.UTF_8);
-            PZOLogger.success("[ZomboidConfigMigrator] Successfully migrated " + jsonFile.getName() + " to v0.9.* configuration.");
+            PZOLogger.success("[ZomboidConfigMigrator] Updated " + jsonFile.getName() + " for PZO " + UpdateChecker.CURRENT_VERSION
+                + (CompatMode.isActive() ? " (compatibility mode)" : ""));
             return true;
         } catch (Throwable t) {
             PZOLogger.error("[ZomboidConfigMigrator] Error migrating " + jsonFile.getName() + ": " + t.getMessage(), t);
@@ -381,38 +257,23 @@ public final class ZomboidConfigMigrator {
     }
 
     /**
-     * Staging helper for auto-updaters (UpdateDialog):
-     * Writes the migrated configuration to ProjectZomboid64.json.new so that the
-     * updater script can atomically replace it when the game process terminates.
+     * For the auto-updater (UpdateDialog): writes the updated file next to the current one as .new, so the updater
+     * script can swap it in once the game has exited.
      */
     public static boolean prepareStagedUpdate(File gameDir) {
         if (gameDir == null) return false;
         try {
             File jsonFile = new File(gameDir, TARGET_JSON_NAME);
             if (!jsonFile.exists()) {
-                File currentDir = new File(".").getAbsoluteFile();
-                File candidate = new File(currentDir, TARGET_JSON_NAME);
-                if (candidate.exists()) {
-                    jsonFile = candidate;
-                }
+                File candidate = new File(new File(".").getAbsoluteFile(), TARGET_JSON_NAME);
+                if (candidate.exists()) jsonFile = candidate;
             }
-
-            if (!jsonFile.exists() || !isMigrationNeeded(jsonFile)) {
-                return false;
-            }
-
-            File backup = new File(jsonFile.getAbsolutePath() + ".bak");
-            if (!backup.exists()) {
-                Files.copy(jsonFile.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                PZOLogger.info("[ZomboidConfigMigrator] Created configuration backup: " + backup.getAbsolutePath());
-            }
-
-            String original = Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8);
-            String migrated = migrateJsonContent(original, gameDir);
-
+            if (!jsonFile.exists() || !isMigrationNeeded(jsonFile)) return false;
+            backupOnce(jsonFile);
+            String migrated = migrateJsonContent(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8), gameDir);
             File stagedFile = new File(jsonFile.getParentFile(), TARGET_JSON_NAME + ".new");
             Files.writeString(stagedFile.toPath(), migrated, StandardCharsets.UTF_8);
-            PZOLogger.success("[ZomboidConfigMigrator] Staged " + stagedFile.getName() + " for atomic replacement on game exit.");
+            PZOLogger.success("[ZomboidConfigMigrator] Staged " + stagedFile.getName() + " for replacement on game exit.");
             return true;
         } catch (Throwable t) {
             PZOLogger.warn("[ZomboidConfigMigrator] Notice staging config update: " + t.getMessage());
@@ -420,21 +281,23 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /**
-     * Startup verification:
-     * Called during early PZOEntrypoint boot. Inspects ProjectZomboid64.json in the
-     * working directory and immediately repairs it if it lacks required 0.9.5 flags.
-     */
+    private static void backupOnce(File jsonFile) throws java.io.IOException {
+        File backup = new File(jsonFile.getAbsolutePath() + ".bak");
+        if (!backup.exists()) {
+            Files.copy(jsonFile.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            PZOLogger.info("[ZomboidConfigMigrator] Created configuration backup: " + backup.getAbsolutePath());
+        }
+    }
+
+    /** Early in PZOEntrypoint: brings the game folder's ProjectZomboid64.json up to date for the next launch. */
     public static void checkAndMigrateCurrentInstallation(File gameDir) {
         try {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();
             File jsonFile = new File(gameDir, TARGET_JSON_NAME);
             if (jsonFile.exists() && isMigrationNeeded(jsonFile)) {
-                PZOLogger.info("[ZomboidConfigMigrator] Outdated or missing 1.5.9 JVM arguments detected in " + TARGET_JSON_NAME + ". Upgrading...");
-                boolean ok = migrateFileInPlace(jsonFile);
-                if (ok) {
-                    PZOLogger.success("[ZomboidConfigMigrator] Configuration successfully aligned with v1.5.9 (native access, JVMTI agent, and B42 JVM tuning active on next launch).");
-                }
+                PZOLogger.info("[ZomboidConfigMigrator] " + TARGET_JSON_NAME + " differs from what PZO " + UpdateChecker.CURRENT_VERSION
+                    + " needs on this PC. Updating (applies on the next launch)...");
+                migrateFileInPlace(jsonFile);
             }
         } catch (Throwable t) {
             PZOLogger.warn("[ZomboidConfigMigrator] Non-fatal notice during startup configuration check: " + t.getMessage());
