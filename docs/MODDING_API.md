@@ -197,6 +197,10 @@ installed version. The ones most likely to matter to other mods:
 | `Corpse_AutoClean` | Automatic Corpse Cleanup | Off by default. Prefer `protect` / `addCleanupFilter`. |
 | `Debris_AutoClean` | Automatic Debris Cleanup | Off by default. Prefer `protect` / `addCleanupFilter`. |
 | `GFX_ForestCanopyCull` | Bake Distant Swaying Trees | Distant tree sway baked. |
+| `JVM_CutawayRebakeFilter` | Re-draw Cutaway Walls Only When They Change | Chunk textures re-baked after a cutaway visit only where a square's cutaway flags changed. |
+| `JVM_OcclusionReuse` | Keep the Upper-Floor Occlusion Grid | Occlusion grid kept on frames where only lighting changed. |
+| `JVM_PuddleFrameCache` | Cache Puddle Squares Between Frames | `FBORenderCell.renderPuddles` replaced by a cached pass at medium/high puddle quality. Stand it down if your mod patches that method. |
+| `JVM_PuddleRedrawFilter` | Low Puddles: Re-draw Only Chunks With Puddles | Low-quality puddle size changes re-bake only chunk levels that drew puddles. |
 | `JVM_FSREnabled` | AMD FSR 1.0 Upscaling | World drawn at a lower resolution and upscaled. |
 
 Settings that only take effect at launch or world load (for example the chunk load distance) follow a stand-down at

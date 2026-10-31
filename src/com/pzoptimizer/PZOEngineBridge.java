@@ -386,6 +386,24 @@ public class PZOEngineBridge {
                 FarThumpCadence.active = value;
             } else if ("JVM_NoiseSweep".equals(key)) {
                 NoiseListSweep.active = value;
+            } else if (BenchmarkHarness.rebakeFixesForcedOff && ("JVM_RoomIdCheckSkip".equals(key) || "JVM_CutawayRebakeFilter".equals(key)
+                    || "JVM_OcclusionReuse".equals(key))) {
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (rebake=0)");
+            } else if ("JVM_RoomIdCheckSkip".equals(key)) {
+                RoomIdCheckSkip.active = value;
+            } else if ("JVM_CutawayRebakeFilter".equals(key)) {
+                CutawayRebakeFilter.active = value;
+            } else if ("JVM_OcclusionReuse".equals(key)) {
+                OcclusionReuse.setActive(value);
+            } else if (BenchmarkHarness.puddleFixesForcedOff && ("JVM_PuddleFrameCache".equals(key) || "JVM_PuddleRedrawFilter".equals(key)
+                    || "JVM_PuddleRedrawPacing".equals(key))) {
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (puddles=0)");
+            } else if ("JVM_PuddleFrameCache".equals(key)) {
+                PuddleFrameCache.active = value;
+            } else if ("JVM_PuddleRedrawFilter".equals(key)) {
+                PuddleRedraw.filterActive = value;
+            } else if ("JVM_PuddleRedrawPacing".equals(key)) {
+                PuddleRedraw.setPacing(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -1284,7 +1302,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.5.9.1\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.6\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1553,7 +1571,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.5.9.1'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.6'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

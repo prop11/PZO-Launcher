@@ -297,6 +297,21 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderMinusFloor: baked translucent sprites drawn in colour and depth passes");
                     fc = tb;
                 }
+                byte[] oc = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell occlusion reuse", OcclusionReuse::patchRenderCell);
+                if (oc != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell occlusion: grid kept while only lighting changed");
+                    fc = oc;
+                }
+                byte[] pf = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell puddle frame cache", PuddleFrameCache::patchRenderCell);
+                if (pf != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderPuddles: puddle squares, lights and depths cached per chunk level");
+                    fc = pf;
+                }
+                byte[] pr = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell puddle redraw", PuddleRedraw::patchRenderCell);
+                if (pr != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell low-quality puddle redraw: only chunk levels with puddles, paced");
+                    fc = pr;
+                }
                 if (BenchmarkHarness.isConfigured()) {
                     byte[] ts = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent stats", TranslucentStats::patchRenderCell);
                     if (ts != null) {
@@ -533,7 +548,20 @@ public class PZOptimAgent {
                 return classfileBuffer;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels".equals(className) && classfileBuffer != null) {
-                return patchFBORenderLevels(classfileBuffer);
+                byte[] rl = patchFBORenderLevels(classfileBuffer);
+                byte[] stamp = AsmSupport.transform(rl != null ? rl : classfileBuffer, loader, "FBORenderLevels bake stamp", PuddleFrameCache::patchRenderLevels);
+                if (stamp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderLevels.clearCachedSquares: puddle cache told of each bake");
+                    return stamp;
+                }
+                return rl;
+            }
+            if ("zombie/iso/IsoPuddles".equals(className) && classfileBuffer != null) {
+                byte[] ip = AsmSupport.transform(classfileBuffer, loader, "IsoPuddles chunk texture record", PuddleRedraw::patchPuddles);
+                if (ip != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoPuddles.renderToChunkTexture: bakes record whether they drew puddles");
+                }
+                return ip;
             }
             if ("zombie/fileSystem/TexturePackDevice".equals(className) && classfileBuffer != null) {
                 return patchTexturePackDevice(classfileBuffer);
@@ -638,6 +666,20 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched FliesSound: no hasFlies clear+set (and chunk re-bake) on an unchanged square");
                 }
                 return fs;
+            }
+            if ("zombie/iso/fboRenderChunk/FBORenderCutaways".equals(className) && classfileBuffer != null) {
+                byte[] cw = AsmSupport.transform(classfileBuffer, loader, "FBORenderCutaways re-bake filter", CutawayRebakeFilter::patchCutaways);
+                if (cw != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCutaways.doCutawayVisitSquares: chunks re-baked only where a cutaway changed");
+                }
+                return cw;
+            }
+            if ("zombie/buildingRooms/BuildingRoomsEditor".equals(className) && classfileBuffer != null) {
+                byte[] be = AsmSupport.transform(classfileBuffer, loader, "BuildingRoomsEditor ID check", RoomIdCheckSkip::patchEditor);
+                if (be != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched BuildingRoomsEditor.checkBuildingAndRoomIDs: log-only ID walk skipped outside debug");
+                }
+                return be;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null) {
                 byte[] mip = AsmSupport.transform(classfileBuffer, loader, "FBORenderChunk mip levels", ChunkMipLimit::patchRenderChunk);

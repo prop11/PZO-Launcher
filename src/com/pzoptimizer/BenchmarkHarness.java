@@ -202,6 +202,20 @@ public final class BenchmarkHarness {
                 upkeepForcedOff = true;
                 notes.add("zombie upkeep patches disabled (upkeep=0)");
             }
+            if ("0".equals(cfg.get("rebake"))) {
+                RoomIdCheckSkip.active = false;
+                CutawayRebakeFilter.active = false;
+                OcclusionReuse.setActive(false);
+                rebakeFixesForcedOff = true;
+                notes.add("room ID skip, cutaway re-bake filter and occlusion reuse disabled (rebake=0)");
+            }
+            if ("0".equals(cfg.get("puddles"))) {
+                PuddleFrameCache.active = false;
+                PuddleRedraw.filterActive = false;
+                PuddleRedraw.setPacing(false);
+                puddleFixesForcedOff = true;
+                notes.add("puddle frame cache and low-quality puddle redraw filter/pacing disabled (puddles=0)");
+            }
             if (cfg.get("chunks") != null) {
                 try {
                     ChunkLoadDistance.force(Integer.parseInt(cfg.get("chunks").trim()));
@@ -269,6 +283,8 @@ public final class BenchmarkHarness {
 
     // upkeep=0: the settings screen's values for those patches are ignored for the run
     static volatile boolean upkeepForcedOff = false;
+    static volatile boolean rebakeFixesForcedOff = false;
+    static volatile boolean puddleFixesForcedOff = false;
     private static volatile long lastTickNs;
     private static final long MAIN_STALL_NS = 45_000_000_000L;
     private static final long PHASE_STALL_NS = 240_000_000_000L;
@@ -848,6 +864,18 @@ public final class BenchmarkHarness {
             w.println("  \"travel_stats_folded\": " + ZombieTravelTally.folded.get() + ",");
             w.println("  \"far_thump_probes_skipped\": " + FarThumpCadence.skipped.get() + ",");
             w.println("  \"noise_sweeps_skipped\": " + NoiseListSweep.framesSkipped.get() + ",");
+            w.println("  \"room_id_checks_skipped\": " + RoomIdCheckSkip.skipped.get() + ",");
+            w.println("  \"cutaway_rebakes_kept\": " + CutawayRebakeFilter.rebakesKept.get() + ",");
+            w.println("  \"cutaway_rebakes_skipped\": " + CutawayRebakeFilter.rebakesSkipped.get() + ",");
+            w.println("  \"occlusion_rebuilds\": " + OcclusionReuse.rebuilds.get() + ",");
+            w.println("  \"occlusion_rebuilds_skipped\": " + OcclusionReuse.rebuildsSkipped.get() + ",");
+            w.println("  \"puddle_squares_drawn\": " + PuddleFrameCache.squaresDrawn.get() + ",");
+            w.println("  \"puddle_levels_rebuilt\": " + PuddleFrameCache.levelsRebuilt.get() + ",");
+            w.println("  \"puddle_light_refreshes\": " + PuddleFrameCache.lightRefreshes.get() + ",");
+            w.println("  \"puddle_depth_refreshes\": " + PuddleFrameCache.depthRefreshes.get() + ",");
+            w.println("  \"puddle_redraw_levels\": " + PuddleRedraw.levelsRedrawn.get() + ",");
+            w.println("  \"puddle_redraw_skipped\": " + PuddleRedraw.levelsSkipped.get() + ",");
+            w.println("  \"puddle_redraw_paced\": " + PuddleRedraw.levelsPaced.get() + ",");
             w.println("  \"screenshot_dir\": \"" + esc(ZomboidFileSystem.instance.getScreenshotDir()) + "\",");
             w.println("  \"notes\": [" + ns + "],");
             w.println("  \"zooms\": [");
