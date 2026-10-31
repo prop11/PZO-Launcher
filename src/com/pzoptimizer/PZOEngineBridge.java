@@ -386,6 +386,24 @@ public class PZOEngineBridge {
                 FarThumpCadence.active = value;
             } else if ("JVM_NoiseSweep".equals(key)) {
                 NoiseListSweep.active = value;
+            } else if (BenchmarkHarness.rebakeFixesForcedOff && ("JVM_RoomIdCheckSkip".equals(key) || "JVM_CutawayRebakeFilter".equals(key)
+                    || "JVM_OcclusionReuse".equals(key))) {
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (rebake=0)");
+            } else if ("JVM_RoomIdCheckSkip".equals(key)) {
+                RoomIdCheckSkip.active = value;
+            } else if ("JVM_CutawayRebakeFilter".equals(key)) {
+                CutawayRebakeFilter.active = value;
+            } else if ("JVM_OcclusionReuse".equals(key)) {
+                OcclusionReuse.setActive(value);
+            } else if (BenchmarkHarness.puddleFixesForcedOff && ("JVM_PuddleFrameCache".equals(key) || "JVM_PuddleRedrawFilter".equals(key)
+                    || "JVM_PuddleRedrawPacing".equals(key))) {
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (puddles=0)");
+            } else if ("JVM_PuddleFrameCache".equals(key)) {
+                PuddleFrameCache.active = value;
+            } else if ("JVM_PuddleRedrawFilter".equals(key)) {
+                PuddleRedraw.filterActive = value;
+            } else if ("JVM_PuddleRedrawPacing".equals(key)) {
+                PuddleRedraw.setPacing(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}

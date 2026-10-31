@@ -172,7 +172,10 @@ public final class AsmSupport {
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && mi.owner.equals(owner) && mi.name.equals(name) && mi.desc.equals(desc)
                     && mi.getOpcode() != Opcodes.INVOKESTATIC) {
-                m.instructions.set(mi, new MethodInsnNode(Opcodes.INVOKESTATIC, toOwner, toName, toDesc, false));
+                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, toOwner, toName, toDesc, false);
+                // set() unlinks the old node, so the walk continues from its replacement
+                m.instructions.set(mi, call);
+                insn = call;
                 n++;
             }
         }
