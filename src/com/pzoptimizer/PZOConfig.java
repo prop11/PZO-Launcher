@@ -15,6 +15,10 @@ public final class PZOConfig {
     private static volatile boolean javaModsEnabled = true;
     private static volatile boolean fsrEnabled = false;
     private static volatile boolean powerShieldEnabled = true;
+    private static volatile boolean luaCompileCache = true;
+    private static volatile boolean fastLoad = true;
+    // Testing aid: "key=value;..." merged over HardwareProbe's real values, "" for the real hardware
+    private static volatile String hardwareOverride = "";
     // "auto", "on" or "off": compatibility mode for older PCs, see CompatMode
     private static volatile String compatMode = "auto";
     private static final java.util.Set<String> approvedJavaMods = new java.util.LinkedHashSet<>();
@@ -50,6 +54,10 @@ public final class PZOConfig {
                 javaModsEnabled = !(content.contains("\"java_mods_enabled\":false") || content.contains("\"java_mods_enabled\": false"));
                 fsrEnabled = content.contains("\"fsr_enabled\":true") || content.contains("\"fsr_enabled\": true");
                 powerShieldEnabled = !(content.contains("\"power_shield\":false") || content.contains("\"power_shield\": false"));
+                luaCompileCache = !(content.contains("\"lua_compile_cache\":false") || content.contains("\"lua_compile_cache\": false"));
+                fastLoad = !(content.contains("\"fast_load\":false") || content.contains("\"fast_load\": false"));
+                String hw = extractJsonField(content, "hardware_override");
+                hardwareOverride = hw == null ? "" : hw;
                 String cm = extractJsonField(content, "compat_mode");
                 compatMode = ("on".equalsIgnoreCase(cm) || "off".equalsIgnoreCase(cm)) ? cm.toLowerCase() : "auto";
                 parseHashList(extractJsonField(content, "approved_java_mods"), approvedJavaMods);
@@ -61,11 +69,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -191,6 +199,46 @@ public final class PZOConfig {
         powerShieldEnabled = enabled;
         save();
         PZOLogger.info("[PZO Config] CPU power shield set to: " + enabled + " (applies on next launch)");
+    }
+
+    /** Lua compile cache (LuaCompileCache): read at launch, before the Lua mod's settings exist. */
+    public static boolean isLuaCompileCacheEnabled() {
+        load();
+        return luaCompileCache;
+    }
+
+    public static synchronized void setLuaCompileCacheEnabled(boolean enabled) {
+        load();
+        if (luaCompileCache == enabled) return;
+        luaCompileCache = enabled;
+        save();
+        PZOLogger.info("[PZO Config] Lua compile cache set to: " + enabled + " (applies on next launch)");
+    }
+
+    /** Faster file and map loading (ScriptCommentStrip, MapLoadFixes): read at launch. */
+    public static boolean isFastLoadEnabled() {
+        load();
+        return fastLoad;
+    }
+
+    public static synchronized void setFastLoadEnabled(boolean enabled) {
+        load();
+        if (fastLoad == enabled) return;
+        fastLoad = enabled;
+        save();
+        PZOLogger.info("[PZO Config] Faster file and map loading set to: " + enabled + " (applies on next launch)");
+    }
+
+    public static String getHardwareOverride() {
+        load();
+        return hardwareOverride;
+    }
+
+    public static synchronized void setHardwareOverride(String summary) {
+        load();
+        hardwareOverride = summary == null ? "" : summary.trim();
+        save();
+        PZOLogger.info("[PZO Config] Hardware override: " + (hardwareOverride.isEmpty() ? "off (real hardware)" : hardwareOverride));
     }
 
     /** "auto", "on" or "off"; read once at launch by CompatMode. */

@@ -98,9 +98,29 @@ public final class LogSpamShield {
         private static final long WINDOW_MS = 1000L;
         private static final int MAX_CACHE_SIZE = 64;
 
+        // Launched from Steam on Windows the process has no console: every write to the JDK's stdout throws
+        // IOException("The handle is invalid") inside PrintStream, which swallows it. The sink is probed on the first
+        // line and every 256th after; once it reports an error nothing more is sent to it.
+        private boolean sinkDead;
+        private int linesSinceProbe = 256;
+
         public DeduplicatingOutputStream(OutputStream out, boolean isErr) {
             super(out);
             this.isErr = isErr;
+        }
+
+        private void emit(byte[] line) throws IOException {
+            if (sinkDead) return;
+            out.write(line);
+            out.write('\n');
+            if (++linesSinceProbe >= 256) {
+                linesSinceProbe = 0;
+                // Exact class only: the game's ProxyPrintStream reports its console half's error while still writing
+                // console.txt, so it must never be cut off
+                if (out != null && out.getClass() == PrintStream.class && ((PrintStream) out).checkError()) {
+                    sinkDead = true;
+                }
+            }
         }
 
         @Override
@@ -132,6 +152,7 @@ public final class LogSpamShield {
             byte[] rawBytes = buffer.toByteArray();
             buffer.reset();
 
+            if (sinkDead) return;
             String line = new String(rawBytes, StandardCharsets.UTF_8);
             if (line.isEmpty()) {
                 out.write('\n');
@@ -140,15 +161,13 @@ public final class LogSpamShield {
 
             // Always allow PZO status/diagnostic messages without rate limiting
             if (line.contains("[PZO") || line.contains("[SUCCESS]") || line.contains("[WARN]")) {
-                out.write(rawBytes);
-                out.write('\n');
+                emit(rawBytes);
                 return;
             }
 
             String payload = extractPayload(line);
             if (payload.isEmpty()) {
-                out.write(rawBytes);
-                out.write('\n');
+                emit(rawBytes);
                 return;
             }
 
@@ -162,8 +181,7 @@ public final class LogSpamShield {
             });
 
             if (tracker.count <= MAX_BURST_PER_WINDOW) {
-                out.write(rawBytes);
-                out.write('\n');
+                emit(rawBytes);
             } else {
                 tracker.suppressedTotal.incrementAndGet();
             }
@@ -176,11 +194,12 @@ public final class LogSpamShield {
         @Override
         public void flush() throws IOException {
             synchronized (lock) {
-                out.flush();
+                if (!sinkDead) out.flush();
             }
         }
 
         public void flushSummaries() {
+            if (sinkDead) return;
             long now = System.currentTimeMillis();
             for (Map.Entry<String, Tracker> entry : tracked.entrySet()) {
                 Tracker tracker = entry.getValue();

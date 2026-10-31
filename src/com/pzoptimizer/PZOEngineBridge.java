@@ -404,6 +404,17 @@ public class PZOEngineBridge {
                 PuddleRedraw.filterActive = value;
             } else if ("JVM_PuddleRedrawPacing".equals(key)) {
                 PuddleRedraw.setPacing(value);
+            } else if ("JVM_ModelLoadFixes".equals(key)) {
+                ModelLoadFixes.active = value;
+            } else if ("JVM_ThreadLocalFastPath".equals(key)) {
+                ThreadLocalFastPath.active = value;
+            } else if ("JVM_ChunkTextureKeep".equals(key)) {
+                ChunkTextureKeep.active = value;
+            } else if ("JVM_LuaCompileCache".equals(key)) {
+                // Lua files load before the Lua settings do, so the value lives in pzo_config.json for the next launch
+                PZOConfig.setLuaCompileCacheEnabled(value);
+            } else if ("JVM_FastLoad".equals(key)) {
+                PZOConfig.setFastLoadEnabled(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -877,6 +888,42 @@ public class PZOEngineBridge {
                                 }
                             );
                             tableRawset.invoke(pzoTable, "modApi", modApiFunc);
+
+                            // profiler(op, arg): the Lua mod's performance overlay and recordings (LiveProfiler)
+                            Object profilerFunc = Proxy.newProxyInstance(
+                                javaFuncClass.getClassLoader(),
+                                new Class<?>[]{javaFuncClass},
+                                (proxy, m, mArgs) -> {
+                                    if ("call".equals(m.getName())) {
+                                        Object callFrame = mArgs[0];
+                                        int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
+                                        Object op = n > 0 ? getArg.invoke(callFrame, 0) : null;
+                                        Object a = n > 1 ? getArg.invoke(callFrame, 1) : null;
+                                        pushObj.invoke(callFrame, op == null ? Boolean.FALSE : LiveProfiler.dispatch(op.toString(), a));
+                                        return 1;
+                                    }
+                                    return null;
+                                }
+                            );
+                            tableRawset.invoke(pzoTable, "profiler", profilerFunc);
+
+                            // setHardwareOverride(summary): pretend to be other hardware for the recommendations ("" = real)
+                            Object hwOverrideFunc = Proxy.newProxyInstance(
+                                javaFuncClass.getClassLoader(),
+                                new Class<?>[]{javaFuncClass},
+                                (proxy, m, mArgs) -> {
+                                    if ("call".equals(m.getName())) {
+                                        Object callFrame = mArgs[0];
+                                        int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
+                                        Object v = n > 0 ? getArg.invoke(callFrame, 0) : null;
+                                        PZOConfig.setHardwareOverride(v == null ? "" : v.toString());
+                                        pushObj.invoke(callFrame, HardwareProbe.getRealSummary());
+                                        return 1;
+                                    }
+                                    return null;
+                                }
+                            );
+                            tableRawset.invoke(pzoTable, "setHardwareOverride", hwOverrideFunc);
 
                             // getChannel
                             Object getChannelFunc = Proxy.newProxyInstance(

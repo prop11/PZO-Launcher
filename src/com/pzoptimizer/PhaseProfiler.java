@@ -1,5 +1,7 @@
 package com.pzoptimizer;
 
+import com.pzoptimizer.shaded.asm.tree.ClassNode;
+import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -164,5 +166,17 @@ public final class PhaseProfiler {
 
     private static String ms(long ns, int divisor) {
         return String.format("%.1fms", ns / 1_000_000.0 / divisor);
+    }
+
+    /** GameProfiler: its recorder calls (end -> logTimeSpan, startFrame -> writeLine) go through this class. */
+    static boolean patch(ClassNode node) {
+        int spans = 0, lines = 0;
+        for (MethodNode m : node.methods) {
+            spans += AsmSupport.redirectCalls(m, "zombie/GameProfileRecording", "logTimeSpan", "(Lzombie/GameProfiler$ProfileArea;)V",
+                "com/pzoptimizer/PhaseProfiler", "logTimeSpan", "(Ljava/lang/Object;Ljava/lang/Object;)V");
+            lines += AsmSupport.redirectCalls(m, "zombie/GameProfileRecording", "writeLine", "()V",
+                "com/pzoptimizer/PhaseProfiler", "writeLine", "(Ljava/lang/Object;)V");
+        }
+        return spans > 0 && lines > 0;
     }
 }

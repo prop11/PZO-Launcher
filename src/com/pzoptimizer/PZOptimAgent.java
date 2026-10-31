@@ -35,6 +35,8 @@ public class PZOptimAgent {
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
 
         try {
+            // Loaded before the transformer exists, which calls into it for every class
+            ClassSightings.note("");
             inst.addTransformer(new EngineTransformer(), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
 
@@ -161,6 +163,10 @@ public class PZOptimAgent {
             if (className != null && className.startsWith("reallimbs/")) {
                 RealLimbsCompat.noteLoader(loader);
                 return null;
+            }
+            if (className != null && classBeingRedefined == null && !className.startsWith("zombie/")
+                    && !className.startsWith("com/pzoptimizer/")) {
+                ClassSightings.note(className);
             }
             AsmSupport.REDEFINING.set(classBeingRedefined);
             byte[] specific;
@@ -312,6 +318,11 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell low-quality puddle redraw: only chunk levels with puddles, paced");
                     fc = pr;
                 }
+                byte[] kt = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell chunk texture keep", ChunkTextureKeep::patchRenderCell);
+                if (kt != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.checkNewlyOnScreenChunks: chunk textures kept off screen and reused when the chunk comes back");
+                    fc = kt;
+                }
                 if (BenchmarkHarness.isConfigured()) {
                     byte[] ts = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell translucent stats", TranslucentStats::patchRenderCell);
                     if (ts != null) {
@@ -377,11 +388,40 @@ public class PZOptimAgent {
                 return ecs;
             }
             if ("zombie/GameProfiler".equals(className) && classfileBuffer != null) {
-                byte[] gp = AsmSupport.transform(classfileBuffer, loader, "GameProfiler.isValidThread", GameThreadPatches::patchGameProfiler);
+                byte[] gp = AsmSupport.transform(classfileBuffer, loader, "GameProfiler.isValidThread", n -> {
+                    boolean thread = GameThreadPatches.patchGameProfiler(n);
+                    boolean fast = ThreadLocalFastPath.patchProfiler(n);
+                    if (fast) PZOLogger.success("[PZO Agent] ASM-patched GameProfiler.getInstance: game thread's profiler handed back without a ThreadLocal lookup");
+                    // Was a raw-bytes patch further down that this branch made unreachable
+                    boolean phases = PhaseProfiler.patch(n);
+                    if (phases) PZOLogger.success("[PZO Agent] ASM-patched GameProfiler recorder calls: PhaseProfiler debug timing hook armed");
+                    return thread || fast || phases;
+                });
                 if (gp != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched GameProfiler.isValidThread: game threads recognised without a name scan");
                 }
                 return gp;
+            }
+            if ("zombie/iso/IsoDepthHelper".equals(className) && classfileBuffer != null) {
+                byte[] dh = AsmSupport.transform(classfileBuffer, loader, "IsoDepthHelper results", ThreadLocalFastPath::patchDepthHelper);
+                if (dh != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoDepthHelper: game thread's depth results handed back without a ThreadLocal lookup");
+                }
+                return dh;
+            }
+            if ("zombie/core/skinnedmodel/model/SkinningBoneHierarchy".equals(className) && classfileBuffer != null) {
+                byte[] bh = AsmSupport.transform(classfileBuffer, loader, "SkinningBoneHierarchy bone names", ModelLoadFixes::patchBoneHierarchy);
+                if (bh != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched SkinningBoneHierarchy.buildBoneHierarchy: bone names resolved from a table, no exception per unknown bone");
+                }
+                return bh;
+            }
+            if ("zombie/core/textures/Texture".equals(className) && classfileBuffer != null) {
+                byte[] tx = AsmSupport.transform(classfileBuffer, loader, "Texture bad path cache", ModelLoadFixes::patchTexture);
+                if (tx != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched Texture.getSharedTexture: unloadable texture paths fail once, logged once per name");
+                }
+                return tx;
             }
             if ("zombie/iso/objects/IsoLightSwitch".equals(className) && classfileBuffer != null) {
                 byte[] ls = AsmSupport.transform(classfileBuffer, loader, "IsoLightSwitch power cache", GameThreadPatches::patchLightSwitch);
@@ -467,12 +507,48 @@ public class PZOptimAgent {
                 }
                 return base != classfileBuffer ? base : null;
             }
-            if ("zombie/core/opengl/RenderThread".equals(className) && classfileBuffer != null && BenchmarkHarness.isConfigured()) {
+            if ("zombie/core/opengl/RenderThread".equals(className) && classfileBuffer != null) {
+                // Benchmarks and the Lua mod's profiler; both record only while they run
                 byte[] rt = AsmSupport.transform(classfileBuffer, loader, "RenderThread timing", GpuFrameTimer::patch);
                 if (rt != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched RenderThread: benchmark render frame timing armed");
+                    PZOLogger.success("[PZO Agent] ASM-patched RenderThread: render frame timing for benchmarks and the profiler");
                 }
                 return rt;
+            }
+            if ("zombie/scripting/ScriptParser".equals(className) && classfileBuffer != null) {
+                byte[] sp = AsmSupport.transform(classfileBuffer, loader, "ScriptParser comment strip", ScriptCommentStrip::patchScriptParser);
+                if (sp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ScriptParser.stripComments: block comments removed in one pass");
+                }
+                return sp;
+            }
+            if ("zombie/iso/LotHeader".equals(className) && classfileBuffer != null) {
+                byte[] lh = AsmSupport.transform(classfileBuffer, loader, "LotHeader zombie intensity lookup", MapLoadFixes::patchLotHeader);
+                if (lh != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched LotHeader.getZombieIntensityForChunk: map search shared by the chunks of a cell");
+                }
+                return lh;
+            }
+            if ("zombie/iso/IsoMetaGrid".equals(className) && classfileBuffer != null) {
+                byte[] mg = AsmSupport.transform(classfileBuffer, loader, "IsoMetaGrid vehicle zone check", MapLoadFixes::patchMetaGrid);
+                if (mg != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoMetaGrid.checkVehiclesZones: duplicate vehicle zones found by hash");
+                }
+                return mg;
+            }
+            if ("zombie/iso/IsoCell".equals(className) && classfileBuffer != null) {
+                byte[] ic = AsmSupport.transform(classfileBuffer, loader, "IsoCell profiler chunk timing", LiveProfiler::patchCell);
+                if (ic != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoCell: chunk streaming timed while the profiler runs");
+                }
+                return ic;
+            }
+            if ("zombie/gameStates/IngameState".equals(className) && classfileBuffer != null) {
+                byte[] is = AsmSupport.transform(classfileBuffer, loader, "IngameState profiler chunk timing", LiveProfiler::patchIngameState);
+                if (is != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IngameState: chunk grid moves timed while the profiler runs");
+                }
+                return is;
             }
             if ("zombie/core/textures/TextureIDAssetManager".equals(className) && classfileBuffer != null) {
                 byte[] tex = BytecodeRedirect.virtualToStatic(classfileBuffer,
@@ -612,7 +688,12 @@ public class PZOptimAgent {
                     ZombieArrivalQueue::patchGameWindow);
                 if (sv != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched GameWindow.save: queued zombie arrivals and travel statistics flushed before saving");
-                    return sv;
+                    gw = sv;
+                }
+                byte[] lp = AsmSupport.transform(gw != null ? gw : classfileBuffer, loader, "GameWindow profiler timing", LiveProfiler::patchGameWindow);
+                if (lp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GameWindow.frameStep: update and render timed while the profiler runs");
+                    gw = lp;
                 }
                 return gw != null ? gw : classfileBuffer;
             }
@@ -657,6 +738,11 @@ public class PZOptimAgent {
                 byte[] lm = AsmSupport.transform(classfileBuffer, loader, "LuaManager lookup trace", LuaLookupTrace::patchLuaManager);
                 if (lm != null) {
                     PZOLogger.info("[PZO Agent] LuaManager.getFunctionObject: failed Vehicles.* lookups are traced with their thread and stack");
+                }
+                byte[] lc = AsmSupport.transform(lm != null ? lm : classfileBuffer, loader, "LuaManager compile cache", LuaCompileCache::patchLuaManager);
+                if (lc != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched LuaManager.RunLuaInternal: compiled Lua kept between launches");
+                    lm = lc;
                 }
                 return lm;
             }
@@ -771,9 +857,6 @@ public class PZOptimAgent {
             }
             if ("zombie/pathfind/nativeCode/PathfindNative".equals(className) && classfileBuffer != null) {
                 return patchPathfindNative(classfileBuffer);
-            }
-            if ("zombie/GameProfiler".equals(className) && classfileBuffer != null) {
-                return patchGameProfiler(classfileBuffer);
             }
             return null;
         }
@@ -1998,18 +2081,6 @@ public class PZOptimAgent {
             return redirectCallSites(b, 0xB6, "zombie/pathfind/nativeCode/VehicleState", "check", "()Z",
                 "com/pzoptimizer/PathfindGovernor", "vehicleCheck", "(Ljava/lang/Object;)Z",
                 "Bytecode-patched PathfindNative.updateMain: PathfindGovernor vehicle navmesh throttle armed");
-        }
-
-        // Both redirects pass straight through to the recorder unless a debug launch has switched PhaseProfiler on
-        private byte[] patchGameProfiler(byte[] b) {
-            byte[] spans = redirectCallSites(b, 0xB6, "zombie/GameProfileRecording", "logTimeSpan", "(Lzombie/GameProfiler$ProfileArea;)V",
-                "com/pzoptimizer/PhaseProfiler", "logTimeSpan", "(Ljava/lang/Object;Ljava/lang/Object;)V",
-                "Bytecode-patched GameProfiler.end: PhaseProfiler debug timing hook armed");
-            if (spans == null) return null;
-            byte[] lines = redirectCallSites(spans, 0xB6, "zombie/GameProfileRecording", "writeLine", "()V",
-                "com/pzoptimizer/PhaseProfiler", "writeLine", "(Ljava/lang/Object;)V",
-                "Bytecode-patched GameProfiler.startFrame: vanilla profiler CSV writes routed through PhaseProfiler");
-            return (lines != null) ? lines : spans;
         }
 
         /**

@@ -302,6 +302,15 @@ public final class LuaEventPatches {
             }
         }
 
+        if (LiveProfiler.on) {
+            long t0 = LiveProfiler.luaBegin();
+            try {
+                caller.protectedCallVoid(thread, closure, params);
+            } finally {
+                LiveProfiler.luaEnd(closure, event, t0);
+            }
+            return;
+        }
         if (!timing) {
             caller.protectedCallVoid(thread, closure, params);
             return;

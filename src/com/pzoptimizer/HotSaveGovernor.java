@@ -52,6 +52,11 @@ public final class HotSaveGovernor {
      * ChunkSaveWorker.Update (vanilla only reaches it in singleplayer, after the save queue drains).
      */
     public static void hotsaveAncilliarySystems(Object worker) {
+        if (worldLoading()) {
+            pendingHotSave.set(true);
+            hotSavesDeferredWhileLoading.incrementAndGet();
+            return;
+        }
         long now = System.nanoTime();
         long last = lastHotSaveNanos;
         if (!active || intervalNanos <= 0L || last == 0L || (now - last) >= intervalNanos) {
@@ -69,7 +74,7 @@ public final class HotSaveGovernor {
      */
     public static void update(Object worker, Object aboutToLoad) {
         ((ChunkSaveWorker) worker).Update((IsoChunk) aboutToLoad);
-        if (!pendingHotSave.get()) {
+        if (!pendingHotSave.get() || worldLoading()) {
             return;
         }
         long now = System.nanoTime();
@@ -101,6 +106,21 @@ public final class HotSaveGovernor {
             PZOLogger.warn("[HotSaveGovernor] Hot-save invoke failed: " + t.getMessage());
         }
     }
+
+    /**
+     * The game's loading thread is still running. Loading reads several save files (map_symbols.bin in
+     * MapItem.LoadWorldMap among them) into the shared SliceY.SliceBuffer without SliceBufferLock, while the hot-save
+     * fills the same buffer on the game thread: both corrupt each other (BufferUnderflowException in LoadWorldMap,
+     * BufferOverflowException in IsoMetaGrid.savePart, the map symbols not loaded). Nothing needs a hot-save before
+     * the world is loaded, so it waits and runs on the first streamer update afterwards. Applies with or without the
+     * throttle.
+     */
+    private static boolean worldLoading() {
+        Thread loader = zombie.gameStates.GameLoadingState.loader;
+        return loader != null && loader.isAlive();
+    }
+
+    public static final AtomicLong hotSavesDeferredWhileLoading = new AtomicLong(0);
 
     public static void reset() {
         lastHotSaveNanos = 0L;

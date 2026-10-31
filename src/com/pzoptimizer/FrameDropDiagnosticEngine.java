@@ -186,6 +186,7 @@ public final class FrameDropDiagnosticEngine {
             return;
         }
 
+        LiveProfiler.onFrame(deltaNanos);
         ZombieLodGovernor.recordFrameStep(deltaNanos);
         BodyAtlasPrewarmGovernor.onFrameTick();
         WorldUpscalerGovernor.updateDynamicScale(deltaNanos, ZombieLodGovernor.getTargetFps());
