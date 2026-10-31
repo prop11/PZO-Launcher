@@ -15,8 +15,31 @@ public final class HardwareProbe {
 
     private HardwareProbe() {}
 
-    /** "cpu=..;cores=N;threads=N;ramMb=N;gpu=..;vramMb=N", or "" while still probing. */
+    /**
+     * "cpu=..;cores=N;threads=N;ramMb=N;gpu=..;vramMb=N", or "" while still probing. With a hardware override set
+     * (settings screen developer mode, pzo_config.json "hardware_override"), its keys replace the real ones and
+     * "spoofed=1" is added, so the recommendations can be tried for other PCs.
+     */
     public static String getSummary() {
+        start();
+        String override = PZOConfig.getHardwareOverride();
+        if (override == null || override.isEmpty()) return summary;
+        java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>();
+        for (String part : (summary + ";" + override).split(";")) {
+            int eq = part.indexOf('=');
+            if (eq > 0) merged.put(part.substring(0, eq).trim(), part.substring(eq + 1).trim());
+        }
+        merged.put("spoofed", "1");
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, String> e : merged.entrySet()) {
+            if (sb.length() > 0) sb.append(';');
+            sb.append(e.getKey()).append('=').append(e.getValue());
+        }
+        return sb.toString();
+    }
+
+    /** The detected hardware, ignoring any override. */
+    public static String getRealSummary() {
         start();
         return summary;
     }

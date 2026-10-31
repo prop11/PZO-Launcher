@@ -42,11 +42,12 @@ public final class FileSystemWhitelistShield {
         obtainUnsafe();
         collectAllSearchRoots();
 
-        // Keeps the whitelist in place through boot, the main menu and save loading
+        // Retries until ZomboidFileSystem exists; the wrapper then stays in its final allowedPrefixes field for good
+        // (reset() only clears the cached list), so the thread ends after the first success
         Thread daemon = new Thread(() -> {
             while (true) {
                 try {
-                    tryApplyShield();
+                    if (tryApplyShield()) break;
                     Thread.sleep(1000);
                 } catch (InterruptedException ignored) {
                     break;
@@ -151,7 +152,7 @@ public final class FileSystemWhitelistShield {
             allowedField.setAccessible(true);
             Object lazy = allowedField.get(fsInstance);
             if (lazy != null) {
-                hookLazySupplier(lazy);
+                if (!hookLazySupplier(lazy)) return false;
                 if (!applied) {
                     applied = true;
                     PZOLogger.success(String.format("[FileSystemWhitelistShield] Added %d game/workshop folders to the ZomboidFileSystem whitelist", discoveredRoots.size()));
@@ -164,19 +165,18 @@ public final class FileSystemWhitelistShield {
         return false;
     }
 
-    private static void hookLazySupplier(Object lazyObj) {
+    private static boolean hookLazySupplier(Object lazyObj) {
         obtainUnsafe();
-        if (unsafeInstance == null) return;
+        if (unsafeInstance == null) return false;
 
         try {
             Field supplierField = null;
-            Class<?> cur = lazyObj.getClass();
-            while (cur != null && cur != Object.class) {
-                try {
-                    supplierField = cur.getDeclaredField("supplier");
-                    break;
-                } catch (NoSuchFieldException e) {
-                    cur = cur.getSuperclass();
+            for (Class<?> cur = lazyObj.getClass(); supplierField == null && cur != null && cur != Object.class; cur = cur.getSuperclass()) {
+                for (Field f : cur.getDeclaredFields()) {
+                    if (f.getName().equals("supplier")) {
+                        supplierField = f;
+                        break;
+                    }
                 }
             }
 
@@ -192,8 +192,10 @@ public final class FileSystemWhitelistShield {
                         resetMethod.invoke(lazyObj);
                     } catch (Throwable ignored) {}
                 }
+                return true;
             }
         } catch (Throwable ignored) {}
+        return false;
     }
 
     /** Supplier wrapper that always adds the discovered secondary-drive roots. */

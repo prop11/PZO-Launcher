@@ -101,12 +101,14 @@ public final class TranslucentBake {
         if (sq == null) return true;
         zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance.currentCell;
         if (cell == null) return true;
-        for (int z : sq.z == 0 ? new int[] {0} : new int[] {sq.z, 0}) {
-            for (int y = sq.y - 3; y <= sq.y + 1; y++) {
-                for (int x = sq.x - 3; x <= sq.x + 1; x++) {
-                    zombie.iso.IsoGridSquare s = cell.getGridSquare(x, y, z);
-                    if (s != null && s.has(zombie.iso.SpriteDetails.IsoFlagType.water)) return true;
-                }
+        return waterInArea(cell, sq.x, sq.y, sq.z) || (sq.z != 0 && waterInArea(cell, sq.x, sq.y, 0));
+    }
+
+    private static boolean waterInArea(zombie.iso.IsoCell cell, int sx, int sy, int z) {
+        for (int y = sy - 3; y <= sy + 1; y++) {
+            for (int x = sx - 3; x <= sx + 1; x++) {
+                zombie.iso.IsoGridSquare s = cell.getGridSquare(x, y, z);
+                if (s != null && s.has(zombie.iso.SpriteDetails.IsoFlagType.water)) return true;
             }
         }
         return false;

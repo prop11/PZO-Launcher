@@ -22,6 +22,8 @@ public final class GpuFrameTimer {
     private static int frames;
     private static long waitNs, submitNs, presentNs;
     private static long[] presentSamples = new long[4096];
+    // Present time for LiveProfiler, kept while it measures
+    static volatile long presentTotalNs, presentCount;
 
     private GpuFrameTimer() {}
 
@@ -37,6 +39,11 @@ public final class GpuFrameTimer {
     public static void displayUpdate(boolean processMessages) {
         long t = System.nanoTime();
         org.lwjglx.opengl.Display.update(processMessages);
+        if (LiveProfiler.on) {
+            // Render thread is the only writer; the profiler reads the pair on the game thread
+            presentTotalNs += System.nanoTime() - t;
+            presentCount++;
+        }
         if (recording) {
             long d = System.nanoTime() - t;
             presentNs += d;

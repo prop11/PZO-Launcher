@@ -201,6 +201,11 @@ installed version. The ones most likely to matter to other mods:
 | `JVM_OcclusionReuse` | Keep the Upper-Floor Occlusion Grid | Occlusion grid kept on frames where only lighting changed. |
 | `JVM_PuddleFrameCache` | Cache Puddle Squares Between Frames | `FBORenderCell.renderPuddles` replaced by a cached pass at medium/high puddle quality. Stand it down if your mod patches that method. |
 | `JVM_PuddleRedrawFilter` | Low Puddles: Re-draw Only Chunks With Puddles | Low-quality puddle size changes re-bake only chunk levels that drew puddles. |
+| `JVM_ChunkTextureKeep` | Keep Chunk Images Just Off Screen | Chunk level textures are not freed when they leave the screen and are reused on return unless dirty. If your mod changes how a chunk is drawn without invalidating it (`invalidateRenderChunkLevel`), invalidate it or stand this down. |
+| `JVM_ModelLoadFixes` | Quieter Model Loading | Bone names resolved from a table; a texture path the file system rejects fails once and is logged once. |
+| `JVM_ThreadLocalFastPath` | Faster Per-Thread Lookups | `GameProfiler.getInstance` and `IsoDepthHelper` results returned from a slot on the game thread. |
+| `JVM_LuaCompileCache` | Keep Compiled Lua Between Launches | Compiled Lua kept in Zomboid/PZO/luacache.bin, keyed by a hash of the file text; next launch. Changing a file's text recompiles it. |
+| `JVM_FastLoad` | Faster File and Map Loading | One-pass `ScriptParser.stripComments`, hashed vehicle zone dedupe, shared lot header search for zombie intensity; identical results; next launch. |
 | `JVM_FSREnabled` | AMD FSR 1.0 Upscaling | World drawn at a lower resolution and upscaled. |
 
 Settings that only take effect at launch or world load (for example the chunk load distance) follow a stand-down at

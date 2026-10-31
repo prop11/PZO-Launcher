@@ -22,6 +22,7 @@ public final class ViewpointStanddownGovernor {
     private static volatile boolean modDetected = false;
     private static volatile boolean initialized = false;
     private static volatile long lastCheckTime = 0;
+    private static volatile boolean classPathProbed = false;
 
     static {
         initialize();
@@ -80,24 +81,28 @@ public final class ViewpointStanddownGovernor {
         }
         lastCheckTime = now;
 
-        boolean detected = false;
-
-        // Known Viewpoint / True Weathers / 3D mod classes already loaded
-        String[] modClasses = new String[] {
-            "viewpoint.Viewpoint",
-            "viewpoint.Camera3D",
-            "viewpoint.TrueWeathers",
-            "viewpoint.ModEntry",
-            "com.viewpoint.ViewpointMain",
-            "com.trueweathers.TrueWeathers",
-            "viewpoint.TrueWeather"
-        };
-        for (String cName : modClasses) {
-            try {
-                Class.forName(cName, false, ViewpointStanddownGovernor.class.getClassLoader());
-                detected = true;
-                break;
-            } catch (Throwable ignored) {}
+        // Known Viewpoint / True Weathers / 3D mod classes. With the agent, the transformer reports them as they load
+        // from any loader. Without it, probe the class path once only: each miss throws ClassNotFoundException, and
+        // this runs every 3 s on the game thread while driving.
+        boolean detected = ClassSightings.viewpointLoaded;
+        if (!detected && !classPathProbed) {
+            classPathProbed = true;
+            String[] modClasses = new String[] {
+                "viewpoint.Viewpoint",
+                "viewpoint.Camera3D",
+                "viewpoint.TrueWeathers",
+                "viewpoint.ModEntry",
+                "com.viewpoint.ViewpointMain",
+                "com.trueweathers.TrueWeathers",
+                "viewpoint.TrueWeather"
+            };
+            for (String cName : modClasses) {
+                try {
+                    Class.forName(cName, false, ViewpointStanddownGovernor.class.getClassLoader());
+                    detected = true;
+                    break;
+                } catch (Throwable ignored) {}
+            }
         }
 
         // The game's ActiveMods list
