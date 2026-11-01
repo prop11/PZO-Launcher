@@ -25,9 +25,10 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
  *
  * The visit's three re-bake calls are held until it ends. Each square's flags are recorded before the visit first
  * touches them (a square cut both times goes 1 -> 0 -> 1); a held re-bake runs only when a square of its chunk ended
- * with different flags. In the FBO renderer the bake reads exactly those target flags, so the skipped textures would
- * have come out the same. The visit's neighbour-edge pass, which re-bakes the chunk next door when an edge changes,
- * is left as it is.
+ * with different flags, or a square of a neighbouring chunk on its edge did (wall bakes read the N/S/W/E neighbours'
+ * flags, and vanilla's edge pass only tracks "any cut wall on this edge", plus mis-stores the south edge). In the FBO
+ * renderer the bake reads exactly those target flags, so the skipped textures would have come out the same. The
+ * visit's neighbour-edge pass is left as it is.
  */
 public final class CutawayRebakeFilter {
 
@@ -92,8 +93,13 @@ public final class CutawayRebakeFilter {
         changed.clear();
         for (java.util.Map.Entry<IsoGridSquare, Integer> e : before.entrySet()) {
             IsoGridSquare square = e.getKey();
-            if (square.getPlayerCutawayFlag(lastPlayer, 0L) != e.getValue() && square.getChunk() != null) {
-                changed.add(square.getChunk());
+            if (square.getPlayerCutawayFlag(lastPlayer, 0L) != e.getValue()) {
+                markChanged(square);
+                // Wall and door bakes read the N/S/W/E neighbours' flags, so a changed edge square also stales the next chunk
+                markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.N));
+                markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.S));
+                markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.W));
+                markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.E));
             }
         }
         for (Object[] h : held) {
@@ -109,6 +115,12 @@ public final class CutawayRebakeFilter {
         changed.clear();
         holding = false;
         lastSquare = null;
+    }
+
+    private static void markChanged(IsoGridSquare square) {
+        if (square != null && square.getChunk() != null) {
+            changed.add(square.getChunk());
+        }
     }
 
     private static void flushAll() {

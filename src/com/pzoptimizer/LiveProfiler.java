@@ -57,6 +57,8 @@ public final class LiveProfiler {
         String mod;
         long frameNs, windowNs, recordNs, slowNs, calls;
         boolean touched;
+        // PZO's own Lua (the profiler screen and overlay among it) is left out of the mod lists: recording makes it busy
+        boolean self;
 
         Handler(Object prototype, String event, String where) {
             this.prototype = prototype;
@@ -67,6 +69,7 @@ public final class LiveProfiler {
 
     private static final IdentityHashMap<Object, Handler> handlers = new IdentityHashMap<>();
     private static final ArrayList<Handler> touched = new ArrayList<>();
+    private static final Handler[] recent = new Handler[16];
 
     // Ring of recent frames for the overlay (10 s at up to ~800 FPS)
     private static final int RING = 8192;
@@ -92,6 +95,13 @@ public final class LiveProfiler {
     private static final int SLOW_KEEP = 15;
     private static final List<double[]> slowest = new ArrayList<>();
     private static final List<String> slowestTop = new ArrayList<>();
+
+    // Scene context sampled every 30 recorded frames, so the report can say what was around when it was slow:
+    // zombies, animals, driving, rain, Java heap use
+    private static int ctxSamples, ctxDriving, ctxRaining;
+    private static long ctxZombies, ctxAnimals;
+    private static int ctxZombiesMax, ctxAnimalsMax;
+    private static double ctxHeapPeak;
 
     // Collector pause counters (cycle counters of concurrent collectors are left out)
     private static GarbageCollectorMXBean[] pauseBeans;
@@ -188,7 +198,7 @@ public final class LiveProfiler {
         else if (inRender) luaRenderNs += dt;
         else luaLogicNs += dt;
         Handler h = attribute(closure, event, dt);
-        if (h != null && h.frameNs > frameTopNs) {
+        if (h != null && !h.self && h.frameNs > frameTopNs) {
             frameTop = h;
             frameTopNs = h.frameNs;
         }
@@ -200,7 +210,12 @@ public final class LiveProfiler {
         if (closure instanceof se.krka.kahlua.vm.LuaClosure lc && lc.prototype != null) {
             proto = lc.prototype;
         }
-        Handler h = handlers.get(proto);
+        int slot = System.identityHashCode(proto) & 15;
+        Handler h = recent[slot];
+        if (h == null || h.prototype != proto) {
+            h = handlers.get(proto);
+            if (h != null) recent[slot] = h;
+        }
         if (h == null) {
             if (proto instanceof se.krka.kahlua.vm.Prototype p) {
                 String file = p.filename != null ? p.filename : p.file;
@@ -208,7 +223,9 @@ public final class LiveProfiler {
             }
             h = new Handler(proto, event == null ? "?" : event, where);
             h.mod = modOf(where);
+            h.self = SELF_MOD.equalsIgnoreCase(h.mod);
             handlers.put(proto, h);
+            recent[slot] = h;
         }
         if (!h.touched) {
             h.touched = true;
@@ -252,8 +269,10 @@ public final class LiveProfiler {
             hist[bin]++;
             histCount++;
             // After a short warm-up a frame at or above the running 99th percentile counts as one of the 1% lows
-            slow = histCount >= 200 && ms >= p99Estimate();
+            if ((histCount & 63) == 0) p99Cached = p99Estimate();
+            slow = histCount >= 200 && ms >= p99Cached;
             keepIfSlowest(now, ms, parts);
+            if (recFrames % 30 == 1) sampleContext();
         }
 
         for (int i = 0, n = touched.size(); i < n; i++) {
@@ -276,6 +295,34 @@ public final class LiveProfiler {
         if (now - windowStart >= 2_000_000_000L) closeWindow(now);
         if (recording && now - recordStartNs >= recordDurationNs) stopRecording();
     }
+
+    private static void sampleContext() {
+        try {
+            ctxSamples++;
+            zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
+            if (cell != null) {
+                int z = cell.getZombieList().size();
+                // IsoCell.getAnimals() builds a new list on every call; count in place instead
+                int a = 0;
+                for (zombie.iso.IsoMovingObject o : cell.getObjectList()) {
+                    if (o instanceof zombie.characters.animals.IsoAnimal) a++;
+                }
+                ctxZombies += z;
+                ctxAnimals += a;
+                ctxZombiesMax = Math.max(ctxZombiesMax, z);
+                ctxAnimalsMax = Math.max(ctxAnimalsMax, a);
+            }
+            zombie.characters.IsoPlayer p = zombie.characters.IsoPlayer.players[0];
+            if (p != null && p.getVehicle() != null) ctxDriving++;
+            zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+            if (cm != null && cm.getRainIntensity() > 0.1f) ctxRaining++;
+            Runtime rt = Runtime.getRuntime();
+            ctxHeapPeak = Math.max(ctxHeapPeak, (rt.totalMemory() - rt.freeMemory()) / (double) rt.maxMemory());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static double p99Cached = Double.MAX_VALUE;
 
     private static double p99Estimate() {
         int target = (int) Math.ceil(histCount * 0.01);
@@ -365,7 +412,7 @@ public final class LiveProfiler {
         HashMap<String, Double> byMod = new HashMap<>();
         for (Handler h : handlers.values()) {
             long ns = window ? h.windowNs : h.recordNs;
-            if (ns > 0) byMod.merge(h.mod, ns / 1e6 / frames, Double::sum);
+            if (ns > 0 && !h.self) byMod.merge(h.mod, ns / 1e6 / frames, Double::sum);
         }
         List<Map.Entry<String, Double>> list = new ArrayList<>(byMod.entrySet());
         list.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
@@ -380,8 +427,12 @@ public final class LiveProfiler {
         recGcMax = 0;
         Arrays.fill(hist, 0);
         histCount = 0;
+        p99Cached = Double.MAX_VALUE;
         slowest.clear();
         slowestTop.clear();
+        ctxSamples = ctxDriving = ctxRaining = ctxZombiesMax = ctxAnimalsMax = 0;
+        ctxZombies = ctxAnimals = 0;
+        ctxHeapPeak = 0;
         for (Handler h : handlers.values()) {
             h.recordNs = 0;
             h.slowNs = 0;
@@ -418,30 +469,62 @@ public final class LiveProfiler {
         }
     }
 
+    // Reused by liveText, which the overlay calls a few times a second on the game thread
+    private static final int[] liveHist = new int[2501];
+    private static final float[] liveBuckets = new float[100];
+
     /** Stats line, breakdown, top mods and a graph of the last 10 s (max frame time per 100 ms). */
     private static String liveText() {
         long now = System.nanoTime();
         long from = now - 10_000_000_000L;
-        float[] ms = new float[ringCount];
-        int n = 0;
-        float[] buckets = new float[100];
+        Arrays.fill(liveHist, 0);
+        Arrays.fill(liveBuckets, 0f);
+        int n = 0, spikes = 0;
+        double total = 0, worst = 0;
         for (int i = 0; i < ringCount; i++) {
             int idx = (ringHead - 1 - i + RING) % RING;
             if (ringEnd[idx] < from) break;
-            ms[n++] = ringMs[idx];
+            float v = ringMs[idx];
+            n++;
+            total += v;
+            worst = Math.max(worst, v);
+            if (v > 33.4f) spikes++;
+            liveHist[Math.min(liveHist.length - 1, (int) (v * 10))]++;
             int b = 99 - (int) ((now - ringEnd[idx]) / 100_000_000L);
-            if (b >= 0 && b < 100) buckets[b] = Math.max(buckets[b], ringMs[idx]);
+            if (b >= 0 && b < 100) liveBuckets[b] = Math.max(liveBuckets[b], v);
         }
-        StringBuilder sb = new StringBuilder();
-        sb.append(statsLine(ms, n)).append('\n');
+        StringBuilder sb = new StringBuilder(1024);
+        sb.append(histStatsLine(liveHist, n, total, worst, spikes)).append('\n');
         sb.append(windowSnapshot);
         sb.append('G');
-        for (float b : buckets) sb.append('\t').append(fmt(b));
+        for (float b : liveBuckets) sb.append('\t').append(fmt(b));
         sb.append('\n');
         if (recording) {
             sb.append("R\t").append(fmt((now - recordStartNs) / 1e9)).append('\t').append(fmt(recordDurationNs / 1e9)).append('\n');
         }
         return sb.toString();
+    }
+
+    // The overlay's stats line from a 0.1 ms histogram: same fields as statsLine, percentiles to the nearest 0.1 ms
+    private static String histStatsLine(int[] h, int n, double total, double worst, int spikes) {
+        if (n == 0) return "S\t0\t0\t0\t0\t0\t0";
+        int n1 = Math.max(1, n / 100);
+        int take = n1, p99Rank = n - Math.min(n - 1, (int) (n * 0.99));
+        double low = 0, p99 = 0;
+        int seen = 0;
+        for (int b = h.length - 1; b >= 0 && (take > 0 || seen < p99Rank); b--) {
+            int c = h[b];
+            if (c == 0) continue;
+            double v = (b + 0.5) / 10.0;
+            int use = Math.min(c, take);
+            low += use * v;
+            take -= use;
+            if (seen < p99Rank && seen + c >= p99Rank) p99 = v;
+            seen += c;
+        }
+        low /= n1;
+        return "S\t" + fmt(1000.0 * n / total) + '\t' + fmt(low > 0 ? 1000.0 / low : 0) + '\t' + fmt(p99) + '\t'
+            + fmt(worst) + '\t' + spikes + '\t' + n;
     }
 
     // S fps, 1% low fps, p99 ms, worst ms, frames over 33 ms, frames
@@ -475,6 +558,12 @@ public final class LiveProfiler {
         sb.append('B');
         for (double p : recParts) sb.append('\t').append(fmt(p / f));
         sb.append('\n');
+        // C: zombies avg and max, animals avg and max, % of time driving, % raining, peak heap use %, heap max MB
+        int cs = Math.max(1, ctxSamples);
+        sb.append("C\t").append(fmt((double) ctxZombies / cs)).append('\t').append(ctxZombiesMax).append('\t')
+            .append(fmt((double) ctxAnimals / cs)).append('\t').append(ctxAnimalsMax).append('\t')
+            .append(fmt(100.0 * ctxDriving / cs)).append('\t').append(fmt(100.0 * ctxRaining / cs)).append('\t')
+            .append(fmt(100.0 * ctxHeapPeak)).append('\t').append(Runtime.getRuntime().maxMemory() >> 20).append('\n');
         // Timeline: the longest frame in each of 120 equal slices of the recorded time
         double total = 0;
         for (int i = 0; i < recFrames; i++) total += recMs[i];
@@ -499,7 +588,7 @@ public final class LiveProfiler {
         HashMap<String, Handler> topOf = new HashMap<>();
         double slowTotal = 0;
         for (Handler h : handlers.values()) {
-            if (h.recordNs == 0) continue;
+            if (h.recordNs == 0 || h.self) continue;
             double[] a = byMod.computeIfAbsent(h.mod, k -> new double[3]);
             a[0] += h.recordNs;
             a[1] += h.slowNs;
@@ -558,6 +647,9 @@ public final class LiveProfiler {
                         case "B" -> w.println(String.format(Locale.ROOT,
                             "Per frame: update %s ms, chunk streaming %s ms, Lua events %s ms, render %s ms, other/waiting %s ms, GC %s ms; render thread present %s ms",
                             c[1], c[2], c[3], c[4], c[5], c[6], c[7]));
+                        case "C" -> w.println(String.format(Locale.ROOT,
+                            "Scene: zombies %s average (%s at most), animals %s average (%s at most), driving %s%% of the time, raining %s%%, Java heap peak %s%% of %s MB",
+                            c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]));
                         case "F" -> w.println(String.format(Locale.ROOT,
                             "  slow frame at %s s: %s ms (update %s, chunks %s, Lua %s, render %s, other %s, GC %s%s)%s",
                             c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], "1".equals(c[9]) ? ", saving" : "",
@@ -624,6 +716,9 @@ public final class LiveProfiler {
 
     // ---- Helpers ----------------------------------------------------------------------------------------------
 
+    // PZO's Lua mod folder, as modOf returns it for both the Workshop staging copy and the subscribed copy
+    private static final String SELF_MOD = "MPOptimiser";
+
     // Mod folder from a Lua file path; "@game" for the game's own scripts
     static String modOf(String where) {
         String p = where.replace('\\', '/');
@@ -645,8 +740,12 @@ public final class LiveProfiler {
         return s == null ? "" : s.replace('\t', ' ').replace('\n', ' ');
     }
 
+    // Two decimals without String.format, which is slow enough to show up in the overlay's update
     private static String fmt(double v) {
-        return String.format(Locale.ROOT, "%.2f", v);
+        if (Double.isNaN(v) || Double.isInfinite(v)) return "0.00";
+        long c = Math.round(Math.abs(v) * 100.0);
+        long frac = c % 100;
+        return (v < 0 && c != 0 ? "-" : "") + (c / 100) + (frac < 10 ? ".0" : ".") + frac;
     }
 
     // ---- Patches ----------------------------------------------------------------------------------------------

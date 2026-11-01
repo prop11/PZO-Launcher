@@ -28,6 +28,10 @@ public final class GpuFrameTimer {
     private GpuFrameTimer() {}
 
     public static void postRender(SpriteRenderer renderer) {
+        if (!recording) {
+            renderer.postRender();
+            return;
+        }
         submitStart = System.nanoTime();
         renderer.postRender();
         if (recording) {
@@ -37,6 +41,11 @@ public final class GpuFrameTimer {
     }
 
     public static void displayUpdate(boolean processMessages) {
+        // Installed for everyone: without a benchmark or the profiler running this is just the stock call
+        if (!recording && !LiveProfiler.on) {
+            org.lwjglx.opengl.Display.update(processMessages);
+            return;
+        }
         long t = System.nanoTime();
         org.lwjglx.opengl.Display.update(processMessages);
         if (LiveProfiler.on) {
