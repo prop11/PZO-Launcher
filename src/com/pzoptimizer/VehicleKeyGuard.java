@@ -3,9 +3,9 @@ package com.pzoptimizer;
 import java.lang.reflect.Method;
 
 /**
- * Prefix hook on BaseVehicle.addKeyToGloveBox(). Vanilla dereferences glovebox.container without a null check,
- * which throws for vehicle scripts whose GloveBox part has no container. Only that case is skipped; every
- * other vehicle runs the vanilla body unchanged, building keys and key rings included.
+ * Prefix hook on BaseVehicle.addKeyToGloveBox(). Vanilla uses glovebox.container without a null check, which throws for
+ * vehicle scripts whose GloveBox part has no container. I only skip that case; every other vehicle runs vanilla
+ * unchanged, keys and key rings included.
  */
 public final class VehicleKeyGuard {
 

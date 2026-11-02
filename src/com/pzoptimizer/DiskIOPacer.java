@@ -6,9 +6,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import zombie.Lua.LuaManager;
 
 /**
- * Throttles mods that rewrite a file every frame or tick (e.g. PZ_Map and PZ_Pulse rewriting heartbeat.txt
- * ~120 times a second), which stalls the main thread on NTFS. Rapid writes to heartbeat/pulse files and
- * non-append overwrites within 500 ms get a LuaFileWriter backed by OutputStream.nullOutputStream().
+ * Throttles mods that rewrite a file every frame or tick (PZ_Map and PZ_Pulse rewrite heartbeat.txt ~120 times a
+ * second), which stalls the main thread on NTFS. Rapid writes to heartbeat/pulse files, and overwrites of the same file
+ * within 500 ms, get a LuaFileWriter that writes to nowhere.
  */
 public final class DiskIOPacer {
 

@@ -6,9 +6,9 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Detects physical cores and hybrid layouts (Intel P/E cores, AMD Zen 5 + Zen 5c) via Linux sysfs or the
- * native library, so frame-synchronous worker pools are not spread onto efficiency cores or SMT siblings,
- * which only adds barrier tail latency.
+ * Works out physical cores and hybrid layouts (Intel P/E, AMD Zen 5 + Zen 5c) from Linux sysfs or the native library,
+ * so the frame-synced worker pools don't end up on efficiency cores or SMT siblings, which just adds stragglers at
+ * every barrier.
  */
 public final class CpuTopologyGovernor {
 
@@ -67,9 +67,9 @@ public final class CpuTopologyGovernor {
     private CpuTopologyGovernor() {}
 
     /**
-     * Worker count for frame-synchronous parallel batches. On hybrid CPUs with more than 9 physical cores
-     * (Ryzen AI 9 HX 370, Core Ultra) this caps at min(11, physicalCores - 1) to avoid E-core/SMT stragglers.
-     * On 4 or fewer logical CPUs it is logical - 2, minimum 1.
+     * Worker count for the frame-synced batches. Hybrid CPUs with more than 9 physical cores (Ryzen AI 9 HX 370, Core
+     * Ultra) get min(11, physicalCores - 1) to keep E-core/SMT stragglers out. 4 or fewer logical CPUs get logical - 2,
+     * at least 1.
      */
     public static int getOptimalWorkerCount() {
         // Leave two cores for the game's main and render threads

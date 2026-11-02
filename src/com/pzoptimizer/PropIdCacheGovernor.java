@@ -5,14 +5,14 @@ import java.util.Map;
 import zombie.core.TilePropertyAliasMap;
 
 /**
- * Vanilla resolves every tile property lookup through HashMap<String, Integer>.getOrDefault, which walks a
- * node and unboxes an Integer per call. After each TilePropertyAliasMap.Generate() this governor snapshots
- * the table into a flat open-addressed String[]/int[] pair, so a hit is one array probe with an identity
- * compare (property names are mostly interned literals) and no boxing.
+ * Vanilla resolves every tile property lookup through HashMap<String, Integer>.getOrDefault, which walks a node and
+ * unboxes an Integer every call. After each TilePropertyAliasMap.Generate() I snapshot the table into a flat
+ * open-addressed String[]/int[] pair, so a hit is one array probe with an identity compare (property names are mostly
+ * interned literals) and no boxing.
  *
- * Thread-safety: the snapshot is immutable and published through a single volatile field, so the main
- * thread and PZO worker threads read it lock-free. Generate() runs on the main thread during world load;
- * while it runs (and before the first one completes) lookups fall through to vanilla.
+ * The snapshot is immutable and published through one volatile field, so the main thread and my workers read it
+ * without locks. Generate() runs on the main thread during world load, and until it's finished lookups fall through to
+ * vanilla.
  */
 public final class PropIdCacheGovernor {
 
@@ -69,9 +69,7 @@ public final class PropIdCacheGovernor {
         return snapshot != null;
     }
 
-    /**
-     * Redirect target for invokevirtual TilePropertyAliasMap.Generate(HashMap) inside IsoWorld.
-     */
+    /** Redirect target for TilePropertyAliasMap.Generate(HashMap) inside IsoWorld. */
     public static void generate(Object aliasMap, HashMap<String, java.util.ArrayList<String>> propertyValueMap) {
         TilePropertyAliasMap map = (TilePropertyAliasMap) aliasMap;
         snapshot = null;
@@ -87,9 +85,7 @@ public final class PropIdCacheGovernor {
         }
     }
 
-    /**
-     * Redirect target for invokevirtual TilePropertyAliasMap.getIDFromPropertyName(String) inside PropertyContainer.
-     */
+    /** Redirect target for TilePropertyAliasMap.getIDFromPropertyName(String) inside PropertyContainer. */
     public static int getIDFromPropertyNameFast(Object aliasMap, String propName) {
         Snapshot s = snapshot;
         if (active && s != null && propName != null && aliasMap == TilePropertyAliasMap.instance) {

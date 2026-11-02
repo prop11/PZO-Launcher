@@ -3,7 +3,10 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/** Weather settings that hitch while travelling in rain: lighting split updates, puddle levels and weather masking (puddle caching: PuddleFrameCache, PuddleRedraw). */
+/**
+ * Weather settings that hitch while travelling in rain: lighting split updates, puddle levels, weather masking (puddle
+ * caching lives in PuddleFrameCache / PuddleRedraw).
+ */
 public final class RainAndWeatherOptimizer {
 
     private static volatile boolean initialized = false;
@@ -32,7 +35,7 @@ public final class RainAndWeatherOptimizer {
     }
 
     /**
-     * Keeps lightingSplitUpdate off. When on, FBORenderCell caps chunk updates at 5 per frame, which makes
+     * Keeps lightingSplitUpdate off. With it on, FBORenderCell caps chunk updates at 5 per frame, which makes
      * flashlights flicker and stops other players' flashlights lighting anything in multiplayer.
      */
     public static void applyLightingSplitUpdate() {
@@ -53,7 +56,7 @@ public final class RainAndWeatherOptimizer {
         }
     }
 
-    /** Switches puddles to ground level only (perfPuddles = 2) when set lower. */
+    /** Drops puddles to ground level only (perfPuddles = 2) when set lower. */
     public static void applyPuddlesElevationCap() {
         try {
             Class<?> coreClass = Class.forName("zombie.core.Core");
@@ -74,7 +77,7 @@ public final class RainAndWeatherOptimizer {
         }
     }
 
-    /** Keeps WeatherFxMask.maskingEnabled on; without it indoor areas show a raw gray box. */
+    /** Keeps WeatherFxMask.maskingEnabled on; without it indoor areas show a raw grey box. */
     private static void ensureWeatherMaskingRestored() {
         try {
             Class<?> maskClass = Class.forName("zombie.iso.weather.fx.WeatherFxMask");

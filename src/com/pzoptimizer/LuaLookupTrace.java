@@ -11,9 +11,9 @@ import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Diagnostic for an intermittent 'no such function "Vehicles.Init.Default"' seen on some benchmark routes: when
- * LuaManager.getFunctionObject fails to resolve a Vehicles.* function, the calling thread and its Java stack are
- * logged (at most MAX_REPORTS times a session), so it can be told whether the lookup ran off the game thread.
+ * Diagnostic for an occasional 'no such function "Vehicles.Init.Default"' on some benchmark routes. When
+ * LuaManager.getFunctionObject can't resolve a Vehicles.* function I log the calling thread and its Java stack (at
+ * most MAX_REPORTS a session), to see whether the lookup ran off the game thread.
  */
 public final class LuaLookupTrace {
 
@@ -22,7 +22,7 @@ public final class LuaLookupTrace {
 
     private LuaLookupTrace() {}
 
-    // Before every return of getFunctionObject(name, logger): the returned value is passed through
+    // Before every return of getFunctionObject(name, logger), the return value passes through here
     public static Object result(Object value, String name) {
         if (value != null || name == null || !name.startsWith("Vehicles.")) return value;
         if (reports.incrementAndGet() > MAX_REPORTS) return value;

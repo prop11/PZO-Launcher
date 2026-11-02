@@ -7,7 +7,7 @@ public class FastMath {
     private static final float[] SIN_TABLE = new float[SIN_MASK + 1];
     private static final float RAD_TO_INDEX = (SIN_MASK + 1) / (float) (Math.PI * 2);
 
-    // Fast integer tile distance table for offsets -32 to +32
+    // Integer tile distance table for offsets -32 to +32
     private static final int OFFSET_RANGE = 32;
     private static final int TABLE_SIZE = (OFFSET_RANGE * 2) + 1; // 65
     private static final int[][] TILE_DIST_SQ = new int[TABLE_SIZE][TABLE_SIZE];

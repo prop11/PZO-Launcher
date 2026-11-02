@@ -7,9 +7,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Replaces the TexturePackPage.readIntByte call in TexturePackDevice.readPage. Version 0 .pack files have no page
- * length, so vanilla finds the end of each page's PNG data by reading one byte at a time until the little-endian
- * 0xDEADBEEF terminator. This finds the same terminator by searching blocks of the buffered stream, then leaves the
- * stream positioned just after it, which is exactly where the vanilla loop would stop. Nothing is cached on disk.
+ * length, so vanilla finds the end of each page's PNG by reading a byte at a time until the little-endian 0xDEADBEEF
+ * terminator. I search blocks of the buffered stream for the same terminator and leave the stream just after it,
+ * exactly where the vanilla loop would stop. Nothing is cached on disk.
  */
 public final class PackPageScanner {
 
@@ -52,7 +52,7 @@ public final class PackPageScanner {
                 bytesScanned.addAndGet(consumed + hit + 4);
                 return TERMINATOR;
             }
-            // Keep the last 3 bytes so a terminator split across two blocks is still found
+            // Keep the last 3 bytes so a terminator split across two blocks still gets found
             skipFully(in, n - 3);
             consumed += n - 3;
         }

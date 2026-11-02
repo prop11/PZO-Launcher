@@ -5,13 +5,13 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Settings screen "Skip the room ID self-check outside debug mode" (JVM_RoomIdCheckSkip).
+ * Skips the room ID self-check outside debug mode (JVM_RoomIdCheckSkip).
  *
- * BuildingRoomsEditor.checkBuildingAndRoomIDs walks every building and room of every map cell and only logs when an
- * ID differs from the one its position implies; nothing is repaired or changed. It runs about six times per world load
- * (BuildingRoomsEditor.init, applyChanges, three times from Basements), with a list search per room, and maps with
- * basements or custom buildings print hundreds of "buildingDef.ID=... expected=..." error lines each time. Outside
- * -debug the walk is skipped; a -debug game keeps it for map makers.
+ * BuildingRoomsEditor.checkBuildingAndRoomIDs walks every building and room in every map cell and only logs when an ID
+ * doesn't match its position; it never fixes anything. It runs about six times per world load (init, applyChanges,
+ * three times from Basements) with a list search per room, and maps with basements or custom buildings print hundreds
+ * of "buildingDef.ID=... expected=..." errors each time. Skipped unless the game runs with -debug, where map makers
+ * still get it.
  */
 public final class RoomIdCheckSkip {
 

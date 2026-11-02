@@ -9,24 +9,21 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Zombie bone math on the frame workers.
  *
- * Stock AnimationPlayer.updateAnimation_StandardAnimation runs, per zombie and on the game thread: the per-bone
- * blend of every live track (updateMultiTrackBoneTransforms), the body angles, the deferred movement, the twist
- * bones, bone re-parenting, the model transforms and the skin transforms. Only the blend weights, the angles and the
- * deferred movement feed the rest of the zombie's update (movement reads them right away); they read the tracks and
- * never the bone results. So while the scheduler's postupdate runs, an eligible zombie does those three parts in
- * place as stock and queues the rest; when postupdate returns, the queue runs across the workers and the game thread.
- * Rendering then sees this frame's pose as before. Gameplay code that reads a queued zombie's bone pose during the
- * same postupdate loop sees the previous frame's pose (accepted trade-off).
+ * Stock runs all of updateAnimation_StandardAnimation per zombie on the game thread: track blending, body angles,
+ * deferred movement, twist bones, reparenting, model and skin transforms. The rest of the zombie's update only needs
+ * the blend weights, angles and deferred movement, and none of those read the bone results. So during the scheduler's
+ * postupdate an eligible zombie does those three in place and queues the rest, and the queue runs across the workers
+ * when postupdate returns. Rendering still gets this frame's pose. Anything reading a queued zombie's bones during the
+ * same loop sees last frame's pose, which is fine.
  *
- * Eligible: a zombie with no parent player, no animation recorder and no ragdoll track. Anything else, and every
- * call outside the scheduler's postupdate or off the game thread, takes the stock path. A second update of a queued
- * player in the same loop first finishes the queued one inline; reset, release and setModel drop it from the queue.
- * Workers use their own scratch objects (PerThreadScratch). A failure on a worker turns this off for the session and
- * the affected zombies are redone on the game thread.
+ * Eligible means no parent player, no animation recorder and no ragdoll track. Everything else, and any call off the
+ * game thread or outside postupdate, goes the stock way. A second update of a queued player finishes the queued one
+ * first, and reset/release/setModel drop it. Workers use PerThreadScratch. If a worker fails this turns itself off
+ * for the session and those zombies are redone on the game thread.
  *
- * The patched AnimationPlayer gains no members, since ZombieBuddy drops a whole batch of its mods' patches when one
- * class in it was reshaped: both halves call the player's own methods through method handles, the bone pass skips
- * its blend-weight call through a per-thread switch, and queue membership is kept here.
+ * AnimationPlayer gets no new members, because ZombieBuddy drops a whole batch of its mods' patches when one class in
+ * it changes shape. So I call its methods through handles, skip the blend call with a per-thread flag and keep the
+ * queue here.
  */
 public final class BoneBatch {
 
@@ -81,6 +78,13 @@ public final class BoneBatch {
 
     public static final AtomicLong deferred = new AtomicLong();
     public static final AtomicLong batches = new AtomicLong();
+    public static final AtomicLong checks = new AtomicLong(), mismatches = new AtomicLong();
+
+    // The bone pass itself can't be re-run to compare (nextFrame overwrites each bone's previous transform), but the
+    // skin matrices a worker precomputed are a pure function of the model transforms, so one queued zombie in
+    // CHECK_EVERY gets them recomputed on the game thread after the batch. After MAX_MISMATCHES the batch switches off.
+    private static final int CHECK_EVERY = 64, MAX_MISMATCHES = 3;
+    private static final Object[] checkSample = new Object[64];
 
     private BoneBatch() {}
 
@@ -173,7 +177,16 @@ public final class BoneBatch {
                 failure = t;
             }
         } else {
+            int sampled = 0;
+            long b = batches.get();
+            for (int i = (int) (b % CHECK_EVERY); i < n && sampled < checkSample.length; i += CHECK_EVERY) {
+                if (live[i]) checkSample[sampled++] = q[i];
+            }
             failure = FrameWorkers.run(n, i -> runOne(q, dt, i));
+            for (int i = 0; i < sampled; i++) {
+                if (failure == null) checkSkins(checkSample[i]);
+                checkSample[i] = null;
+            }
         }
         if (failure != null) {
             active = false;
@@ -226,11 +239,9 @@ public final class BoneBatch {
     }
 
     /**
-     * Replaces UpdateSkinTransforms() at the end of the deferred bone work. Stock resets the player's per-skeleton
-     * skin cache here and the renderer rebuilds each entry on the game thread (getSkinTransforms: one matrix
-     * multiply per bone) when it prepares the model. The skeletons cached before the reset are the ones the
-     * renderer asked for last frame, so they are rebuilt right here on the worker; the renderer then finds them
-     * current. A skeleton not seen last frame is still built by the renderer as stock.
+     * Replaces UpdateSkinTransforms() at the end of the deferred bone work. Stock clears the skin cache here and the
+     * renderer rebuilds each entry on the game thread. The skeletons cached before the clear are the ones drawn last
+     * frame, so rebuild those here on the worker; anything new is still built by the renderer like stock.
      */
     public static void updateSkinTransforms(Object player) {
         zombie.core.skinnedmodel.animation.AnimationPlayer p = (zombie.core.skinnedmodel.animation.AnimationPlayer) player;
@@ -249,6 +260,74 @@ public final class BoneBatch {
             p.getSkinTransforms((zombie.core.skinnedmodel.model.SkinningData) skins[i]);
         }
         if (n > 0) skinsPrecomputed.add(n);
+    }
+
+    private static final class CheckHandles {
+        static final java.lang.invoke.VarHandle MODEL, TRANSFORMS, DIRTY, BONE_MAP;
+        static {
+            java.lang.invoke.VarHandle m = null, t = null, d = null, bm = null;
+            try {
+                MethodHandles.Lookup l = MethodHandles.lookup();
+                Class<?> ap = zombie.core.skinnedmodel.animation.AnimationPlayer.class;
+                Class<?> std = Class.forName("zombie.core.skinnedmodel.animation.AnimationPlayer$SkinTransformData");
+                m = MethodHandles.privateLookupIn(ap, l).findVarHandle(ap, "modelTransforms", org.lwjgl.util.vector.Matrix4f[].class);
+                MethodHandles.Lookup sl = MethodHandles.privateLookupIn(std, l);
+                t = sl.findVarHandle(std, "transforms", org.lwjgl.util.vector.Matrix4f[].class);
+                d = sl.findVarHandle(std, "dirty", boolean.class);
+                bm = sl.findVarHandle(std, "boneMap", int[].class);
+            } catch (Throwable e) {
+                PZOLogger.warn("[BoneBatch] skin check handles not found, check off: " + e);
+            }
+            MODEL = m;
+            TRANSFORMS = t;
+            DIRTY = d;
+            BONE_MAP = bm;
+        }
+    }
+
+    // Game thread, after the batch: every skin the worker built must match getSkinTransforms' maths exactly
+    private static void checkSkins(Object player) {
+        if (player == null || !skinPrecompute || SkinHandles.DATA == null || CheckHandles.BONE_MAP == null) return;
+        try {
+            org.lwjgl.util.vector.Matrix4f[] model = (org.lwjgl.util.vector.Matrix4f[]) CheckHandles.MODEL.get(player);
+            org.lwjgl.util.vector.Matrix4f expect = new org.lwjgl.util.vector.Matrix4f();
+            for (Object d = SkinHandles.DATA.get(player); d != null; d = SkinHandles.NEXT.get(d)) {
+                zombie.core.skinnedmodel.model.SkinningData to = (zombie.core.skinnedmodel.model.SkinningData) SkinHandles.SKINNED_TO.get(d);
+                int[] map = (int[]) CheckHandles.BONE_MAP.get(d);
+                if (to == null || map == null || (boolean) CheckHandles.DIRTY.get(d)) continue;
+                org.lwjgl.util.vector.Matrix4f[] got = (org.lwjgl.util.vector.Matrix4f[]) CheckHandles.TRANSFORMS.get(d);
+                checks.incrementAndGet();
+                for (int bone = 0; bone < model.length && bone < map.length; bone++) {
+                    int boneTo = map[bone];
+                    if (boneTo == -1) continue;
+                    if (to.boneOffset != null && to.boneOffset.get(boneTo) != null) {
+                        org.lwjgl.util.vector.Matrix4f.mul(to.boneOffset.get(boneTo), model[bone], expect);
+                    } else {
+                        expect.setIdentity();
+                    }
+                    if (!sameMatrix(expect, got[boneTo])) {
+                        long m = mismatches.incrementAndGet();
+                        PZOLogger.warn("[BoneBatch] precomputed skin matrix differs from a game-thread recompute (bone " + bone + ")"
+                            + (m >= MAX_MISMATCHES ? ", bone batch off for this session" : ""));
+                        if (m >= MAX_MISMATCHES) active = false;
+                        return;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[BoneBatch] skin check failed: " + t);
+        }
+    }
+
+    private static boolean sameMatrix(org.lwjgl.util.vector.Matrix4f a, org.lwjgl.util.vector.Matrix4f b) {
+        return Float.floatToIntBits(a.m00) == Float.floatToIntBits(b.m00) && Float.floatToIntBits(a.m01) == Float.floatToIntBits(b.m01)
+            && Float.floatToIntBits(a.m02) == Float.floatToIntBits(b.m02) && Float.floatToIntBits(a.m03) == Float.floatToIntBits(b.m03)
+            && Float.floatToIntBits(a.m10) == Float.floatToIntBits(b.m10) && Float.floatToIntBits(a.m11) == Float.floatToIntBits(b.m11)
+            && Float.floatToIntBits(a.m12) == Float.floatToIntBits(b.m12) && Float.floatToIntBits(a.m13) == Float.floatToIntBits(b.m13)
+            && Float.floatToIntBits(a.m20) == Float.floatToIntBits(b.m20) && Float.floatToIntBits(a.m21) == Float.floatToIntBits(b.m21)
+            && Float.floatToIntBits(a.m22) == Float.floatToIntBits(b.m22) && Float.floatToIntBits(a.m23) == Float.floatToIntBits(b.m23)
+            && Float.floatToIntBits(a.m30) == Float.floatToIntBits(b.m30) && Float.floatToIntBits(a.m31) == Float.floatToIntBits(b.m31)
+            && Float.floatToIntBits(a.m32) == Float.floatToIntBits(b.m32) && Float.floatToIntBits(a.m33) == Float.floatToIntBits(b.m33);
     }
 
     private static void runOne(Object[] q, float[] dt, int i) throws Throwable {

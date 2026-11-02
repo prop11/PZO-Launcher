@@ -10,9 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * B42 launches with ZGC by default. On 4-8 core CPUs its concurrent threads compete with PZO's chunk and
- * simulation workers and cause stutter, so on those systems this switches ProjectZomboid64.json to G1GC
- * with low pause targets, leaving cores free for the workers.
+ * B42 launches with ZGC. On 4-8 core CPUs its concurrent threads fight PZO's chunk and simulation workers and cause
+ * stutter, so there I switch ProjectZomboid64.json to G1 with low pause targets and leave the cores to the workers.
  */
 public final class GCLauncherOptimizer {
 
@@ -89,10 +88,10 @@ public final class GCLauncherOptimizer {
                 String s = item.toString().trim();
                 if (s.contains("UseCompactObjectHeaders")) {
                     changed = true;
-                    continue; // Strip invalid flag
+                    continue; // drop the bad flag
                 }
                 if (s.contains(" ")) {
-                    // Re-split arguments that were joined with spaces
+                    // Split back up any args that got joined with spaces
                     String[] tokens = s.split("\\s+");
                     for (String tok : tokens) {
                         if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
@@ -130,7 +129,7 @@ public final class GCLauncherOptimizer {
                 changed = true;
             }
 
-            // Also inspect windows platform-specific blocks if present
+            // The Windows-specific blocks too, if there are any
             Object winObj = root.get("windows");
             if (winObj instanceof Map) {
                 @SuppressWarnings("unchecked")

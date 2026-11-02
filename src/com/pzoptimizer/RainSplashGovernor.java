@@ -18,10 +18,9 @@ import zombie.iso.IsoWorld;
 import zombie.iso.objects.RainManager;
 
 /**
- * Eliminates heavy rain micro-stutter and frame-time spikes:
- * 1. Replaces vanilla's synchronized 64-RNG-checks per chunk level with an O(1) non-blocking
- *    geometric inverse transform skip, reducing RNG calls by over 99%.
- * 2. Caches the 4 splash frame textures to eliminate per-splash HashMap queries and string concats.
+ * Cheaper rain splashes. Vanilla rolls 64 synchronized random checks per chunk level per frame; I jump straight to the
+ * next hit with a geometric skip instead, which is the same distribution with about 1% of the random calls. The 4
+ * splash frame textures are also cached so each splash doesn't do a HashMap lookup and a string concat.
  */
 public final class RainSplashGovernor {
 
@@ -30,7 +29,7 @@ public final class RainSplashGovernor {
     private static final Texture[] SPLASH_TEXTURES = new Texture[4];
     private static volatile boolean texturesLoaded = false;
 
-    // Fast 64-bit linear congruential PRNG for rain splash geometric distribution
+    // Small 64-bit LCG for the splash skips
     private static long rngSeed = 0x5DEECE66DL;
     private static int skipCount = 0;
 
@@ -134,10 +133,7 @@ public final class RainSplashGovernor {
         return Texture.getSharedTexture(name);
     }
 
-    /**
-     * ASM transformer for zombie.iso.IsoChunkLevel:
-     * Replaces updateRainSplashes() with RainSplashGovernor.updateRainSplashes(this).
-     */
+    /** Transformer for IsoChunkLevel: swaps updateRainSplashes() for RainSplashGovernor.updateRainSplashes(this). */
     public static boolean patchChunkLevel(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "updateRainSplashes", "()V");
         if (m == null) return false;
@@ -156,10 +152,7 @@ public final class RainSplashGovernor {
         return true;
     }
 
-    /**
-     * ASM transformer for zombie.iso.IsoGridSquare:
-     * Redirects Texture.getSharedTexture in renderRainSplash to RainSplashGovernor.getSplashTexture.
-     */
+    /** Transformer for IsoGridSquare: sends Texture.getSharedTexture in renderRainSplash to getSplashTexture. */
     public static boolean patchGridSquare(ClassNode node) {
         boolean changed = false;
         for (MethodNode m : node.methods) {

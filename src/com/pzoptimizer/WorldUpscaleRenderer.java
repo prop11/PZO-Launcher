@@ -15,16 +15,16 @@ import zombie.core.textures.TextureFBO;
 /**
  * AMD FidelityFX Super Resolution 1.0 pass for the scaled world buffer.
  *
- * Queued on the render thread just before Core.RenderOffScreenBuffer() composites the world. It upscales
- * the (W*s x H*s) sub-rectangle WorldRenderScale rendered into back to W x H:
- *   1. EASU (edge-adaptive spatial upsampling, 12-tap)      world FBO sub-rect -> PZO temp FBO
- *   2. RCAS (robust contrast-adaptive sharpening)           PZO temp FBO      -> world FBO (full rect)
- * The vanilla composite (screen.frag weather shader, reticle, cursor) then runs on a full-resolution world
- * texture exactly as it would without FSR, and the UI is never scaled.
+ * Queued on the render thread just before Core.RenderOffScreenBuffer() composites the world, and scales the (W*s x H*s)
+ * corner WorldRenderScale rendered into back up to W x H:
+ *   EASU (edge-adaptive upsampling, 12-tap)      world FBO corner -> PZO temp FBO
+ *   RCAS (contrast-adaptive sharpening)          PZO temp FBO     -> world FBO (full size)
+ * The vanilla composite (screen.frag weather shader, reticle, cursor) then runs on a full-resolution world texture
+ * exactly like it would without FSR, and the UI is never scaled.
  *
- * Shaders are ports of ffx_fsr1.h (MIT, Advanced Micro Devices) to GLSL 3.30 using texelFetch with
- * manual edge clamping, so the unscaled remainder of the world texture is never sampled.
- * Any GL or compile failure disables FSR (scale latches back to 1.0) instead of corrupting the frame.
+ * The shaders are ports of ffx_fsr1.h (MIT, AMD) to GLSL 3.30 using texelFetch with manual edge clamping, so the unused
+ * part of the world texture is never sampled. Any GL or compile failure turns FSR off (scale goes back to 1.0) rather
+ * than wrecking the frame.
  */
 public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
 
@@ -65,7 +65,7 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
             WorldUpscalerGovernor.markPipelineFailed();
             PZOLogger.warn("[WorldUpscaler] FSR pass failed, reverting to native resolution: " + t);
         }
-        // Next frame renders at the latest requested scale; FSR is only allowed once its shaders exist
+        // Next frame renders at the latest requested scale; FSR only once its shaders exist
         float next = (!failed && initialized) ? WorldUpscalerGovernor.getEffectiveScale() : 1.0f;
         if (!initialized && !failed && WorldUpscalerGovernor.getEffectiveScale() < 0.999f) {
             try {
@@ -154,7 +154,7 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         }
     }
 
-    // The engine caches the bound texture/shader/GL state, so it must be told everything changed under it
+    // The engine caches the bound texture/shader/GL state, so tell it everything changed under it
     private static void resyncEngineState() {
         try {
             Texture.lastTextureID = -1;

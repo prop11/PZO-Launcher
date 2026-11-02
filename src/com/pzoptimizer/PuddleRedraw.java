@@ -17,24 +17,23 @@ import zombie.iso.IsoChunkMap;
 import zombie.iso.fboRenderChunk.FBORenderLevels;
 
 /**
- * Low puddle quality: settings screen "Re-draw only chunks with puddles" (JVM_PuddleRedrawFilter) and "Spread
- * puddle re-draws over frames" (JVM_PuddleRedrawPacing).
+ * For the lowest puddle quality: only redraw chunks that have puddles (JVM_PuddleRedrawFilter), and spread those
+ * redraws over frames (JVM_PuddleRedrawPacing).
  *
- * At the game's lowest puddle quality the puddles are drawn into the cached chunk textures. While rain fills or dries
- * them, FBORenderCell.renderTilesInternal re-bakes every texture of every loaded chunk (all levels, roofs and
- * basements included) each time the puddle size or wetness moves by 1/500, at most once a second: a long frame every
- * second through every rain shower, longest on the slow machines that pick this quality.
+ * At the lowest puddle quality the puddles are drawn into the cached chunk textures. While rain fills or dries them,
+ * renderTilesInternal re-bakes every texture of every loaded chunk (all levels, roofs and basements too) each time the
+ * puddle size or wetness moves by 1/500, at most once a second. That's a long frame every second through every rain
+ * shower, worst on the slow machines that pick this quality.
  *
- * Filter (exact): each bake of a chunk level records whether it drew puddles. A level whose last bake gathered its
- * puddle squares and drew none (indoors, upper floors, water) has no puddle in its picture and gets none with any
- * other size or wetness, since which squares take puddles does not depend on those values; it is left alone. A level
- * that drew puddles, or whose last bake did not get as far as gathering them (no rain then, snow, off screen), is
- * re-baked as before. Whatever else would change a level's puddle squares (objects, cutaways) re-bakes it anyway,
- * which records it again.
+ * Filter (exact): each bake of a chunk level records whether it drew any puddles. A level whose last bake gathered its
+ * puddle squares and drew none (indoors, upper floors, water) won't get any at a different size or wetness either,
+ * because which squares take puddles doesn't depend on those, so it's left alone. A level that drew puddles, or whose
+ * last bake never got as far as gathering them (no rain then, snow, off screen), is re-baked as before. Anything else
+ * that changes a level's puddle squares (objects, cutaways) re-bakes it anyway and records it again.
  *
- * Pacing (not exact): the on-screen levels to re-bake are marked dirty a few per frame, all within about 15 frames,
- * instead of all in one frame. Until its turn a level shows the puddles one 1/500 step behind. Off-screen levels are
- * marked at once, which costs nothing until they come into view.
+ * Pacing (not exact): on-screen levels are marked dirty a few per frame, all within about 15 frames, instead of all at
+ * once. Until its turn a level shows puddles one 1/500 step behind. Off-screen levels are marked straight away, which
+ * costs nothing until they come into view.
  */
 public final class PuddleRedraw {
 
@@ -48,7 +47,7 @@ public final class PuddleRedraw {
     private static final byte UNKNOWN = 0, NONE = 1, DREW = 2;
     private static final int SPREAD_FRAMES = 15, MIN_PER_FRAME = 4;
 
-    // Main thread only: bakes, the redraw and the pacing all run on it
+    // Main thread only: bakes, the redraw and the pacing all run there
     private static final WeakHashMap<FBORenderLevels, byte[]> records = new WeakHashMap<>();
     private static int recordsPerfPuddles = Integer.MIN_VALUE, recordsQuality = Integer.MIN_VALUE;
     private static FBORenderLevels bakeLevels;
@@ -69,7 +68,7 @@ public final class PuddleRedraw {
     private static byte[] recordsOf(FBORenderLevels renderLevels) {
         int perf = zombie.core.Core.getInstance().getPerfPuddles(), quality = zombie.core.PerformanceSettings.puddlesQuality;
         if (perf != recordsPerfPuddles || quality != recordsQuality) {
-            // Which squares take puddles indoors depends on the puddle setting; start over
+            // Which squares take puddles indoors depends on the puddle setting, so start over
             records.clear();
             recordsPerfPuddles = perf;
             recordsQuality = quality;
@@ -87,7 +86,7 @@ public final class PuddleRedraw {
         bakeZ = z;
         bakeGathered = false;
         bakeDrew = false;
-        // Stays unknown if the bake throws before its end
+        // Stays unknown if the bake throws before it finishes
         recordsOf(bakeLevels)[z + 32] = UNKNOWN;
     }
 
@@ -96,7 +95,10 @@ public final class PuddleRedraw {
         bakeGathered = true;
     }
 
-    /** Replaces SpriteRenderer.drawGeneric in IsoPuddles.renderToChunkTexture, reached only when puddles are drawn. */
+    /**
+     * Replaces SpriteRenderer.drawGeneric in IsoPuddles.renderToChunkTexture, which is only reached when puddles get
+     * drawn.
+     */
     public static zombie.core.textures.TextureDraw drew(zombie.core.SpriteRenderer renderer, zombie.core.textures.TextureDraw.GenericDrawer drawer) {
         bakeDrew = true;
         return renderer.drawGeneric(drawer);
@@ -195,7 +197,7 @@ public final class PuddleRedraw {
         pendingCount = 0;
     }
 
-    // What the stock invalidateAll does to one level: dirty, cached square lists kept
+    // What stock invalidateAll does to one level: dirty, cached square lists kept
     private static void mark(FBORenderLevels renderLevels, int z) {
         boolean clear = FBORenderLevels.clearCachedSquares;
         FBORenderLevels.clearCachedSquares = false;

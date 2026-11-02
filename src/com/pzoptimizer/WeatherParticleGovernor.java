@@ -11,9 +11,9 @@ import org.lwjgl.opengl.GL11;
 import zombie.core.ShaderHelper;
 
 /**
- * Eliminates synchronous GPU pipeline flushes and driver stalls during weather particle rendering.
- * In vanilla, WeatherParticleDrawer queries the active shader program via GL11.glGetInteger(GL_CURRENT_PROGRAM),
- * which forces a CPU-GPU pipeline synchronization stall on every weather drawer every frame.
+ * WeatherParticleDrawer asks GL for the current shader program (glGetInteger(GL_CURRENT_PROGRAM)) on every weather
+ * drawer every frame, and that query can stall the CPU on the GPU. I answer it from ShaderHelper.currentlyBound, which
+ * already tracks the bound program.
  */
 public final class WeatherParticleGovernor {
 
@@ -35,8 +35,8 @@ public final class WeatherParticleGovernor {
     private WeatherParticleGovernor() {}
 
     /**
-     * Replaces GL11.glGetInteger(GL_CURRENT_PROGRAM) in WeatherParticleDrawer.render().
-     * Reads the tracked Java program ID directly from ShaderHelper.currentlyBound without stalling the GPU pipeline.
+     * Replaces GL11.glGetInteger(GL_CURRENT_PROGRAM) in WeatherParticleDrawer.render() with ShaderHelper's tracked
+     * program.
      */
     public static int getProgramNoStall(int param) {
         if (active && param == 35725) { // GL_CURRENT_PROGRAM
@@ -52,10 +52,7 @@ public final class WeatherParticleGovernor {
         return GL11.glGetInteger(param);
     }
 
-    /**
-     * ASM Transformer for zombie.iso.weather.fx.WeatherParticleDrawer:
-     * Redirects GL11.glGetInteger(35725) calls to WeatherParticleGovernor.getProgramNoStall(35725).
-     */
+    /** Transformer for WeatherParticleDrawer: sends glGetInteger(35725) to getProgramNoStall(35725). */
     public static boolean patchDrawer(ClassNode node) {
         MethodNode render = AsmSupport.findMethod(node, "render", "()V");
         if (render == null) return false;

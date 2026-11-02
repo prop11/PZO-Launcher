@@ -6,9 +6,9 @@ import java.lang.invoke.MethodType;
 import java.util.List;
 
 /**
- * Calls into game methods whose signature differs between supported builds. PZO compiles against one build, so a
- * direct call links that build's exact signature and throws NoSuchMethodError on the other. These are looked up by
- * name at first use instead:
+ * Game methods whose signature changed between the builds I support. PZO compiles against one build, so a direct call
+ * would bake in that exact signature and throw NoSuchMethodError on the other. These get looked up by name on first use
+ * instead:
  * - IsoGridSquare.getObjects(): PZArrayList (42.21, itself a java.util.List) -> List (42.22)
  * - ZomboidFileSystem.getModIDs(): ArrayList (42.21) -> List (42.22)
  * - IsoPlayer.teleportTo(x, y, z): z is an int (42.21) -> float (42.22)
@@ -17,7 +17,7 @@ public final class GameCompat {
 
     private GameCompat() {}
 
-    // Held lazily: the lookups load game classes, which must not happen while the agent is still defining them
+    // Lazy, because the lookups load game classes and the agent may still be defining them
     private static final class H {
         static final MethodHandle GET_OBJECTS = find(zombie.iso.IsoGridSquare.class, "getObjects",
             MethodType.methodType(List.class, zombie.iso.IsoGridSquare.class));

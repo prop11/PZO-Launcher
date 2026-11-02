@@ -11,12 +11,12 @@ import zombie.characters.IsoZombie;
 import zombie.iso.IsoMovingObject;
 
 /**
- * Replaces the call to MovingObjectUpdateScheduler.getUpdateSchedulerSimulationLevelForObject in startFrame.
- * Vanilla lowers the update rate of rendered zombies no player can see (alpha below 0.25), then raises every
- * object one level for each of the 25/35/45/55 average-FPS thresholds, so above 55 FPS unseen zombies are back to
- * a full update every frame. For those unseen zombies only, the vanilla method is evaluated again with the FPS
- * clamped to capFps, i.e. exactly the level vanilla itself picks at that frame rate. Visible zombies, players,
- * other objects and each state's minimum simulation level are untouched. Also counts objects per level.
+ * Replaces the getUpdateSchedulerSimulationLevelForObject call in MovingObjectUpdateScheduler.startFrame. Vanilla
+ * lowers the update rate of rendered zombies no player can see (alpha under 0.25), then bumps every object up a level
+ * for each of the 25/35/45/55 average-FPS thresholds, so above 55 FPS unseen zombies are back to a full update every
+ * frame. For those unseen zombies only, I run the vanilla method again with the FPS clamped to capFps, which is
+ * exactly the level vanilla would pick at that frame rate. Visible zombies, players, other objects and each state's
+ * minimum level are untouched. Also counts objects per level.
  */
 public final class UnseenZombieSimGovernor {
 
@@ -73,7 +73,7 @@ public final class UnseenZombieSimGovernor {
         return sim;
     }
 
-    // Same test vanilla uses to demote a rendered object: no player sees it at alpha 0.25 or above, now or as a target
+    // Same test vanilla uses to demote a rendered object: nobody sees it at alpha 0.25 or more, now or as a target
     private static boolean isUnseen(IsoMovingObject obj) {
         if (!obj.getDoRender() || obj.isSceneCulled()) {
             return false;

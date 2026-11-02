@@ -16,9 +16,8 @@ public class ChunkCrashShield {
     }
 
     /**
-     * The chunk grid is centered (2*R + 1), so its width must be odd. An even chunkGridWidth (e.g. 16) causes
-     * "ArrayIndexOutOfBoundsException: Index 271 out of bounds for length 256"; this rounds the width up to the
-     * next odd value and grows the swap buffers to match.
+     * The chunk grid is centred (2R + 1), so its width has to be odd. An even chunkGridWidth (16, say) throws "Index
+     * 271 out of bounds for length 256", so round it up to the next odd number and grow the swap buffers to match.
      */
     public static void enforceChunkGridSanity() {
         try {

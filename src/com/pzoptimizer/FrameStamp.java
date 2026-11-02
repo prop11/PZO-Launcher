@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** The game thread and the game's own tick counter, for answers that are only kept within one game tick. */
+/** The game thread and the game's tick counter, for answers that are only valid within one tick. */
 final class FrameStamp {
 
     private FrameStamp() {}

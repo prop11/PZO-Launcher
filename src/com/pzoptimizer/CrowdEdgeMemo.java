@@ -7,30 +7,29 @@ import java.util.concurrent.atomic.AtomicLong;
 import zombie.iso.IsoGridSquare;
 
 /**
- * Settings screen "Crowd push-apart wall memo" (JVM_CrowdEdgeMemo).
+ * Memoises wall checks for the crowd push-apart (JVM_CrowdEdgeMemo).
  *
- * IsoMovingObject.separate asks current.isBlockedTo(neighbour) for each of the up to 8 neighbour squares holding
- * moving objects, every frame, for every zombie. In a crowd many zombies stand on the same squares and ask the same
- * question; since 42.21 each answer walks four edge tests (wall, window, door, stairs) through method references.
+ * IsoMovingObject.separate calls isBlockedTo for up to 8 neighbour squares, every frame, for every zombie. In a crowd
+ * lots of zombies stand on the same squares asking the same thing, and since 42.21 each answer is four edge tests
+ * through method references.
  *
- * Answers are kept in a small direct-mapped table for the current game tick only. Anything that can change a wall,
- * window, door or barricade between two squares reaches PolygonalMap2.squareChanged (the pathfinder has to hear of
- * it) or IsoGridSquare.RecalcAllWithNeighbours; both bump an epoch that invalidates every kept answer, so a door
- * opened halfway through the zombie loop is seen by the next zombie, as before. Both squares are compared by
- * identity, so a square reused for another chunk never matches. Game thread only.
+ * Answers are kept for the current tick only, in a small direct-mapped table. Anything that changes a wall, window,
+ * door or barricade goes through PolygonalMap2.squareChanged or IsoGridSquare.RecalcAllWithNeighbours, and both bump an
+ * epoch that throws every answer away, so a door opened mid-loop is seen by the next zombie like before. Squares are
+ * compared by identity, so a square reused for another chunk never matches. Game thread only.
  */
 public final class CrowdEdgeMemo {
 
     public static volatile boolean active = true;
     public static final AtomicLong hits = new AtomicLong();
     public static final AtomicLong misses = new AtomicLong();
-    // The memo is only trusted once both reset hooks are in; until then every call is answered live
+    // Only trusted once both reset hooks are in; until then everything is answered live
     static volatile boolean separateHooked, gridSquareHooked, pathfinderHooked;
 
     private static final int SIZE = 8192;
     private static final int MASK = SIZE - 1;
-    // Object[], not IsoGridSquare[]: this class is first touched while IsoMovingObject is being patched, and creating
-    // an IsoGridSquare array then would load IsoGridSquare mid-transform and lose all of its own patches
+    // Object[], not IsoGridSquare[]: this class is first touched while IsoMovingObject is being patched, and making an
+    // IsoGridSquare array then loads IsoGridSquare mid-transform and it loses all its own patches
     private static final Object[] from = new Object[SIZE];
     private static final Object[] to = new Object[SIZE];
     private static final long[] stamp = new long[SIZE];
@@ -49,7 +48,7 @@ public final class CrowdEdgeMemo {
         if (!active || b == null || !gridSquareHooked || !pathfinderHooked || !FrameStamp.onGameThread()) return a.isBlockedTo(b);
         long tick = FrameStamp.tick();
         if (tick < 0) return a.isBlockedTo(b);
-        // tick in the high bits, epoch in the low ones: either moving on invalidates the slot
+        // Tick in the high bits, epoch in the low ones; either one moving on invalidates the slot
         long key = (tick << 32) | (epoch.get() & 0xFFFFFFFFL);
         int dir = (b.x - a.x + 1) * 3 + (b.y - a.y + 1);
         int h = (a.x * 0x9E3779B1) ^ (a.y * 0x85EBCA77) ^ (a.z * 0xC2B2AE3D) ^ (dir * 0x27D4EB2F);

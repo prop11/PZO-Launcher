@@ -7,8 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JNI bridge to pzo_native64.dll / libpzo_native64.so / libpzo_native64.dylib: OS scheduling, timer
- * resolution, power throttling exemption and AVX2 batch helpers.
+ * JNI bridge to pzo_native64.dll / libpzo_native64.so / libpzo_native64.dylib: OS scheduling, timer resolution, power
+ * throttling exemption and the AVX2 batch helpers.
  */
 public class PZONative {
 
@@ -123,7 +123,7 @@ public class PZONative {
             CompatMode.noteNativeAvx2(avx2);
             boolean compat = CompatMode.isActive();
 
-            // The JAVA tab's CPU power shield switch; it is read at launch
+            // The JAVA tab's CPU power shield switch, read at launch
             boolean shield = PZOConfig.isPowerShieldEnabled();
             boolean powerShield = false;
             if (shield) try { powerShield = disablePowerThrottling(); } catch (Throwable ignored) {}
@@ -181,8 +181,8 @@ public class PZONative {
     }
 
     /**
-     * 4 or fewer logical CPUs (e.g. i5-7300HQ). The game's main and render threads already need most of
-     * these, so HIGH priority class, MMCSS boosts and full-width worker pools starve input handling instead.
+     * 4 or fewer logical CPUs (e.g. i5-7300HQ). The game's main and render threads already need most of those, so the
+     * HIGH priority class, MMCSS boosts and full-width worker pools just starve input handling.
      */
     public static boolean isLowCoreCpu() {
         return Runtime.getRuntime().availableProcessors() <= 4;

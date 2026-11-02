@@ -7,12 +7,10 @@ import java.lang.management.MemoryUsage;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * With G1, a young collection (3-8 ms) runs wherever the game thread is when Eden fills up, often mid-step
- * during combat or driving, which drops a frame.
- *
- * This watches the "G1 Eden Space" pool via JMX. When Eden is above 90% of its learned collection threshold
- * and the frame limiter has slack left at the end of a step, it tips the young collection into that idle
- * window, so the next tick starts with an empty Eden.
+ * With G1 a young collection (3-8 ms) runs wherever the game thread happens to be when Eden fills up, often mid-step in
+ * combat or driving, and that drops a frame. I watch "G1 Eden Space" over JMX, and when Eden is past 90% of its
+ * learned threshold and the frame limiter has slack at the end of a step, I push the collection into that idle time so
+ * the next tick starts with an empty Eden.
  */
 public final class GcSlackGovernor {
 
@@ -67,14 +65,12 @@ public final class GcSlackGovernor {
         }
     }
 
-    /**
-     * Called at the end of a frame step when spare frame-cap slack time (in nanoseconds) is available.
-     */
+    /** Called at the end of a frame step when there's spare frame-cap time (in nanoseconds). */
     public static void onFrameSlack(long spareSlackNanos) {
         if (!active) return;
         if (!initialized) initialize();
         if (!usable || spareSlackNanos < 3_500_000L) {
-            return; // Require at least 3.5 ms of spare frame slack
+            return; // need at least 3.5 ms spare
         }
 
         try {
@@ -90,7 +86,7 @@ public final class GcSlackGovernor {
 
             if (gcCount != lastYoungCount) {
                 if (lastYoungCount >= 0 && lastEdenUsed > (64L << 20)) {
-                    // Blend learned Eden capacity before collection
+                    // Blend in the Eden size I saw before the last collection
                     learnedEdenCapBytes = (learnedEdenCapBytes * 3 + lastEdenUsed) / 4;
                 }
                 lastYoungCount = gcCount;
@@ -99,13 +95,13 @@ public final class GcSlackGovernor {
             lastEdenUsed = used;
 
             long remaining = learnedEdenCapBytes - used;
-            long threshold = (long) (learnedEdenCapBytes * 0.10); // Less than 10% Eden remaining
+            long threshold = (long) (learnedEdenCapBytes * 0.10); // under 10% of Eden left
             long now = System.nanoTime();
 
             if (remaining > 0 && remaining <= threshold && remaining <= (24L << 20) && (now - lastSlackCollectNanos) > 500_000_000L) {
-                // Small short-lived allocations tip the imminent young GC into this idle window
+                // A few small short-lived allocations tip the coming young GC into this idle window
                 long deadline = now + Math.min(spareSlackNanos - 1_500_000L, 2_500_000L);
-                int chunkBytes = 128 * 1024; // 128 KB (never humongous)
+                int chunkBytes = 128 * 1024; // 128 KB, never humongous
                 long beforeCount = youngCollector.getCollectionCount();
                 long allocated = 0L;
                 while (System.nanoTime() < deadline && allocated < remaining + (4L << 20)) {

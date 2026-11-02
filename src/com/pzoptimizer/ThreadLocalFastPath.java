@@ -4,12 +4,12 @@ import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 
 /**
- * Settings screen "Faster per-thread lookups" (JVM_ThreadLocalFastPath).
+ * Faster per-thread lookups (JVM_ThreadLocalFastPath).
  *
- * GameProfiler.getInstance() and IsoDepthHelper's depth results are ThreadLocals read many thousand times a frame
- * (every profiled block, every tile drawn), about 1.3% of the game thread. Neither ThreadLocal is ever set or removed,
- * so a thread's value never changes after its first read: the game thread's value is kept in a slot and handed back
- * after a single thread comparison. Other threads take the normal ThreadLocal path.
+ * GameProfiler.getInstance() and IsoDepthHelper's depth results are ThreadLocals read many thousands of times a frame
+ * (every profiled block, every tile drawn), about 1.3% of the game thread. Neither one is ever set or removed, so a
+ * thread's value never changes after the first read. I keep the game thread's value in a slot and hand it back after a
+ * single thread compare; other threads take the normal path.
  */
 public final class ThreadLocalFastPath {
 
@@ -49,7 +49,7 @@ public final class ThreadLocalFastPath {
         return v;
     }
 
-    // By name: GameProfiler is used before GameWindow (which holds the game thread) may be initialised
+    // By name, because GameProfiler gets used before GameWindow (which holds the game thread) may be initialised
     private static boolean isGameThread(Thread t) {
         return "MainThread".equals(t.getName());
     }

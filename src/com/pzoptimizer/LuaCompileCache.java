@@ -29,15 +29,14 @@ import se.krka.kahlua.vm.LuaClosure;
 import se.krka.kahlua.vm.Prototype;
 
 /**
- * Settings screen "Keep compiled Lua between launches" (JVM_LuaCompileCache, next launch).
+ * Keeps compiled Lua between launches (JVM_LuaCompileCache, applies next launch).
  *
- * Every launch and every save load the game compiles each Lua file it runs, its own and every mod's, from source
- * (LuaManager.RunLuaInternal -> LuaCompiler.loadis). The result depends only on the source text, the file name the
- * compiler stamps into each function (FuncState.currentFile / currentfullFile) and Core.debug (local variable lines),
- * so it is kept in Zomboid/PZO/luacache.bin under a SHA-1 of the text plus those three, and loaded from there next
- * time. Every Prototype field is stored (Kahlua's own dump drops the file names and locals), the closure is created by
- * the same constructor, and anything unreadable is compiled as before. The file is dropped whole when
- * projectzomboid.jar changes, and only the process holding its lock writes to it.
+ * Every launch and every save load, the game compiles every Lua file it runs, its own and every mod's, from source. The
+ * result only depends on the source, the file name the compiler stamps into each function (FuncState.currentFile /
+ * currentfullFile) and Core.debug (local variable lines), so I keep it in Zomboid/PZO/luacache.bin under a SHA-1 of
+ * the text plus those three. Every Prototype field is stored (Kahlua's own dump drops the file names and locals), the
+ * closure is made with the same constructor, and anything unreadable just gets compiled. The file is thrown away when
+ * projectzomboid.jar changes, and only the process holding the lock writes to it.
  */
 public final class LuaCompileCache {
 
@@ -83,7 +82,7 @@ public final class LuaCompileCache {
             }
         }
         long t0 = System.nanoTime();
-        // Compile errors propagate exactly as before and nothing is stored
+        // Compile errors come through exactly as before and nothing gets stored
         LuaClosure c = LuaCompiler.loadis(new StringReader(source), name, env);
         compileNanos.addAndGet(System.nanoTime() - t0);
         misses.incrementAndGet();
@@ -118,7 +117,7 @@ public final class LuaCompileCache {
         return sb.toString();
     }
 
-    // ---- File ---------------------------------------------------------------------------------------------------
+    // File
 
     private static String gameStamp() {
         try {
@@ -230,7 +229,7 @@ public final class LuaCompileCache {
         lock = null;
     }
 
-    // ---- Prototype encoding (every field, strings as raw UTF-16 so nothing is lost) -----------------------------
+    // Prototype encoding: every field, strings as raw UTF-16 so nothing gets lost
 
     static void writePrototype(DataOutputStream d, Prototype p) throws IOException {
         writeInts(d, p.code);
@@ -355,7 +354,6 @@ public final class LuaCompileCache {
         return new String(c);
     }
 
-    // ---- Patch --------------------------------------------------------------------------------------------------
 
     static boolean patchLuaManager(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "RunLuaInternal", "(Ljava/lang/String;Z)Ljava/lang/Object;");

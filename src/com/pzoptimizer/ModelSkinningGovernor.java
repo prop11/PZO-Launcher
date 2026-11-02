@@ -15,14 +15,14 @@ public final class ModelSkinningGovernor {
 
     public static boolean shouldSkinModel(float screenX, float screenY) {
         if (!UnstableChannelGuard.isUnstableBuild()) {
-            return true; // Pass through in stable builds
+            return true; // does nothing on stable builds
         }
 
         updateScreenDimensions();
 
         if (screenX < -PADDING || screenX > (screenWidth + PADDING)
                 || screenY < -PADDING || screenY > (screenHeight + PADDING)) {
-            boneTransformsSaved.addAndGet(64); // Average 64 bone transforms per character model
+            boneTransformsSaved.addAndGet(64); // about 64 bone transforms per character model
             return false;
         }
 

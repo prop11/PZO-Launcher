@@ -14,13 +14,13 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Measures frame times and logs frame drops and stutters with their likely cause. Only active when the
- * game is launched with -debug; for normal players onFrameTick just drives the governors that hang off it.
+ * Times frames and logs drops and stutters with a likely cause. Only with -debug; for normal players onFrameTick just
+ * drives the governors hanging off it.
  */
 public final class FrameDropDiagnosticEngine {
 
     private static volatile boolean running = false;
-    // -1 until the first frame tick, when Core.debug has been parsed from the launch arguments
+    // -1 until the first frame tick, by which point Core.debug has been parsed from the launch args
     private static int debugState = -1;
     private static boolean profilerRequested = false;
 
@@ -72,7 +72,7 @@ public final class FrameDropDiagnosticEngine {
     private static Field cswToSaveQField;
     private static Field lgsField;
 
-    /** The logger thread starts on the first frame tick, and only for a debug launch. */
+    /** The logger thread starts on the first frame tick, and only on a debug launch. */
     public static void initialize() {
     }
 
@@ -240,8 +240,8 @@ public final class FrameDropDiagnosticEngine {
     }
 
     /**
-     * Sustained dips (165 -> 60 fps, say) never cross the single-frame stutter threshold, so frame times
-     * are also averaged per second and compared against a slow moving baseline of normal play.
+     * Long dips (165 -> 60 fps, say) never trip the single-frame stutter threshold, so frame times are also averaged
+     * per second and compared to a slow-moving baseline of normal play.
      */
     private static void trackWindow(long now, double frameTimeMs, int zombies) {
         if (windowStartNanos == 0) {
@@ -435,7 +435,7 @@ public final class FrameDropDiagnosticEngine {
         } else if (activeZombies > 100) {
             cause = "HORDE_PHYSICS_DENSITY (" + activeZombies + " zombies)";
         } else if (haveProfile && mainMs < frameTimeMs * 0.4) {
-            // The main thread was mostly idle or outside any profiled area: waiting on the render thread, GPU or a lock
+            // Main thread was mostly idle or outside anything profiled: waiting on the render thread, the GPU or a lock
             cause = String.format("RENDER_THREAD_OR_GPU_WAIT (main thread profiled %.1f of %.1f ms)", mainMs, frameTimeMs);
         } else if (haveProfile) {
             cause = "MAIN_THREAD_WORK";
@@ -517,7 +517,7 @@ public final class FrameDropDiagnosticEngine {
         if (pendingDiagnosticLogs.isEmpty()) return;
 
         List<File> targetDirs = new ArrayList<>();
-        // Check discovered Zomboid directories
+        // Try the Zomboid folders I found
         String userHome = System.getProperty("user.home");
         if (userHome != null) {
             targetDirs.add(new File(userHome, "Zomboid" + File.separator + "Logs"));
@@ -543,7 +543,7 @@ public final class FrameDropDiagnosticEngine {
                     }
                     fw.flush();
                 } catch (Throwable ignored) {}
-                break; // Written to primary log directory
+                break; // primary log folder
             }
         }
     }

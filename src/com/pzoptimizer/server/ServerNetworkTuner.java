@@ -1,6 +1,6 @@
 package com.pzoptimizer.server;
 
-/** Configures Netty direct buffer pooling for the server's sockets. */
+/** Netty direct buffer pooling for the server's sockets. */
 public class ServerNetworkTuner {
     public static void apply() {
         try {

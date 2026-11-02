@@ -7,7 +7,7 @@ import java.lang.reflect.Method;
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
-        // Ensure AWT/Swing is allowed for Pre-Menu dialogs
+        // AWT/Swing has to be allowed for the pre-menu dialogs
         try {
             System.setProperty("java.awt.headless", "false");
         } catch (Throwable ignored) {}
@@ -64,7 +64,7 @@ public class PZOEntrypoint {
             }
         } catch (Throwable ignored) {}
 
-        // Create the Zomboid user directories and write pzo_status.json to every discovered Zomboid path
+        // Make the Zomboid user folders and write pzo_status.json to every Zomboid path I find
         try {
             TelemetryReporter.refreshDiscoveredDirectories(args);
             long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
@@ -119,7 +119,7 @@ public class PZOEntrypoint {
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
         AssetCachePrewarmer.startPrewarmingAsync();
-        // Pre-touch native libs into page cache & disable LWJGL vertex array bounds checks
+        // Pull the native libs into the page cache and turn off LWJGL's vertex array bounds checks
         NativeLibraryPreloader.startPreloadingAsync();
         SpriteBatchOptimizer.apply();
 
@@ -168,7 +168,7 @@ public class PZOEntrypoint {
             PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
 
-        // Native library version check
+        // Check the native library's version
         if (!fullUpdateHandled) {
             try {
                 UpdateDialog.checkAndPromptNativeMismatch(resolvedNativeUrl);
@@ -243,8 +243,8 @@ public class PZOEntrypoint {
     private static final java.util.Set<String> BROWSER_HOSTS = java.util.Set.of(
         "github.com", "steamcommunity.com", "store.steampowered.com");
 
-    // Lua can reach this, and rundll32 FileProtocolHandler will happily launch local files, so only
-    // plain https links to known hosts get through.
+    // Lua can reach this, and rundll32 FileProtocolHandler will happily launch local files, so only plain https links
+    // to known hosts get through
     static boolean isAllowedBrowserUrl(String url) {
         try {
             java.net.URI uri = new java.net.URI(url.trim());

@@ -40,14 +40,14 @@ import zombie.iso.weather.fx.WeatherParticleDrawer;
 /**
  * Weather particles (rain, snow, clouds, fog) as one tile repeated across the screen.
  *
- * ParticleRectangle.render draws its particle set once per screen cell, offset by the cell origin: with ~20 x 10
- * cells every particle is added to the drawer ~200 times on the main thread and turned into ~200 quads on the
- * render thread. Every cell shows the same particles, so here the set is added once at the origin and the drawer
- * keeps the list of cell positions. The render thread packs those quads into one vertex buffer and draws it once per
- * origin with the cell offset folded into the ModelViewProjection uniform (the same VBORenderer shader and vertex
- * layout). Per texture the draws go cell by cell in stock order, so blending matches; particles that stock culls
- * per cell as off screen are clipped by the GPU instead. Rain's per-cell double arithmetic can differ from the
- * GPU offset by float rounding (well under a thousandth of a pixel).
+ * ParticleRectangle.render draws its particle set once per screen cell, offset by the cell origin. With ~20 x 10 cells
+ * every particle gets added to the drawer ~200 times on the main thread and turned into ~200 quads on the render
+ * thread, but every cell shows the same particles. So I add the set once at the origin and the drawer keeps the list
+ * of cell positions. The render thread packs those quads into one vertex buffer and draws it once per cell with the
+ * offset folded into the ModelViewProjection uniform (same VBORenderer shader and vertex layout). Per texture the draws
+ * go cell by cell in stock order so blending matches, and particles stock would cull per cell as off screen get clipped
+ * by the GPU instead. Rain's per-cell double maths can differ from the GPU offset by float rounding (well under a
+ * thousandth of a pixel).
  */
 public final class WeatherTileBatcher {
 
@@ -60,8 +60,8 @@ public final class WeatherTileBatcher {
     private static final int SLOTS = 8;
     private static final int STRIDE = 36; // position 3, colour 4, uv 2 floats, as VBORenderer.formatPositionColorUv
 
-    // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
-    // while one of those classes is being defined, and loading it again from there is a duplicate definition
+    // Holder class: these handles load game classes, and the agent calls my patch methods while one of those is still
+    // being defined
     private static final class H {
         private static final VarHandle PR_WIDTH, PR_HEIGHT, PR_PARTICLES, PR_ID, P_ALPHA;
         private static final VarHandle D_BUFFER, D_TEXTURES, D_BY_TEXTURE, FX_INSTANCE, FX_DEBUG_BOUNDS;
@@ -106,7 +106,10 @@ public final class WeatherTileBatcher {
         active = value && H.D_BUFFER != null;
     }
 
-    /** One ParticleRectangle's particles for one frame: per texture slot the particle buffer offsets, and the cell positions. */
+    /**
+     * One ParticleRectangle's particles for one frame: per texture slot the particle buffer offsets, and the cell
+     * positions.
+     */
     private static final class Tile {
         final int[][] positions = new int[SLOTS][];
         final int[] counts = new int[SLOTS];
@@ -119,8 +122,8 @@ public final class WeatherTileBatcher {
         final ArrayList<Tile> tiles = new ArrayList<>();
     }
 
-    // Drawer -> batch, kept here so WeatherParticleDrawer keeps its stock shape (see ZombieBuddyCompat).
-    // There are only a few drawers, all long-lived; pairs are appended copy-on-write, so readers need no lock
+    // Drawer -> batch, kept here so WeatherParticleDrawer keeps its stock shape (see ZombieBuddyCompat). Only a few
+    // drawers and they live a long time; pairs are appended copy-on-write so readers don't need a lock
     private static volatile Object[] batchPairs = new Object[0];
 
     private static Batch batch(WeatherParticleDrawer drawer, boolean create) {
@@ -143,7 +146,7 @@ public final class WeatherTileBatcher {
         }
     }
 
-    // ---- main thread ----
+    // Main thread
 
     // WeatherParticleDrawer.startFrame: the drawer's particle buffer is being reset, so are its tiles
     public static void onStartFrame(WeatherParticleDrawer drawer) {
@@ -187,7 +190,7 @@ public final class WeatherTileBatcher {
             }
         }
 
-        // Move this rectangle's entries out of the drawer's own lists so its stock pass does not draw them too
+        // Pull this rectangle's entries out of the drawer's own lists so its stock pass doesn't draw them too
         Tile tile = new Tile();
         boolean any = false;
         for (int i = 0; i < SLOTS; i++) {
@@ -213,7 +216,7 @@ public final class WeatherTileBatcher {
         return true;
     }
 
-    // ---- render thread ----
+    // Render thread
 
     private static VBOLinesShader shader;
     private static final int VBO_RING_SIZE = 4;
@@ -287,7 +290,7 @@ public final class WeatherTileBatcher {
             }
         }
 
-        // setModelViewProjection skips the upload while the stack matrices are unchanged, so put the uniform back
+        // setModelViewProjection skips the upload while the stack matrices haven't changed, so put the uniform back
         program.setValue("ModelViewProjection", BASE);
         GL15.glBindBuffer(34962, 0);
         for (int i = 0; i < 5; i++) GL20.glEnableVertexAttribArray(i);
@@ -316,7 +319,7 @@ public final class WeatherTileBatcher {
         staging.putFloat(x).putFloat(y).putFloat(0.0F).putFloat(r).putFloat(g).putFloat(b).putFloat(a).putFloat(u).putFloat(v);
     }
 
-    // No usable shader: the same quads through VBORenderer, one per cell, as stock would have added them
+    // No usable shader: same quads through VBORenderer, one per cell, the way stock would have added them
     private static void drawWithVboRenderer(Batch b, ByteBuffer particles, ArrayList<Texture> textures) {
         VBORenderer vbor = VBORenderer.getInstance();
         for (int slot = 0; slot < SLOTS && slot < textures.size(); slot++) {
@@ -345,13 +348,12 @@ public final class WeatherTileBatcher {
         vbor.flush();
     }
 
-    // ---- ASM ----
 
     static boolean patchParticleRectangle(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "render", "()V");
         if (m == null) return false;
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            // Already carries this patch: a second prefix would queue every tile twice
+            // Already has this patch, a second prefix would queue every tile twice
             if (insn instanceof MethodInsnNode mi && "renderTiled".equals(mi.name) && "com/pzoptimizer/WeatherTileBatcher".equals(mi.owner)) {
                 return false;
             }
@@ -374,7 +376,7 @@ public final class WeatherTileBatcher {
         if (render == null || startFrame == null) return false;
         MethodInsnNode firstVbor = null;
         for (AbstractInsnNode insn = render.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            // Already carries this patch (bytes handed back by another agent): a second hook would draw the tiles twice
+            // Already has this patch (another agent handed the bytes back), a second hook would draw the tiles twice
             if (insn instanceof MethodInsnNode mi && "drawTiles".equals(mi.name) && "com/pzoptimizer/WeatherTileBatcher".equals(mi.owner)) {
                 return false;
             }

@@ -9,17 +9,20 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Pre-menu update prompt and self-updater, using WinForms on Windows, AppleScript on macOS and Zenity/KDialog on Linux and Steam Deck. */
+/**
+ * Pre-menu update prompt and self-updater: WinForms on Windows, AppleScript on macOS, Zenity/KDialog on Linux and Steam
+ * Deck.
+ */
 public class UpdateDialog {
     private static final String CONFIG_FILE = "pzo_config.json";
 
-    // These dialogs block startup before the game window exists, so an unseen one must never hang the launch.
+    // These block startup before the game window exists, so one nobody can see must never hang the launch
     private static final int DIALOG_AUTO_CLOSE_MS = 60000;
     private static final long DIALOG_PROCESS_TIMEOUT_SEC = 120;
 
-    // The PowerShell child rarely gets foreground rights, so Activate() alone often just flashes the taskbar.
-    // Attaching to the foreground window's input thread lets SetForegroundWindow through. Passed via
-    // PZO_FG_SRC because the script itself cannot contain double quotes.
+    // The PowerShell child rarely gets foreground rights, so Activate() alone often just flashes the taskbar. Attaching
+    // to the foreground window's input thread lets SetForegroundWindow through. Passed in PZO_FG_SRC because the script
+    // itself can't contain double quotes.
     private static final String PS_FOREGROUND_SRC = """
         using System;
         using System.Runtime.InteropServices;
@@ -46,8 +49,8 @@ public class UpdateDialog {
         }
         """;
 
-    // TopMost keeps the form above normal windows; it is pulled to the front on show and again for the next
-    // 3s in case Steam's launch window takes focus back. An unanswered form closes as Cancel (= skip).
+    // TopMost keeps it above normal windows, and it's pulled to the front on show and again for 3 s in case Steam's
+    // launch window grabs focus back. If nobody answers it closes as Cancel (= skip).
     private static final String PS_FORM_GUARDS =
         "try{Add-Type -TypeDefinition $env:PZO_FG_SRC}catch{};" +
         "$f.TopMost=$true;$f.ShowInTaskbar=$true;" +
@@ -82,8 +85,8 @@ public class UpdateDialog {
     }
 
     /**
-     * Checks if a native governor library exists in the game folder and verifies whether its
-     * version matches the Java mod version. If missing, mismatched, or outdated, prompts the user to download.
+     * Checks the game folder for the native library and whether its version matches the Java side. If it's missing,
+     * mismatched or outdated, asks the user to download it.
      */
     public static boolean checkAndPromptNativeMismatch(String dllDownloadUrl) {
         boolean filePresent = PZONative.isNativeFilePresent();
@@ -154,9 +157,9 @@ public class UpdateDialog {
     }
 
     /**
-     * Dev launch options that open the startup dialogs with sample data so they can be checked without a real
-     * update, mismatch or mod. Answers are only logged: nothing is downloaded, ignored, allowed or blocked.
-     * -pzo_updatebox, -pzo_nativebox, -pzo_nativemissingbox, -pzo_javamodbox, -pzo_pzwarnbox, -pzo_noticebox, -pzo_alldialogs
+     * Dev launch options that open the startup dialogs with sample data, so they can be checked without a real update,
+     * mismatch or mod. Answers just get logged; nothing is downloaded, ignored, allowed or blocked. -pzo_updatebox,
+     * -pzo_nativebox, -pzo_nativemissingbox, -pzo_javamodbox, -pzo_pzwarnbox, -pzo_noticebox, -pzo_alldialogs
      */
     public static void runDevDialogPreviews(String[] args) {
         java.util.Set<String> flags = new java.util.HashSet<>();
@@ -626,7 +629,7 @@ public class UpdateDialog {
             boolean nativeInstalled = PZONative.isNativeFilePresent() || currentNative.exists() || win64Dll.exists();
             boolean hasNewNative = false;
 
-            // Download the matching native library first, when native support is installed or available
+            // Get the matching native library first, if native support is installed or available
             List<String> nativeCandidates = new ArrayList<>();
             if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
                 nativeCandidates.add(dllDownloadUrl);
@@ -655,7 +658,7 @@ public class UpdateDialog {
                 }
             }
 
-            // With the native library installed, never update the jar alone
+            // With the native library installed, never update the jar on its own
             if (nativeInstalled && !hasNewNative) {
                 if (newNative.exists()) newNative.delete();
                 PZOLogger.error("Failed to download matching native library (" + nativeFileName + ") for version " + latestVersion + ". Aborting update to avoid library mismatch.");
@@ -876,7 +879,9 @@ public class UpdateDialog {
         } catch (Throwable ignored) {}
     }
 
-    /** Asks whether a third-party Java mod jar may run. Returns "ALLOW", "BLOCK" or "SKIP"; anything unclear is "SKIP". */
+    /**
+     * Asks whether a third-party Java mod jar may run. "ALLOW", "BLOCK" or "SKIP"; anything unclear counts as "SKIP".
+     */
     public static String promptJavaModApproval(String modName, String workshopId, String jarPath, String sha256) {
         String text = "A Workshop mod wants to run Java code.\n\n"
             + "Java mods are not sandboxed like Lua mods: they run with full access to your PC. "
@@ -897,8 +902,9 @@ public class UpdateDialog {
         return "SKIP";
     }
 
-    // The message goes through an environment variable so mod names and paths are never parsed as script.
-    // A process that outlives the timeout (AMSI scan, policy block, unseen zenity) is killed and reported as "-1:", which every caller treats as skip.
+    // The message goes in an environment variable so mod names and paths never get parsed as script. A process that
+    // outlives the timeout (AMSI scan, policy block, invisible zenity) is killed and reported as "-1:", which every
+    // caller treats as skip.
     private static String runDialogProcess(ProcessBuilder pb, String text) throws Exception {
         if (text != null) pb.environment().put("PZO_DIALOG_TEXT", text);
         pb.environment().put("PZO_FG_SRC", PS_FOREGROUND_SRC);
@@ -925,7 +931,7 @@ public class UpdateDialog {
         return p.exitValue() + ":" + (out != null ? out : "");
     }
 
-    // Title and message go through environment variables so neither is parsed as script.
+    // Title and message go in environment variables so neither gets parsed as script
     private static void showWindowsNotice(String title, String text) throws Exception {
         String psCode =
             "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
@@ -953,7 +959,7 @@ public class UpdateDialog {
         runDialogProcess(pb, text);
     }
 
-    // No double quotes in the script: Java does not escape them when building the Windows command line.
+    // No double quotes in the script, Java doesn't escape them when it builds the Windows command line
     private static String showWindowsJavaModDialog(String text) throws Exception {
         String psCode =
             "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
@@ -1004,7 +1010,7 @@ public class UpdateDialog {
 
     private static String showLinuxJavaModDialog(String text) {
         try {
-            // zenity --text takes Pango markup, so escape it; exit 0 is Allow, the extra button prints its label
+            // zenity --text takes Pango markup, so escape it. Exit 0 is Allow, the extra button prints its label
             String markup = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
             String out = runDialogProcess(new ProcessBuilder("zenity", "--question", "--default-cancel", "--width=560",
                 "--title=PZO Engine - Java Mod Approval", "--text=" + markup,
@@ -1025,7 +1031,7 @@ public class UpdateDialog {
         return "SKIP";
     }
 
-    /** Blocking OK-only warning. The title must be a fixed string; the message goes through PZO_DIALOG_TEXT. */
+    /** Blocking OK-only warning. The title has to be a fixed string; the message goes through PZO_DIALOG_TEXT. */
     public static void showWarningNotice(String title, String text) {
         String os = System.getProperty("os.name", "").toLowerCase();
         try {

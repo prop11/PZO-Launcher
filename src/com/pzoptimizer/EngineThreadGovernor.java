@@ -5,8 +5,8 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Raises process, render-thread and main-thread scheduling priority, and wraps MainThread.mainThreadLoop
- * so the per-frame governors and the frame pacer run after every step.
+ * Raises process, render-thread and main-thread priority, and wraps MainThread.mainThreadLoop so the per-frame
+ * governors and the frame pacer run after every step.
  */
 public class EngineThreadGovernor {
 
@@ -21,8 +21,8 @@ public class EngineThreadGovernor {
 
         try {
             if (PZONative.isLoaded() && PZOConfig.isPowerShieldEnabled()) {
-                PZONative.setHighPrecisionTimer(true); // 0.5ms kernel resolution
-                PZONative.disablePowerThrottling(); // Exemption from Windows 11 EcoQoS
+                PZONative.setHighPrecisionTimer(true); // 0.5 ms timer resolution
+                PZONative.disablePowerThrottling(); // opt out of Windows 11 EcoQoS
                 if (PZONative.isLowCoreCpu()) {
                     PZONative.setProcessPriority(0);
                     PZOLogger.info("[EngineThreadGovernor] Low core count CPU: process left at NORMAL_PRIORITY_CLASS, working set not locked");
@@ -50,7 +50,9 @@ public class EngineThreadGovernor {
 
     private static volatile boolean benchmarkOnly = false;
 
-    /** Stock baseline runs: only the mainThreadLoop wrapper is installed, so BenchmarkHarness ticks and nothing else runs. */
+    /**
+     * Stock baseline runs: only the mainThreadLoop wrapper goes in, so BenchmarkHarness ticks and nothing else runs.
+     */
     public static void initializeBenchmarkOnly() {
         if (!initialized.compareAndSet(false, true)) {
             return;
@@ -100,7 +102,7 @@ public class EngineThreadGovernor {
         }
     }
 
-    /** Applies the native scheduler boost from inside the render thread, via its invoke queue. */
+    /** Applies the native scheduler boost on the render thread, through its invoke queue. */
     private static void tryHookRenderThread() {
         try {
             Class<?> renderThreadClass = Class.forName("zombie.core.opengl.RenderThread");
@@ -132,7 +134,7 @@ public class EngineThreadGovernor {
 
     private static volatile boolean mainThreadPacerHooked = false;
 
-    /** Same for the main thread, and installs the mainThreadLoop wrapper. */
+    /** Same for the main thread, plus the mainThreadLoop wrapper. */
     private static void tryHookMainThread() {
         try {
             Class<?> mainThreadClass = Class.forName("zombie.MainThread");
@@ -160,7 +162,6 @@ public class EngineThreadGovernor {
                 });
             }
 
-            // Wrap MainThread.mainThreadLoop so the per-frame governors and the frame pacer run after each step
             if (!mainThreadPacerHooked) {
                 installMainLoopWrapper();
             }
@@ -179,7 +180,7 @@ public class EngineThreadGovernor {
                 PZOLogger.success("[EngineThreadGovernor] MainThread.mainThreadLoop hooked with Zero-Lock Diagnostic Probe (Uncapped Native Clock)");
             }
         } catch (Throwable t) {
-            // Non-fatal if field not yet assigned
+            // Field might not be set yet, that's fine
         }
     }
 
@@ -199,8 +200,8 @@ public class EngineThreadGovernor {
         private static boolean pacerReflectionFailed = false;
 
         /**
-         * Mirrors GameWindow.mainThreadStep(): with a capped framerate the next frameStep runs once
-         * accumulator + (now - currentTime) reaches 1e9 / lockFPS.
+         * Same maths as GameWindow.mainThreadStep(): with a capped framerate the next frameStep runs once accumulator +
+         * (now - currentTime) reaches 1e9 / lockFPS.
          */
         private static void paceToNextFrame() {
             if (pacerReflectionFailed || zombie.core.PerformanceSettings.instance.isFramerateUncapped()) return;

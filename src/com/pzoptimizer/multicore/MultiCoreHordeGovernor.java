@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Horde proximity, frustum culling and LOD-tier classification, spread across the PZO workers. */
+/** Horde proximity, frustum culling and LOD tiers, spread across PZO's workers. */
 public final class MultiCoreHordeGovernor {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -292,7 +292,7 @@ public final class MultiCoreHordeGovernor {
                     final int partLen = Math.min(PARTITION_SIZE, count - startIdx);
 
                     futures.add(CompletableFuture.runAsync(() -> {
-                        // Sliced sub-buffers share direct off-heap native memory
+                        // Slices share the same off-heap memory
                         FloatBuffer subCoords = coordBuf.duplicate();
                         subCoords.position(startIdx * 2);
                         FloatBuffer partCoords = subCoords.slice();

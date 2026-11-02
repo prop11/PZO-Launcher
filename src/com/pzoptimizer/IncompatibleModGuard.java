@@ -5,9 +5,9 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * Detects PZ_Optimization (Steam Workshop 3805285544). It installs recompiled zombie.* classes as loose files in the
- * game folder, and the launcher classpath lists "." before projectzomboid.jar, so those copies replace the game's own
- * classes. PZO patches the stock classes and cannot run safely on top of them, so it stands down while they are there.
+ * Detects PZ_Optimization (Workshop 3805285544). It drops recompiled zombie.* classes as loose files in the game
+ * folder, and the launcher classpath has "." before projectzomboid.jar, so those replace the game's own classes. PZO
+ * patches the stock classes and can't safely run on top of those, so it stands down while they're there.
  */
 public final class IncompatibleModGuard {
 
@@ -59,7 +59,7 @@ public final class IncompatibleModGuard {
         return dirs;
     }
 
-    // pzopt-installed.txt is its install manifest; the pzopt folder holds its boot repair and helper classes.
+    // pzopt-installed.txt is its install manifest; the pzopt folder has its boot repair and helper classes
     private static File findPzOptimizationMarker(File gameDir) {
         if (gameDir == null || !gameDir.isDirectory()) return null;
         File manifest = new File(gameDir, "pzopt-installed.txt");
@@ -76,7 +76,7 @@ public final class IncompatibleModGuard {
         return null;
     }
 
-    /** Logs the conflict, marks PZO inactive for the Lua side and warns the player once per launch. */
+    /** Logs the conflict, tells the Lua side PZO is off and warns the player once per launch. */
     public static synchronized void reportAndWarn() {
         if (warningShown) return;
         warningShown = true;

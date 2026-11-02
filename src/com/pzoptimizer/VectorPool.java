@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Thread-local vectors for raycasting, horde spatial queries and line-of-sight math. */
+/** Per-thread vectors for raycasts, horde spatial queries and line-of-sight maths. */
 public class VectorPool {
 
     public static class Vec2 {

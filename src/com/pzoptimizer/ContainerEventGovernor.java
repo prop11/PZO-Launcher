@@ -10,9 +10,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Coalesces OnContainerUpdate bursts from door toggles, looting and tile updates. In large modpacks several
- * mods hook OnContainerUpdate and each runs full inventory sorts on the main thread. The first update fires
- * immediately, bursts within 250 ms are debounced, and a trailing dispatch delivers the final state.
+ * Coalesces OnContainerUpdate bursts (doors, looting, tile updates). In big modpacks several mods hook it and each does
+ * full inventory sorts on the main thread. The first update fires right away, bursts within 250 ms are debounced, and a
+ * trailing dispatch delivers the final state.
  */
 public final class ContainerEventGovernor {
 
@@ -22,8 +22,8 @@ public final class ContainerEventGovernor {
     private static volatile GovernedEventMap governedMapRef = null;
 
     public static void initialize() {
-        // Disabled: firing Lua events from a background thread and intercepting OnContainerUpdate caused
-        // contention and dropped events during multi-corpse drops.
+        // Disabled: firing Lua events from a background thread and intercepting OnContainerUpdate caused contention and
+        // dropped events when several corpses dropped at once.
     }
 
     public static synchronized boolean installGovernor() {
@@ -98,7 +98,7 @@ public final class ContainerEventGovernor {
             long now = System.currentTimeMillis();
             if (now - lastContainerUpdateTime >= DEBOUNCE_WINDOW_MS) {
                 hasPendingUpdate = false;
-                // Allow the trailing dispatch to pass through get() immediately
+                // Let the trailing dispatch straight through get()
                 lastContainerUpdateTime = 0;
                 try {
                     LuaEventManager.triggerEvent("OnContainerUpdate");

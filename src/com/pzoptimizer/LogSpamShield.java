@@ -13,10 +13,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Some mods log from per-frame render or tick loops (e.g. LingLi_SCTD_LipsSkin logging 8,869 times), and the
- * synchronized PrintStream turns that into lock contention between the render and main threads. This wraps
- * System.out, System.err and DebugLog in a deduplicating stream that suppresses repeats and periodically
- * prints a summary.
+ * Some mods log from per-frame loops (LingLi_SCTD_LipsSkin logged 8,869 times once), and the synchronized PrintStream
+ * turns that into lock contention between the render and main threads. So System.out, System.err and DebugLog go
+ * through a deduplicating stream that drops repeats and prints a summary now and then.
  */
 public final class LogSpamShield {
 
@@ -98,9 +97,9 @@ public final class LogSpamShield {
         private static final long WINDOW_MS = 1000L;
         private static final int MAX_CACHE_SIZE = 64;
 
-        // Launched from Steam on Windows the process has no console: every write to the JDK's stdout throws
-        // IOException("The handle is invalid") inside PrintStream, which swallows it. The sink is probed on the first
-        // line and every 256th after; once it reports an error nothing more is sent to it.
+        // Launched from Steam on Windows there's no console, so every write to the JDK's stdout throws IOException("The
+        // handle is invalid") inside PrintStream, which swallows it. I probe the sink on the first line and every
+        // 256th after, and stop sending to it once it reports an error.
         private boolean sinkDead;
         private int linesSinceProbe = 256;
 
@@ -115,8 +114,8 @@ public final class LogSpamShield {
             out.write('\n');
             if (++linesSinceProbe >= 256) {
                 linesSinceProbe = 0;
-                // Exact class only: the game's ProxyPrintStream reports its console half's error while still writing
-                // console.txt, so it must never be cut off
+                // Exact class only: the game's ProxyPrintStream reports its console half's error while it's still
+                // writing console.txt, so that one must never be cut off
                 if (out != null && out.getClass() == PrintStream.class && ((PrintStream) out).checkError()) {
                     sinkDead = true;
                 }
@@ -159,7 +158,7 @@ public final class LogSpamShield {
                 return;
             }
 
-            // Always allow PZO status/diagnostic messages without rate limiting
+            // PZO's own status messages are never rate limited
             if (line.contains("[PZO") || line.contains("[SUCCESS]") || line.contains("[WARN]")) {
                 emit(rawBytes);
                 return;

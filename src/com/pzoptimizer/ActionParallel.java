@@ -18,9 +18,6 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import zombie.characters.IsoGameCharacter;
 import zombie.characters.IsoZombie;
@@ -37,25 +34,15 @@ import zombie.network.GameClient;
 import zombie.network.GameServer;
 
 /**
- * Reads the zombies' action-transition variables on worker threads.
+ * Moves the zombies' action-transition variable reads onto worker threads.
  *
- * Each frame every animating zombie's ActionContext.update() evaluates the transition conditions of its current
- * action states; nearly all of the cost is the variable reads (a megamorphic callback into the zombie, a string
- * conversion and a parse per condition). The evaluation itself stays on the game thread; only the reads move:
+ * Nearly all of ActionContext.update() is reading variables (a callback, a string conversion and a parse per
+ * condition), so each zombie's postupdate is split at that call. The first half runs in the bucket loop and queues the
+ * zombie, the workers pre-read the variables CallbackPurity says are safe, then each postupdate picks up where it
+ * stopped, on the game thread, in queue order. Conditions use the pre-read values; anything else is read live as stock.
  *
- * 1. In each scheduler bucket's postupdate loop an eligible zombie runs its postupdate up to the point stock calls
- *    ActionContext.update() (movement, facing, turning flags) and is queued; everything after that point in its
- *    postupdate (the state change, animator, model, hit and attack clears, the zombie's own tail) is deferred.
- * 2. After the loop, the workers read, for every queued zombie, the variables its current and sub-states'
- *    conditions reference, but only plain stored values and callbacks CallbackPurity proved to be pure reads.
- * 3. Still in the bucket, each queued zombie resumes its postupdate exactly where it stopped, in queue order, on the
- *    game thread. Condition reads of a pre-read variable return the worker's value; any other read (an impure
- *    callback, a state entered during this evaluation) runs live as stock. Evaluation works on a scratch copy of
- *    the state container and changes no variable, so the pre-read values hold for the whole evaluation.
- *
- * Within one zombie nothing is reordered. Across zombies, the deferred parts run after every zombie's first part,
- * so a zombie whose postupdate read another zombie's mid-update state could see it one step later; grappling and
- * reanimated-player zombies, whose postupdates read each other, are never deferred. Single player only.
+ * Nothing is reordered within a zombie. Across zombies every second half runs after every first half, so grappling
+ * and reanimated-player zombies (they read each other mid-update) are never deferred. Single player only.
  */
 public final class ActionParallel {
 
@@ -70,27 +57,30 @@ public final class ActionParallel {
     public static final AtomicLong deferred = new AtomicLong();
     public static final AtomicLong preRead = new AtomicLong();
     public static final AtomicLong preReadHits = new AtomicLong();
+    public static final AtomicLong checks = new AtomicLong(), mismatches = new AtomicLong();
+
+    // One pre-read hit in CHECK_EVERY is also read live and compared. A difference means a worker saw a value the
+    // game thread wouldn't have, so after MAX_MISMATCHES the pre-reads switch off for the session.
+    private static final int CHECK_EVERY = 64, MAX_MISMATCHES = 3;
 
     private static final List<IsoZombie> queue = new ArrayList<>();
     private static Thread gameThread;
 
     private static volatile Set<String> pureKeys;
-    private static ExecutorService workers;
-    private static int workerCount;
+    private static boolean auditStarted;
 
     // Set on the game thread while one queued zombie resumes
     private static IsoZombie resumingZombie;
     private static Object[] resumingKeys, resumingVals;
     private static int resumingCount;
 
-    // Per-zombie phase and pre-read snapshot live here, not in fields on the character: ZombieBuddy loads
-    // IsoGameCharacter before this agent sees it, and the retransform that patches it then cannot add fields.
-    // Phases are game thread only and empty outside a collecting bucket; snapshot slots follow queue order.
+    // Phase and snapshot live here rather than as fields on the character: ZombieBuddy loads IsoGameCharacter before
+    // I see it, and the retransform can't add fields. Game thread only; snapshot slots follow queue order.
     private static final IdentityHashMap<IsoGameCharacter, Byte> phases = new IdentityHashMap<>();
     private static Object[][] snapKeys = new Object[0][], snapVals = new Object[0][];
 
-    // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
-    // while one of those classes is being defined, and loading it again from there is a duplicate definition
+    // Holder class: these handles load game classes, and the agent calls my patch methods while one of those is
+    // still being defined
     private static final class H {
         private static final VarHandle CVC_LHS, CVC_RHS, LOOKUP_REF, REF_HANDLE, REF_SUBSOURCE, AC_CONTAINER, CONT_CURRENT, CONT_CHILDREN,
             TRANSITION_CONDITIONS;
@@ -101,8 +91,8 @@ public final class ActionParallel {
             MethodHandle resolve = null, parse = null;
             Class<?> lookupClass = null;
             MethodHandles.Lookup l = MethodHandles.lookup();
-            // The condition patch calls resolve() for every character whether or not the split is active, so its
-            // handle must not depend on the lookups below succeeding
+            // resolve() runs for every character even when the split is off, so this handle can't depend on the lookups
+            // below
             try {
                 MethodHandles.Lookup cvc = MethodHandles.privateLookupIn(CharacterVariableCondition.class, l);
                 resolve = cvc.findStatic(CharacterVariableCondition.class, "resolveValue",
@@ -162,7 +152,7 @@ public final class ActionParallel {
         allPatched = patchedBits == (PATCH_CHARACTER | PATCH_ZOMBIE | PATCH_BUCKET | PATCH_CONDITION);
     }
 
-    // The purity audit reads class files, so it runs once in the background instead of on a game frame
+    // The purity audit reads class files, so do it once in the background rather than on a frame
     private static void startAudit() {
         Thread t = new Thread(() -> {
             try {
@@ -178,28 +168,23 @@ public final class ActionParallel {
         t.start();
     }
 
-    private static synchronized void ensureWorkers() {
-        if (workers != null) return;
-        workerCount = Math.max(1, Math.min(6, Runtime.getRuntime().availableProcessors() - 2));
-        workers = Executors.newFixedThreadPool(workerCount, r -> {
-            Thread t = new Thread(r, "PZO-ActionRead");
-            t.setDaemon(true);
-            return t;
-        });
+    private static synchronized void ensureAudit() {
+        if (auditStarted) return;
+        auditStarted = true;
         startAudit();
     }
 
-    // ---- phase 1: game thread, inside the bucket loop ----
+    // Phase 1: game thread, inside the bucket loop
 
     public static void beginBucket() {
         if (!active || !allPatched || GameClient.client || GameServer.server) return;
         if (gameThread == null) gameThread = Thread.currentThread();
         if (Thread.currentThread() != gameThread) return;
-        ensureWorkers();
+        ensureAudit();
         collecting = true;
     }
 
-    /** At the point stock calls ActionContext.update(): true means stop here, the rest runs after the loop. */
+    /** Where stock calls ActionContext.update(): true means stop here and finish after the loop. */
     public static boolean defer(IsoGameCharacter chr) {
         if (!collecting || !(chr instanceof IsoZombie z) || Thread.currentThread() != gameThread) return false;
         if (z.isBeingGrappled() || z.isGrappling() || z.getReanimatedPlayer() != null || z.isReanimatedForGrappleOnly()) return false;
@@ -228,7 +213,7 @@ public final class ActionParallel {
         phases.remove(chr);
     }
 
-    // ---- phases 2 and 3: after the bucket loop ----
+    // Phases 2 and 3: after the bucket loop
 
     public static void flushBucket() {
         if (!collecting) return;
@@ -239,7 +224,7 @@ public final class ActionParallel {
         Set<String> keys = pureKeys;
         boolean read = keys != null && n >= MIN_PARALLEL;
         if (read) {
-            readOnWorkers(keys);
+            read = readOnWorkers(keys);
         }
         try {
             for (int i = 0; i < n; i++) {
@@ -271,7 +256,8 @@ public final class ActionParallel {
         return c;
     }
 
-    private static void readOnWorkers(Set<String> keys) {
+    // Same pool as the bone work, with the game thread helping; false if a task threw, then nothing pre-read is used
+    private static boolean readOnWorkers(Set<String> keys) {
         int n = queue.size();
         // Slots are allocated here on the game thread; each worker then writes only its own range
         if (snapKeys.length < n) {
@@ -284,28 +270,21 @@ public final class ActionParallel {
                 snapVals[i] = new Object[64];
             }
         }
-        int chunks = Math.min(workerCount, (n + 15) / 16);
-        CountDownLatch done = new CountDownLatch(chunks);
-        for (int c = 0; c < chunks; c++) {
+        int chunks = Math.min(FrameWorkers.workerCount() + 1, (n + 15) / 16);
+        Throwable failure = FrameWorkers.run(chunks, c -> {
             int from = n * c / chunks, to = n * (c + 1) / chunks;
-            workers.execute(() -> {
-                try {
-                    for (int i = from; i < to; i++) {
-                        preReadZombie(queue.get(i), keys, snapKeys[i], snapVals[i]);
-                    }
-                } finally {
-                    done.countDown();
-                }
-            });
+            for (int i = from; i < to; i++) {
+                preReadZombie(queue.get(i), keys, snapKeys[i], snapVals[i]);
+            }
+        });
+        if (failure != null) {
+            PZOLogger.warn("[ActionParallel] pre-read failed on a worker, reading live this bucket: " + failure);
+            return false;
         }
-        try {
-            done.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        return true;
     }
 
-    // Worker: the game thread is waiting, so the zombie and its action states do not change meanwhile
+    // Worker side. The game thread is waiting, so the zombie and its states can't change under me
     private static void preReadZombie(IsoZombie z, Set<String> keys, Object[] k, Object[] v) {
         int count = 0;
         try {
@@ -320,7 +299,7 @@ public final class ActionParallel {
                 }
             }
         } catch (Throwable t) {
-            count = 0; // anything unexpected: this zombie reads everything live
+            count = 0; // something unexpected: just read everything live for this zombie
         }
         k[Math.min(count, k.length - 1)] = null;
         preRead.addAndGet(count);
@@ -398,16 +377,30 @@ public final class ActionParallel {
             Object[] k = resumingKeys;
             for (int i = 0; i < resumingCount; i++) {
                 if (k[i] == value) {
-                    preReadHits.incrementAndGet();
+                    long hit = preReadHits.incrementAndGet();
                     Object r = resumingVals[i];
-                    return r == NULL ? null : r;
+                    if (r == NULL) r = null;
+                    if (hit % CHECK_EVERY == 0) return checked(value, owner, r);
+                    return r;
                 }
             }
         }
         return (Object) H.RESOLVE.invokeExact(value, owner);
     }
 
-    // ---- ASM ----
+
+    // Game thread: the live answer always wins, a different pre-read value is counted
+    private static Object checked(Object value, IAnimationVariableSource owner, Object preRead) throws Throwable {
+        Object live = (Object) H.RESOLVE.invokeExact(value, owner);
+        checks.incrementAndGet();
+        if (!java.util.Objects.equals(live, preRead)) {
+            long m = mismatches.incrementAndGet();
+            PZOLogger.warn("[ActionParallel] pre-read value differs from a live read (" + preRead + " vs " + live + ")"
+                + (m >= MAX_MISMATCHES ? ", pre-reads off for this session" : ""));
+            if (m >= MAX_MISMATCHES) pureKeys = null;
+        }
+        return live;
+    }
 
     private static final String SELF = "com/pzoptimizer/ActionParallel";
     private static final String CHR = "zombie/characters/IsoGameCharacter";
@@ -431,7 +424,8 @@ public final class ActionParallel {
         MethodNode anim = AsmSupport.findMethod(node, "postUpdateAnimating", "()V");
         MethodNode internal = AsmSupport.findMethod(node, "postUpdateInternal", "()V");
         if (anim == null || internal == null) return false;
-        // Bytes this agent already patched (another agent redefined the class with them): applying again would split twice
+        // Bytes this agent already patched (another agent redefined the class with them): applying again would split
+        // twice
         for (AbstractInsnNode insn = anim.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && SELF.equals(mi.owner)) return true;
         }

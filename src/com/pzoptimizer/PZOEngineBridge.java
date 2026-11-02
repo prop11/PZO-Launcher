@@ -5,11 +5,11 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
-/** Exposes PZO engine status, diagnostics and options to Lua through LuaManager.env. */
+/** Exposes PZO's status, diagnostics and options to Lua through LuaManager.env. */
 public class PZOEngineBridge {
 
     private static volatile boolean initialized = false;
-    // LuaManager.init() builds a new env on every Lua reload, dropping the PZOEngine globals
+    // LuaManager.init() builds a fresh env on every Lua reload, which drops the PZOEngine globals
     private static volatile Object boundEnv = null;
     private static volatile int cachedRamGb = 0;
 
@@ -411,10 +411,21 @@ public class PZOEngineBridge {
             } else if ("JVM_ChunkTextureKeep".equals(key)) {
                 ChunkTextureKeep.active = value;
             } else if ("JVM_LuaCompileCache".equals(key)) {
-                // Lua files load before the Lua settings do, so the value lives in pzo_config.json for the next launch
+                // Lua files load before the Lua settings do, so this lives in pzo_config.json for next launch
                 PZOConfig.setLuaCompileCacheEnabled(value);
             } else if ("JVM_FastLoad".equals(key)) {
                 PZOConfig.setFastLoadEnabled(value);
+            } else if ("JVM_LaptopFastGpu".equals(key)) {
+                GpuPreference.setActive(value);
+            } else if ("JVM_TextureHandoff".equals(key)) {
+                TextureHandoff.active = value;
+                PZOConfig.setTextureHandoffEnabled(value);
+            } else if ("JVM_DepthMapParallel".equals(key)) {
+                DepthMapParallel.active = value;
+                PZOConfig.setDepthMapParallelEnabled(value);
+            } else if ("JVM_AnimImportCache".equals(key)) {
+                // Animations import at boot, before the Lua settings arrive, so this is for next launch
+                PZOConfig.setAnimImportCacheEnabled(value);
             }
             PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
@@ -562,10 +573,10 @@ public class PZOEngineBridge {
 
         Thread bridgeHookThread = new Thread(() -> {
             boolean attached = false;
-            // Poll for LuaManager.env initialization during boot (up to 2.5 minutes for heavy modpacks)
+            // Poll for LuaManager.env during boot (up to 2.5 minutes for heavy modpacks)
             for (int i = 0; i < 600; i++) {
                 try {
-                    // Lua's tables are not thread-safe: the attempt itself runs on the game thread
+                    // Lua's tables aren't thread-safe, so the attempt itself runs on the game thread
                     if (GameThreadQueue.runOnGameThread(PZOEngineBridge::attemptAttach)) {
                         attached = true;
                         break;
@@ -605,10 +616,10 @@ public class PZOEngineBridge {
         bridgeHookThread.start();
     }
 
-    /** One attach attempt; runs on the game thread (GameThreadQueue), since it writes Lua's tables. */
+    /** One attach attempt. Runs on the game thread (GameThreadQueue) because it writes Lua's tables. */
     private static boolean attemptAttach() throws Exception {
-        // Never touch Lua from another thread: the game thread may be in the middle of loading a mod's file.
-        // A dedicated server has no GameWindow thread and keeps the queue's fallback.
+        // Never touch Lua from another thread, the game thread might be halfway through loading a mod's file. A
+        // dedicated server has no GameWindow thread and keeps the queue's fallback.
         Thread gameThread = (Thread) Class.forName("zombie.GameWindow").getField("gameThread").get(null);
         if (gameThread != null && gameThread != Thread.currentThread()) return false;
 
@@ -855,7 +866,7 @@ public class PZOEngineBridge {
                             );
                             tableRawset.invoke(pzoTable, "getHardwareSummary", getHardwareFunc);
 
-                            // getCompatStatus: why compatibility mode is on this launch, "" when it is off
+                            // getCompatStatus: why compatibility mode is on this launch, "" when it's off
                             Object getCompatFunc = Proxy.newProxyInstance(
                                 javaFuncClass.getClassLoader(),
                                 new Class<?>[]{javaFuncClass},
@@ -907,7 +918,8 @@ public class PZOEngineBridge {
                             );
                             tableRawset.invoke(pzoTable, "profiler", profilerFunc);
 
-                            // setHardwareOverride(summary): pretend to be other hardware for the recommendations ("" = real)
+                            // setHardwareOverride(summary): pretend to be other hardware for the recommendations ("" =
+                            // the real one)
                             Object hwOverrideFunc = Proxy.newProxyInstance(
                                 javaFuncClass.getClassLoader(),
                                 new Class<?>[]{javaFuncClass},
@@ -939,7 +951,7 @@ public class PZOEngineBridge {
                             );
                             tableRawset.invoke(pzoTable, "getChannel", getChannelFunc);
 
-                            // getRenderTelemetry (Unstable channel live metrics)
+                            // getRenderTelemetry (live metrics on the Unstable channel)
                             Object getRenderTelemetryFunc = Proxy.newProxyInstance(
                                 javaFuncClass.getClassLoader(),
                                 new Class<?>[]{javaFuncClass},
@@ -1291,7 +1303,7 @@ public class PZOEngineBridge {
                         rawset.invoke(env, "PZOEngine", pzoTable);
                         rawset.invoke(env, "PZOEngineBridge", pzoTable);
 
-                        // Inject Main Menu Beta Opt-In Tickbox UI into Kahlua
+                        // Main menu beta opt-in tickbox UI
                         try {
                             String luaCode =
                                 "local function addPZOBetaToggle()\n" +
@@ -1865,8 +1877,8 @@ public class PZOEngineBridge {
         return false;
     }
 
-    // LuaManager.env exists before LuaEventManager has added every event to the Events table,
-    // so injecting as soon as env is non-null can hit a nil Events.OnMainMenuEnter.
+    // LuaManager.env exists before LuaEventManager has added every event to the Events table, so injecting as soon as
+    // env is non-null can hit a nil Events.OnMainMenuEnter
     private static boolean areLuaEventsRegistered(Object env) {
         try {
             Method envGet = env.getClass().getMethod("rawget", Object.class);

@@ -7,8 +7,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
 /**
- * Eliminates up to 140 ms chunk loading stagnation by waking WorldStreamer
- * instantaneously from its idle park when new chunk jobs are submitted.
+ * Wakes the WorldStreamer as soon as a chunk job is submitted, instead of leaving it asleep for up to 140 ms in its
+ * fixed idle sleep.
  */
 public final class StreamerWake {
 
@@ -47,7 +47,7 @@ public final class StreamerWake {
         } catch (Throwable ignored) {}
     }
 
-    /** Bytecode redirect for WorldStreamer.addJob: submits chunk and instantly unparks streamer thread. */
+    /** Redirect for WorldStreamer.addJob: submits the job and unparks the streamer thread. */
     @SuppressWarnings("unchecked")
     public static boolean enqueueChunk(ConcurrentLinkedQueue queue, Object chunk) {
         boolean result = queue.add(chunk);
@@ -55,7 +55,7 @@ public final class StreamerWake {
         return result;
     }
 
-    /** Interruptible high-precision replacement for WorldStreamer's fixed sleep. */
+    /** Replaces WorldStreamer's fixed sleep with a park I can wake. */
     public static void idle(long millis) throws InterruptedException {
         if (!active || millis <= 0) {
             Thread.sleep(millis);
@@ -72,7 +72,7 @@ public final class StreamerWake {
         }
     }
 
-    /** Unparks the WorldStreamer thread without using Thread.interrupt(), preserving NIO file channels. */
+    /** Unparks the WorldStreamer thread without Thread.interrupt(), which would close its NIO file channels. */
     public static void signal() {
         if (!active) return;
 

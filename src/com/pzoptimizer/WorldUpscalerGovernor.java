@@ -3,10 +3,10 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Opt-in world render scaling (the JAVA tab's FSR switch or -pzo_fsr): the world renders below native resolution
- * (77%, FSR's Ultra Quality, by default; JAVA tab or -pzo_fsr_quality / -pzo_fsr_scale / -pzo_fsr_sharpness) and is
- * upscaled with FSR 1.0 (EASU + RCAS) while the UI stays native. Aimed at fill-rate-limited setups such as
- * APUs (Steam Deck, ROG Ally, Iris Xe, Radeon 780M/890M) and 4K displays.
+ * Opt-in world render scaling (the JAVA tab's FSR switch or -pzo_fsr). The world renders below native resolution (77%
+ * by default, FSR's Ultra Quality; set from the JAVA tab or -pzo_fsr_quality / -pzo_fsr_scale / -pzo_fsr_sharpness) and
+ * gets upscaled with FSR 1.0 (EASU + RCAS) while the UI stays native. Meant for fill-rate limited setups like APUs
+ * (Steam Deck, ROG Ally, Iris Xe, Radeon 780M/890M) and 4K screens.
  */
 public final class WorldUpscalerGovernor {
 
@@ -124,7 +124,7 @@ public final class WorldUpscalerGovernor {
             }
         } else {
             active = false;
-            // The agent runs before main() receives the game arguments, so only main's check is conclusive
+            // The agent runs before main() gets the game arguments, so only main's check is the final word
             if (args != null) {
                 PZOLogger.info("[WorldUpscalerGovernor] FSR 1.0 Upscaler inactive (-pzo_fsr launch parameter not detected). Native resolution preserved.");
             }
@@ -139,8 +139,8 @@ public final class WorldUpscalerGovernor {
     }
 
     /**
-     * The JAVA tab's FSR switch. Saved for the next launch, where it installs the render hooks; while they are in
-     * already, it also switches FSR on or off right away.
+     * The JAVA tab's FSR switch. Saved for next launch, where it installs the render hooks; if they're already in, it
+     * also turns FSR on or off straight away.
      */
     public static void setUserEnabled(boolean enabled) {
         try {
@@ -152,7 +152,7 @@ public final class WorldUpscalerGovernor {
         }
     }
 
-    // Kept here (not read from WorldUpscaleRenderer) so isActive() never loads game render classes early
+    // Kept here rather than read from WorldUpscaleRenderer so isActive() never loads game render classes early
     private static volatile boolean pipelineFailed = false;
 
     static void markPipelineFailed() {
@@ -183,9 +183,8 @@ public final class WorldUpscalerGovernor {
     private static int lastQueuedFrame = Integer.MIN_VALUE;
 
     /**
-     * Redirect target for invokevirtual Core.RenderOffScreenBuffer(). Queues the FSR pass on the render
-     * thread right before the world composite; only once per frame because a second upscale would read
-     * the already-upscaled image as its low-resolution input.
+     * Redirect target for Core.RenderOffScreenBuffer(). Queues the FSR pass on the render thread right before the world
+     * composite, once per frame only, since a second upscale would take the already-upscaled image as its input.
      */
     public static void renderOffScreenBuffer(Object core) {
         try {
@@ -257,8 +256,8 @@ public final class WorldUpscalerGovernor {
     }
 
     /**
-     * Dynamically adjusts the FSR render scale between 65% (or the chosen scale, if lower) and the chosen scale based
-     * on frame-time headroom against the target frame interval, using deadband and hysteresis against oscillation.
+     * Moves the FSR render scale between 65% (or the chosen scale, if lower) and the chosen scale depending on how much
+     * frame time is left against the target, with a deadband and hysteresis so it doesn't oscillate.
      */
     public static void updateDynamicScale(long frameStepNanos, int targetFps) {
         if (!active || !dynamicScaleActive || frameStepNanos <= 0 || targetFps <= 0) {
@@ -296,7 +295,7 @@ public final class WorldUpscalerGovernor {
         }
         int w = Math.max(320, (int) (nativeWidth * renderScale));
         int h = Math.max(240, (int) (nativeHeight * renderScale));
-        // Align to even numbers for texture alignment
+        // Even numbers for texture alignment
         w = (w + 1) & ~1;
         h = (h + 1) & ~1;
         framesUpscaled.incrementAndGet();

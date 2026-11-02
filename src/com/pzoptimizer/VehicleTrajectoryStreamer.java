@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Delegates to PredictiveChunkStreamer; kept for existing callers. */
+/** Just forwards to PredictiveChunkStreamer, kept for old callers. */
 public final class VehicleTrajectoryStreamer {
 
     public static void start() {

@@ -1,6 +1,8 @@
 package com.pzoptimizer;
 
-/** Moves render and physics threads onto P-cores, sets MMCSS "Games" scheduling and disables Windows power throttling. */
+/**
+ * Puts the render and physics threads on P-cores, sets MMCSS "Games" scheduling and turns off Windows power throttling.
+ */
 public class PowerThrottlingShield {
     public static void apply() {
         try {

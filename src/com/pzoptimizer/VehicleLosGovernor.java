@@ -20,27 +20,26 @@ import zombie.scripting.objects.VehicleScript;
 import zombie.vehicles.BaseVehicle;
 
 /**
- * Replaces BaseVehicle.getIntersectPoint(start, end, result) in IsoZombie.isVehicleBetween. Every zombie that
- * spots a player tests the sight line against every vehicle in the cell with a full oriented-box intersection,
- * which allocates and releases pooled vectors and transforms per vehicle. The box is centred on the physics
- * origin with half extents |extents/2 + centerOfMassOffset|, so it lies inside a sphere of that radius; if the
- * segment (projected into physics space exactly as getLocalPos does, with height 0) never comes within the
- * radius, the box test cannot hit and null is returned without allocating. Otherwise the vanilla test runs.
+ * Replaces BaseVehicle.getIntersectPoint(start, end, result) in IsoZombie.isVehicleBetween. Every zombie that spots a
+ * player tests the sight line against every vehicle in the cell with a full oriented-box intersection, grabbing and
+ * releasing pooled vectors and transforms per vehicle. The box is centred on the physics origin with half extents
+ * |extents/2 + centerOfMassOffset|, so it sits inside a sphere of that radius. If the segment (projected into physics
+ * space exactly like getLocalPos does, height 0) never comes within that radius the box test can't hit, so I return
+ * null without allocating. Otherwise vanilla's test runs.
  *
- * IsoZombie.isVehicleBetween itself is also short-circuited: it walks the cell's vehicle HashSet for every zombie
- * that looks at a player. Those spheres are snapshotted once per frame into flat arrays (world centre, height
- * offset, radius), so each zombie only does a segment-to-point distance per vehicle and calls the vanilla box
- * test for the few it can actually cross. The radius carries a tile of slack for vehicles that move between the
- * snapshot and a zombie's update. The snapshot is also bucketed into 16-tile cells, so a zombie only looks at the
- * vehicles near its sight line, and the box test itself (boxHit) is vanilla's arithmetic on reused scratch objects,
- * against the vehicle's current transform, instead of allocating from the vehicle pools per test.
+ * isVehicleBetween itself is short-circuited too, since it walks the cell's vehicle HashSet for every zombie looking at
+ * a player. The spheres are snapshotted once a frame into flat arrays (world centre, height offset, radius), so each
+ * zombie just does a segment-to-point distance per vehicle and only box-tests the few it could cross. The radius has a
+ * tile of slack for vehicles that move between the snapshot and a zombie's update. The snapshot is also bucketed into
+ * 16-tile cells so a zombie only looks at vehicles near its sight line, and the box test (boxHit) is vanilla's maths on
+ * reused scratch objects against the vehicle's current transform, instead of allocating from the vehicle pools.
  */
 public final class VehicleLosGovernor {
 
     private static volatile boolean active = true;
     public static final AtomicLong testsRejected = new AtomicLong();
     public static final AtomicLong testsRun = new AtomicLong();
-    // One box test in 32 is repeated through vanilla's getIntersectPoint; any disagreement is counted
+    // One box test in 32 also runs through vanilla's getIntersectPoint, and any disagreement gets counted
     public static final AtomicLong boxChecks = new AtomicLong();
     public static final AtomicLong boxMismatches = new AtomicLong();
     private static int boxCheckTick;
@@ -58,7 +57,8 @@ public final class VehicleLosGovernor {
     // Main thread only
     private static int snapshotFrame = Integer.MIN_VALUE;
     private static int snapshotCount;
-    // Allocated on first use: patchZombie runs inside IsoZombie's class load, so static init stays free of game types
+    // Allocated on first use: patchZombie runs inside IsoZombie's class load, so static init has to stay free of game
+    // types
     private static BaseVehicle[] snapVehicles;
     private static float[] snapShape; // world x, world y, physics height, radius with slack
     private static float maxRadius;
@@ -118,7 +118,7 @@ public final class VehicleLosGovernor {
                 if (y < minY) minY = y;
                 if (y > maxY) maxY = y;
             } else {
-                snapShape[k + 3] = Float.NaN; // no shape known: always run the vanilla test
+                snapShape[k + 3] = Float.NaN; // no known shape, always use the vanilla test
             }
             n++;
         }
@@ -131,7 +131,7 @@ public final class VehicleLosGovernor {
         gridW = 0;
         if (n == 0 || minX > maxX) return;
         int w = (int) ((maxX - minX) / CELL) + 1, h = (int) ((maxY - minY) / CELL) + 1;
-        if ((long) w * h > MAX_CELLS) return; // vehicles too spread out: the linear walk is used
+        if ((long) w * h > MAX_CELLS) return; // vehicles too spread out, use the linear walk
         gridX0 = minX;
         gridY0 = minY;
         gridH = h;
@@ -165,7 +165,7 @@ public final class VehicleLosGovernor {
         float ex = zombie.getX(), ey = zombie.getY();
         long rejected = 0, run = 0;
         try {
-            // Vehicles without a known shape sit in no cell, so they always get the vanilla test
+            // Vehicles with no known shape aren't in any cell, so they always get the vanilla test
             for (int i = 0; i < snapshotCount; i++) {
                 if (snapShape[i * 4 + 3] != snapShape[i * 4 + 3]) {
                     run++;
@@ -224,9 +224,9 @@ public final class VehicleLosGovernor {
     }
 
     /**
-     * BaseVehicle.getIntersectPoint(start, end, result) != null, with the same transform, the same JOML calls and
-     * the same slab test in the same order, on reused scratch objects instead of the vehicle pools. Only x and y
-     * of the points matter: getLocalPos drops the world z.
+     * BaseVehicle.getIntersectPoint(start, end, result) != null, with the same transform, the same JOML calls and the
+     * same slab test in the same order, but on reused scratch objects instead of the vehicle pools. Only the points' x
+     * and y matter, getLocalPos drops world z.
      */
     private static boolean boxHit(BaseVehicle vehicle, float sx, float sy, float ex, float ey) {
         VehicleScript script = vehicle.getScript();
@@ -291,7 +291,10 @@ public final class VehicleLosGovernor {
         return active;
     }
 
-    /** Prefixes IsoZombie.isVehicleBetween(FFF)Z with: if (VehicleLosGovernor.isActive()) return isVehicleBetween(this, x, y, z). */
+    /**
+     * Prefixes IsoZombie.isVehicleBetween(FFF)Z with: if (VehicleLosGovernor.isActive()) return isVehicleBetween(this,
+     * x, y, z).
+     */
     static boolean patchZombie(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "isVehicleBetween", "(FFF)Z");
         if (m == null) return false;
@@ -337,7 +340,7 @@ public final class VehicleLosGovernor {
                 }
                 float cx = ax + dx * t, cz = az + dz * t;
                 float distSq = cx * cx + ay * ay + cz * cz;
-                // Small slack so float rounding can never reject a segment that grazes the box corner
+                // A little slack so float rounding can never reject a segment that just grazes the box corner
                 float r = (float) Math.sqrt(radiusSq) + 0.05f;
                 if (distSq > r * r) {
                     testsRejected.incrementAndGet();

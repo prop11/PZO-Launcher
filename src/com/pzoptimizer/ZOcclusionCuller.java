@@ -13,16 +13,16 @@ public final class ZOcclusionCuller {
 
     public static boolean shouldRenderZLevel(int z) {
         if (!UnstableChannelGuard.isUnstableBuild()) {
-            return true; // Pass through in stable builds
+            return true; // does nothing on stable builds
         }
 
         if (z >= 0) {
-            return true; // Surface and above are always rendered normally
+            return true; // surface and above always render normally
         }
 
         updatePlayerZ();
 
-        // On the surface (Z >= 0), levels below ground are hidden by the terrain
+        // On the surface (Z >= 0) anything underground is hidden by the terrain anyway
         if (cachedPlayerZ >= 0) {
             subterraneanTilesCulled.addAndGet(64); // 8x8 tile layer equivalent
             return false;

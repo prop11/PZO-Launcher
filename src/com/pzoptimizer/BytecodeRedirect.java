@@ -5,10 +5,9 @@ import java.io.DataOutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Rewrites invokevirtual calls of one method into invokestatic calls of a static replacement taking the receiver as
- * its first argument. Both instructions are 3 bytes and the operand stack is identical, so no offsets, stack map
- * frames or max_stack values change. Only real instructions inside Code attributes are rewritten: the method bodies
- * are decoded opcode by opcode, so constant data that happens to look like the call is never touched.
+ * Turns invokevirtual calls of one method into invokestatic calls of a replacement that takes the receiver first.
+ * Same instruction size and same stack, so no offsets, frames or max_stack change. Method bodies are decoded opcode
+ * by opcode, so constant data that happens to look like the call is never touched.
  */
 final class BytecodeRedirect {
 

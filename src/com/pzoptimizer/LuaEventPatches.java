@@ -21,21 +21,20 @@ import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Event.trigger (every Lua event the game fires) does two needless things per callback: it builds the profiler label
- * "Lua - " + name as a new string even with the profiler off, and after each callback it asks callbacks.contains
- * (a linear scan) whether the callback is still registered. The label is now built once per event name, and the
- * scan is skipped when the callback is still at the index it was called from (the scan's answer is then true); any
- * other case runs the scan as stock.
+ * Event.trigger (every Lua event the game fires) does two pointless things per callback: it builds the profiler label
+ * "Lua - " + name as a new string even with the profiler off, and after each callback it does a linear
+ * callbacks.contains to check it's still registered. Now the label is built once per event name, and the scan is
+ * skipped when the callback is still at the index it was called from (the scan would say true anyway).
  *
- * In addition, LuaEventPatches provides bytecode-level rate pacing and LOD governors:
- * 1. Mod OnTick / OnPlayerUpdate 60Hz Rate Clamp: 3rd-party mod per-frame handlers are paced to 60Hz on average and
- *    staggered across frames, eliminating frametime spikes on 120Hz/144Hz/240Hz monitors. At 60 FPS or below nothing is
- *    skipped, and every handler runs on a frame with a key or mouse button press or release.
- * 2. Mod Zombie Script LOD: 3rd-party zombie mod scripts run every frame near a local player, and are smoothly staggered
- *    across frames when far away (cutting 70-80% mod overhead in large hordes).
+ * Also does the rate pacing for mods:
+ * - OnTick / OnPlayerUpdate at 60 Hz: other mods' per-frame handlers run 60 times a second on average, staggered across
+ *   frames, so 120/144/240 Hz screens don't get spikes. At 60 FPS or below nothing is skipped, and every handler still
+ *   runs on a frame with a key or mouse press or release.
+ * - Zombie script LOD: mod zombie scripts run every frame near a player and staggered when far away (cuts 70-80% of mod
+ *   overhead in big hordes).
  *
- * While a benchmark runs, every callback is also timed and the total is attributed to "event file:function", so the
- * results show which Lua handlers (the game's or a mod's) cost the most, e.g. on LoadGridsquare during chunk loading.
+ * While a benchmark runs every callback is timed too and charged to "event file:function", so the results show which
+ * Lua handlers (the game's or a mod's) cost the most, e.g. LoadGridsquare during chunk loading.
  */
 public final class LuaEventPatches {
 
@@ -46,13 +45,13 @@ public final class LuaEventPatches {
 
     private static final ConcurrentHashMap<String, String> labels = new ConcurrentHashMap<>();
 
-    // Game thread only (Lua runs there); a handler may fire another event, so the current name is a stack
+    // Game thread only (Lua runs there). A handler can fire another event, so the current name is a stack
     private static final String[] eventStack = new String[64];
     private static int depth;
     private static final Map<String, long[]> handlerTimes = new HashMap<>(); // key -> {nanos, calls}
 
-    // 60Hz Mod Event Pacing (Main thread only). Each handler keeps a schedule advancing by one period per run, so the
-    // average rate is 60Hz at any frame rate; the slack keeps a locked 60 FPS with frame jitter from skipping at all.
+    // 60 Hz pacing for mod events (main thread only). Each handler has a schedule that moves on by one period per run,
+    // so the average is 60 Hz at any frame rate; the slack stops a locked 60 FPS with jitter from skipping at all.
     private static final long PACE_PERIOD_NS = 16_666_667L, PACE_SLACK_NS = 2_000_000L;
     // Next due time per handler: OnTick uses slot 0, OnPlayerUpdate one slot per local player (split-screen)
     private static final Map<Object, long[]> tickDue = new WeakHashMap<>(), playerDue = new WeakHashMap<>();
@@ -60,7 +59,7 @@ public final class LuaEventPatches {
     private static int edgeFrame = Integer.MIN_VALUE;
     private static boolean edgeThisFrame;
 
-    // GameKeyboard keeps its key states private; held lazily so this class never loads game classes early
+    // GameKeyboard keeps its key states private. Held lazily so this class never loads game classes early.
     private static final class Keys {
         static final VarHandle DOWN, LAST_DOWN;
         static {
@@ -77,7 +76,7 @@ public final class LuaEventPatches {
         }
     }
 
-    // Zombie Script LOD frame ticker
+    // Frame ticker for the zombie script LOD
     private static long zombieLODTick = 0;
 
     static {
@@ -125,7 +124,7 @@ public final class LuaEventPatches {
                 }
             }
         } catch (Throwable t) {
-            // Non-critical startup read
+            // Startup read, doesn't matter if it fails
         }
     }
 
@@ -171,7 +170,7 @@ public final class LuaEventPatches {
         }
         String f = file.replace('\\', '/').toLowerCase(java.util.Locale.ROOT);
         boolean isMod = (f.contains("/mods/") || f.contains("workshop")) && !f.contains("mpoptimiser");
-        // A 3D camera mod may move the camera from these events; pacing it would step the view above 60 FPS
+        // A 3D camera mod might move the camera from these events, and pacing it would make the view step above 60 FPS
         if (isMod && ViewpointStanddownGovernor.getMode() != ViewpointStanddownGovernor.Mode.DISABLED
                 && ViewpointStanddownGovernor.isViewpointModId(f)) {
             isMod = false;
@@ -188,10 +187,10 @@ public final class LuaEventPatches {
         modPrototypeCache.clear();
     }
 
-    // Mods whose handlers must run on every event, matched on the lower-cased script path (other mods ask through
+    // Mods whose handlers have to run on every event, matched on the lower-cased script path (other mods ask through
     // PZOApi.exemptMod instead):
     // - Real Limbs times its kick hits in OnTick and runs its Java heartbeat from OnPlayerUpdate.
-    // - Project A-Life's NPCs are zombie shells: its OnZombieUpdate fence re-applies NPC behaviour on every update (a
+    // - Project A-Life's NPCs are zombie shells. Its OnZombieUpdate fence re-applies NPC behaviour on every update (a
     //   staggered NPC runs plain zombie AI in between), and its OnTick animation client applies a fixed number of
     //   queued NPC animations per tick before they expire.
     private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife"};
@@ -203,20 +202,20 @@ public final class LuaEventPatches {
         return false;
     }
 
-    /** True when this handler call should be skipped to hold it at 60Hz on average. */
+    /** True when this call should be skipped to keep the handler at 60 Hz on average. */
     private static boolean paceSkip(Map<Object, long[]> dueMap, Object closure, int slot) {
         long now = System.nanoTime();
         long[] due = dueMap.get(closure);
         if (due == null) dueMap.put(closure, due = new long[4]);
         long next = due[slot];
         if (next == 0) {
-            // Staggered first slot so handlers registered together do not all land on the same frame
+            // Stagger the first slot so handlers registered together don't all land on the same frame
             due[slot] = now + PACE_PERIOD_NS - (System.identityHashCode(closure) & 3) * 4_000_000L;
             return false;
         }
         if (now + PACE_SLACK_NS < next) {
-            // isKeyPressed / isButtonPressed only hold for the frame of the edge, so a skipped handler would miss it;
-            // run early without moving the schedule
+            // isKeyPressed / isButtonPressed only hold for the frame of the press, so a skipped handler would miss it.
+            // Run it early without moving the schedule.
             return !inputEdgeThisFrame();
         }
         next += PACE_PERIOD_NS;
@@ -246,7 +245,7 @@ public final class LuaEventPatches {
         }
     }
 
-    /** Squared distance from the zombie to the nearest local player in its cell, or -1 when there is none. */
+    /** Squared distance from the zombie to the nearest local player in its cell, or -1 if there isn't one. */
     private static float nearestLocalPlayerDistSq(zombie.characters.IsoZombie z) {
         zombie.characters.IsoPlayer[] players = zombie.characters.IsoPlayer.players;
         if (players == null) return -1.0f;
@@ -265,7 +264,7 @@ public final class LuaEventPatches {
                             Object[] params) {
         String event = depth > 0 && depth <= eventStack.length ? eventStack[depth - 1] : "?";
 
-        // 1. Mod OnTick / OnPlayerUpdate 60Hz Rate Clamp & Frame Spreading
+        // Mod OnTick / OnPlayerUpdate at 60 Hz, spread over frames
         if (modPaced && isModClosure(closure)) {
             if ("OnTick".equals(event)) {
                 if (paceSkip(tickDue, closure, 0)) return;
@@ -276,23 +275,23 @@ public final class LuaEventPatches {
             }
         }
 
-        // 2. Mod scripts on zombies LOD: every frame near a local player, staggered when far
+        // Mod zombie scripts: every frame near a player, staggered further out
         if (zombieLod && "OnZombieUpdate".equals(event)) {
             if (isModClosure(closure) && params != null && params.length > 0 && params[0] instanceof zombie.characters.IsoZombie z
                     && !ModApi.isFullRate(z)) {
                 float distSq = nearestLocalPlayerDistSq(z);
                 if (distSq >= 0.0f) {
-                    // Proximity < 15 tiles: run every frame!
+                    // Under 15 tiles: every frame
                     if (distSq > 225.0f) {
                         long tick = zombieLODTick;
                         int zid = z.zombieId != 0 ? z.zombieId : System.identityHashCode(z);
                         if (distSq <= 900.0f) {
-                            // Mid-range (15 to 30 tiles): stagger every 3 frames
+                            // 15-30 tiles: every 3rd frame
                             if (((zid + tick) % 3) != 0) {
                                 return;
                             }
                         } else {
-                            // Far-range (> 30 tiles): stagger every 6 frames
+                            // Past 30 tiles: every 6th frame
                             if (((zid + tick) % 6) != 0) {
                                 return;
                             }
@@ -381,7 +380,7 @@ public final class LuaEventPatches {
             }
         }
         if (calls == 0) return false;
-        // Event name on entry, popped before every return; the callbacks run inside, so they see this event
+        // Event name pushed on entry and popped before every return; the callbacks run inside so they see this event
         com.pzoptimizer.shaded.asm.tree.InsnList pre = new com.pzoptimizer.shaded.asm.tree.InsnList();
         pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
         pre.add(new FieldInsnNode(Opcodes.GETFIELD, node.name, "name", "Ljava/lang/String;"));
@@ -396,7 +395,7 @@ public final class LuaEventPatches {
         return true;
     }
 
-    // The loop index n of "callbacks.get(n)" earlier in the same loop body
+    // The loop index n from "callbacks.get(n)" earlier in the same loop body
     private static int loopIndexBefore(AbstractInsnNode at) {
         for (AbstractInsnNode p = at.getPrevious(); p != null; p = p.getPrevious()) {
             if (p instanceof MethodInsnNode g && "java/util/ArrayList".equals(g.owner) && "get".equals(g.name)) {

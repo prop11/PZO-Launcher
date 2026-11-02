@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Shadow copies of the bound texture, shader program and blend state, used to skip redundant GL calls. */
+/** Shadow copies of the bound texture, shader and blend state, so redundant GL calls can be skipped. */
 public final class EngineGLStateGovernor {
 
     private static volatile int activeTextureId = -1;
@@ -9,7 +9,7 @@ public final class EngineGLStateGovernor {
     private static volatile int activeBlendDst = -1;
     private static volatile boolean blendEnabled = false;
 
-    // Mobile / GL4ES Environment Detection (Zomdroid)
+    // GL4ES on Android (Zomdroid)
     private static volatile boolean mobileGLEnvironment = false;
 
     static {
@@ -43,7 +43,7 @@ public final class EngineGLStateGovernor {
 
     public static boolean shouldBindTexture(int textureId) {
         if (textureId == activeTextureId) {
-            return false; // Skip redundant JNI bind
+            return false; // already bound
         }
         activeTextureId = textureId;
         return true;
@@ -51,7 +51,7 @@ public final class EngineGLStateGovernor {
 
     public static boolean shouldSetProgram(int programId) {
         if (programId == activeProgramId) {
-            return false; // Skip redundant shader use
+            return false; // already in use
         }
         activeProgramId = programId;
         return true;

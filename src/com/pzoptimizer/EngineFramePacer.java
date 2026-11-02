@@ -1,16 +1,14 @@
 package com.pzoptimizer;
 
 /**
- * With a capped framerate, vanilla MainThread.mainLoop spins mainThreadStep() + Thread.yield() until
- * GameWindow's accumulator reaches the next frame, burning a full core between frames. The pacer is
- * called once per frame (from EngineThreadGovernor's mainThreadLoop hook) with the next frame's due
- * time and uses the slack instead:
- * - GcSlackGovernor may tip an imminent G1 young collection into the idle window
- * - the thread sleeps until shortly before the due time, then ShortWait covers the rest
- * The last ~150us are always left to vanilla's own yield loop, so frame timing is never delayed.
+ * With a capped framerate, vanilla MainThread.mainLoop spins mainThreadStep() + Thread.yield() until the next frame is
+ * due, burning a whole core between frames. I get called once a frame (from EngineThreadGovernor's mainThreadLoop
+ * hook) with the next due time and use that slack instead: GcSlackGovernor may push an imminent young GC into it, then
+ * I sleep until just before the deadline and ShortWait covers the rest. The last ~150us are always left to vanilla's
+ * own yield loop, so frames are never late.
  *
- * Sleeping is only used while a background calibration confirms the OS timer is precise; with the
- * default 15.6 ms Windows timer a 1 ms sleep could cost a whole frame.
+ * Only sleeps while the background calibration says the OS timer is precise. With Windows' default 15.6 ms timer a 1 ms
+ * sleep can cost a whole frame.
  */
 public final class EngineFramePacer {
 
@@ -76,12 +74,10 @@ public final class EngineFramePacer {
         t.start();
     }
 
-    /**
-     * Spends the time until dueNanos (the next vanilla frameStep) without delaying it.
-     */
+    /** Uses up the time until dueNanos (the next vanilla frameStep) without delaying it. */
     public static void paceUntil(long dueNanos) {
         if (!enabled) return;
-        // Agent-only launches never run PZOEntrypoint.main, so initialize() may not have been called
+        // Agent-only launches never run PZOEntrypoint.main, so initialize() might not have happened
         if (!calibratorStarted) startCalibrator();
         long remaining = dueNanos - System.nanoTime();
         if (remaining <= SPIN_RESERVE_NANOS || remaining > MAX_PLAUSIBLE_SLACK_NANOS) return;
@@ -108,7 +104,7 @@ public final class EngineFramePacer {
         }
     }
 
-    /** Legacy entry point: paces a frame that started at frameStartNanos to the configured target. */
+    /** Old entry point: paces a frame that started at frameStartNanos to the target rate. */
     public static void paceFrame(long frameStartNanos) {
         paceUntil(frameStartNanos + targetFrameTimeNanos);
     }

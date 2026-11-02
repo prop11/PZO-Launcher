@@ -7,13 +7,12 @@ import zombie.util.IPooledObject;
 import zombie.util.Pool;
 
 /**
- * isRagdoll() is queried for every character many times per frame, but ragdolls are rare. The
- * AnimationPlayer redirects (RagdollController.alloc / Pool.tryRelease) keep an exact count of live
- * ragdoll controllers, so while none exist anywhere isRagdoll() is a single volatile read.
- * When any exist it runs vanilla's own logic through direct calls.
+ * isRagdoll() gets asked for every character many times a frame, but ragdolls are rare. The AnimationPlayer redirects
+ * (RagdollController.alloc / Pool.tryRelease) keep an exact count of live ragdoll controllers, so while there are none
+ * isRagdoll() is a single volatile read, and when there are it runs vanilla's own logic.
  *
- * The gate only engages once the agent confirms both tracking redirects applied; otherwise an
- * undercount could report a live ragdoll as not ragdolling.
+ * Only switches on once the agent confirms both tracking redirects went in, otherwise an undercount could report a live
+ * ragdoll as not ragdolling.
  */
 public final class RagdollGateGovernor {
 

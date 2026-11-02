@@ -13,15 +13,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import zombie.core.opengl.ShaderUnit;
 
 /**
- * Puddle shaders with Early-Z preserved via GL 4.2 / ARB_conservative_depth.
+ * Keeps early-Z working for the puddle shaders (GL 4.2 / ARB_conservative_depth).
  *
- * The HQ / MQ / LQ puddle fragment shaders end with gl_FragDepth = vDepth. Writing gl_FragDepth unconditionally
- * disables the GPU's early depth test unless conservative depth is declared, forcing every occluded wet pixel to run
- * the full ray-marched reflection shader.
- *
- * By declaring layout (depth_unchanged) out float gl_FragDepth, modern OpenGL 4.2+ drivers keep hardware Early-Z active
- * while keeping the exact stock depth writes intact. This avoids the localized puddle/reflection flicker caused by
- * vertex-stage depth rounding discrepancies.
+ * The HQ / MQ / LQ puddle fragment shaders end with gl_FragDepth = vDepth. Writing gl_FragDepth turns off the GPU's
+ * early depth test unless conservative depth is declared, so every hidden wet pixel ran the full ray-marched reflection
+ * shader. Declaring layout (depth_unchanged) out float gl_FragDepth keeps early-Z on with the exact same depth writes,
+ * which also avoids the puddle/reflection flicker from vertex-stage depth rounding.
  */
 public final class ShaderEarlyDepth {
 
@@ -35,7 +32,7 @@ public final class ShaderEarlyDepth {
         "layout (depth_unchanged) out float gl_FragDepth;\n" +
         "#endif\n";
 
-    // Held lazily: patchShaderUnit runs while ShaderUnit is being defined, and the lookup would load it a second time
+    // Lazy: patchShaderUnit runs while ShaderUnit is being defined, and the lookup would load it a second time
     private static final class H {
         static final MethodHandle LOAD = lookupLoad();
     }

@@ -20,17 +20,17 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * What the enabled ZombieBuddy mods patch, read from their jars before any game class loads, and what PZO leaves alone
+ * What the enabled ZombieBuddy mods patch (read from their jars before any game class loads), and what PZO leaves alone
  * because of it.
  *
  * ZombieBuddy applies each mod's @Patch(className, methodName) classes with one ByteBuddy retransformation per mod,
  * every already-loaded target class in a single retransformClasses call. If PZO changed the members of one of those
- * classes, the JVM refuses ZombieBuddy's version and the whole mod's batch is lost. So:
- *  - a PZO patch may add or rename members only in a class no enabled ZombieBuddy mod patches;
- *  - a PZO patch that rewrites a method a mod also patches stands down, since the mod's advice or replacement was
- *    written against the stock body (ZombieBuddy's own hooks are exempt: they ran alongside PZO since 1.0).
- * Jars are read as bytes, never loaded. A jar that cannot be read makes every class keep its stock shape.
- * Everything found and every stand-down is written to Zomboid/PZO_mod_compat.txt.
+ * classes, the JVM refuses ZombieBuddy's version and that mod's whole batch is lost. So:
+ * - a PZO patch may only add or rename members in a class no enabled ZombieBuddy mod patches
+ * - a PZO patch that rewrites a method a mod also patches stands down, because the mod's advice or replacement was
+ *   written against the stock body (ZombieBuddy's own hooks are fine, they've run alongside PZO since 1.0)
+ * Jars are read as bytes, never loaded. If a jar can't be read, every class keeps its stock shape. Everything found and
+ * every stand-down goes to Zomboid/PZO_mod_compat.txt.
  */
 public final class ZombieBuddyCompat {
 
@@ -141,7 +141,7 @@ public final class ZombieBuddyCompat {
         return unreadable || targets.containsKey(internalName);
     }
 
-    /** Whether any enabled ZombieBuddy mod patches this class (cheap; decides whether a patch is fingerprinted). */
+    /** Whether any enabled ZombieBuddy mod patches this class (cheap; decides whether a patch gets fingerprinted). */
     static boolean hasTargets(String internalName) {
         scan();
         return zombieBuddy && targets.containsKey(internalName);

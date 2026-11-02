@@ -4,7 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Caches Lua global function lookups, interned strings and table keys without changing the Lua API. */
+/** Caches Lua global function lookups, interned strings and table keys, without changing the Lua API. */
 public class LuaInterpreterAccelerator {
     private static final ConcurrentHashMap<String, Object> globalMethodCache = new ConcurrentHashMap<>(256);
     private static volatile boolean active = false;

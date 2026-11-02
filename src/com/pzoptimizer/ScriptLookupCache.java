@@ -16,11 +16,11 @@ import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Memo for ScriptManager.FindItem(name, moduleDefaultsToBase). Loot rolling resolves every distribution entry by name
- * on every roll: a full-type check, then for a short or unknown name the module chain (trim, alias map, module
- * cache, module map) and the module's item map. That was over half of the loot time when a new chunk is handed to
- * the game thread. The answer for a name only changes when scripts are (re)loaded, so found items are remembered
- * and the memo is emptied at the start and the end of every ScriptManager method that loads or reloads scripts.
- * A name that resolves to nothing is not remembered and always takes the stock path.
+ * on every roll: a full-type check, then for a short or unknown name the module chain (trim, alias map, module cache,
+ * module map) and the module's item map. That was over half the loot time when a new chunk is handed to the game
+ * thread. A name's answer only changes when scripts (re)load, so found items are remembered, and the memo is emptied at
+ * the start and end of every ScriptManager method that loads or reloads scripts. Names that resolve to nothing aren't
+ * remembered and always go the stock way.
  */
 public final class ScriptLookupCache {
 
@@ -28,7 +28,7 @@ public final class ScriptLookupCache {
     public static final LongAdder hits = new LongAdder();
     public static final LongAdder fills = new LongAdder();
 
-    // Items are also created off the game thread (chunk loading on the streamer), so the maps are concurrent
+    // Items get created off the game thread too (chunk loading on the streamer), so the maps are concurrent
     private static final ConcurrentHashMap<String, Object> withBase = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Object> withoutBase = new ConcurrentHashMap<>();
 

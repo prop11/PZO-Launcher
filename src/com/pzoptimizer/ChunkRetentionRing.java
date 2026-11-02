@@ -2,7 +2,7 @@ package com.pzoptimizer;
 
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Tracks chunks touched in the last 45 s, so recently visited chunks can be kept when the player crosses back over a boundary. */
+/** Remembers chunks touched in the last 45 s so they can be kept when the player crosses back over a boundary. */
 public final class ChunkRetentionRing {
 
     private static final int MAX_RETAINED_CHUNKS = 512;

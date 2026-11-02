@@ -5,14 +5,14 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Settings screen "Silent zombies skip sound upkeep" (JVM_SilentZombieAudio).
+ * Silent zombies skip sound upkeep (JVM_SilentZombieAudio).
  *
  * IsoGameCharacter.updateEmitter recomputes every FMOD parameter of the character each frame (footstep material,
- * inside, player distance, zombie state...) and, every 30 ms, places and ticks its three emitters; for a prone zombie
- * that includes a head bone lookup. For a zombie whose emitters hold no sound at all (nothing queued, playing or
- * fading) all of that feeds nothing: the parameters only reach FMOD event instances, and sounds are only started
- * inside that same emitter tick. The first updateEmitter after a sound is queued finds the emitter not clear and runs
- * in full, so the sound starts with this frame's parameter values and position, exactly as before.
+ * inside, player distance, zombie state...) and every 30 ms places and ticks its three emitters, which for a prone
+ * zombie includes a head bone lookup. If none of a zombie's emitters has any sound (nothing queued, playing or fading)
+ * all of that feeds nothing: the parameters only go to FMOD event instances, and sounds only start inside that same
+ * emitter tick. The first updateEmitter after a sound is queued sees the emitter isn't clear and runs in full, so the
+ * sound starts with this frame's parameters and position just like before.
  */
 public final class SilentZombieAudio {
 

@@ -4,7 +4,7 @@ package com.pzoptimizer.server;
 public class ServerChunkStreamBooster {
     public static void apply() {
         try {
-            // 256KB page-aligned buffer chunks for SQLite .db and map_*.bin files
+            // 256 KB buffers for the SQLite .db and map_*.bin files
             System.setProperty("pzo.server.stream_buffer_size", "262144");
             System.setProperty("jdk.nio.maxCachedBufferSize", "524288");
             System.setProperty("sun.nio.PageAlignDirectMemory", "true");

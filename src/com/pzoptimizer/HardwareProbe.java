@@ -4,21 +4,23 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 /**
- * This PC's CPU, RAM and main GPU for the settings screen's per-PC verdicts, read once on a background thread through
- * the OSHI library the game itself uses for its "System specs" log. OSHI is reached by reflection: its FFM build needs a
- * newer Java than PZO compiles for. Until the probe finishes (or if it fails) the summary is empty and Lua falls back.
+ * This PC's CPU, RAM and main GPU for the settings screen's per-PC verdicts, read once in the background through OSHI
+ * (what the game uses for its "System specs" log). Reached by reflection because its FFM build needs a newer Java than
+ * I compile for. Until the probe finishes, or if it fails, the summary is empty and Lua falls back.
  */
 public final class HardwareProbe {
 
     private static volatile String summary = "";
     private static volatile boolean started = false;
+    // Graphics adapters OSHI found: -1 while probing, 0 if the probe failed
+    private static volatile int gpuCount = -1;
 
     private HardwareProbe() {}
 
     /**
-     * "cpu=..;cores=N;threads=N;ramMb=N;gpu=..;vramMb=N", or "" while still probing. With a hardware override set
-     * (settings screen developer mode, pzo_config.json "hardware_override"), its keys replace the real ones and
-     * "spoofed=1" is added, so the recommendations can be tried for other PCs.
+     * "cpu=..;cores=N;threads=N;ramMb=N;gpu=..;vramMb=N", or "" while still probing. A hardware override (developer
+     * mode on the settings screen, pzo_config.json "hardware_override") replaces those keys and adds "spoofed=1", so
+     * the recommendations can be tried out for other PCs.
      */
     public static String getSummary() {
         start();
@@ -42,6 +44,12 @@ public final class HardwareProbe {
     public static String getRealSummary() {
         start();
         return summary;
+    }
+
+    /** Graphics adapters in this PC: -1 while still probing, 0 if the probe failed. */
+    public static int getGpuCount() {
+        start();
+        return gpuCount;
     }
 
     public static synchronized void start() {
@@ -69,8 +77,9 @@ public final class HardwareProbe {
             long ram = (Long) call(call(hal, "getMemory"), "getTotal");
             append(sb, "ramMb", String.valueOf(ram / (1024L * 1024L)));
 
-            // Laptops and desktops with an iGPU list two cards; the game renders on the one with the most video memory
+            // Laptops and desktops with an iGPU list two cards; the game renders on whichever has the most VRAM
             List<?> gpus = (List<?>) call(hal, "getGraphicsCards");
+            gpuCount = gpus.size();
             Object best = null;
             long bestVram = -1;
             for (Object g : gpus) {
@@ -87,6 +96,7 @@ public final class HardwareProbe {
             summary = sb.toString();
             PZOLogger.info("[HardwareProbe] " + summary);
         } catch (Throwable t) {
+            if (gpuCount < 0) gpuCount = 0;
             PZOLogger.warn("[HardwareProbe] Hardware details not readable, verdicts fall back to RAM only: " + t);
         }
     }

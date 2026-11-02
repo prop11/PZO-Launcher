@@ -4,10 +4,9 @@ import java.util.Locale;
 import java.util.concurrent.locks.LockSupport;
 
 /**
- * On Linux and macOS, LockSupport.parkNanos(10_000) sleeps for tens of microseconds as requested. On
- * Windows, HotSpot rounds any park below 1 ms up to a full millisecond (or the current timer quantum),
- * turning a 10 us barrier wait into a ~1 ms game-thread stall, so Windows uses Thread.onSpinWait() +
- * Thread.yield() (SwitchToThread) instead.
+ * On Linux and macOS LockSupport.parkNanos(10_000) sleeps for tens of microseconds like you'd expect. On Windows,
+ * HotSpot rounds any park under 1 ms up to a whole millisecond (or the timer quantum), so a 10 us barrier wait turns
+ * into a ~1 ms game-thread stall. Windows uses Thread.onSpinWait() + Thread.yield() (SwitchToThread) instead.
  */
 public final class ShortWait {
 

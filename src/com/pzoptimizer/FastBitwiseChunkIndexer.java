@@ -23,7 +23,7 @@ public final class FastBitwiseChunkIndexer {
         return ((long) (z & 0xFF) << 48) | ((long) (x & 0xFFFFFF) << 24) | (y & 0xFFFFFF);
     }
 
-    /** Interleaves two 16-bit values into a 32-bit Morton (Z-order) code, keeping neighbouring tiles close in memory. */
+    /** Interleaves two 16-bit values into a 32-bit Morton code, so neighbouring tiles sit close together in memory. */
     public static int mortonEncode2D(int x, int y) {
         return (spreadBits(x & 0xFFFF)) | (spreadBits(y & 0xFFFF) << 1);
     }

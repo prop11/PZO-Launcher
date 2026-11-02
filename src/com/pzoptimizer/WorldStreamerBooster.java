@@ -3,7 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 
-/** Raises the World Streamer and Lighting thread priorities so they are not starved while driving. */
+/** Bumps the World Streamer and Lighting thread priorities so they don't get starved while driving. */
 public class WorldStreamerBooster {
 
     private static volatile boolean streamBoosterInstalled = false;

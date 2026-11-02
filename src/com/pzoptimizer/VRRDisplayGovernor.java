@@ -4,9 +4,9 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * On G-Sync / FreeSync displays, reaching the refresh rate pushes the driver into V-Sync buffering and adds
- * 20-40 ms of input lag. This reads the display refresh rate and caps just below it (58 at 60 Hz, 141 at
- * 144 Hz, 237 at 240 Hz) to stay inside the VRR window.
+ * On G-Sync / FreeSync displays, hitting the refresh rate drops the driver into V-Sync buffering and adds 20-40 ms of
+ * input lag. I read the refresh rate and cap just under it (58 at 60 Hz, 141 at 144 Hz, 237 at 240 Hz) to stay inside
+ * the VRR range.
  */
 public final class VRRDisplayGovernor {
 
@@ -54,10 +54,7 @@ public final class VRRDisplayGovernor {
         return hz;
     }
 
-    /**
-     * Calculates the sub-refresh frame cap using standard VRR framing formula:
-     * floor(hz - (hz * hz / 3600.0))
-     */
+    /** Cap just under the refresh rate: floor(hz - hz * hz / 3600). */
     public static int calculateOptimalCap(int refreshRate) {
         if (refreshRate <= 60) return 58;
         if (refreshRate <= 120) return 117;

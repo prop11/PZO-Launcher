@@ -7,7 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** KahluaTableImpl backing map: contiguous integer keys 1..N live in a flat Object[], everything else in a LinkedHashMap. */
+/** KahluaTableImpl backing map: integer keys 1..N go in a flat Object[], everything else in a LinkedHashMap. */
 public class FastLuaMap extends AbstractMap<Object, Object> {
 
     private Object[] arrayPart = new Object[16];

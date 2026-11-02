@@ -4,12 +4,12 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-/** Meters chunk integration on the main thread to a per-frame time budget. A B42 chunk holds 2,048 squares (32 levels). */
+/** Caps how much chunk integration the main thread does per frame. A B42 chunk is 2,048 squares (32 levels). */
 public final class ChunkIngestionPacer {
 
     private static volatile boolean active = false;
     private static volatile boolean pacerInstalled = false;
-    // Set when this game build lacks the fields we hook; the maintenance daemon retries every second otherwise.
+    // Set if this game build doesn't have the fields I hook; otherwise the daemon retries every second
     private static volatile boolean pacerUnavailable = false;
     private static volatile boolean pacerWarned = false;
 
@@ -107,7 +107,7 @@ public final class ChunkIngestionPacer {
                 lockUpgraded = true;
             }
         } catch (Throwable t) {
-            // IsoChunkMap not yet loaded; will retry on next check
+            // IsoChunkMap isn't loaded yet, try again next check
         }
     }
 
@@ -139,11 +139,10 @@ public final class ChunkIngestionPacer {
     private static volatile int lastUnloadFrameCount = -1;
 
     /**
-     * Paces the teardown of orphaned chunks left in IsoChunkMap.SharedChunks.
-     *
-     * Vanilla removes and tears down the ~13 trailing chunks of a boundary crossing in one frame (50-80 ms
-     * at driving speed). With the Up/Down/Left/Right patch the map shift itself is cheap and the trailing
-     * chunks stay in SharedChunks; this unloads them on frames that ingested nothing, one per frame.
+     * Spreads out tearing down the orphaned chunks left in IsoChunkMap.SharedChunks. Vanilla tears down the ~13
+     * trailing chunks of a boundary crossing in one frame (50-80 ms at driving speed). With the Up/Down/Left/Right
+     * patch the shift itself is cheap and those chunks stay in SharedChunks, so I unload one per frame on frames that
+     * didn't ingest anything.
      */
     public static boolean isPlayerDriving() {
         return PacedConcurrentQueue.isPlayerDriving();
@@ -151,7 +150,7 @@ public final class ChunkIngestionPacer {
 
     public static void processPendingUnloads() {
         if (isEngineLoading()) return;
-        if (isPlayerDriving()) return; // Do not unload chunks while driving to avoid collision/mesh gaps
+        if (isPlayerDriving()) return; // no unloading while driving, it leaves collision/mesh gaps
 
         try {
             if (zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
@@ -166,11 +165,11 @@ public final class ChunkIngestionPacer {
             } catch (Throwable ignored) {}
 
             if (currentFrame != -1 && currentFrame == lastUnloadFrameCount) {
-                return; // Already processed for this frame tick
+                return; // already done this tick
             }
             lastUnloadFrameCount = currentFrame;
 
-            // tryLock: skip this tick if bSettingChunk is held
+            // tryLock: just skip this tick if bSettingChunk is held
             if (!zombie.iso.IsoChunkMap.bSettingChunk.tryLock()) {
                 return;
             }
@@ -200,7 +199,7 @@ public final class ChunkIngestionPacer {
                         continue;
                     }
 
-                    // An orphaned chunk is one no longer referenced by any active player IsoChunkMap
+                    // Orphaned = no longer referenced by any player's IsoChunkMap
                     if (chunk.refs == null || chunk.refs.isEmpty()) {
                         if (ChunkRetentionRing.isRetained(chunk.wx, chunk.wy)) {
                             continue;
@@ -225,9 +224,7 @@ public final class ChunkIngestionPacer {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Drains all orphaned chunks in SharedChunks immediately (used on game shutdown or cell unloads).
-     */
+    /** Drops every orphaned chunk in SharedChunks right away (shutdown, cell unloads). */
     public static void flushAllUnloads() {
         try {
             if (zombie.iso.IsoChunkMap.SharedChunks == null || zombie.iso.IsoChunkMap.SharedChunks.isEmpty()) return;
@@ -271,9 +268,7 @@ public final class ChunkIngestionPacer {
         }
     }
 
-    /**
-     * Specialized ConcurrentLinkedQueue that meters poll() invocations on the main thread.
-     */
+    /** ConcurrentLinkedQueue that meters poll() calls on the main thread. */
     public static final class PacedConcurrentQueue extends ConcurrentLinkedQueue<Object> {
         private static final long serialVersionUID = 42L;
 
@@ -372,8 +367,8 @@ public final class ChunkIngestionPacer {
                 }
             } catch (Throwable ignored) {}
 
-            // Only reset after a >500 ms gap (debugger pause or external stall); resetting on smaller gaps pushed
-            // the following chunks into the same frame.
+            // Only reset after a gap over 500 ms (debugger pause, external stall). Resetting on smaller gaps shoved the
+            // next chunks into the same frame.
             if (now - frameStartTime > 500_000_000L) {
                 frameStartTime = now;
                 chunksThisFrame = 0;
@@ -382,7 +377,7 @@ public final class ChunkIngestionPacer {
 
         @Override
         public Object poll() {
-            // Background callers (WorldStreamer, WorldReuser) are not metered
+            // Background callers (WorldStreamer, WorldReuser) aren't metered
             String threadName = Thread.currentThread().getName();
             if (threadName != null && (threadName.contains("WorldStreamer") || threadName.contains("Reuser"))) {
                 Object chunk = super.poll();
@@ -390,7 +385,7 @@ public final class ChunkIngestionPacer {
                 return chunk;
             }
 
-            // Drain without a limit while loading (boot, teleports, cell loads)
+            // No limit while loading (boot, teleports, cell loads)
             if (isEngineLoading()) {
                 Object chunk = super.poll();
                 if (chunk != null) approximateSize.decrementAndGet();
@@ -401,8 +396,8 @@ public final class ChunkIngestionPacer {
 
             checkFrameBoundary(now);
 
-            // While driving, a chunk boundary crossing needs 13-26 chunks, so ingest up to 32 under a 12 ms ceiling;
-            // a smaller cap lets the vehicle outrun ingestion onto missing floor tiles.
+            // Driving across a chunk boundary needs 13-26 chunks, so take up to 32 under a 12 ms ceiling. Any lower and
+            // the car outruns ingestion onto missing floor.
             boolean driving = isPlayerDriving();
             int backlog = approximateSize.get();
             int maxChunks;
@@ -418,7 +413,7 @@ public final class ChunkIngestionPacer {
             }
 
             if (chunksThisFrame > 0 && (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos)) {
-                // Budget spent; the rest is integrated next frame
+                // Out of budget, the rest goes next frame
                 return null;
             }
 

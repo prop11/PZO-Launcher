@@ -16,13 +16,9 @@ import java.lang.invoke.VarHandle;
 import java.util.List;
 
 /**
- * Settings screen "Distant zombie attachment culling" (Horde_CullDistantAttachments).
- *
- * Every frame ModelSlotRenderData.initModelInst collects a character's sub-models for drawing, including the models of
- * items worn on belts, backs and holsters (ModelSlot.attachedModels). For zombies farther than CULL_TILES from every
- * local player those models are left out of that frame's render data: a few pixels each, but a separate draw with its
- * own skinning per item across a horde. Nothing about the zombie or its items changes, and the next frame it is in
- * range they are drawn again; items in the hands are never skipped.
+ * Skips the belt, back and holster item models on zombies further than CULL_TILES from every player
+ * (Horde_CullDistantAttachments). Each one is only a few pixels but it's its own skinned draw, which adds up across a
+ * horde. Only that frame's render data changes, and items in the hands are always drawn.
  */
 public final class AttachmentCull {
 

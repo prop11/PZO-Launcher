@@ -10,8 +10,7 @@ public class HighPrecisionTimer {
 
         Thread timerThread = new Thread(() -> {
             try {
-                // Sleeping on a long interval keeps the JVM's timer resolution request active
-                // for the whole process.
+                // Sleeping on a long interval keeps the JVM's timer resolution request active for the whole process
                 while (true) {
                     Thread.sleep(60000);
                 }

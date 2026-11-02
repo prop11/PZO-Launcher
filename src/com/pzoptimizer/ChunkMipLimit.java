@@ -7,10 +7,9 @@ import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 
 /**
- * FBORenderChunk.endRenderThread rebuilds the whole mip chain of a chunk texture after every bake (11 levels for
- * 1024x1024). The world composite samples these textures at a level of detail around 1 even at the widest zoom, so
- * only the first few levels are ever read. GL_TEXTURE_MAX_LEVEL is set before glGenerateMipmap so the chain stops at
- * MAX_LEVEL; anything sampling deeper clamps to it. The levels that are built hold the same pixels as before.
+ * FBORenderChunk.endRenderThread rebuilds a chunk texture's whole mip chain after every bake (11 levels at 1024x1024),
+ * but the world composite samples around level 1 even at the widest zoom. So set GL_TEXTURE_MAX_LEVEL before
+ * glGenerateMipmap and stop at MAX_LEVEL; anything sampling deeper just clamps. The levels I do build are unchanged.
  */
 public final class ChunkMipLimit {
 
@@ -22,7 +21,7 @@ public final class ChunkMipLimit {
 
     private ChunkMipLimit() {}
 
-    // Replaces GL30.glGenerateMipmap(target) in endRenderThread; render thread, the chunk texture is bound
+    // Replaces GL30.glGenerateMipmap(target) in endRenderThread (render thread, chunk texture bound)
     public static void generate(int target) {
         org.lwjgl.opengl.GL11.glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, active ? maxLevel : STOCK_MAX_LEVEL);
         org.lwjgl.opengl.GL30.glGenerateMipmap(target);

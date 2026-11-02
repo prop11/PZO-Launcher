@@ -17,6 +17,12 @@ public final class PZOConfig {
     private static volatile boolean powerShieldEnabled = true;
     private static volatile boolean luaCompileCache = true;
     private static volatile boolean fastLoad = true;
+    // Set when I added the Windows "High performance" GPU preference, so I know I can take it out again
+    private static volatile boolean gpuPrefWritten = false;
+    // Loading features that kick in before the Lua settings arrive, so they're read at launch
+    private static volatile boolean textureHandoff = true;
+    private static volatile boolean depthMapParallel = true;
+    private static volatile boolean animImportCache = true;
     // Testing aid: "key=value;..." merged over HardwareProbe's real values, "" for the real hardware
     private static volatile String hardwareOverride = "";
     // "auto", "on" or "off": compatibility mode for older PCs, see CompatMode
@@ -56,6 +62,10 @@ public final class PZOConfig {
                 powerShieldEnabled = !(content.contains("\"power_shield\":false") || content.contains("\"power_shield\": false"));
                 luaCompileCache = !(content.contains("\"lua_compile_cache\":false") || content.contains("\"lua_compile_cache\": false"));
                 fastLoad = !(content.contains("\"fast_load\":false") || content.contains("\"fast_load\": false"));
+                textureHandoff = !(content.contains("\"texture_handoff\":false") || content.contains("\"texture_handoff\": false"));
+                depthMapParallel = !(content.contains("\"depth_map_parallel\":false") || content.contains("\"depth_map_parallel\": false"));
+                animImportCache = !(content.contains("\"anim_import_cache\":false") || content.contains("\"anim_import_cache\": false"));
+                gpuPrefWritten = content.contains("\"gpu_pref_written\":true") || content.contains("\"gpu_pref_written\": true");
                 String hw = extractJsonField(content, "hardware_override");
                 hardwareOverride = hw == null ? "" : hw;
                 String cm = extractJsonField(content, "compat_mode");
@@ -69,11 +79,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -187,7 +197,10 @@ public final class PZOConfig {
         PZOLogger.info("[PZO Config] Third-party Java mod loading set to: " + enabled + " (applies on next launch)");
     }
 
-    /** Kernel QoS (timer, power throttling exemption, MMCSS, priority): applied at launch, so a change applies on the next one. */
+    /**
+     * Kernel QoS (timer, power throttling exemption, MMCSS, priority). Applied at launch, so changes take effect next
+     * time.
+     */
     public static boolean isPowerShieldEnabled() {
         load();
         return powerShieldEnabled;
@@ -201,7 +214,7 @@ public final class PZOConfig {
         PZOLogger.info("[PZO Config] CPU power shield set to: " + enabled + " (applies on next launch)");
     }
 
-    /** Lua compile cache (LuaCompileCache): read at launch, before the Lua mod's settings exist. */
+    /** Lua compile cache. Read at launch, before the Lua mod's settings exist. */
     public static boolean isLuaCompileCacheEnabled() {
         load();
         return luaCompileCache;
@@ -215,7 +228,7 @@ public final class PZOConfig {
         PZOLogger.info("[PZO Config] Lua compile cache set to: " + enabled + " (applies on next launch)");
     }
 
-    /** Faster file and map loading (ScriptCommentStrip, MapLoadFixes): read at launch. */
+    /** Faster file and map loading (ScriptCommentStrip, MapLoadFixes). Read at launch. */
     public static boolean isFastLoadEnabled() {
         load();
         return fastLoad;
@@ -227,6 +240,55 @@ public final class PZOConfig {
         fastLoad = enabled;
         save();
         PZOLogger.info("[PZO Config] Faster file and map loading set to: " + enabled + " (applies on next launch)");
+    }
+
+    public static boolean isTextureHandoffEnabled() {
+        load();
+        return textureHandoff;
+    }
+
+    public static synchronized void setTextureHandoffEnabled(boolean enabled) {
+        load();
+        if (textureHandoff == enabled) return;
+        textureHandoff = enabled;
+        save();
+    }
+
+    public static boolean isDepthMapParallelEnabled() {
+        load();
+        return depthMapParallel;
+    }
+
+    public static synchronized void setDepthMapParallelEnabled(boolean enabled) {
+        load();
+        if (depthMapParallel == enabled) return;
+        depthMapParallel = enabled;
+        save();
+    }
+
+    public static boolean isAnimImportCacheEnabled() {
+        load();
+        return animImportCache;
+    }
+
+    public static synchronized void setAnimImportCacheEnabled(boolean enabled) {
+        load();
+        if (animImportCache == enabled) return;
+        animImportCache = enabled;
+        save();
+        PZOLogger.info("[PZO Config] Imported animation cache set to: " + enabled + " (applies on next launch)");
+    }
+
+    public static boolean isGpuPrefWritten() {
+        load();
+        return gpuPrefWritten;
+    }
+
+    public static synchronized void setGpuPrefWritten(boolean written) {
+        load();
+        if (gpuPrefWritten == written) return;
+        gpuPrefWritten = written;
+        save();
     }
 
     public static String getHardwareOverride() {
@@ -256,7 +318,7 @@ public final class PZOConfig {
         PZOLogger.info("[PZO Config] Compatibility mode set to: " + m + " (applies on next launch)");
     }
 
-    /** FSR world upscaling switched on in the JAVA tab; read at launch, since the render hooks go in before the game starts. */
+    /** FSR world upscaling from the JAVA tab. Read at launch, since the render hooks go in before the game starts. */
     public static boolean isFsrEnabled() {
         load();
         return fsrEnabled;
@@ -270,7 +332,7 @@ public final class PZOConfig {
         PZOLogger.info("[PZO Config] FSR world upscaling set to: " + enabled);
     }
 
-    /** Returns "APPROVED", "BLOCKED" or null when the user has not decided on this jar hash yet. */
+    /** "APPROVED", "BLOCKED", or null if the user hasn't decided on this jar hash yet. */
     public static synchronized String getJavaModDecision(String sha256) {
         load();
         if (approvedJavaMods.contains(sha256)) return "APPROVED";

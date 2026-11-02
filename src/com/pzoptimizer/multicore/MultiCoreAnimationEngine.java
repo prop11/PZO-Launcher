@@ -34,9 +34,7 @@ public final class MultiCoreAnimationEngine {
         PZOLogger.success("[MultiCoreAnimationEngine] Armed: Thread-Safe Multi-Core Skeletal Animation Pipeline");
     }
 
-    /**
-     * Determines whether full skeletal skinning matrix transformation should occur for a given entity.
-     */
+    /** Whether this entity needs full skinning. */
     public static boolean shouldSkinModel(float screenX, float screenY, int entityIndex) {
         if (entityIndex >= 0 && MultiCoreHordeGovernor.isEntityCulled(entityIndex)) {
             totalBoneTransformsBypassed.addAndGet(64);
@@ -56,9 +54,7 @@ public final class MultiCoreAnimationEngine {
         return true;
     }
 
-    /**
-     * Determines whether bone transforms should be evaluated this frame for distant entities (LOD downsampling).
-     */
+    /** Whether a distant entity's bones should be evaluated this frame (LOD). */
     public static boolean shouldUpdateLOD(int entityIndex, long frameCounter) {
         if (entityIndex < 0) return true;
 
@@ -70,9 +66,7 @@ public final class MultiCoreAnimationEngine {
         return true;
     }
 
-    /**
-     * Parallelizes ModelSlot direction and track pre-staging across worker pool.
-     */
+    /** Spreads ModelSlot direction and track pre-staging across the worker pool. */
     public static void stageParallelModelSlots(List<ModelManager.ModelSlot> slots, float delta) {
         if (slots == null || slots.isEmpty() || PZOMultiCoreEngine.getExecutor() == null) return;
 
