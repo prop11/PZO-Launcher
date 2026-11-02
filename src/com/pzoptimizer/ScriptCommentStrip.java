@@ -12,17 +12,17 @@ import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Settings screen "Faster file and map loading" (JVM_FastLoad, next launch).
+ * Part of "Faster file and map loading" (JVM_FastLoad, next launch).
  *
- * ScriptParser.stripComments removes block comments by walking back from the end of the text and calling
- * StringBuilder.replace for each one, which moves everything after it. media/tileGeometry.txt alone is 6.5 MB with
- * 22,080 comments, so every boot moved tens of gigabytes of characters; script files, sandbox options and mods'
- * files go through the same method. This runs the same search, in the same order, over a view of the text in which
- * removed regions are skipped instead of moved, so the result is identical and the cost is linear.
+ * ScriptParser.stripComments removes block comments by walking back from the end and calling StringBuilder.replace for
+ * each one, which shifts everything after it. media/tileGeometry.txt alone is 6.5 MB with 22,080 comments, so every
+ * boot shifted tens of gigabytes of characters, and script files, sandbox options and mod files all go through the same
+ * method. I run the same search in the same order over a view of the text where removed bits are skipped rather than
+ * moved, so the result is identical and the cost is linear.
  *
  * The view is the untouched prefix a[0, prefix) followed by the kept tail. Every search after a removal starts at or
- * before the removal point, and a two-character search starting there reads at most one character of the tail, so
- * only the tail's first two characters are ever looked at and the tail can stay a list of untouched ranges.
+ * before the removal point, and a two-character search starting there reads at most one character of the tail, so only
+ * the tail's first two characters ever get looked at and the tail can just be a list of untouched ranges.
  */
 public final class ScriptCommentStrip {
 
@@ -63,7 +63,7 @@ public final class ScriptCommentStrip {
             // Remove [start, end + 2) from the view
             int cut = end + 2;
             if (cut > prefix) {
-                // The removed range runs into the tail: drop that many characters from the tail's front
+                // The removed range runs into the tail, so drop that many characters off the tail's front
                 int drop = cut - prefix;
                 tailLen -= drop;
                 while (drop > 0) {

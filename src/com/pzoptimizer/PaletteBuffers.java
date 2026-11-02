@@ -5,17 +5,17 @@ import org.lwjgl.util.vector.Matrix;
 import org.lwjgl.util.vector.Matrix4f;
 
 /**
- * Bulk replacements for Matrix4f.store(FloatBuffer) and Matrix4f.load(FloatBuffer) in
+ * Bulk versions of Matrix4f.store(FloatBuffer) and Matrix4f.load(FloatBuffer) for
  * AnimatedModel$AnimatedModelInstanceRenderData (initMatrixPalette writes every bone of every animated model into a
- * direct buffer each frame, init reads it back). The lwjgl methods do sixteen single-float put/get calls, and on
- * this JDK every access to a direct buffer pays a memory-session validity check. These copy the same sixteen floats
- * in the same order (m00, m01, m02, m03, m10 ... m33, as Matrix4f.store does) through one bulk put or get.
+ * direct buffer each frame and init reads it back). lwjgl does sixteen single-float put/get calls, and on this JDK
+ * every direct buffer access pays a memory-session check. These copy the same sixteen floats in the same order (m00,
+ * m01, m02, m03, m10 ... m33, like Matrix4f.store) with one bulk put or get.
  */
 public final class PaletteBuffers {
 
     public static volatile boolean active = true;
 
-    // The game thread's scratch row; any other thread gets its own array
+    // The game thread's scratch row; other threads get their own array
     private static volatile Thread owner;
     private static final float[] scratch = new float[16];
 

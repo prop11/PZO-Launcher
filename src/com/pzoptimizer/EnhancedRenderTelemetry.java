@@ -4,7 +4,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.util.Locale;
 
-/** Collects PZO culling and throttling counters and turns them into estimated CPU/GPU time savings. */
+/** Turns PZO's culling and throttling counters into rough CPU/GPU time saved. */
 public final class EnhancedRenderTelemetry {
 
     public static class MetricsSnapshot {
@@ -47,16 +47,16 @@ public final class EnhancedRenderTelemetry {
         snap.parallelSimulatedEntities = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
         snap.multiCoreWorkers = com.pzoptimizer.multicore.PZOMultiCoreEngine.getWorkerCount();
 
-        // Hardware cost weightings:
-        // ~0.0015 ms CPU time saved per culled draw call + state check
-        // ~0.0035 ms GPU raster/vertex time saved per subterranean tile
-        // ~0.0006 ms CPU SIMD time saved per 4x4 bone matrix multiplication
-        // ~0.0010 ms JNI driver switch time saved per redundant GL call
-        // ~0.0040 ms CPU time saved per throttled distant zombie AI / pathfind tick
+        // Rough cost per thing saved:
+        //   ~0.0015 ms CPU per culled draw call + state check
+        //   ~0.0035 ms GPU per skipped underground tile
+        //   ~0.0006 ms CPU per 4x4 bone matrix multiply
+        //   ~0.0010 ms per redundant GL call (JNI + driver)
+        //   ~0.0040 ms CPU per throttled distant zombie AI / pathfind tick
         snap.estimatedCpuMsSaved = (snap.drawsCulled * 0.0015) + (snap.boneTransformsSaved * 0.0006) + (snap.glCallsFiltered * 0.0010) + (snap.throttledTownZombies * 0.0040);
         snap.estimatedGpuMsSaved = (snap.drawsCulled * 0.0012) + (snap.subterraneanTilesCulled * 0.0035);
 
-        // Baseline frame budget 16.6ms (60 FPS); compute estimated efficiency dividend
+        // Against a 16.6 ms (60 FPS) frame
         double frameSavings = Math.min(8.0, (snap.estimatedCpuMsSaved + snap.estimatedGpuMsSaved) / 1000.0);
         snap.estimatedFpsGainPercent = Math.min(75.0, (frameSavings / 16.6) * 100.0);
 
@@ -83,7 +83,6 @@ public final class EnhancedRenderTelemetry {
         sb.append("#### Enhanced Rendering & Multi-Core Scaling Telemetry (Unstable Channel)\n");
         sb.append(String.format(Locale.US, "- **P-Core Performance Workers**: %d Threads (Affinity Mask Active)\n", s.multiCoreWorkers));
         sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks (Zero-Void Multi-Core Streaming)\n", s.parallelChunksStreamed));
-        sb.append(String.format(Locale.US, "- **Spatial Island Parallel Simulation**: %,d entity updates\n", s.parallelSimulatedEntities));
         sb.append(String.format(Locale.US, "- **SIMD AVX2 Spatial Processor**: %s\n", s.avx2SpatialActive ? "ACTIVE (8-wide YMM registers)" : "SCALAR FALLBACK"));
         sb.append(String.format(Locale.US, "- **Horde Zombies Monitored**: %,d (Offscreen Culled: %,d | Hibernating: %,d)\n",
             s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating));

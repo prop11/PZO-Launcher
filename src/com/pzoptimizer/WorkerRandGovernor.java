@@ -6,13 +6,12 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Vanilla RandStandard.INSTANCE is one CellularAutomatonRNG behind a fair ReentrantLock, so PZO workers
- * drawing random numbers concurrently (chunk parsing, animation, spatial checks) contend on it.
- * RandStandard.INSTANCE's internal Random is wrapped so that:
- * - the main game thread goes straight to the stock generator (a reference compare), keeping its sequence
- * - PZO worker threads (PZO-MultiCore-Worker, PZO-ChunkStreamer-Worker, PZO-MultiCoreHordeGovernor) use
+ * Vanilla RandStandard.INSTANCE is one CellularAutomatonRNG behind a fair ReentrantLock, so my workers fight over it
+ * when they draw random numbers at the same time (chunk parsing, animation, spatial checks). I wrap its Random so:
+ * - the main game thread goes straight to the stock generator (one reference compare) and keeps its sequence
+ * - PZO's worker threads (PZO-MultiCore-Worker, PZO-ChunkStreamer-Worker, PZO-MultiCoreHordeGovernor) use
  *   ThreadLocalRandom with no lock
- * - the wrapper is re-applied if world init replaces RandStandard.INSTANCE.rand
+ * - the wrapper goes back on if world init replaces RandStandard.INSTANCE.rand
  */
 public final class WorkerRandGovernor extends Random {
 
@@ -50,8 +49,8 @@ public final class WorkerRandGovernor extends Random {
     }
 
     /**
-     * Installs or re-installs the worker RNG wrapper on zombie.core.random.RandStandard.INSTANCE. Cheap to
-     * call every frame: one reference compare when already wrapped.
+     * Puts the worker RNG wrapper on RandStandard.INSTANCE (again). Fine to call every frame, it's one reference
+     * compare once wrapped.
      */
     public static void ensureInstalled() {
         if (!active) return;
@@ -98,9 +97,9 @@ public final class WorkerRandGovernor extends Random {
         } catch (Throwable ignored) {}
     }
 
-    // EngineThreadGovernor renames the game's main/render threads to "PZO-MainSimulationThread" /
-    // "PZO-RenderThread", so a "PZO-" prefix alone would pull them off the stock generator.
-    // Classified once per thread; worker names are fixed at creation.
+    // EngineThreadGovernor renames the game's main/render threads to "PZO-MainSimulationThread" / "PZO-RenderThread",
+    // so a "PZO-" prefix alone would pull them off the stock generator. Each thread is classified once, worker names
+    // never change.
     private static final ThreadLocal<Boolean> IS_WORKER = ThreadLocal.withInitial(() -> {
         Thread t = Thread.currentThread();
         if (t == zombie.MainThread.mainThread) return Boolean.FALSE;

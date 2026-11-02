@@ -3,17 +3,17 @@ package com.pzoptimizer;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Per-frame fork/join pool for work the game thread splits across cores. The game thread publishes a batch of
- * indexed tasks, works on it alongside the workers, and returns once every index is done. Workers spin for a few
- * microseconds after a batch and then sleep on a monitor, so an idle game costs nothing.
+ * Per-frame fork/join pool for work the game thread splits across cores. The game thread posts a batch of indexed
+ * tasks, helps out, and returns once every index is done. Workers spin for a few microseconds after a batch and then
+ * sleep, so an idle game costs nothing.
  *
- * Only one batch runs at a time and only the game thread starts them. Each batch carries its own cursor, so a worker
- * that wakes late can never take an index of the next batch. A task that throws is recorded and the batch still
- * completes; the caller decides what a failure means.
+ * One batch at a time, only started by the game thread. Each batch has its own cursor, so a worker that wakes up late
+ * can't grab an index from the next one. A task that throws is recorded and the batch still finishes; the caller
+ * decides what that means.
  */
 public final class FrameWorkers {
 
-    /** Worker threads carry their own scratch objects; PerThreadScratch hands them out instead of shared statics. */
+    /** Worker threads have their own scratch objects; PerThreadScratch hands those out instead of shared statics. */
     public static final class Worker extends Thread {
         final Object[] scratch = new Object[PerThreadScratch.MAX_SLOTS];
         final java.util.ArrayDeque<Object> matrices = new java.util.ArrayDeque<>();
@@ -64,8 +64,13 @@ public final class FrameWorkers {
 
     private FrameWorkers() {}
 
+    // Counted in real cores, not hyperthreads. The game thread works on every batch too and the render thread
+    // needs a core of its own, so on a normal CPU that's two fewer than CpuTopologyGovernor's count (which already
+    // leaves those two out on a low-core CPU).
     public static int workerCount() {
-        return Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() - 2));
+        int cores = CpuTopologyGovernor.getOptimalWorkerCount();
+        int n = PZONative.isLowCoreCpu() ? cores : cores - 2;
+        return Math.max(1, Math.min(8, n));
     }
 
     private static void start() {

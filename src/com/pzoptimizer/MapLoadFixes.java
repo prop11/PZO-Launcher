@@ -12,9 +12,9 @@ import zombie.iso.zones.Zone;
  * Part of "Faster file and map loading" (JVM_FastLoad).
  *
  * IsoMetaGrid.checkVehiclesZones drops vehicle zones that repeat an earlier zone's x, y, w and h by comparing every
- * zone with every zone before it; with map mods that is millions of comparisons during each save load. This keeps the
- * first zone of each rectangle in a hash map instead: the same zones are removed, the survivors keep their order, and
- * each duplicate is logged with the same message (against the first zone with that rectangle, as the stock loop does).
+ * zone with every zone before it, which with map mods is millions of comparisons per save load. I keep the first zone
+ * of each rectangle in a hash map instead: the same zones get removed, the rest keep their order, and each duplicate
+ * gets the same log message (against the first zone with that rectangle, like the stock loop).
  */
 public final class MapLoadFixes {
 
@@ -24,7 +24,7 @@ public final class MapLoadFixes {
 
     private record Rect(int x, int y, int w, int h) {}
 
-    /** Start of IsoMetaGrid.checkVehiclesZones; true when done here. */
+    /** Start of IsoMetaGrid.checkVehiclesZones; true when I've handled it. */
     public static boolean checkVehiclesZones(zombie.iso.IsoMetaGrid grid) {
         if (!ScriptCommentStrip.active) return false;
         ArrayList<VehicleZone> zones = grid.vehiclesZones;
@@ -46,7 +46,7 @@ public final class MapLoadFixes {
         return true;
     }
 
-    // Last lookup of LotHeader.getZombieIntensityForChunk's map search; published whole, so any thread may read it
+    // Last lookup of LotHeader.getZombieIntensityForChunk's map search. Published whole, so any thread can read it.
     private record IntensityMemo(zombie.iso.LotHeader header, zombie.iso.MapFiles files, int c300x, int c300y, int maps,
                                  zombie.iso.LotHeader found, boolean hit) {}
 
@@ -55,8 +55,9 @@ public final class MapLoadFixes {
 
     /**
      * Replaces LotHeader.getZombieIntensityForChunk while active (Integer.MIN_VALUE = run the original). The map search
-     * depends only on the cell and which 300-tile cell the chunk falls in, so the 1,024 chunks of a cell that MapCollisionData
-     * and IsoMetaCell ask about in a row share one search; the answer is then read the same way as stock.
+     * only depends on the cell and which 300-tile cell the chunk is in, so the 1,024 chunks of a cell that
+     * MapCollisionData and IsoMetaCell ask about in a row share one search. The answer is read out the same way as
+     * stock.
      */
     public static int zombieIntensity(zombie.iso.LotHeader lotHeader, int chunkX, int chunkY) {
         if (!ScriptCommentStrip.active) return Integer.MIN_VALUE;

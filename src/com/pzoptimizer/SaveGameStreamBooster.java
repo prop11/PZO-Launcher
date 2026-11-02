@@ -5,7 +5,7 @@ import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.Statement;
 
-/** Larger I/O buffers for save files (map_*.bin, zpop_*.bin), and SQLite WAL mode plus memory-mapping for the save databases. */
+/** Bigger I/O buffers for save files (map_*.bin, zpop_*.bin), plus SQLite WAL mode and mmap for the save databases. */
 public class SaveGameStreamBooster {
     private static final int OPTIMAL_BUFFER_SIZE = 131072; // 128 KB high-throughput buffer
     private static volatile boolean dbTuned = false;
@@ -20,13 +20,13 @@ public class SaveGameStreamBooster {
             PopTemplateGuard.ensurePopulated();
         } catch (Throwable ignored) {}
 
-        // Apply SQLite WAL mode and memory-mapping once the database connections open
+        // Set SQLite WAL mode and mmap once the database connections are open
         startDbTuningDaemon();
     }
 
     private static void startDbTuningDaemon() {
         Thread daemon = new Thread(() -> {
-            for (int i = 0; i < 180; i++) { // Check for up to 3 minutes during startup and save loading
+            for (int i = 0; i < 180; i++) { // keep checking for up to 3 minutes during startup and save loading
                 try {
                     boolean allTuned = tuneSqliteDatabases();
                     if (allTuned && i > 30) {
@@ -101,8 +101,8 @@ public class SaveGameStreamBooster {
         try (Statement s = conn.createStatement()) {
             s.execute("PRAGMA journal_mode = WAL;");
             s.execute("PRAGMA synchronous = NORMAL;");
-            s.execute("PRAGMA mmap_size = 268435456;"); // 256MB memory-mapped disk I/O
-            s.execute("PRAGMA cache_size = -64000;");   // 64MB memory page cache
+            s.execute("PRAGMA mmap_size = 268435456;"); // 256 MB memory-mapped I/O
+            s.execute("PRAGMA cache_size = -64000;"); // 64 MB page cache
             s.execute("PRAGMA busy_timeout = 5000;");
             PZOLogger.success("[SaveGameStreamBooster] " + dbName + " optimized: WAL mode, 256MB mmap, 64MB cache");
         } catch (Throwable t) {

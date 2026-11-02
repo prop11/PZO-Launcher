@@ -3,7 +3,7 @@ package com.pzoptimizer;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
-/** Inflater subclass for WorldStreamer that decompresses through the native library, with the JVM Inflater as fallback. */
+/** Inflater for WorldStreamer that decompresses through the native library, falling back to the JVM's. */
 public class NativeInflater extends Inflater {
 
     private byte[] inputBuffer = null;
@@ -64,7 +64,7 @@ public class NativeInflater extends Inflater {
             }
         }
 
-        // JVM Fallback
+        // JVM fallback
         int res = super.inflate(b, off, len);
         if (super.finished()) {
             this.isFinished = true;

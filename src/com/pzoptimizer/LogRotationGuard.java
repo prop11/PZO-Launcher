@@ -3,7 +3,7 @@ package com.pzoptimizer;
 import java.io.File;
 import java.nio.file.Files;
 
-/** Trims oversized console.txt logs left by previous modded sessions before startup. */
+/** Trims huge console.txt logs left over from earlier modded sessions before startup. */
 public class LogRotationGuard {
     private static final long MAX_LOG_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
 

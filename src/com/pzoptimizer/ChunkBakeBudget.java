@@ -20,22 +20,20 @@ import zombie.iso.fboRenderChunk.FBORenderChunkManager;
 import zombie.iso.fboRenderChunk.FBORenderLevels;
 
 /**
- * Spreads chunk-texture re-bakes over frames.
+ * Spreads chunk texture re-bakes over frames.
  *
- * Each chunk level group is cached in a texture and re-baked when it is marked dirty. Stock re-bakes every dirty
- * on-screen texture in the frame it became dirty, and blood and corpse changes can mark many groups dirty at once.
- * A re-bake for blood or corpse changes only starts while fewer than 4 bakes started this frame; none waits more
- * than 3 frames, and the previous texture keeps being drawn meanwhile.
+ * Stock re-bakes every dirty on-screen chunk texture the frame it gets dirty, and blood or corpse changes can dirty a
+ * lot of them at once. Those re-bakes now only start while fewer than 4 bakes have started this frame, none waits
+ * more than 3 frames, and the old texture is drawn meanwhile.
  *
- * Lighting re-bakes are not budgeted. A lightning flash, dusk, dawn and fog change the light a little every frame on
- * every square, and holding some groups back showed neighbouring chunks at different brightness (the screen
- * shimmered for the length of each flash). During a flash every lighting-only re-bake is held together until it ends.
+ * Lighting re-bakes aren't budgeted. Lightning, dusk, dawn and fog change the light everywhere every frame, and
+ * holding some back left neighbouring chunks at different brightness (shimmer during flashes). During a flash all
+ * lighting-only re-bakes are held together until it ends instead.
  *
- * A first bake (no texture yet) and any re-bake for an object, item, cutaway, obscuring, creation, redraw or tree
- * change is never held. Besides the texture, a bake rebuilds the chunk level's lists of squares drawn every frame
- * (trees, translucent objects), so holding a redraw (chunk or neighbour finished loading) or tree change (stencil
- * area, tree fade) left trees missing or stale for the length of the hold. A held group stays dirty; for the call that would start its
- * bake, its dirty bit is hidden so the manager draws the existing texture instead of re-baking.
+ * First bakes and re-bakes for objects, items, cutaways, obscuring, creation, redraws or trees are never held: a bake
+ * also rebuilds the per-frame square lists (trees, translucent objects), so holding those left trees missing or
+ * stale. A held group stays dirty; I just hide the dirty bit from the call that would bake it, so the old texture
+ * is drawn.
  */
 public final class ChunkBakeBudget {
 
@@ -88,8 +86,8 @@ public final class ChunkBakeBudget {
         return false;
     }
 
-    // The handles below load game classes, so they live in a holder: the agent calls this class's patch methods
-    // while one of those classes is being defined, and loading it again from there is a duplicate definition
+    // Holder class: these handles load game classes, and the agent calls my patch methods while one of those is
+    // still being defined
     private static final class H {
         private static final MethodHandle GET_NLEVELS, GET_ZOOM_INFO;
         private static final VarHandle ZI_DIRTY, ZI_FLAGS, ZI_CHUNK;
@@ -145,11 +143,10 @@ public final class ChunkBakeBudget {
         long flags = (long) H.ZI_FLAGS.get(zi);
         boolean hasTexture = H.ZI_CHUNK.get(zi) != null;
 
-        // During an active lightning flash, hold pure lighting re-bakes uniformly across all chunks.
-        // Full-screen illumination is handled by WeatherShader post-processing; holding chunk texture
-        // rebuilds prevents the 50-100 ms multi-chunk freeze without causing neighbor brightness shimmer.
-        // The group stays dirty and re-bakes once the flash ends: indoor squares ignore the flash, so a light
-        // switched on during it never dirties them again and would otherwise stay unbaked.
+        // During a flash, hold lighting-only re-bakes on every chunk together. The flash itself is drawn by the
+        // WeatherShader; holding avoids a 50-100 ms freeze without chunks shimmering at different brightness. The group
+        // stays dirty and bakes when the flash ends: indoor squares ignore the flash, so a light switched on during it
+        // would otherwise never get baked.
         if (hasTexture && (flags & FBORenderChunk.DIRTY_LIGHTING) != 0 && (flags & ~FBORenderChunk.DIRTY_LIGHTING) == 0 && lightningActive) {
             bakesHeld.incrementAndGet();
             return beginHidden(mgr, chunk, level, zoom, canRender, canClear, zi);
@@ -196,7 +193,7 @@ public final class ChunkBakeBudget {
     public static final java.util.Comparator<IsoChunk> LIGHTING_COMPARATOR =
         (a, b) -> Integer.compare(a.lightingUpdateCounter, b.lightingUpdateCounter);
 
-    /** Zero-allocation / fast-path sort for 42.22 chunk lighting. */
+    /** Allocation-free sort for 42.22's per-frame chunk lighting. */
     public static void sortChunks(java.util.ArrayList<IsoChunk> chunks, java.util.Comparator<?> ignored) {
         int size = chunks.size();
         if (size <= 1) return;
@@ -230,7 +227,6 @@ public final class ChunkBakeBudget {
             }
         }
 
-        // Optimize 42.22 per-frame chunk lighting sort
         MethodNode ucl = AsmSupport.findMethod(node, mn -> "updateChunkLighting".equals(mn.name));
         if (ucl != null) {
             for (AbstractInsnNode insn = ucl.instructions.getFirst(); insn != null; insn = insn.getNext()) {

@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Staggers AI updates for distant zombies: every 3rd frame at medium range, every 6th beyond that, phased by zombie ID. */
+/** Staggers AI for distant zombies: every 3rd frame at medium range, every 6th beyond, phased by zombie ID. */
 public class HordeHibernationEngine {
     private static int frameCounter = 0;
     private static final int HIBERNATION_DISTANCE_SQ = 35 * 35; // 1225 tiles^2

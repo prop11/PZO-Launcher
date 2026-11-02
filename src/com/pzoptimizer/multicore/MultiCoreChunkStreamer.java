@@ -18,7 +18,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Parallel chunk loading: chunk requests from WorldStreamer are read and decompressed on PZO worker threads instead of one background thread. */
+/**
+ * Parallel chunk loading: WorldStreamer's chunk requests are read and decompressed on PZO's workers instead of one
+ * background thread.
+ */
 public final class MultiCoreChunkStreamer {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -33,7 +36,7 @@ public final class MultiCoreChunkStreamer {
         return ByteBuffer.allocate(1048576);
     });
 
-    // Chunks currently being loaded, so two workers never load the same one
+    // Chunks being loaded right now, so two workers never load the same one
     private static final Set<Long> IN_FLIGHT_CHUNKS = ConcurrentHashMap.newKeySet();
 
     private static final Object CHUNK_PARSE_LOCK = new Object();
@@ -135,8 +138,8 @@ public final class MultiCoreChunkStreamer {
     private static volatile boolean queueHooked = false;
 
     /**
-     * Queue installed into WorldStreamer.jobQueue via Unsafe. Incoming chunk load requests are pre-read from
-     * disk and decompressed on the PZO workers, then passed to WorldStreamer without contending on its monitor.
+     * Queue put into WorldStreamer.jobQueue via Unsafe. Chunk load requests are read from disk and decompressed on my
+     * workers, then passed to WorldStreamer without fighting over its monitor.
      */
     public static class PZOChunkStreamQueue extends ConcurrentLinkedQueue<IsoChunk> {
         @Override
@@ -234,7 +237,7 @@ public final class MultiCoreChunkStreamer {
                 } catch (Throwable t) {
                     PZOLogger.warn("[MultiCoreChunkStreamer] Fallback recovery for chunk (" + chunk.wx + "," + chunk.wy + "): " + t.getMessage());
                     // Fallback: parse synchronously under the parse lock. Handing it to WorldStreamer.jobQueue instead
-                    // would race, because WorldStreamer does not take CHUNK_PARSE_LOCK.
+                    // would race, because WorldStreamer doesn't take CHUNK_PARSE_LOCK.
                     try {
                         synchronized (getParseLock()) {
                             resetSanityCheck();
@@ -287,13 +290,13 @@ public final class MultiCoreChunkStreamer {
                         loadedData.rewind();
                     }
                 } catch (Throwable t) {
-                    // Missing, empty or unreadable file: generate the chunk in memory instead
+                    // Missing, empty or unreadable file, so generate the chunk in memory instead
                     loadedData = null;
                 }
             }
 
-            // getParseLock() is the IsoChunk.sanityCheck monitor. Vanilla's SanityCheck.beginLoad/endLoad also
-            // synchronize on it, so this excludes both other workers and WorldStreamer.
+            // getParseLock() is the IsoChunk.sanityCheck monitor, and vanilla's SanityCheck.beginLoad/endLoad sync on
+            // it too, so this keeps out both other workers and WorldStreamer
             synchronized (getParseLock()) {
                 resetSanityCheck();
                 try {
@@ -323,7 +326,7 @@ public final class MultiCoreChunkStreamer {
             }
 
         } catch (Throwable t) {
-            // Re-throw to trigger fallback in caller
+            // Rethrow so the caller falls back
             throw new RuntimeException(t);
         }
     }

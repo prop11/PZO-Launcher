@@ -8,13 +8,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Runs work from PZO's background threads on the game thread. Kahlua tables and the Lua exposer are not thread-safe:
- * the game thread reads them constantly (every LuaManager.getFunctionObject, every event), so writing them from
- * another thread can make a lookup fail for a moment ('no such function "Vehicles.Init.Default"' when a vehicle
- * spawns). Tasks are run after each MainThread loop step by EngineThreadGovernor's hook, which also ticks at the
- * main menu. If that hook never installed, a task runs on the caller after NO_HOOK_FALLBACK_NS so nothing waits
- * forever. Once it is installed a task always waits for it: the first loop step only comes after every mod's Lua has
- * loaded, which takes minutes with a large modpack, and running Lua on another thread meanwhile corrupts the load.
+ * Runs work from PZO's background threads on the game thread. Kahlua tables and the Lua exposer aren't thread-safe, and
+ * the game thread reads them constantly, so writing them from another thread can make a lookup fail for a moment ('no
+ * such function "Vehicles.Init.Default"' when a vehicle spawns). Tasks run after each MainThread loop step from
+ * EngineThreadGovernor's hook, which also ticks on the main menu. If the hook never got installed, a task runs on the
+ * caller after NO_HOOK_FALLBACK_NS so nothing waits forever. Once it is installed a task always waits for it: the first
+ * loop step only comes after every mod's Lua has loaded (minutes with a big modpack), and running Lua on another thread
+ * meanwhile corrupts the load.
  */
 public final class GameThreadQueue {
 
@@ -38,7 +38,7 @@ public final class GameThreadQueue {
         while ((t = tasks.poll()) != null) t.run();
     }
 
-    /** Runs the task on the game thread and returns its result; called from a background thread. */
+    /** Runs the task on the game thread and returns the result; call it from a background thread. */
     public static <T> T runOnGameThread(Callable<T> task) throws Throwable {
         FutureTask<T> f = new FutureTask<>(task);
         tasks.add(f);

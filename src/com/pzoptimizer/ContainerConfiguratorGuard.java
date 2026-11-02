@@ -8,7 +8,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Wraps ItemConfigurator's container-name map so container types from modded vehicles (KI5, DAMN, etc.) are registered on first lookup. */
+/**
+ * Wraps ItemConfigurator's container map so container types from modded vehicles (KI5, DAMN...) get registered on first
+ * lookup.
+ */
 public final class ContainerConfiguratorGuard {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -23,7 +26,7 @@ public final class ContainerConfiguratorGuard {
         obtainUnsafe();
         installGuard();
 
-        // Re-applies the guard after world reloads
+        // Put the guard back after world reloads
         Thread guardDaemon = new Thread(ContainerConfiguratorGuard::daemonLoop, "PZO-ContainerGuard");
         guardDaemon.setDaemon(true);
         guardDaemon.setPriority(Thread.MIN_PRIORITY);
@@ -59,7 +62,7 @@ public final class ContainerConfiguratorGuard {
             PZOLogger.success("[ContainerConfiguratorGuard] Armed: Dynamic Modded Container Registration Guard (Zero ItemPickInfo Log Contention)");
             return true;
         } catch (Throwable t) {
-            // May fail early before ItemConfigurator is loaded; daemon will retry
+            // Can fail before ItemConfigurator is loaded, the daemon retries
             return false;
         }
     }

@@ -13,21 +13,21 @@ import zombie.iso.IsoChunk;
 import zombie.iso.fboRenderChunk.FBORenderLevels;
 
 /**
- * Settings screen "Keep the occlusion grid when nothing that shapes it changed" (JVM_OcclusionReuse).
+ * Keeps the occlusion grid when nothing that shapes it changed (JVM_OcclusionReuse).
  *
- * Every frame in which any on-screen chunk texture is dirty, FBORenderCell.renderTilesInternal rebuilds the occluded
- * squares grid (which squares upper floors hide) and every on-screen chunk level recounts its visible squares
- * against it. Lighting drift marks textures dirty nearly every frame, so this runs nearly every frame.
+ * Any frame where an on-screen chunk texture is dirty, FBORenderCell.renderTilesInternal rebuilds the occluded-squares
+ * grid (which squares upper floors hide) and every on-screen chunk level recounts its visible squares against it.
+ * Lighting drift dirties textures nearly every frame, so this runs nearly every frame.
  *
- * The grid and the counts are a function of: the on-screen chunk levels, the grid bounds (from the camera), the
- * zoom, each level's renderable-square flags (ChunkLevelData.squareFlags) and the squares' floors. The flags are only
- * rewritten by prepareChunkForUpdating, which runs for every dirty level just before the rebuild; it is wrapped here
- * so a flag that actually changed is seen, whatever the dirty reason (room visibility changes are invalidated as
- * lighting too, and do change the flags). Floors change only with object, creation or redraw invalidations. So the
- * rebuild is skipped only when every dirty level is dirty for lighting, blood or corpses alone, no flag changed, and
- * the on-screen set, bounds and zoom are those of the last rebuild; the grid and counts it would make are then the
- * ones already there.
- * Single player only: split screen shares one occlusion grid between players.
+ * The grid and counts only depend on the on-screen chunk levels, the grid bounds (camera), the zoom, each level's
+ * renderable-square flags (ChunkLevelData.squareFlags) and the floors. The flags are only rewritten by
+ * prepareChunkForUpdating, which runs for every dirty level right before the rebuild, so I wrap it to catch any flag
+ * that really changed, whatever the dirty reason (room visibility changes come through as lighting and do change the
+ * flags). Floors only change with object, creation or redraw invalidations. So I skip the rebuild only when every
+ * dirty level is dirty for lighting, blood or corpses alone, no flag changed, and the on-screen set, bounds and zoom
+ * match the last rebuild; it would just make the grid and counts I already have.
+ *
+ * Single player only, split screen shares one occlusion grid between players.
  */
 public final class OcclusionReuse {
 
@@ -35,7 +35,7 @@ public final class OcclusionReuse {
     public static final AtomicLong rebuilds = new AtomicLong();
     public static final AtomicLong rebuildsSkipped = new AtomicLong();
 
-    // Dirty reasons that never touch a floor; ChunkBakeBudget holds the blood and corpse ones for a few frames
+    // Dirty reasons that never touch a floor. ChunkBakeBudget holds the blood and corpse ones for a few frames.
     private static final long SHAPE_NEUTRAL = zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_LIGHTING
         | zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_BLOOD | zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_CORPSE;
 
@@ -109,7 +109,7 @@ public final class OcclusionReuse {
                     if (!renderLevels.isOnScreen(z)) continue;
                     sig = sig * 31 + System.identityHashCode(c);
                     sig = sig * 31 + z;
-                    // A freed texture is dirty with no reason bits; it has to be drawn and counted afresh
+                    // A freed texture is dirty with no reason bits, so it has to be drawn and counted from scratch
                     if (!structural && renderLevels.isDirty(z, zoom)
                             && (renderLevels.isDirty(z, ~SHAPE_NEUTRAL, zoom) || !renderLevels.isDirty(z, -1L, zoom))) {
                         structural = true;

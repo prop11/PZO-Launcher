@@ -12,17 +12,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Settings screen "Quieter model loading" (JVM_ModelLoadFixes). Two exception storms on the game thread while new
- * models load during world streaming, each exception carrying a full stack trace:
+ * Quieter model loading (JVM_ModelLoadFixes). Two exception storms on the game thread while models load during world
+ * streaming, every exception with a full stack trace:
  *
- * SkinningBoneHierarchy.buildBoneHierarchy resolves every bone name with StringUtils.tryParseEnum, i.e. Enum.valueOf
- * inside a try/catch; every bone that is not a SkeletonBone (props, vehicle parts, mod rigs) throws and is caught. The
- * same answer comes from a name table built once per enum type: exact name match, default when absent.
+ * SkinningBoneHierarchy.buildBoneHierarchy resolves every bone name with StringUtils.tryParseEnum, which is
+ * Enum.valueOf inside a try/catch, so every bone that isn't a SkeletonBone (props, vehicle parts, mod rigs) throws. A
+ * name table built once per enum type gives the same answer: exact match, or the default.
  *
- * A model whose texture name holds a character the file system rejects ("|" on Windows) throws InvalidPathException
- * from Bucket.HasTexture on every load and logs it with a stack walk; the game's own null-texture cache is never
- * reached. The first exception for a name is kept and thrown again (same exception, same null texture, no new stack
- * trace), and the "Failed to load shared texture" error is logged once per name.
+ * A model whose texture name has a character the file system rejects ("|" on Windows) throws InvalidPathException from
+ * Bucket.HasTexture on every load and logs it with a stack walk, and never reaches the game's own null-texture cache.
+ * I keep the first exception per name and rethrow it (same exception, same null texture, no new stack trace), and log
+ * "Failed to load shared texture" once per name.
  */
 public final class ModelLoadFixes {
 
@@ -90,7 +90,7 @@ public final class ModelLoadFixes {
     static boolean patchBoneHierarchy(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "buildBoneHierarchy", "(Lzombie/core/skinnedmodel/model/SkinningData;)V");
         if (m == null) return false;
-        // A static call with the identical descriptor: only the owner and name change
+        // Static call with the exact same descriptor, only the owner and name change
         int n = 0;
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKESTATIC && mi.owner.equals("zombie/util/StringUtils")

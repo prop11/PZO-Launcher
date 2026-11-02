@@ -27,7 +27,7 @@ public class PZOLogger {
             System.err.println("[PZO-LOGGER-ERR] Failed to initialize log file: " + e.getMessage());
         }
 
-        // Uncaught exception handler for crash capture
+        // Uncaught exception handler so crashes get logged
         try {
             Thread.UncaughtExceptionHandler defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
             Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {

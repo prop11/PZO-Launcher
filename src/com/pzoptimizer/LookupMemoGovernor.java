@@ -8,20 +8,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Exact-string memo in front of case-insensitive TreeMap lookups. Vanilla FileGuidTable (~12,000 clothing
- * and item GUIDs) and AnimationVariableHandlePool use TreeMap(String.CASE_INSENSITIVE_ORDER), comparing
- * strings char by char on every lookup.
+ * Exact-string memo in front of case-insensitive TreeMap lookups. FileGuidTable (~12,000 clothing and item GUIDs) and
+ * AnimationVariableHandlePool use TreeMap(String.CASE_INSENSITIVE_ORDER), which compares strings char by char on every
+ * lookup. Both are declared as Map, so the call sites I redirect are Map.get/put/clear; only TreeMaps get memoised,
+ * anything else goes straight through.
  *
- * Both maps are declared as Map, so the redirected call sites are invokeinterface Map.get/put/clear.
- * Only TreeMaps are memoized; any other Map implementation passes straight through.
- *
- * Correctness rules:
- * - Null results are never cached, so AnimationVariableHandlePool's lazy get-then-put initialization
- *   always sees newly registered handles immediately.
- * - Every put/clear on a memoized map drops that map's memo. A case-insensitive put can change the
- *   answer for several exact-case keys, so per-key invalidation would not be safe.
- * - The original map is only read under its own monitor on a miss; callers that already serialize
- *   (AnimationVariableHandlePool holds s_threadLock) are unaffected.
+ * What keeps it correct:
+ * - Null results are never cached, so AnimationVariableHandlePool's lazy get-then-put sees new handles right away.
+ * - Any put/clear drops that map's whole memo. A case-insensitive put can change the answer for several exact-case
+ *   keys, so per-key invalidation wouldn't be safe.
+ * - The real map is only read under its own monitor on a miss; callers that already serialise
+ *   (AnimationVariableHandlePool holds s_threadLock) don't notice.
  */
 public final class LookupMemoGovernor {
 
@@ -33,8 +30,8 @@ public final class LookupMemoGovernor {
     private static volatile TreeMap<?, ?> slot2Tree = null;
     private static volatile ConcurrentHashMap<Object, Object> slot2Memo = null;
 
-    // Must be identity-keyed: TreeMap.equals/hashCode are content-based, so a WeakHashMap entry
-    // becomes unreachable as soon as the map is mutated. Only a handful of maps are ever memoized.
+    // Has to be identity-keyed: TreeMap equals/hashCode are content-based, so a WeakHashMap entry becomes unreachable
+    // the moment the map changes. Only a handful of maps ever get memoised anyway.
     private static final class IdentityWeakTable {
         private final ArrayList<WeakReference<TreeMap<?, ?>>> keys = new ArrayList<>();
         private final ArrayList<ConcurrentHashMap<Object, Object>> values = new ArrayList<>();
@@ -131,8 +128,8 @@ public final class LookupMemoGovernor {
         }
     }
 
-    // Swaps in a fresh memo rather than clearing: a reader that missed before the write can only
-    // populate the discarded instance, never the live one.
+    // Swap in a fresh memo instead of clearing: a reader that missed before the write can only fill the old one, never
+    // the live one
     private static void invalidate(TreeMap<?, ?> tree) {
         synchronized (treeMemos) {
             if (!treeMemos.containsKey(tree)) return;
@@ -143,9 +140,7 @@ public final class LookupMemoGovernor {
         }
     }
 
-    /**
-     * Redirect target for invokeinterface Map.get(Object) inside FileGuidTable and AnimationVariableHandlePool.
-     */
+    /** Redirect target for Map.get(Object) inside FileGuidTable and AnimationVariableHandlePool. */
     @SuppressWarnings("rawtypes")
     public static Object mapGetFast(Map map, Object key) {
         if (!active || key == null || !(map instanceof TreeMap)) {
@@ -171,9 +166,7 @@ public final class LookupMemoGovernor {
         return actual;
     }
 
-    /**
-     * Redirect target for invokeinterface Map.put(Object, Object).
-     */
+    /** Redirect target for Map.put(Object, Object). */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static Object mapPutFast(Map map, Object key, Object value) {
         if (!(map instanceof TreeMap)) {
@@ -188,9 +181,7 @@ public final class LookupMemoGovernor {
         return previous;
     }
 
-    /**
-     * Redirect target for invokeinterface Map.clear().
-     */
+    /** Redirect target for Map.clear(). */
     @SuppressWarnings("rawtypes")
     public static void mapClearFast(Map map) {
         if (!(map instanceof TreeMap)) {

@@ -3,14 +3,11 @@ package com.pzoptimizer;
 import zombie.iso.IsoGridSquare;
 
 /**
- * During IsoChunk.loadInMainThread() and WorldStreamer neighbor recalculations, border squares call
- * IsoGridSquare.RecalcPropertiesIfNeeded() up to ~15 times each in quick succession. Vanilla already guards
- * the work with the public propertiesDirty flag, and that flag is the only safe dedupe: a clean square
- * returns immediately, a dirty one always recalcs. A time-window dedupe would skip squares re-dirtied
- * inside the window.
+ * Border squares call RecalcPropertiesIfNeeded() up to ~15 times in a row during IsoChunk.loadInMainThread() and the
+ * streamer's neighbour recalcs. Vanilla's propertiesDirty flag is the only safe dedupe (clean returns, dirty always
+ * recalcs); a time-window dedupe would miss squares that get dirtied again inside the window.
  *
- * Counters are plain longs: this is a very hot path and exact telemetry is not worth a contended atomic
- * per call.
+ * The counters are plain longs on purpose: this path is very hot and exact stats aren't worth a contended atomic.
  */
 public final class ChunkHandoffRecalcGovernor {
 
@@ -37,9 +34,7 @@ public final class ChunkHandoffRecalcGovernor {
         return cleanSquaresSkipped;
     }
 
-    /**
-     * Redirect target for invokevirtual IsoGridSquare.RecalcPropertiesIfNeeded()V inside IsoGridSquare.
-     */
+    /** Redirect target for IsoGridSquare.RecalcPropertiesIfNeeded() calls inside IsoGridSquare. */
     public static void recalcPropertiesIfNeededFast(Object square) {
         IsoGridSquare sq = (IsoGridSquare) square;
         if (active && !sq.propertiesDirty) {

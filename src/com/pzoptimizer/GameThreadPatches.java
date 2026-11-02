@@ -23,41 +23,38 @@ import zombie.iso.IsoChunkMap;
 import zombie.iso.IsoWorld;
 
 /**
- * Small main-thread fixes applied with ASM, each with its own toggle:
+ * Small main-thread fixes done with ASM, each with its own toggle.
  *
- * LuaTableFastGet (KahluaTableImpl.rawget): stock asks the backing map containsKey and then get, two hash lookups
- * for every Lua table read. Here get runs first and containsKey only on a miss when a metatable exists, which
- * returns exactly what stock returns, including for a null stored in the map directly.
+ * LuaTableFastGet (KahluaTableImpl.rawget): stock does containsKey and then get, two hash lookups per Lua table read.
+ * I call get first and only containsKey on a miss when there's a metatable, which returns exactly what stock does,
+ * including a null stored directly in the map.
  *
- * WorldSoundChunkClamp (WorldSoundManager.addSound): a sound is attached to every chunk in its hearing square by
- * asking IsoCell.getChunk for each chunk coordinate, up to tens of thousands for an alarm or a helicopter, though
- * only chunks inside a player's loaded grid can answer. The walk is clamped to the bounding box of the loaded
- * grids, so the same chunks receive the sound.
+ * WorldSoundChunkClamp (WorldSoundManager.addSound): a sound gets attached to every chunk in its hearing range by
+ * calling IsoCell.getChunk for each chunk coordinate, tens of thousands for an alarm or a helicopter, though only
+ * chunks in a player's loaded grid can answer. The loop is clamped to the loaded grids, so the same chunks get it.
  *
- * LightSwitchPowerCache (IsoLightSwitch.hasElectricityAround): the lighting pass asks every light switch for
- * power every frame (grid power, a 3x3x2 neighbourhood scan). The answer is kept for a few frames per switch; a
- * power change reaches a lamp that many frames late.
+ * LightSwitchPowerCache (IsoLightSwitch.hasElectricityAround): the lighting pass asks every light switch for power
+ * every frame (grid power plus a 3x3x2 scan). The answer is kept for a few frames per switch, so a power change reaches
+ * a lamp that many frames late.
  *
  * ChunkHandoffPacer (IsoChunkMap.updateInternal): newly loaded chunks are handed to the main thread (loot rolls,
- * recalc, lighting; 1-5 ms each) several at a time, which shows as long frames while moving fast. Hand-offs stop
- * once the frame has spent the budget on them (at least one per frame); a backlog of a full grid row or more
- * lets stock's count through so loading never falls behind. Same chunks, same order, only the frame moves.
+ * recalc, lighting, 1-5 ms each) several at a time, which shows up as long frames when moving fast. Hand-offs stop once
+ * the frame has used its budget (at least one per frame), and a backlog of a grid row or more lets stock's count
+ * through so loading never falls behind. Same chunks, same order, they just land in different frames.
  *
- * EcsClassCache (ECSComponent.getECSClass(Class)): every component lookup by type walks the type's superclass
- * chain to find the class directly below ECSComponent. The answer never changes for a class, so it is kept in a
- * ClassValue after the first walk.
+ * EcsClassCache (ECSComponent.getECSClass(Class)): every lookup by type walks the superclass chain to find the class
+ * right below ECSComponent. That never changes for a class, so it goes in a ClassValue after the first walk.
  *
- * ProfilerThreadCheck (GameProfiler.isValidThread): asked on every profiler probe, even with the profiler off; it
- * reads the current thread's name and scans a list of names. The threads that answered yes are remembered by
- * identity and recognised directly afterwards; any other thread still gets the stock scan.
+ * ProfilerThreadCheck (GameProfiler.isValidThread): called on every profiler probe even with the profiler off, and it
+ * reads the thread name and scans a list. Threads that said yes are remembered by identity; anything else still gets
+ * the stock scan.
  *
- * StateMachineComponentCache (IsoGameCharacter.getStateMachineComponent): getStateMachine and getActionContext
- * look the component up in the character's component HashMap on every call, many times per zombie per frame.
- * Each character keeps the component it last found and reuses it while the component still names that
- * character as its owner. ECSEntity's set and remove keep ownership and the map in step, so a replaced or
- * removed component fails the check and the stock lookup runs again. When the class must keep its stock shape (loaded
- * before this agent saw it, or a ZombieBuddy Java mod active), the method instead reads the component straight from the map,
- * skipping the argument checks, the ECS class walk and the cast check, and falls back to stock.
+ * StateMachineComponentCache (IsoGameCharacter.getStateMachineComponent): getStateMachine and getActionContext look the
+ * component up in the character's HashMap on every call, many times per zombie per frame. Each character keeps the last
+ * one it found and reuses it while that component still names the character as its owner. ECSEntity's set and remove
+ * keep ownership and the map in step, so a replaced or removed component fails the check and stock runs. When the class
+ * has to keep its stock shape (loaded before I attached, or a ZombieBuddy Java mod is active), I read the component
+ * straight from the map instead, skipping the argument checks, the ECS class walk and the cast, and fall back to stock.
  */
 public final class GameThreadPatches {
 
@@ -77,7 +74,7 @@ public final class GameThreadPatches {
 
     private GameThreadPatches() {}
 
-    // ---- KahluaTableImpl.rawget ----
+    // KahluaTableImpl.rawget
 
     public static Object rawgetTail(Map<Object, Object> delegate, KahluaTable metatable, Object key) {
         if (!luaFastGet) {
@@ -103,8 +100,8 @@ public final class GameThreadPatches {
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKEINTERFACE && "java/util/Map".equals(mi.owner)
                     && "containsKey".equals(mi.name)) {
-                // aload_0, getfield delegate, aload_1 precede the call; the new tail starts there and the old
-                // one becomes unreachable
+                // aload_0, getfield delegate, aload_1 come before the call; the new tail starts there and the old one
+                // becomes unreachable
                 AbstractInsnNode start = prevReal(prevReal(prevReal(mi)));
                 if (start == null || start.getOpcode() != Opcodes.ALOAD) return false;
                 InsnList tail = new InsnList();
@@ -123,9 +120,9 @@ public final class GameThreadPatches {
         return false;
     }
 
-    // ---- WorldSoundManager.addSound ----
+    // WorldSoundManager.addSound
 
-    // Bounds of the union of the loaded chunk grids, in world chunk coordinates: {minX, minY, maxX, maxY} exclusive max
+    // Bounds of all loaded chunk grids together, in world chunk coords: {minX, minY, maxX, maxY}, max exclusive
     private static int[] loadedBounds() {
         IsoWorld w = IsoWorld.instance;
         IsoCell cell = w == null ? null : w.currentCell;
@@ -169,7 +166,8 @@ public final class GameThreadPatches {
                 if (!(insn instanceof MethodInsnNode mi) || !"zombie/core/math/PZMath".equals(mi.owner) || !"ceil".equals(mi.name)) {
                     continue;
                 }
-                // radiusMax = (int) PZMath.ceil(...); then chunkMinX, chunkMinY, chunkMaxX, chunkMaxY are stored in order
+                // radiusMax = (int) PZMath.ceil(...); then chunkMinX, chunkMinY, chunkMaxX, chunkMaxY are stored in
+                // order
                 int[] locals = new int[4];
                 int found = -1;
                 VarInsnNode last = null;
@@ -197,15 +195,15 @@ public final class GameThreadPatches {
         return false;
     }
 
-    // ---- IsoLightSwitch.hasElectricityAround ----
+    // IsoLightSwitch.hasElectricityAround
 
-    // Switch -> (frame << 1 | answer). Kept here instead of in fields so IsoLightSwitch keeps its stock shape (see
-    // ZombieBuddyCompat); IsoObject has identity equality, and the map is emptied every few hundred frames
+    // Switch -> (frame << 1 | answer). Kept here rather than in fields so IsoLightSwitch keeps its stock shape (see
+    // ZombieBuddyCompat). IsoObject uses identity equality, and the map gets emptied every few hundred frames.
     private static final java.util.concurrent.ConcurrentHashMap<Object, Long> lightSwitchPower = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile int lightSwitchPurgeFrame;
     private static final int LIGHT_SWITCH_PURGE_FRAMES = 600;
 
-    /** Prefix of hasElectricityAround: the cached answer (0 / 1) while fresh, otherwise -1 for the stock body. */
+    /** Prefix of hasElectricityAround: the cached answer (0 / 1) while it's fresh, otherwise -1 to run stock. */
     public static int lightSwitchCached(Object lightSwitch) {
         if (!lightSwitchCache) return -1;
         int now = IsoWorld.instance.getFrameNo();
@@ -224,7 +222,7 @@ public final class GameThreadPatches {
         return -1;
     }
 
-    /** Before each of the stock body's returns: remembers the answer it computed. */
+    /** Before each return in the stock body: remember what it worked out. */
     public static int lightSwitchStore(int answer, Object lightSwitch) {
         if (lightSwitchCache) lightSwitchPower.put(lightSwitch, ((long) IsoWorld.instance.getFrameNo() << 1) | (answer & 1));
         return answer;
@@ -235,7 +233,7 @@ public final class GameThreadPatches {
         if (m == null) return false;
         java.util.List<AbstractInsnNode> returns = new java.util.ArrayList<>();
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            // Already carries this patch (bytes handed back by another agent)
+            // Already has this patch (another agent handed the bytes back)
             if (insn instanceof MethodInsnNode mi && "lightSwitchCached".equals(mi.name) && "com/pzoptimizer/GameThreadPatches".equals(mi.owner)) {
                 return false;
             }
@@ -261,9 +259,9 @@ public final class GameThreadPatches {
         return true;
     }
 
-    // ---- ECSComponent.getECSClass ----
+    // ECSComponent.getECSClass
 
-    // Only the walk itself refers to ECSComponent, and only when a class is first asked about
+    // Only the walk itself touches ECSComponent, and only the first time a class is asked about
     private static final ClassValue<Class<?>> ECS_CLASS = new ClassValue<>() {
         @Override
         protected Class<?> computeValue(Class<?> type) {
@@ -284,7 +282,9 @@ public final class GameThreadPatches {
         return ECS_CLASS.get(type);
     }
 
-    /** Prefixes the static getECSClass(Class) with: if (cache on and clazz != null) return GameThreadPatches.ecsClass(clazz). */
+    /**
+     * Prefixes getECSClass(Class) with: if the cache is on and clazz != null, return GameThreadPatches.ecsClass(clazz).
+     */
     static boolean patchEcsComponent(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "getECSClass", "(Ljava/lang/Class;)Ljava/lang/Class;");
         if (m == null || (m.access & Opcodes.ACC_STATIC) == 0) return false;
@@ -303,7 +303,7 @@ public final class GameThreadPatches {
         return true;
     }
 
-    // ---- GameProfiler.isValidThread ----
+    // GameProfiler.isValidThread
 
     private static volatile Thread profilerThreadA, profilerThreadB;
 
@@ -313,7 +313,7 @@ public final class GameThreadPatches {
         return t == profilerThreadA || t == profilerThreadB;
     }
 
-    // Stock's answer for a thread that was not recognised; a yes is remembered for the next call
+    // Stock's answer for a thread I didn't recognise; a yes gets remembered for next time
     public static boolean profilerThreadResult(boolean valid) {
         if (valid) {
             Thread t = Thread.currentThread();
@@ -326,7 +326,7 @@ public final class GameThreadPatches {
         return valid;
     }
 
-    /** Prefixes isValidThread with a known-thread check and passes stock's answer through profilerThreadResult. */
+    /** Prefixes isValidThread with the known-thread check, passing stock's answer through profilerThreadResult. */
     static boolean patchGameProfiler(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "isValidThread", "()Z");
         if (m == null || (m.access & Opcodes.ACC_STATIC) == 0) return false;
@@ -347,9 +347,9 @@ public final class GameThreadPatches {
         return true;
     }
 
-    // ---- IsoGameCharacter.getStateMachineComponent ----
+    // IsoGameCharacter.getStateMachineComponent
 
-    // Parameters are Object so the patched class's verifier never has to load the component types
+    // Params are Object so the patched class's verifier never has to load the component types
     public static boolean stateMachineCached(Object component, Object character) {
         return stateMachineCache && ((zombie.characters.ecs.ECSComponent) component).getECSOwnerEntity() == character;
     }
@@ -367,8 +367,8 @@ public final class GameThreadPatches {
         String desc = "()Lzombie/characters/component/StateMachineComponent;";
         MethodNode orig = AsmSupport.findMethod(node, "getStateMachineComponent", desc);
         if (orig == null || (orig.access & Opcodes.ACC_STATIC) != 0) return false;
-        // The field version renames the stock method and adds a field: impossible in a retransform of a class
-        // loaded before this agent saw it, and left out while a ZombieBuddy mod patches the class (see ZombieBuddyCompat)
+        // The field version renames the stock method and adds a field, which a retransform of an already-loaded class
+        // can't do, and it's skipped while a ZombieBuddy mod patches the class (see ZombieBuddyCompat)
         Class<?> live = AsmSupport.REDEFINING.get();
         boolean liveHasField = live != null && hasDeclaredField(live, "pzo$smc");
         if (!liveHasField && (live != null || ZombieBuddyCompat.keepClassShape(node.name))) {
@@ -419,7 +419,7 @@ public final class GameThreadPatches {
         return false;
     }
 
-    // Body-only, so a retransform accepts it: map lookup first, the stock body when it finds nothing
+    // Body-only so a retransform accepts it: map lookup first, stock body if that finds nothing
     private static boolean patchStateMachineInPlace(ClassNode node, MethodNode m) {
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && "com/pzoptimizer/GameThreadPatches".equals(mi.owner)) {
@@ -444,19 +444,19 @@ public final class GameThreadPatches {
         return true;
     }
 
-    // ---- IsoChunkMap.updateInternal ----
+    // IsoChunkMap.updateInternal
 
     private static long handoffStart;
     private static int handoffsThisFrame;
 
-    // Called once per frame with stock's hand-off count for this frame
+    // Called once a frame with stock's hand-off count
     public static int handoffBegin(int stockCount) {
         handoffStart = System.nanoTime();
         handoffsThisFrame = 0;
         return stockCount;
     }
 
-    // Loop condition: returns the remaining count, or 0 to stop handing off this frame
+    // Loop condition: how many are left, or 0 to stop handing off this frame
     public static int handoffContinue(int count) {
         if (count <= 0) return count;
         if (handoffsThisFrame++ == 0 || !handoffPacer) return count;
@@ -469,8 +469,8 @@ public final class GameThreadPatches {
     static boolean patchChunkMap(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "updateInternal", "()V");
         if (m == null) return false;
-        // The count local is the first int local stored from CappedConcurrentQueue.size(); its second store is
-        // stock's hand-off count, and the first "iload count; ifle" after that is the loop condition
+        // The count local is the first int stored from CappedConcurrentQueue.size(); its second store is stock's
+        // hand-off count, and the first "iload count; ifle" after that is the loop condition
         int countVar = -1;
         VarInsnNode secondStore = null;
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {

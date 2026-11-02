@@ -3,7 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-/** Pre-caches the vertical slices above and below the player; B42 worlds have 32 levels (-16 to +16). */
+/** Pre-caches the levels above and below the player; B42 worlds have 32 levels (-16 to +16). */
 public final class VerticalChunkStreamer {
 
     private static volatile boolean active = false;
@@ -19,7 +19,7 @@ public final class VerticalChunkStreamer {
 
     private static void trackVerticalTransitions() {
         try {
-            // Vehicles don't climb building stairs or elevators; skip on-road elevation sweeps
+            // Cars don't go up stairs or lifts, so skip the elevation sweeps on the road
             if (VehicleTravelOptimizer.isPlayerDriving()) {
                 return;
             }

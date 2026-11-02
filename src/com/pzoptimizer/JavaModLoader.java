@@ -23,7 +23,10 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
-/** Finds, deduplicates and loads third-party Java workshop mods across all Steam libraries, deferring ZombieBuddy mods to ZombieBuddy. */
+/**
+ * Finds, dedupes and loads third-party Java Workshop mods across all Steam libraries. ZombieBuddy mods are left to
+ * ZombieBuddy.
+ */
 public class JavaModLoader {
     private static final Set<String> LOADED_MODS = new HashSet<>();
     private static final Set<String> PRUNED_DIR_NAMES = new HashSet<>(Arrays.asList(
@@ -104,7 +107,7 @@ public class JavaModLoader {
             return;
         }
 
-        // Deduplicate multi-version JARs per Workshop Mod folder (e.g. pick 42.20 over 41 / 42.12)
+        // Dedupe multi-version jars per Workshop mod folder (e.g. pick 42.20 over 41 / 42.12)
         List<File> filteredJars = deduplicateModJars(candidateJars);
 
         PZOLogger.info(String.format("[JavaModLoader] Discovered %d unique Java mod package(s).", filteredJars.size()));
@@ -127,7 +130,7 @@ public class JavaModLoader {
         for (File jar : rawJars) {
             String path = jar.getAbsolutePath().replace('\\', '/');
 
-            // Extract Workshop Mod ID if inside /workshop/content/108600/<id>/
+            // Workshop mod ID, if it's under /workshop/content/108600/<id>/
             String modKey = jar.getName();
             int wsIdx = path.indexOf("/108600/");
             if (wsIdx != -1) {
@@ -142,7 +145,7 @@ public class JavaModLoader {
             if (existing == null) {
                 modMap.put(modKey, jar);
             } else {
-                // If existing is B41 and new is B42, replace it
+                // B41 one already there and this one is B42: swap it
                 String existPath = existing.getAbsolutePath().replace('\\', '/');
                 if ((!existPath.contains("42") && path.contains("42")) ||
                     (existPath.contains("42.1") && path.contains("42.2")) ||
@@ -198,7 +201,7 @@ public class JavaModLoader {
                             }
                         }
 
-                        // Parse libraryfolders.vdf
+                        // libraryfolders.vdf
                         File vdfFile = new File(root, "Program Files (x86)/Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
                         if (!vdfFile.exists()) {
                             vdfFile = new File(root, "Steam/steamapps/libraryfolders.vdf".replace('/', File.separatorChar));
@@ -298,7 +301,7 @@ public class JavaModLoader {
 
         ModMetadata meta = findModMetadataForJar(jarFile);
 
-        // Skip mods disabled in the mod manager (default.txt)
+        // Skip mods turned off in the mod manager (default.txt)
         Set<String> enabled = getEnabledModIds();
         if (!enabled.isEmpty() && !meta.modIds.isEmpty()) {
             boolean anyEnabled = false;
@@ -321,8 +324,8 @@ public class JavaModLoader {
         boolean zbPresent = isZombieBuddyPresent();
         if (meta.isZombieBuddyMod || meta.javaPkgName != null || meta.requiresZombieBuddy) {
             if (zbPresent) {
-                // Loading these here would define their classes too early; ZombieBuddy's own @Patch engine
-                // instruments the game classes when ZomboidFileSystem.loadMods runs.
+                // Loading them here would define their classes too early. ZombieBuddy's own @Patch engine instruments
+                // the game classes when ZomboidFileSystem.loadMods runs.
                 successCount++;
                 PZOLogger.info(String.format("[JavaModLoader] [COEXISTENCE] Deferring '%s' (%s) to ZombieBuddy runtime agent (javaPkgName: %s)",
                     jarFile.getName(),
@@ -402,7 +405,7 @@ public class JavaModLoader {
             }
 
             if (!hooked && manifest != null && manifest.getMainAttributes() != null) {
-                // Only inspect classes if manifest declared a plugin/agent entrypoint
+                // Only look at the classes if the manifest declares a plugin/agent entry point
                 Enumeration<JarEntry> entries = jar.entries();
                 List<String> candidateClasses = new ArrayList<>();
                 while (entries.hasMoreElements()) {
@@ -414,7 +417,7 @@ public class JavaModLoader {
                     }
                 }
 
-                // Prioritize Plugin, Agent
+                // Plugin first, then Agent
                 for (String className : candidateClasses) {
                     if (className.toLowerCase().contains("plugin") ||
                         className.toLowerCase().contains("agent")) {
@@ -440,8 +443,8 @@ public class JavaModLoader {
         }
     }
 
-    // A Workshop jar runs with full access to the player's PC, unlike sandboxed Lua, so each distinct
-    // jar (by SHA-256) needs explicit consent. An updated jar has a new hash and is asked about again.
+    // A Workshop jar gets full access to the player's PC, unlike sandboxed Lua, so every distinct jar (by SHA-256) has
+    // to be approved. An updated jar has a new hash, so it gets asked about again.
     private static boolean isApprovedByUser(File jarFile, ModMetadata meta) {
         String sha256 = sha256Hex(jarFile);
         if (sha256 == null) {
@@ -594,7 +597,7 @@ public class JavaModLoader {
             }
         } catch (Throwable ignored) {}
 
-        // Only fall back to latest savegame if default.txt was not found or had no enabled mods
+        // Only fall back to the latest save if default.txt wasn't found or had no mods on
         if (ENABLED_MOD_IDS.isEmpty()) {
             try {
                 String userHome = System.getProperty("user.home");
@@ -661,17 +664,17 @@ public class JavaModLoader {
         File curr = jarFile.getParentFile();
         int levels = 0;
         while (curr != null && levels < 6) {
-            // Check direct mod.info
+            // mod.info directly in the folder
             File modInfo = new File(curr, "mod.info");
             if (modInfo.exists() && modInfo.isFile()) {
                 parseModInfoFile(modInfo, meta);
             }
-            // Check Build 42 subfolder mod.info
+            // Build 42 subfolder
             File b42Info = new File(curr, "42" + File.separator + "mod.info");
             if (b42Info.exists() && b42Info.isFile()) {
                 parseModInfoFile(b42Info, meta);
             }
-            // Check common subfolder mod.info
+            // common subfolder
             File commonInfo = new File(curr, "common" + File.separator + "mod.info");
             if (commonInfo.exists() && commonInfo.isFile()) {
                 parseModInfoFile(commonInfo, meta);
@@ -704,7 +707,7 @@ public class JavaModLoader {
                                   currName.equals("media") || currName.equals("java") ||
                                   currName.equals("classes") || currName.equals("lib") || currName.equals("libs");
 
-            // Stop at the nearest mod root: walking further up reaches ~/Zomboid or workshop root
+            // Stop at the nearest mod root, going further up hits ~/Zomboid or the workshop root
             if (!meta.modIds.isEmpty() && !isSubfolder) {
                 if (curr.getParentFile() != null) {
                     File pInfo = new File(curr.getParentFile(), "mod.info");
@@ -718,7 +721,7 @@ public class JavaModLoader {
             levels++;
         }
 
-        // Secondary check inside the JAR itself for ZombieBuddy signature
+        // Also look inside the jar for the ZombieBuddy signature
         if (!meta.isZombieBuddyMod) {
             try (JarFile jar = new JarFile(jarFile)) {
                 Enumeration<JarEntry> entries = jar.entries();

@@ -28,23 +28,24 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
 import zombie.iso.fboRenderChunk.ObjectRenderLayer;
 
 /**
- * Medium and high puddle quality: settings screen "Cache puddle squares per chunk" (JVM_PuddleFrameCache).
+ * Caches puddle squares per chunk, for medium and high puddle quality (JVM_PuddleFrameCache).
  *
  * Every frame FBORenderCell.renderPuddles walks the puddle squares of every on-screen chunk level, tests each one
- * (cut-away, on screen, floor, floor layer, puddle shape, twice), reads its four corner lights and works out the depth
- * of its four corners, then packs 32 floats per square for the puddle shader. In rain at a wide zoom that is tens of
+ * (cut-away, on screen, floor, floor layer, puddle shape, twice), reads its four corner lights, works out the depth of
+ * its four corners and packs 32 floats per square for the puddle shader. In rain at a wide zoom that's tens of
  * thousands of squares a frame.
  *
- * This replaces that walk with one that keeps, per chunk level:
- *  - the squares that pass the tests that only change with a bake or a cut-away change (level, cut-away), rebuilt
- *    when the level is baked again, its cut-away flags change or the puddle setting changes;
- *  - the corner lights, re-read when the level is baked again or is waiting for a lighting re-bake (every corner light
- *    change in the FBO renderer marks its level dirty for lighting first);
- *  - the corner depths, recomputed when the player's square or the camera's model jiggle correction changes (in
- *    practice: kept while the camera stands still).
- * Being on screen, the floor and its layer and the puddle shape are still tested every frame, in the stock order, and the
- * shape is read fresh, so the packed data is what the stock walk packs, square for square and float for float. The
- * translucent-floor and chunk-texture puddle passes are left to the game.
+ * My walk keeps, per chunk level:
+ * - the squares that pass the tests that only change with a bake or a cut-away change (level, cut-away), rebuilt when
+ *   the level is baked again, its cut-away flags change or the puddle setting changes
+ * - the corner lights, re-read when the level is re-baked or waiting for a lighting re-bake (every corner light change
+ *   in the FBO renderer marks its level dirty for lighting first)
+ * - the corner depths, redone when the player's square or the camera's model jiggle correction changes (so in practice,
+ *   kept while the camera stands still)
+ *
+ * On screen, floor and its layer, and the puddle shape are still tested every frame in stock order, and the shape is
+ * read fresh, so what gets packed matches the stock walk square for square and float for float. The translucent-floor
+ * and chunk-texture puddle passes are left to the game.
  */
 public final class PuddleFrameCache {
 
@@ -73,7 +74,7 @@ public final class PuddleFrameCache {
         final Level[] byZ = new Level[64];
     }
 
-    // Main thread only: bakes and the puddle pass run on it
+    // Main thread only, bakes and the puddle pass both run on it
     private static final WeakHashMap<FBORenderLevels, Levels> states = new WeakHashMap<>();
     private static volatile boolean broken;
     private static VarHandle renderDataField, numSquaresField, capacityField, dataField, perLevelField;
@@ -81,7 +82,7 @@ public final class PuddleFrameCache {
 
     private PuddleFrameCache() {}
 
-    /** Start of FBORenderLevels.clearCachedSquares(level): the level group is being baked again. */
+    /** Start of FBORenderLevels.clearCachedSquares(level): the level group is being re-baked. */
     public static void baked(FBORenderLevels renderLevels, int level) {
         Levels s = states.get(renderLevels);
         if (s != null) s.bakeStamp++;
@@ -115,7 +116,7 @@ public final class PuddleFrameCache {
     /** Start of FBORenderCell.renderPuddles(playerIndex); true skips the stock walk. */
     public static boolean render(zombie.iso.fboRenderChunk.FBORenderCell cell, int playerIndex) {
         if (!active || broken) return false;
-        // Paths this does not reproduce stay stock: puddles switched off in debug, chunk-texture packing
+        // Paths I don't reproduce stay stock: puddles turned off in debug, chunk-texture packing
         if (!zombie.debug.DebugOptions.instance.weather.waterPuddles.getValue()
                 || zombie.iso.fboRenderChunk.FBORenderChunkManager.instance.isCaching()) {
             return false;
@@ -155,7 +156,7 @@ public final class PuddleFrameCache {
             }
             return true;
         } catch (Throwable t) {
-            // Puddles may already be queued this frame, so the stock pass is skipped once rather than drawing them twice
+            // Puddles might already be queued this frame, so skip the stock pass once rather than drawing them twice
             broken = true;
             PZOLogger.warn("[PuddleFrameCache] Stood down from the next frame, puddles drawn by the stock pass: " + t);
             return true;
@@ -251,7 +252,7 @@ public final class PuddleFrameCache {
         numSquaresField.set(threadData, num);
     }
 
-    // The tests the stock walk makes that change only with a bake or a cut-away change
+    // The stock walk's tests that only change with a bake or a cut-away change
     private static void rebuild(Level lv, int bakeStamp, int epoch, List<IsoGridSquare> src, byte[] flags,
                                 zombie.iso.fboRenderChunk.FBORenderCutaways.ChunkLevelData levelData, int playerIndex, int z) {
         int n = 0;

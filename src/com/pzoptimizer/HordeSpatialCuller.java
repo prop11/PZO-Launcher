@@ -8,7 +8,9 @@ import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Batched proximity, camera AABB culling and LOD-tier classification for zombies, using AVX2 through the native library when available. */
+/**
+ * Batched proximity, camera culling and LOD tiers for zombies, with AVX2 through the native library when it's there.
+ */
 public final class HordeSpatialCuller {
 
     private static volatile boolean active = false;
@@ -47,7 +49,7 @@ public final class HordeSpatialCuller {
     public static final float TIER_CLOSE_SQ = 16.0f * 16.0f;     // 256 tiles^2  (LOD 0)
     public static final float TIER_MEDIUM_SQ = 32.0f * 32.0f;   // 1024 tiles^2 (LOD 1)
     public static final float TIER_FAR_SQ = 50.0f * 50.0f;      // 2500 tiles^2 (LOD 2)
-    public static final float CAMERA_HALF_SPAN = 50.0f;         // 100x100 tile camera safety AABB
+    public static final float CAMERA_HALF_SPAN = 50.0f; // 100x100 tile safety box around the camera
 
     public static void initialize() {
         if (active) return;
@@ -83,7 +85,7 @@ public final class HordeSpatialCuller {
                 fieldZ = movingObjClass.getDeclaredField("z");
                 fieldZ.setAccessible(true);
             } catch (Throwable t) {
-                // Fallback to public getters
+                // Fall back to the public getters
                 methodGetX = movingObjClass.getMethod("getX");
                 methodGetY = movingObjClass.getMethod("getY");
                 methodGetZ = movingObjClass.getMethod("getZ");
@@ -262,7 +264,7 @@ public final class HordeSpatialCuller {
 
     public static int getLODTier(int zombieIndex) {
         if (ViewpointStanddownGovernor.isStanddownActive()) {
-            return 0; // Highest fidelity when 3D mod is active
+            return 0; // full detail while a 3D camera mod is on
         }
         if (zombieIndex >= 0 && zombieIndex < snapshotCount) {
             return SNAPSHOT_TIERS[zombieIndex];
@@ -272,7 +274,7 @@ public final class HordeSpatialCuller {
 
     public static boolean isOffscreen(int zombieIndex) {
         if (ViewpointStanddownGovernor.isStanddownActive()) {
-            return false; // Never cull offscreen when 3D camera / Viewpoint is active
+            return false; // never cull off-screen with a 3D camera / Viewpoint
         }
         if (zombieIndex >= 0 && zombieIndex < snapshotCount) {
             return SNAPSHOT_MASK[zombieIndex] == 0;

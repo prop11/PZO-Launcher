@@ -5,11 +5,9 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Pre-warms DeadBodyAtlas's generic zombie LOD sprites. The first time a horde switches to flat LOD sprites
- * (IsoZombie.renderTextureInsteadOfModel -> DeadBodyAtlas.getBodyTexture), vanilla poses and renders all 128
- * generic body combinations (female/male x idle/walktoward x 8 directions x 4 frames) on the game thread in
- * one burst, a ~30 ms stutter. This requests 2 per frame starting 60 frames after world init, so the atlas
- * is filled before the first horde shows up.
+ * Pre-renders DeadBodyAtlas's generic zombie LOD sprites. The first time a horde drops to flat sprites, vanilla
+ * renders all 128 generic poses on the game thread at once (~30 ms hitch). I ask for 2 a frame starting 60 frames
+ * after world init, so it's done before the first horde turns up.
  */
 public final class BodyAtlasPrewarmGovernor {
 

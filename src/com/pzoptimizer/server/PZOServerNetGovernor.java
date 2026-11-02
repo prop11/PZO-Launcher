@@ -12,13 +12,13 @@ public final class PZOServerNetGovernor {
         active = true;
 
         try {
-            // Netty direct memory allocation
+            // Netty direct memory
             System.setProperty("io.netty.allocator.type", "pooled");
             System.setProperty("io.netty.allocator.maxOrder", "9"); // 4MB maximum chunk order
             System.setProperty("io.netty.allocator.pageSize", "8192"); // 8KB aligned pages
             System.setProperty("io.netty.recycler.maxCapacityPerThread", "4096");
 
-            // Tune RakNet / UDP Socket buffer limits
+            // RakNet / UDP socket buffer limits
             System.setProperty("zomboid.raknet.max_packet_queue", "16384");
             System.setProperty("zomboid.raknet.split_packet_cache", "true");
 

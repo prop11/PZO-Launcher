@@ -8,19 +8,19 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Compatibility mode for older or low-end PCs (issue #45). Decided once per launch; on every other PC it is off and
+ * Compatibility mode for older or low-end PCs (issue #45). Decided once per launch; off everywhere else, and then
  * nothing in PZO behaves differently.
  *
- * Trips (setting "Auto") when any of these hold:
- *  - an x86-64 CPU without AVX2 (the native library then uses its plain loops instead of the AVX2 ones),
- *  - 4 or fewer hardware threads,
- *  - less than LOW_RAM_GB of physical memory.
- * In compatibility mode the launch flags drop -XX:+AlwaysPreTouch (which commits and touches the whole starting heap
- * before the game starts), start with a small heap that grows as needed and keep to G1, and the native power shield
- * leaves the process priority, MMCSS and the working set lock alone.
+ * On Auto it kicks in for any of:
+ *  - an x86-64 CPU without AVX2 (the native library falls back to its plain loops)
+ *  - 4 or fewer hardware threads
+ *  - less than LOW_RAM_GB of RAM
+ * It drops -XX:+AlwaysPreTouch (which touches the whole starting heap before the game starts), starts with a small heap
+ * that grows as needed, sticks to G1, and the native power shield leaves the process priority, MMCSS and the working
+ * set lock alone.
  *
- * Forced on or off by the settings screen (pzo_config.json "compat_mode": auto / on / off), by -Dpzo.compat=on|off,
- * or by the game launch option -pzo_compat / -pzo_compat=off.
+ * Can be forced on or off from the settings screen (pzo_config.json "compat_mode": auto / on / off), with
+ * -Dpzo.compat=on|off, or with the launch option -pzo_compat / -pzo_compat=off.
  */
 public final class CompatMode {
 
@@ -56,7 +56,7 @@ public final class CompatMode {
         if (!nativeAvx2Known && !deciding) {
             deciding = true;
             try {
-                // Loads the native library, whose start-up reports AVX2 through noteNativeAvx2
+                // Loads the native library, which reports AVX2 back through noteNativeAvx2 when it starts
                 PZONative.isLoaded();
             } catch (Throwable ignored) {
             } finally {
@@ -83,7 +83,7 @@ public final class CompatMode {
             active = !why.isEmpty();
             reasons = String.join(", ", why);
         }
-        // Only a final answer is kept; one asked for while the native library is still loading is asked again
+        // Only keep a final answer; if the native library is still loading, ask again later
         decided = nativeAvx2Known || !deciding;
         if (decided) {
             if (active) {

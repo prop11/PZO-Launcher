@@ -11,27 +11,23 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Distant wind-swayed foliage is baked into the chunk texture instead of being drawn every frame.
+ * Bakes distant wind-swayed foliage into the chunk texture instead of drawing it every frame.
  *
- * With the wind sprite option on, FBORenderCell classifies every tree and every object with wind render effects as
- * Translucent, so each one is drawn individually every frame in the translucent pass even when it is far away and
- * its sway is a pixel or two. Here the loaded chunks are split each frame into near and far by distance from the
- * player (with hysteresis, so a chunk does not flip back and forth at the edge). While an object of a far chunk is
- * classified, the two wind checks in isObjectRenderLayer_MinusFloor / _Translucent answer "no wind", so the object
- * lands in the layer it would get with wind off: baked, unless something else (a translucent sprite, animation,
- * fire, a fade, other render effects) keeps it in the per-frame pass. When a chunk changes side it is invalidated
- * with DIRTY_TREES, as vanilla does when the wind option is toggled, so it is re-baked with the new answer and near
+ * With wind sprites on, FBORenderCell treats every tree and every object with wind effects as translucent, so each one
+ * is drawn on its own every frame even far away where it sways a pixel or two. Each frame I split the loaded chunks
+ * into near and far (with hysteresis so the edge doesn't flicker). For objects in far chunks the two wind checks in
+ * isObjectRenderLayer_MinusFloor / _Translucent answer "no wind", so they land where they would with wind off: baked,
+ * unless something else (translucent sprite, animation, fire, fade, other effects) keeps them per frame. When a chunk
+ * switches side it gets DIRTY_TREES, same as vanilla does when you toggle the wind option, so it re-bakes and near
  * foliage sways again.
  *
+ * Same for sprites flagged translucent (IsoSprite.depthFlags bit 2): chain-link fences, scaffolding, street
+ * decorations, ornamental plants. Vanilla draws all of them per frame, wind or not; on the bench route they were 94% of
+ * that pass (~350 a frame). In far chunks the classifier sees the bit cleared so they bake too, through TranslucentBake
+ * so depth and transparency match vanilla. Sprites it can't bake faithfully stay per frame.
  *
- * The same applies to sprites flagged translucent (IsoSprite.depthFlags bit 2): chain-link fencing, scaffolding,
- * street decorations, ornamental plants. Vanilla draws every one of them in the per-frame pass, wind or no wind;
- * on the benchmark route they were 94% of what that pass draws, ~350 a frame. For objects of a far chunk the
- * classifier sees the bit cleared, so those bake too, drawn by TranslucentBake so they keep vanilla's depth and
- * transparency; sprites it cannot bake faithfully stay per frame.
- *
- * Idea from fmac (Atmospherics), who found translucent sprites to be disproportionately expensive and caches distant
- * ones. Atmospherics ships its own version of this, so this one stands down while that mod is active.
+ * Idea from fmac (Atmospherics), who found translucent sprites disproportionately expensive and caches distant ones.
+ * Atmospherics has its own version, so this stands down while that mod is active.
  */
 public final class FoliageLod {
 
@@ -46,7 +42,7 @@ public final class FoliageLod {
     public static final AtomicLong chunkFlips = new AtomicLong();
     public static final AtomicLong objectsBaked = new AtomicLong();
 
-    // Game thread only. Chunk world coordinates -> far; entries outside the loaded grid are dropped each frame
+    // Game thread only. Chunk world coords -> far; anything outside the loaded grid is dropped each frame
     private static Map<Long, Boolean> farByChunk = new HashMap<>();
     private static Map<Long, Boolean> nextFar = new HashMap<>();
     private static boolean classifyingFar;
@@ -56,7 +52,7 @@ public final class FoliageLod {
 
     private FoliageLod() {}
 
-    // Multiplied by an odd constant: still one key per chunk, but neighbouring chunks no longer share HashMap buckets
+    // Times an odd constant: still one key per chunk, but neighbouring chunks stop landing in the same HashMap bucket
     private static long key(int wx, int wy) {
         return (((long) wx << 32) ^ (wy & 0xffffffffL)) * 0x2E41CBF68F940BCFL;
     }
@@ -91,7 +87,7 @@ public final class FoliageLod {
         if (player == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
         zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
         if (map == null) return;
-        // Distance from what the camera follows (Viewpoint and spectating move it off the player)
+        // Distance from whatever the camera follows (Viewpoint and spectating move it off the player)
         float px = zombie.iso.IsoCamera.frameState.camCharacterX, py = zombie.iso.IsoCamera.frameState.camCharacterY;
         if (px == 0.0f && py == 0.0f) {
             px = player.getX();
@@ -111,7 +107,7 @@ public final class FoliageLod {
                 Boolean prev = farByChunk.get(k);
                 boolean far = prev == null ? d > r : (prev ? d > r - h : d > r + h);
                 if (prev != null && prev != far) {
-                    // Re-bake with the new answer, the way vanilla reacts to the wind option itself changing
+                    // Re-bake with the new answer, same as vanilla does when the wind option itself changes
                     c.invalidateRenderChunkLevels(zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_TREES);
                     chunkFlips.incrementAndGet();
                 }
@@ -122,7 +118,7 @@ public final class FoliageLod {
         farByChunk = seen;
     }
 
-    // Drops every far chunk back to near and re-bakes it, e.g. when Atmospherics takes over or wind is switched off
+    // Puts every far chunk back to near and re-bakes it, e.g. when Atmospherics takes over or wind gets switched off
     private static void resetAll() {
         if (farByChunk.isEmpty()) return;
         try {
@@ -165,7 +161,7 @@ public final class FoliageLod {
         return ((zombie.core.Core) core).getOptionDoWindSpriteEffects();
     }
 
-    // Replaces the IsoSprite.depthFlags reads of the classifier: a far object's sprite is not treated as translucent
+    // Replaces the IsoSprite.depthFlags reads in the classifier, so a far object's sprite doesn't count as translucent
     public static int depthFlags(Object sprite) {
         int flags = ((zombie.iso.sprite.IsoSprite) sprite).depthFlags;
         if (classifyingFar && spritesActive && (flags & 2) != 0 && TranslucentBake.canBake(classifyingObject, sprite)) {

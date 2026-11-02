@@ -8,13 +8,13 @@ import zombie.statistics.StatisticType;
 import zombie.statistics.StatisticsManager;
 
 /**
- * Settings screen "Zombie travel statistics once a frame" (JVM_ZombieTravelStats).
+ * Adds up zombie travel statistics once a frame (JVM_ZombieTravelStats).
  *
- * Every moving zombie adds its step to "Zombie's Distance Walked / Crawled / Ran" each frame through
- * StatisticsManager.incrementStatistic, which allocates a capturing lambda for computeIfAbsent, looks the key up
- * twice and then string-compares the statistic against every achievement. The steps are summed here per key and
- * handed to incrementStatistic once per key per game tick (and before a save), so the totals and the achievement
- * checks are the same; only the float rounding of the running total can differ in the last digit.
+ * Every moving zombie adds its step to "Zombie's Distance Walked / Crawled / Ran" every frame through
+ * StatisticsManager.incrementStatistic, which allocates a capturing lambda for computeIfAbsent, looks the key up twice
+ * and then string-compares the stat against every achievement. I sum the steps per key and hand them over once per key
+ * per tick (and before a save), so the totals and achievement checks come out the same; only the float rounding of the
+ * running total can differ in the last digit.
  */
 public final class ZombieTravelTally {
 
@@ -23,7 +23,7 @@ public final class ZombieTravelTally {
 
     private static final int SLOTS = 3;
     private static final String[] keys = new String[SLOTS];
-    // Object[]: no game class may load while IsoZombie is being patched
+    // Object[] because no game class may load while IsoZombie is being patched
     private static final Object[] types = new Object[SLOTS];
     private static final Object[] categories = new Object[SLOTS];
     private static final float[] sums = new float[SLOTS];
@@ -66,7 +66,7 @@ public final class ZombieTravelTally {
         folded.incrementAndGet();
     }
 
-    /** Hands the sums to the game; next game tick, before a save, and when switched off. */
+    /** Hands the sums to the game: next tick, before a save, and when switched off. */
     public static void flush() {
         if (!FrameStamp.onGameThread()) return;
         StatisticsManager sm = null;

@@ -19,9 +19,9 @@ import java.util.Map;
 import java.util.function.Predicate;
 
 /**
- * Method-level class rewriting for the agent, using the bundled (relocated) ASM. A transform edits a ClassNode in
- * place and returns true if it changed anything; the class is then rewritten with recomputed stack map frames.
- * Any exception leaves the class as it was loaded, so a game update that moves code degrades to vanilla.
+ * Method-level class rewriting with the bundled ASM. A transform edits the ClassNode in place and returns true if it
+ * changed anything; frames are recomputed on write. Any exception leaves the class as loaded, so if a game update
+ * moves the code I just end up with vanilla.
  */
 public final class AsmSupport {
 
@@ -54,8 +54,8 @@ public final class AsmSupport {
                 }
             }
             if (hasDuplicateMembers(node)) {
-                // Another agent (ViewpointFPS+ via ZombieBuddy) redefined the class with bytes this agent had already
-                // patched, so the patch is in the input; adding its members again is a ClassFormatError
+                // Another agent (ViewpointFPS+ via ZombieBuddy) redefined the class with bytes I'd already patched, so
+                // adding my members again would be a ClassFormatError
                 PZOLogger.warn("[AsmSupport] " + what + ": class already carries this patch, left as is");
                 return null;
             }
@@ -78,10 +78,9 @@ public final class AsmSupport {
     }
 
     /**
-     * A retransform may not add or remove members. Another agent (ZombieBuddy, for one) retransforming a class this
-     * agent already patched hands over the original bytes, so the patch has to add its members again: that is fine
-     * exactly when the live class already has every one of them, i.e. the result has the shape it has now. A class
-     * that was loaded before this agent attached has none of them and keeps refusing.
+     * Retransforms can't add or remove members. When another agent (ZombieBuddy, say) retransforms a class I already
+     * patched, it hands me the original bytes and my members get added again. That's fine as long as the live class
+     * already has all of them. A class that was loaded before I attached has none, so it stays refused.
      */
     private static boolean sameShape(Class<?> live, ClassNode node, int fields, int methods, int interfaces) {
         java.util.Set<String> liveFields = new java.util.HashSet<>();
@@ -212,9 +211,8 @@ public final class AsmSupport {
     }
 
     /**
-     * COMPUTE_FRAMES needs the common superclass of two types. The default implementation loads classes, which
-     * inside a ClassFileTransformer can recurse into the transformer or initialise game classes too early, so the
-     * hierarchy is read from class file bytes instead.
+     * COMPUTE_FRAMES needs the common superclass of two types, and the default does it by loading classes. Inside a
+     * transformer that can recurse or initialise game classes too early, so read the hierarchy from the class bytes.
      */
     static final class LoaderAwareClassWriter extends ClassWriter {
         private final ClassLoader loader;
@@ -240,9 +238,8 @@ public final class AsmSupport {
                 r = null;
             }
             if (r == null) {
-                // JDK classes are not always readable as resources, and on a newer JDK their class files can be
-                // newer than ASM parses. The platform loader only holds JDK modules, so this lookup can never load
-                // or initialise game code.
+                // JDK class files aren't always readable as resources and can be newer than ASM understands. The
+                // platform loader only has JDK modules, so this can't load or initialise game code.
                 try {
                     Class<?> k = Class.forName(type.replace('/', '.'), false, ClassLoader.getPlatformClassLoader());
                     Class<?> sup = k.getSuperclass();

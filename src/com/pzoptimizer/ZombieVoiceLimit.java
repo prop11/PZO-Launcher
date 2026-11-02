@@ -1,11 +1,11 @@
 package com.pzoptimizer;
 
 /**
- * Settings screen "Horde voice limit" (Horde_AudioConcurrencyLimit + Horde_VoiceLimit).
+ * Horde voice limit (Horde_AudioConcurrencyLimit + Horde_VoiceLimit).
  *
- * ZombieVocalsManager.update gives the nearest zombies, re-sorted every 0.5 s, one of its 20 voice slots:
- * count = PZMath.min(slots.length, zombies.size()). That call is redirected here so fewer of those slots are filled;
- * zombies past the limit are the farthest ones and simply stay quiet, as zombies past the 20th already do in vanilla.
+ * ZombieVocalsManager.update gives the nearest zombies (re-sorted every 0.5 s) one of its 20 voice slots, via count =
+ * PZMath.min(slots.length, zombies.size()). I redirect that call so fewer slots get filled. The zombies past the limit
+ * are the furthest ones and just stay quiet, like everything past the 20th already does in vanilla.
  */
 public final class ZombieVoiceLimit {
 

@@ -9,14 +9,9 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 
 /**
- * Thread-safe, zero-allocation IsoDirections.ToVector() optimization.
- *
- * In vanilla 42.21, ToVector() used a single shared mutable Vector2, causing thread-race crashes between main and
- * render threads. In 42.22, vanilla changed this to return new Vector2(), allocating a new heap object on every call.
- *
- * PZO provides a per-thread cache of 8 Vector2 instances (one per cardinal/intercardinal direction). Calls to ToVector()
- * populate and return the calling thread's dedicated vector instance, eliminating all heap allocations while remaining
- * completely thread-safe across all game, render, and worker threads.
+ * IsoDirections.ToVector() without the race or the garbage. In 42.21 it handed out one shared mutable Vector2, which
+ * crashed when the main and render threads raced on it; 42.22 fixed that by allocating a new Vector2 every call. I
+ * keep 8 vectors per thread (one per direction) and hand back the caller's own, so no allocations and no races.
  */
 public final class DirectionVectorFix {
 
@@ -33,7 +28,7 @@ public final class DirectionVectorFix {
 
     private DirectionVectorFix() {}
 
-    /** Compatibility stub for legacy reflection/callers. */
+    /** Kept for old reflection callers. */
     public static boolean useShared() {
         return true;
     }

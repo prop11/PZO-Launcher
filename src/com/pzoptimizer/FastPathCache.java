@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Normalizes and interns asset paths (textures, models, sounds) to avoid repeated String copies during loading. */
+/** Normalises and interns asset paths (textures, models, sounds) so loading doesn't keep copying the same strings. */
 public class FastPathCache {
     private static final int CACHE_SIZE = 4096;
     private static final int MASK = CACHE_SIZE - 1;

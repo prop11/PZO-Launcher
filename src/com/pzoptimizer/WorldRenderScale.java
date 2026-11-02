@@ -13,24 +13,24 @@ import zombie.core.Core;
 import zombie.core.textures.TextureFBO;
 
 /**
- * Render-scale virtualization for the world offscreen buffer (FSR 1.0 input stage).
+ * Render-scale plumbing for the world offscreen buffer (the FSR 1.0 input side).
  *
- * Build 42 rasterizes the world into Core.offscreenBuffer with a screen-sized viewport and a zoom-scaled
- * ortho projection. Rendering at a lower resolution therefore only requires shrinking every pixel-space
- * GL call made while that FBO is bound, keeping the projection untouched: the whole frame lands in the
- * bottom-left (W*s x H*s) sub-rectangle, which WorldUpscaleRenderer then upscales back to W x H.
+ * B42 renders the world into Core.offscreenBuffer with a screen-sized viewport and a zoom-scaled ortho projection. So
+ * to render at a lower resolution I only have to shrink every pixel-space GL call made while that FBO is bound and
+ * leave the projection alone: the whole frame lands in the bottom-left (W*s x H*s) corner, which WorldUpscaleRenderer
+ * then scales back up to W x H.
  *
- * The agent redirects these LWJGL calls in every zombie.* class to the static wrappers below (identical
- * descriptors, so the swap is verifier-neutral). Each wrapper tracks the "logical" (unscaled) state the
- * game asked for and applies the scaled value only while the world FBO is the draw target:
- *   glViewport / glScissor          - scaled; logical value re-applied on every FBO switch
- *   glPushAttrib / glPopAttrib      - logical viewport/scissor mirrored so pops restore correctly
- *   glGetIntegerv(VIEWPORT|SCISSOR) - reports the logical value so save/restore pairs do not double-scale
+ * The agent redirects these LWJGL calls in every zombie.* class to the wrappers below (same descriptors, so the
+ * verifier doesn't care). Each wrapper tracks the unscaled state the game asked for and only applies the scaled value
+ * while the world FBO is the draw target:
+ *   glViewport / glScissor          - scaled; the unscaled value is re-applied on every FBO switch
+ *   glPushAttrib / glPopAttrib      - unscaled viewport/scissor mirrored so pops restore correctly
+ *   glGetIntegerv(VIEWPORT|SCISSOR) - reports the unscaled value so save/restore pairs don't double-scale
  *   glBlitFramebuffer               - rectangles touching the world FBO are scaled (depth/stencil use NEAREST)
  *   glShaderSource                  - fragment shaders get gl_FragCoord rewritten to full-resolution pixels
- *   glUseProgram / glLinkProgram    - keep the rewritten shaders' PZO_FragCoordScale uniform current
+ *   glUseProgram / glLinkProgram    - keep the rewritten shaders' PZO_FragCoordScale uniform up to date
  *
- * All state is touched only on the render thread (the only thread that issues GL in Project Zomboid).
+ * Render thread only (the only thread that does GL in PZ).
  */
 public final class WorldRenderScale {
 
@@ -51,7 +51,7 @@ public final class WorldRenderScale {
 
     private static volatile boolean installed = false;
 
-    // Render-thread latched scale; changed only by WorldUpscaleRenderer between frames
+    // Latched on the render thread; only WorldUpscaleRenderer changes it, between frames
     private static float rtScale = 1.0f;
 
     private static int drawFbo = 0;
@@ -148,7 +148,7 @@ public final class WorldRenderScale {
         if (s >= 0.995f) s = 1.0f;
         if (s != rtScale) {
             rtScale = s;
-            // Re-issue the logical state so the change is coherent if the world FBO is still bound
+            // Re-issue the unscaled state so everything stays consistent if the world FBO is still bound
             reapplyViewportAndScissor();
             updateFragScaleUniform();
         }
@@ -301,7 +301,7 @@ public final class WorldRenderScale {
             dx0 = sc(dx0); dy0 = sc(dy0); dx1 = sc(dx1); dy1 = sc(dy1);
             worldDirty = true;
         }
-        // Scaled depth/stencil blits must be NEAREST or GL rejects them
+        // Scaled depth/stencil blits have to be NEAREST or GL rejects them
         if ((rs != ds) && (mask & (GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT)) != 0) {
             filter = GL_NEAREST;
         }
@@ -325,9 +325,9 @@ public final class WorldRenderScale {
     }
 
     /**
-     * gl_FragCoord inside the scaled world FBO is in reduced pixels; every game shader expects full-resolution
-     * pixels (puddles/water WViewport, fog screenInfo, visibility blur screenSize). The uniform defaults to 0,
-     * which leaves gl_FragCoord untouched, so an unset uniform can never corrupt a shader.
+     * gl_FragCoord inside the scaled world FBO is in reduced pixels, but every game shader expects full-resolution ones
+     * (puddles/water WViewport, fog screenInfo, visibility blur screenSize). The uniform defaults to 0, which leaves
+     * gl_FragCoord alone, so an unset uniform can never break a shader.
      */
     static String rewriteFragCoord(String src) {
         String replaced = FRAG_COORD.matcher(src).replaceAll(Matcher.quoteReplacement("pzo_FragCoord()"));
@@ -335,7 +335,7 @@ public final class WorldRenderScale {
             + "vec4 pzo_FragCoord() { return " + FRAG_SCALE_UNIFORM + ".y > 0.5 ? vec4(gl_FragCoord.xy / "
             + FRAG_SCALE_UNIFORM + ".x, gl_FragCoord.zw) : gl_FragCoord; }\n";
 
-        // Insert after the leading #version / #extension directives (both must precede other code)
+        // Goes after the leading #version / #extension lines, which have to come before anything else
         String[] lines = replaced.split("\n", -1);
         int insertAt = 0;
         for (int i = 0; i < lines.length; i++) {
@@ -395,7 +395,7 @@ public final class WorldRenderScale {
         }
     }
 
-    /** Lets PZO's own raw GL passes report a program switch so the uniform cache stays honest. */
+    /** Lets PZO's own raw GL passes report a program switch so the uniform cache stays right. */
     static void notifyRawProgram(int program) {
         currentProgram = program;
     }

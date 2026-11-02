@@ -9,7 +9,7 @@ import java.nio.ByteOrder;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Watches the player's travel mode (driving, sprinting, walking) and pre-reads chunk files ahead of the direction of travel. */
+/** Watches how the player is moving (driving, sprinting, walking) and pre-reads chunk files ahead of them. */
 public final class PredictiveChunkStreamer {
 
     private static volatile boolean running = false;
@@ -57,7 +57,7 @@ public final class PredictiveChunkStreamer {
 
             while (running) {
                 try {
-                    Thread.sleep(isStorageFast() ? 200 : 350); // 5 Hz on SSD/NVMe, relaxed 3 Hz on HDD
+                    Thread.sleep(isStorageFast() ? 200 : 350); // 5 Hz on SSD/NVMe, 3 Hz on HDD
 
                     long now = System.currentTimeMillis();
                     if (now - lastPrewarmClearTime > 30_000L) {
@@ -103,7 +103,7 @@ public final class PredictiveChunkStreamer {
         }, "PZO-PredictiveChunkStreamer");
 
         streamerThread.setDaemon(true);
-        streamerThread.setPriority(Thread.NORM_PRIORITY - 1); // Priority 4 (never competes with gameplay or WorldStreamer)
+        streamerThread.setPriority(Thread.NORM_PRIORITY - 1); // priority 4, never competes with gameplay or the WorldStreamer
         streamerThread.start();
     }
 

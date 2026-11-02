@@ -69,7 +69,7 @@ public class PopTemplateGuard {
                     }
                 }
 
-                // maleSkins and femaleSkins must hold exactly 5 entries (MaleBody01..05), or
+                // maleSkins and femaleSkins need exactly 5 entries (MaleBody01..05), otherwise
                 // CharacterCreationMain.lua:652 indexes self.skinColors[1..5] out of range
                 fillIfEmpty(ptm, "maleSkins", 5, "MaleBody01");
                 fillIfEmpty(ptm, "femaleSkins", 5, "FemaleBody01");
@@ -89,7 +89,7 @@ public class PopTemplateGuard {
                     ptmClass.getField("femaleSkins").get(ptm) != null ? ((List<?>) ptmClass.getField("femaleSkins").get(ptm)).size() : 0));
             }
         } catch (ClassNotFoundException e) {
-            // Outside PZ client context
+            // Not running inside the PZ client
         } catch (Throwable t) {
             PZOLogger.warn("[PopTemplateGuard] Non-fatal notice on PopTemplateManager: " + t.getMessage());
         }
@@ -226,7 +226,7 @@ public class PopTemplateGuard {
     }
 
     @SuppressWarnings("unchecked")
-    // Only an empty list is filled with the vanilla defaults; skins added by mods are never removed.
+    // Only fill an empty list with the vanilla defaults, never remove skins a mod added
     private static void fillIfEmpty(Object ptm, String fieldName, int expectedSize, String defaultPrefix) {
         try {
             Field f = ptm.getClass().getField(fieldName);

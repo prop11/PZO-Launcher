@@ -8,7 +8,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Creates the shared PZO worker pool and starts the chunk streamer, horde governor, animation engine and island scheduler. */
+/**
+ * Creates the shared worker pool and starts the chunk streamer, horde governor, animation engine and island scheduler.
+ */
 public final class PZOMultiCoreEngine {
 
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
@@ -37,7 +39,6 @@ public final class PZOMultiCoreEngine {
         MultiCoreChunkStreamer.initialize();
         MultiCoreHordeGovernor.initialize();
         MultiCoreAnimationEngine.initialize();
-        MultiCoreIslandScheduler.initialize();
 
         initialized.set(true);
         active = true;
@@ -49,7 +50,6 @@ public final class PZOMultiCoreEngine {
             "  - Pillar 1: MultiCoreChunkStreamer (Parallel Decompression & 1MB NIO Ring)\n" +
             "  - Pillar 2: MultiCoreHordeGovernor (AVX2 SIMD Multi-Core Spatial Matrix)\n" +
             "  - Pillar 3: MultiCoreAnimationEngine (Thread-Safe Skeletal Animation & Off-Screen Skip)\n" +
-            "  - Pillar 4: MultiCoreIslandScheduler (32x32 Spatial Island Dual-Phase Parallel Simulation)\n" +
             "================================================================================",
             workerCount
         ));
@@ -75,8 +75,9 @@ public final class PZOMultiCoreEngine {
         return MultiCoreHordeGovernor.totalParallelSweeps.get();
     }
 
+    // The island scheduler never ran (simulation has to stay on the game thread) and is gone; kept for the Lua bridge
     public static long getParallelSimulatedEntities() {
-        return MultiCoreIslandScheduler.getTotalParallelUpdates();
+        return 0L;
     }
 
     public static long getBonesSaved() {
@@ -99,8 +100,6 @@ public final class PZOMultiCoreEngine {
             getParallelChunksStreamed(), MultiCoreChunkStreamer.getTotalStreamTimeSavedMs(), getPreloadedTrajectoryHits()));
         sb.append(String.format(Locale.US, "- **Multi-Core AVX2 Horde Sweeps**: %,d passes (Entities Tracked: %,d | In FOV: %,d | Culled: %,d)\n",
             getParallelHordeSweeps(), MultiCoreHordeGovernor.lastTrackedZombieCount.get(), MultiCoreHordeGovernor.getLastVisibleCount(), MultiCoreHordeGovernor.lastCulledOffscreenCount.get()));
-        sb.append(String.format(Locale.US, "- **Spatial Island Parallel Simulation**: %,d entity updates (Active Islands: %d)\n",
-            getParallelSimulatedEntities(), MultiCoreIslandScheduler.lastSimulatedIslands.get()));
         sb.append(String.format(Locale.US, "- **Skeletal Bone Transforms Bypassed**: %,d matrices (Adaptive 4-Tier LOD)\n",
             getBonesSaved()));
         return sb.toString();

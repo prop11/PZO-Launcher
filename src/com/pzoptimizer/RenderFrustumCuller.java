@@ -3,7 +3,7 @@ package com.pzoptimizer;
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Drops 2D sprite draws that fall outside the screen before they reach the SpriteRenderer command buffers. */
+/** Drops 2D sprite draws that are off screen before they reach the SpriteRenderer command buffers. */
 public final class RenderFrustumCuller {
 
     public static final AtomicLong drawCallsCulled = new AtomicLong(0);
@@ -15,11 +15,11 @@ public final class RenderFrustumCuller {
 
     public static boolean shouldRender(float x, float y, float width, float height) {
         if (ViewpointStanddownGovernor.isStanddownActive()) {
-            return true; // 3D camera mods transform coordinate space; 2D screen-space culling must stand down
+            return true; // 3D camera mods change the coordinate space, so screen-space culling has to stand down
         }
 
         if (!UnstableChannelGuard.isUnstableBuild()) {
-            return true; // Pass through in stable builds
+            return true; // does nothing on stable builds
         }
 
         updateScreenDimensions();

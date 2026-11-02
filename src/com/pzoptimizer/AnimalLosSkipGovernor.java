@@ -6,12 +6,9 @@ import zombie.characters.animals.behavior.BaseAnimalBehavior;
 import zombie.iso.IsoCamera;
 
 /**
- * Throttles IsoAnimal.updateLOS() for calm animals far from every local player.
- * Vanilla walks the whole cell object list for every animal every frame to find nearby zombies and
- * players. Distant calm animals run that walk on a staggered 1-in-N frame cadence instead, so livestock
- * still notices an approaching zombie within a fraction of a second.
- *
- * Animals that have spotted something or were recently alerted always run the full walk.
+ * Runs IsoAnimal.updateLOS() less often for calm animals far from every player. Vanilla walks the whole cell object
+ * list for every animal every frame; distant calm ones now do it every N frames, staggered, which still notices a
+ * zombie within a fraction of a second. Anything alerted runs it every frame.
  */
 public final class AnimalLosSkipGovernor {
 

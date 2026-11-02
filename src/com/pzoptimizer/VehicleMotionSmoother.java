@@ -30,20 +30,18 @@ import zombie.vehicles.BaseVehicle;
 import zombie.vehicles.BaseVehicle.WheelInfo;
 
 /**
- * Custom motion smoother for Project Zomboid vehicles: eliminates the 60 Hz physics
- * vs display refresh rate (120/144/165 Hz) mismatch jitter by applying transient SLERP
- * (rotation) and LERP (translation, wheels, passengers) interpolation right before
- * rendering, then restoring true physics states immediately afterwards.
+ * Smooths vehicles on high refresh rate screens. Physics runs at 60 Hz, so at 120/144/165 Hz cars visibly judder. Right
+ * before rendering I interpolate each vehicle between its last two physics states (slerp for rotation, lerp for
+ * position, wheels and passengers), then put the real physics state back straight after.
  *
- * Vehicle snapshots are captured directly from BaseVehicle in Java memory without making
- * premature Bullet JNI queries, preserving native contact manifold and collision flags
- * so that crash damage to car parts and players operates normally.
+ * Snapshots are taken from BaseVehicle's Java-side state, not by asking Bullet over JNI, so the native contact manifold
+ * and collision flags are left alone and crash damage still works.
  */
 public final class VehicleMotionSmoother {
 
     public static volatile boolean active = true;
 
-    // Vehicle physics snapshot storage
+    // Physics snapshots per vehicle
     private static final HashMap<Integer, VehicleSnapshot> prevSnapshots = new HashMap<>();
     private static final HashMap<Integer, VehicleSnapshot> currSnapshots = new HashMap<>();
     private static final HashMap<Integer, Long> lastCrashStamp = new HashMap<>();
@@ -51,25 +49,25 @@ public final class VehicleMotionSmoother {
     private static long currentStamp = 0;
     private static float currentAlpha = 0.0f;
 
-    // Transient render restore pool (zero runtime allocations per frame)
+    // Restore entries, pooled so a frame doesn't allocate
     private static final ArrayList<RenderRestore> activeRestores = new ArrayList<>(16);
     private static final ArrayList<RenderRestore> restorePool = new ArrayList<>(16);
 
-    // Scratch math primitives
+    // Scratch maths objects
     private static final Quaternionf scratchQuatA = new Quaternionf();
     private static final Quaternionf scratchQuatB = new Quaternionf();
     private static final Quaternionf scratchQuatOut = new Quaternionf();
     private static final Quaternionf scratchQuatCapture = new Quaternionf();
     private static final Vector3f scratchSeatPos = new Vector3f();
 
-    // Camera state preservation
+    // Saved camera state
     private static boolean cameraSaved = false;
     private static float savedCamOffX = 0.0f;
     private static float savedCamOffY = 0.0f;
     private static float savedCamTOffX = 0.0f;
     private static float savedCamTOffY = 0.0f;
 
-    // Method handles for private/protected game engine members
+    // Handles for private/protected game members
     private static MethodHandle updateTransformHandle = null;
     private static MethodHandle getTOffXHandle = null;
     private static MethodHandle setTOffXHandle = null;
@@ -113,9 +111,8 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * Hooked in WorldSimulation.updatePhysic() after all substeps complete.
-     * Records the substeps executed and computes fractional alpha without querying Bullet JNI,
-     * preserving native Bullet contact manifold and collision flags for WorldSimulation.updateInternal().
+     * Hooked in WorldSimulation.updatePhysic() after all the substeps. Notes how many substeps ran and works out the
+     * fractional alpha without asking Bullet, so its contact state is untouched for updateInternal().
      */
     public static void afterPhysicsSteps(int totalSubSteps, float localTime, float fixedTimeStep) {
         if (!isEnabled()) return;
@@ -130,9 +127,8 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * Hooked in WorldSimulation.update() immediately after updateInternal() completes.
-     * Captures vehicle snapshots directly from BaseVehicle in Java memory without making redundant
-     * Bullet JNI calls, preserving native collision states and allowing crash damage to register normally.
+     * Hooked in WorldSimulation.update() right after updateInternal(). Takes the vehicle snapshots from BaseVehicle's
+     * Java state, again without extra Bullet calls, so collisions and crash damage register normally.
      */
     public static void afterPhysicsUpdate() {
         if (!isEnabled() || lastSubSteps == 0) return;
@@ -150,8 +146,8 @@ public final class VehicleMotionSmoother {
             if (v == null) continue;
             int id = (int) v.vehicleId;
 
-            // Retain collision state: if vehicle collided during native physics step,
-            // record crash stamp so render interpolation avoids smearing into obstacle.
+            // If the vehicle hit something during this physics step, note it so the interpolation doesn't smear it into
+            // the obstacle
             if (v.jniIsCollide) {
                 lastCrashStamp.put(id, currentStamp);
             }
@@ -168,7 +164,7 @@ public final class VehicleMotionSmoother {
             }
 
             if (curr.stamp == 0) {
-                // First initialization for this vehicle: initialize both snapshots identically
+                // First time I see this vehicle, so both snapshots start the same
                 curr.captureFrom(v, currentStamp, scratchQuatCapture);
                 prev.copyFrom(curr);
                 prev.stamp = currentStamp - 1;
@@ -187,8 +183,8 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * Hooked at the very start of GameWindow.renderInternal().
-     * Interpolates vehicles, wheels, and camera to match monitor refresh rate.
+     * Hooked at the very start of GameWindow.renderInternal(): moves vehicles, wheels and the camera to the in-between
+     * pose.
      */
     public static void beforeRender() {
         restoreRenderState();
@@ -213,8 +209,7 @@ public final class VehicleMotionSmoother {
                     continue;
                 }
 
-                // If this vehicle experienced a collision in the current physics tick,
-                // skip interpolation so the crash response and crumple display immediately
+                // Collided this physics tick: don't interpolate, so the crash and crumple show straight away
                 Long crashStamp = lastCrashStamp.get(id);
                 if (crashStamp != null && crashStamp.longValue() == currentStamp) {
                     continue;
@@ -226,7 +221,7 @@ public final class VehicleMotionSmoother {
                 Transform jni = v.jniTransform;
                 if (jni == null) continue;
 
-                // Parity check with curr snapshot: if jni origin diverged significantly, don't interpolate
+                // Real position drifted a long way from the snapshot, so don't interpolate
                 if (Math.abs(jni.origin.x - b.posX) > 0.05f || Math.abs(jni.origin.z - b.posZ) > 0.05f) {
                     continue;
                 }
@@ -234,11 +229,11 @@ public final class VehicleMotionSmoother {
                 float dx = b.posX - a.posX;
                 float dz = b.posZ - a.posZ;
                 if (dx * dx + dz * dz > 1.0f) {
-                    // Collision or teleport spike: avoid interpolation smear
+                    // Collision or teleport jump, don't smear it
                     continue;
                 }
                 if (dx == 0.0f && dz == 0.0f && a.rotEquals(b)) {
-                    // Parked or static vehicle: zero transform work required
+                    // Parked, nothing to do
                     continue;
                 }
 
@@ -246,18 +241,18 @@ public final class VehicleMotionSmoother {
                 restore.capture(v);
                 activeRestores.add(restore);
 
-                // 1. Interpolate translation
+                // Position
                 jni.origin.x = a.posX + (b.posX - a.posX) * t;
                 jni.origin.y = a.posY + (b.posY - a.posY) * t;
                 jni.origin.z = a.posZ + (b.posZ - a.posZ) * t;
 
-                // 2. Interpolate orientation via SLERP
+                // Rotation
                 scratchQuatA.set(a.rotX, a.rotY, a.rotZ, a.rotW);
                 scratchQuatB.set(b.rotX, b.rotY, b.rotZ, b.rotW);
                 scratchQuatA.slerp(scratchQuatB, t, scratchQuatOut);
                 jni.setRotation(scratchQuatOut.normalize());
 
-                // 3. Interpolate wheels
+                // Wheels
                 int wheels = Math.min(b.wheelCount, v.wheelInfo != null ? v.wheelInfo.length : 0);
                 for (int w = 0; w < wheels; w++) {
                     WheelInfo wi = v.wheelInfo[w];
@@ -268,16 +263,16 @@ public final class VehicleMotionSmoother {
                     }
                 }
 
-                // 4. Update world coordinates for rendering
+                // World coordinates the renderer reads
                 float worldDx = jni.origin.x - restore.origJniX;
                 float worldDy = jni.origin.z - restore.origJniZ;
                 v.setX(restore.origWorldX + worldDx);
                 v.setY(restore.origWorldY + worldDy);
 
-                // 5. Compute chassis and model matrices
+                // Chassis and model matrices
                 updateTransformHandle.invokeExact(v);
 
-                // 6. Smooth seated passengers
+                // Passengers in seats
                 int seats = v.getMaxPassengers();
                 for (int p = 0; p < seats; p++) {
                     IsoGameCharacter chr = v.getCharacter(p);
@@ -295,7 +290,7 @@ public final class VehicleMotionSmoother {
                 vehicleMoved = true;
             }
 
-            // 7. Center camera smoothly on the driving vehicle
+            // Keep the camera centred on the car the player is driving
             if (vehicleMoved) {
                 smoothCamera();
             }
@@ -306,7 +301,7 @@ public final class VehicleMotionSmoother {
     }
 
     private static void smoothCamera() throws Throwable {
-        // A 3D camera mod (Viewpoint) drives the view itself; recentring PlayerCamera here would fight it
+        // A 3D camera mod (Viewpoint) drives the view itself, recentring PlayerCamera here would fight it
         if (IsoPlayer.numPlayers > 1 || ViewpointStanddownGovernor.isStanddownActive()) return;
         IsoPlayer player = IsoPlayer.players[0];
         if (player == null || player.getVehicle() == null) return;
@@ -327,8 +322,8 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * Hooked before every RETURN in GameWindow.renderInternal().
-     * Restores all vehicles, wheels, and camera state back to true physics.
+     * Hooked before every return in GameWindow.renderInternal(): puts vehicles, wheels and the camera back to real
+     * physics.
      */
     public static void afterRender() {
         restoreRenderState();
@@ -366,16 +361,15 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * ASM Transformer for zombie.core.physics.WorldSimulation:
-     * 1. Inserts afterPhysicsSteps after substeps in updatePhysic().
-     * 2. Inserts afterPhysicsUpdate before RETURN in update().
+     * Transformer for WorldSimulation: afterPhysicsSteps after the substeps in updatePhysic(), afterPhysicsUpdate
+     * before update() returns.
      */
     public static boolean patchWorldSimulation(ClassNode node) {
         MethodNode mPhysic = AsmSupport.findMethod(node, "updatePhysic", "()V");
         if (mPhysic == null) return false;
 
-        // numSimulationSubSteps = (int)(localTime / 0.01F). Its slot differs between builds (2 on 42.22, 3 on 42.21),
-        // and loading the wrong one fails verification and stops the world from loading.
+        // numSimulationSubSteps = (int)(localTime / 0.01F). Its local slot changes between builds (2 on 42.22, 3 on
+        // 42.21), and loading the wrong one fails verification and the world won't load.
         int stepsSlot = -1;
         for (AbstractInsnNode insn = mPhysic.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn.getOpcode() == Opcodes.F2I) {
@@ -392,8 +386,8 @@ public final class VehicleMotionSmoother {
         for (AbstractInsnNode insn = mPhysic.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (!patchedAfterSteps && insn instanceof FieldInsnNode fi && fi.getOpcode() == Opcodes.GETFIELD
                     && "zombie/core/physics/WorldSimulation".equals(fi.owner) && "time".equals(fi.name) && "J".equals(fi.desc)) {
-                // Target of the substep loop exit / iflt branch:
-                // Insert: afterPhysicsSteps(numSimulationSubSteps, this.localTime, fixedTimeStep)
+                // At the substep loop exit (the iflt target), insert afterPhysicsSteps(numSimulationSubSteps,
+                // this.localTime, fixedTimeStep)
                 AbstractInsnNode prev = fi.getPrevious(); // aload_0
                 if (prev != null && prev.getOpcode() == Opcodes.ALOAD) {
                     InsnList post = new InsnList();
@@ -437,14 +431,12 @@ public final class VehicleMotionSmoother {
     }
 
     /**
-     * ASM Transformer for zombie.GameWindow:
-     * Wraps renderInternal() with beforeRender() at method start and afterRender() at each return.
+     * Transformer for GameWindow: beforeRender() at the start of renderInternal() and afterRender() at every return.
      */
     public static boolean patchGameWindow(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "renderInternal", "()V");
         if (m == null) return false;
 
-        // Head injection
         InsnList head = new InsnList();
         head.add(new MethodInsnNode(
             Opcodes.INVOKESTATIC,
@@ -455,7 +447,7 @@ public final class VehicleMotionSmoother {
         ));
         m.instructions.insert(head);
 
-        // Tail injection before each RETURN
+        // Before each return
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn.getOpcode() == Opcodes.RETURN) {
                 InsnList tail = new InsnList();
@@ -473,9 +465,7 @@ public final class VehicleMotionSmoother {
         return true;
     }
 
-    // ------------------------------------------------------------------------
-    // Snapshot and Restore Pools
-    // ------------------------------------------------------------------------
+    // Snapshot and restore pools
 
     private static final class VehicleSnapshot {
         int id;

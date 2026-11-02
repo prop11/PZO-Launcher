@@ -8,13 +8,12 @@ import zombie.characters.IsoZombie;
 import zombie.iso.IsoGridSquare;
 
 /**
- * Settings screen "Far zombies probe doors every other frame" (JVM_FarThumpCadence).
+ * Far zombies check for doors every other frame (JVM_FarThumpCadence).
  *
- * Each frame every walking zombie calls tryThump(null) from updateInternal: it finds the tile ahead of it and tests
- * that edge for a door, window, window frame or fence to thump or climb. A zombie farther than FAR_TILES from every
- * local player now runs that probe on every other game tick, alternating by zombie so the work is spread evenly. It
- * reaches a door or window at most one frame later, which nobody can see at that distance; within FAR_TILES nothing
- * changes.
+ * Every walking zombie calls tryThump(null) each frame to look for a door, window, frame or fence on the tile ahead.
+ * Zombies further than FAR_TILES from every player now only do that every other tick, alternating so the work is spread
+ * evenly. They reach a door at most one frame late, which nobody can see from that far away. Closer zombies are
+ * unchanged.
  */
 public final class FarThumpCadence {
 

@@ -4,8 +4,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Sets the DebugOptions and PerformanceSettings PZO relies on: native threaded pathfinding, the unsafe
- * threading options forced off, and lighting / animation LOD values.
+ * Sets the DebugOptions and PerformanceSettings PZO relies on: threaded native pathfinding on, the unsafe threading
+ * options off, and the lighting / animation LOD values.
  */
 public class EngineFeaturesTuner {
 
@@ -23,9 +23,9 @@ public class EngineFeaturesTuner {
                     setOptionValue(debugOptionsInstance, "pathfindSmoothPlayerPath", true);
 
                     // Kept off on purpose:
-                    // - threadAnimation: crashes the single-threaded Kahlua VM
-                    // - threadAmbient / threadSound / threadWorld: FMOD races (e.g. the DayZ Ambient Sound TimSort crash)
-                    // - threadLighting / threadGridStacks: RenderThread .join() stalls on PZForkJoinPool
+                    //   threadAnimation - crashes the single-threaded Kahlua VM
+                    //   threadAmbient / threadSound / threadWorld - FMOD races (DayZ Ambient Sound TimSort crash)
+                    //   threadLighting / threadGridStacks - RenderThread .join() stalls on PZForkJoinPool
                     setOptionValue(debugOptionsInstance, "threadAnimation", false);
                     setOptionValue(debugOptionsInstance, "threadLighting", false);
                     setOptionValue(debugOptionsInstance, "lightingSplitUpdate", false);
@@ -47,8 +47,8 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // Vanilla default. Corpses or items in the chunk texture invalidate the chunk FBO every frame
-                    // while bodies or items move.
+                    // Vanilla default. Corpses or items baked into the chunk texture would invalidate the chunk FBO
+                    // every frame while they move.
                     try {
                         Field fboGroupField = debugOptionsClass.getField("fboRenderChunk");
                         Object fboGroup = fboGroupField.get(debugOptionsInstance);
@@ -58,7 +58,7 @@ public class EngineFeaturesTuner {
                         }
                     } catch (Throwable ignored) {}
 
-                    // Persist to debug-options.ini
+                    // Save to debug-options.ini
                     persistDebugOptionsFile();
 
                     PZOLogger.success("EngineFeaturesTuner: Multi-Threaded Engine Subsystems Armed (GridStacks, Lighting, Pathfinding Native)");
@@ -87,20 +87,20 @@ public class EngineFeaturesTuner {
 
                 try {
                     Field lightFpsField = perfClass.getField("lightingFps");
-                    lightFpsField.setInt(null, 15); // Vanilla 15 FPS lighting updates (halves lighting CPU workload)
+                    lightFpsField.setInt(null, 15); // vanilla 15 FPS lighting updates
                 } catch (Throwable ignored) {}
 
                 try {
                     Field falloffField = perfClass.getField("zombieAnimationSpeedFalloffCount");
-                    falloffField.setInt(null, 4); // Adaptive animation frame skip for distant horde zombies
+                    falloffField.setInt(null, 4); // frame skip for distant horde zombies
                 } catch (Throwable ignored) {}
 
                 try {
                     Field blendField = perfClass.getField("numberZombiesBlended");
-                    blendField.setInt(null, 16); // High-fidelity skeletal blending for 16 closest zombies
+                    blendField.setInt(null, 16); // full blending for the 16 closest zombies
                 } catch (Throwable ignored) {}
 
-                // Decoupled UI FBO rendering is left to display initialization to avoid premature TextureFBO probing.
+                // UI FBO is left to display init, probing TextureFBO this early goes wrong
                 PopTemplateGuard.resetFBOState();
 
                 PZOLogger.success("EngineFeaturesTuner: Core Engine PerformanceSettings Optimized (15 FPS Lighting | Skeletal Falloff)");

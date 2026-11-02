@@ -1,8 +1,8 @@
 package com.pzoptimizer;
 
 /**
- * Mod classes seen by the agent's transformer as they load, from any class loader (ZombieBuddy and other Java mod
- * loaders included). Kept free of game references so the transformer can touch it without loading anything else.
+ * Mod classes the transformer has seen load, from any class loader (ZombieBuddy and other Java mod loaders too). No
+ * game references in here, so the transformer can use it without loading anything else.
  */
 public final class ClassSightings {
 

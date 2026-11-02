@@ -12,12 +12,12 @@ import java.util.Stack;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Replaces Stack.contains and Stack.add in IsoPlayer. updateLOS checks every spotted character against
- * lastSpotted, a Stack that only empties once no zombie has been seen for 1000 ticks, so in a horde each frame
- * does spotted x lastSpotted linear scans. Large stacks get a mirrored HashSet (same equals semantics as
- * Vector.contains). The mirror is valid only while the stack's modCount matches the one it was built at; adds
- * made through add() keep it in sync, and any other change (clear, a mod calling remove) rebuilds it.
- * Vector.set does not bump modCount and would go unnoticed; nothing in the game calls it on these stacks.
+ * Replaces Stack.contains and Stack.add in IsoPlayer. updateLOS checks every spotted character against lastSpotted, a
+ * Stack that only empties after no zombie has been seen for 1000 ticks, so in a horde every frame does spotted x
+ * lastSpotted linear scans. Big stacks get a mirrored HashSet (same equals semantics as Vector.contains). The mirror is
+ * only trusted while the stack's modCount matches what it was built at: adds through add() keep it in sync, and
+ * anything else (clear, a mod calling remove) rebuilds it. Vector.set doesn't bump modCount and would slip through, but
+ * nothing in the game calls it on these stacks.
  */
 public final class SpottedListGovernor {
 
@@ -28,7 +28,7 @@ public final class SpottedListGovernor {
     private static final int MIN_SIZE = 16;
     private static final VarHandle MOD_COUNT = lookupModCount();
 
-    // One entry per player stack; a handful at most, so a linear scan beats hashing a Vector (O(n) hashCode)
+    // One entry per player stack, a handful at most, so a linear scan beats hashing a Vector (O(n) hashCode)
     private static final Mirror[] mirrors = new Mirror[16];
 
     private static final class Mirror {

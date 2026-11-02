@@ -3,13 +3,16 @@ package com.pzoptimizer;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 
-/** Distance, line-of-sight, angle and batch culling math, using 8-wide AVX2 through the native library and FastMath tables. */
+/**
+ * Distance, line-of-sight, angle and batch culling maths, with 8-wide AVX2 through the native library and FastMath
+ * tables.
+ */
 public class ZombieMathVectorizer {
     private static boolean active = false;
 
     public static void apply() {
         try {
-            // Touch the FastMath tables so their first real use is not a cold miss
+            // Touch the FastMath tables so their first real use isn't a cold miss
             for (int i = -180; i <= 180; i++) {
                 float rad = (float) Math.toRadians(i);
                 FastMath.sin(rad);
@@ -31,37 +34,27 @@ public class ZombieMathVectorizer {
         return PZONative.isLoaded() && PZONative.isAVX2Supported();
     }
 
-    /**
-     * Batch calculates Euclidean distances for up to N entities using 8-wide AVX2 SIMD.
-     */
+    /** Distances for up to N entities, 8 at a time with AVX2. */
     public static int batchDistances(FloatBuffer directCoords, int count, float ox, float oy, FloatBuffer directOutDist) {
         return PZONative.calculateDistancesAVX2(directCoords, count, ox, oy, directOutDist);
     }
 
-    /**
-     * Batch calculates squared distances for up to N entities using 8-wide AVX2 SIMD (no sqrt).
-     */
+    /** Squared distances for up to N entities (no sqrt), 8 at a time with AVX2. */
     public static int batchDistancesSq(FloatBuffer directCoords, int count, float ox, float oy, FloatBuffer directOutDistSq) {
         return PZONative.calculateDistancesSqAVX2(directCoords, count, ox, oy, directOutDistSq);
     }
 
-    /**
-     * Batch tests radial proximity for up to N entities using 8-wide AVX2 SIMD.
-     */
+    /** Radius test for up to N entities, 8 at a time with AVX2. */
     public static int batchCullRadial(FloatBuffer directCoords, int count, float ox, float oy, float maxRadSq, ByteBuffer directOutMask) {
         return PZONative.cullRadialAVX2(directCoords, count, ox, oy, maxRadSq, directOutMask);
     }
 
-    /**
-     * Batch tests 2D AABB bounding box for up to N entities using 8-wide AVX2 SIMD.
-     */
+    /** 2D bounding box test for up to N entities, 8 at a time with AVX2. */
     public static int batchCullAABB(FloatBuffer directCoords, int count, float minX, float minY, float maxX, float maxY, ByteBuffer directOutMask) {
         return PZONative.cullAABBAVX2(directCoords, count, minX, minY, maxX, maxY, directOutMask);
     }
 
-    /**
-     * Batch classifies multi-tier LOD for up to N entities using 8-wide AVX2 SIMD.
-     */
+    /** LOD tiers for up to N entities, 8 at a time with AVX2. */
     public static int batchClassifyTiers(FloatBuffer directCoords, int count, float ox, float oy,
                                          float t0Sq, float t1Sq, float t2Sq, ByteBuffer directOutTiers) {
         return PZONative.classifyTiersAVX2(directCoords, count, ox, oy, t0Sq, t1Sq, t2Sq, directOutTiers);
@@ -73,23 +66,17 @@ public class ZombieMathVectorizer {
         return dx * dx + dy * dy;
     }
 
-    /**
-     * Fast Manhattan distance for rapid spatial grid culling.
-     */
+    /** Manhattan distance, for quick grid culling. */
     public static float manhattanDistance(float x1, float y1, float x2, float y2) {
         return Math.abs(x2 - x1) + Math.abs(y2 - y1);
     }
 
-    /**
-     * Fast Euclidean distance using fast inverse square root approximation.
-     */
+    /** Distance using the fast inverse square root. */
     public static float fastDistance(float x1, float y1, float x2, float y2) {
         return FastMath.distance(x1, y1, x2, y2);
     }
 
-    /**
-     * Fast direction angle between two entities using trigonometric lookup.
-     */
+    /** Angle between two entities from the trig tables. */
     public static float fastAngle(float x1, float y1, float x2, float y2) {
         return (float) Math.atan2(y2 - y1, x2 - x1);
     }

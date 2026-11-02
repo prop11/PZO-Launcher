@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Sets JIT and runtime system properties sized to the CPU core count. */
+/** JIT and runtime properties sized to the core count. */
 public class HotSpotJITCompilerTuner {
 
     public static void tuneRuntimeProperties() {

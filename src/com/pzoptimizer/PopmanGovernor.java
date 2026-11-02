@@ -17,19 +17,19 @@ import zombie.popman.ZombiePopulationManager;
 import zombie.popman.ZombieStateFlags;
 
 /**
- * Population manager optimizations that keep vanilla data structures and native threading as they are:
- * - ZombieStateFlags flyweights: the 64 possible flag values are pre-allocated and reused instead of
- *   allocated per zombie during cell realization
- * - sparse active-cell aggregation: replaces the full-map scan and Arrays.fill behind the 5-second
- *   zombie count stutter with a pass over active cells only
- * - Unsafe unpacking of the 29-byte zombie records returned by readByteBuffer
+ * Population manager speed-ups that keep vanilla's data structures and native threading as they are:
+ * - ZombieStateFlags flyweights: the 64 possible flag values are made once and reused, instead of allocated per zombie
+ *   while cells realise
+ * - sparse active-cell counting: replaces the full-map scan and Arrays.fill behind the 5-second zombie count stutter
+ *   with a pass over active cells only
+ * - Unsafe reads of the 29-byte zombie records readByteBuffer returns
  */
 public final class PopmanGovernor {
 
     private static volatile boolean initialized = false;
     private static volatile boolean active = true;
 
-    // Flyweight cache for standard 6-bit ZombieStateFlags (2^6 = 64 states)
+    // One shared instance per 6-bit ZombieStateFlags value (64 of them)
     private static final ZombieStateFlags[] STATE_FLAGS_CACHE = new ZombieStateFlags[64];
 
     // Cells touched by the last update, so only those are cleared
@@ -37,7 +37,7 @@ public final class PopmanGovernor {
     private static int activeCount = 0;
     private static long lastRealZombieUpdate = 0L;
 
-    // Reflection handles to ZombiePopulationManager protected fields
+    // Reflection handles for ZombiePopulationManager's protected fields
     private static Field fieldRealZombieCount = null;
     private static Field fieldRealZombieCount2 = null;
     private static Field fieldWidth = null;
@@ -48,7 +48,7 @@ public final class PopmanGovernor {
     private static MethodHandle handleNRealZombieCount = null;
     private static boolean reflectionResolved = false;
 
-    // Unsafe for direct buffer reads
+    // Unsafe, for direct buffer reads
     private static sun.misc.Unsafe unsafeInstance = null;
     private static long bufferAddressOffset = -1L;
 
@@ -137,7 +137,7 @@ public final class PopmanGovernor {
         return ZombieStateFlags.fromInt(flags);
     }
 
-    /** Sparse replacement for vanilla's full-grid zombie count update: only cells active last time or now are touched. */
+    /** Sparse version of vanilla's full-grid zombie count update: only cells active last time or now get touched. */
     public static void updateRealZombieCountFast(ZombiePopulationManager zpm) {
         if (!reflectionResolved || zpm == null) return;
 
@@ -157,7 +157,7 @@ public final class PopmanGovernor {
                 fieldRealZombieCount2.set(zpm, count2);
             }
 
-            // Clear only the cells that were active last update (no Arrays.fill)
+            // Clear only the cells that were active last update, no Arrays.fill
             for (int i = 0; i < activeCount; i++) {
                 int oldIdx = activeCellIndices[i];
                 if (oldIdx >= 0 && oldIdx < count1.length) {
@@ -212,26 +212,29 @@ public final class PopmanGovernor {
                 count2[k * 3 + 2] = count1[idx];
             }
 
-            // Hand off to the native popman thread
+            // Hand it to the native popman thread
             if (handleNRealZombieCount != null) {
                 handleNRealZombieCount.invokeExact(nonZero, count2);
             }
 
-            // Bump the timestamp so vanilla updateMain() skips its full-grid loop
+            // Bump the timestamp so vanilla's updateMain() skips its full-grid loop
             long now = System.currentTimeMillis();
             fieldRealZombieUpdateTime.setLong(zpm, now);
 
             sparseCellUpdates.incrementAndGet();
             totalFullScansAvoided.incrementAndGet();
         } catch (Throwable t) {
-            // Non-fatal, allow game to continue normally
+            // Not fatal, the game carries on as normal
         }
     }
 
-    /** Reads the 29-byte zombie records straight from the native direct buffer with Unsafe, skipping 8 ByteBuffer calls per zombie. */
+    /**
+     * Reads the 29-byte zombie records straight out of the native buffer with Unsafe, skipping 8 ByteBuffer calls per
+     * zombie.
+     */
     public static int unpackZombieDirect(ByteBuffer buf, int offset, float[] outFloats, int[] outInts) {
         if (unsafeInstance == null || bufferAddressOffset < 0 || !buf.isDirect()) {
-            return -1; // Fallback to standard reading
+            return -1; // fall back to the normal reads
         }
 
         try {
@@ -252,9 +255,7 @@ public final class PopmanGovernor {
         }
     }
 
-    /**
-     * MainThread frame boundary hook invoked by EngineThreadGovernor.
-     */
+    /** Main thread frame boundary hook, called by EngineThreadGovernor. */
     public static void onFrameBoundary(int frameCount) {
         if (!active || !initialized) return;
 

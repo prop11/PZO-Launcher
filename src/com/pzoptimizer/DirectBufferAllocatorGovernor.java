@@ -4,7 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 
-/** Every 5 s, removes disposed entries from DirectBufferAllocator's tracking list once it holds more than 64. */
+/** Every 5 s, prunes disposed entries from DirectBufferAllocator's tracking list once it's over 64. */
 public final class DirectBufferAllocatorGovernor {
 
     private static volatile boolean running = false;

@@ -2,7 +2,7 @@ package com.pzoptimizer;
 
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Interns repeated texture paths, sound names and item names shared by many objects. */
+/** Interns texture paths, sound names and item names that lots of objects share. */
 public class ResourceInterner {
     private static final ConcurrentHashMap<String, String> STRING_POOL = new ConcurrentHashMap<>(4096);
     private static final int MAX_POOL_SIZE = 16384;

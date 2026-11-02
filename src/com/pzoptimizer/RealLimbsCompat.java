@@ -5,16 +5,16 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 
 /**
- * Project Real Limbs (ZombieBuddy mod, package reallimbs) gives hit zombies a physics body and drives their pose,
- * states and update from the game thread; any of its hooks reached on another thread is skipped and left to the game.
- * PZO moves zombie bone math (BoneBatch) and action-graph evaluation (ActionParallel) to frame workers and caps the
- * update rate of unseen zombies, so a zombie with a body lost its physics pose. Those zombies, and only those, are kept
- * on the stock path, asked through Real Limbs' own Hooks.ours(IsoZombie), the check it exposes to thread optimisers.
- * Asking also tells Real Limbs that an optimiser threads zombies, which it uses to keep the rest of its hooks safe.
+ * Project Real Limbs (a ZombieBuddy mod, package reallimbs) gives hit zombies a physics body and drives their pose,
+ * states and update from the game thread, and skips any of its hooks that get called from another thread. PZO moves
+ * zombie bone math (BoneBatch) and action evaluation (ActionParallel) onto workers and caps the update rate of unseen
+ * zombies, so a zombie with a body lost its physics pose. Those zombies, and only those, stay on the stock path. I ask
+ * through Real Limbs' own Hooks.ours(IsoZombie), the check it exposes for thread optimisers, and asking also tells it
+ * an optimiser is threading zombies, which it uses to keep its other hooks safe.
  */
 public final class RealLimbsCompat {
 
-    // ZombieBuddy loads mods through its own class loader; the transformer records it when Real Limbs' classes load
+    // ZombieBuddy loads mods through its own class loader; the transformer notes it when Real Limbs' classes load
     private static volatile ClassLoader loader;
     private static volatile MethodHandle ours, hasBody;
     private static volatile boolean resolveFailed;
@@ -34,9 +34,9 @@ public final class RealLimbsCompat {
     }
 
     /**
-     * True while Real Limbs owns this zombie's body (physics, arms, pending NPC or multiplayer ghost). Game thread only.
-     * ours() reads a set Real Limbs rebuilds at the end of each frame, so a body taken this frame (the killing blow:
-     * the corpse pose comes from it) is only in it from the next frame; hasBody() reads its live body map.
+     * True while Real Limbs owns this zombie's body (physics, arms, pending NPC or multiplayer ghost). Game thread
+     * only. ours() reads a set Real Limbs rebuilds at the end of each frame, so a body taken this frame (the killing
+     * blow, where the corpse pose comes from) only shows up next frame; hasBody() reads its live body map.
      */
     public static boolean isBody(Object zombie) {
         MethodHandle h = ours;

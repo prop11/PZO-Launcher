@@ -7,14 +7,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import zombie.WorldSoundManager;
 
 /**
- * Settings screen "Clear expired noises only when one expired" (JVM_NoiseSweep).
+ * Only clears expired noises when one actually expired (JVM_NoiseSweep).
  *
- * Every frame WorldSoundManager.update takes the sound lock once per loaded chunk (361 at 1080p) and walks that
- * chunk's noise list for entries whose life ran out, removing them one by one. A noise only runs out in
- * WorldSoundManager's own list (life counts down there, and the expired one is released one update later), and each
- * noise is added to its chunks and to that list together. So at the start of an update the chunk lists can only hold
- * an expired noise if the manager's list holds one; when it does not, the per-chunk walk is skipped. When it does,
- * each chunk list is compacted in one pass, in the same order.
+ * Every frame WorldSoundManager.update takes the sound lock once per loaded chunk (361 at 1080p) and walks each chunk's
+ * noise list removing expired entries one by one. But a noise only expires in WorldSoundManager's own list (that's
+ * where its life counts down), and every noise goes into its chunks and that list together. So the chunk lists can only
+ * have an expired noise if the manager's list does. If it doesn't, I skip the per-chunk walk; if it does, each chunk
+ * list is compacted in one pass, same order.
  */
 public final class NoiseListSweep {
 

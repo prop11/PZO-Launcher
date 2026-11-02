@@ -10,18 +10,18 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * FliesSound$ChunkLevelData.update moves a player's corpse-flies emitter: it clears hasFlies on the emitter's old
- * square, then sets it on the new one. Almost always the square is the same, and setHasFlies invalidates the chunk
- * level on every change, so each update (re-run for the chunks around the player whenever a chunk loads, i.e.
- * continuously while driving) re-bakes a level next to the player twice. Here the clear is held back and only
- * applied if the square that then gets the flies is a different one; the final state is the same as stock.
+ * FliesSound$ChunkLevelData.update moves a player's corpse-flies emitter by clearing hasFlies on the old square and
+ * setting it on the new one. It's nearly always the same square, and setHasFlies invalidates the chunk level on every
+ * change, so each update (which re-runs for nearby chunks whenever one loads, i.e. constantly while driving) re-bakes a
+ * level next to the player twice. I hold the clear back and only apply it if the flies end up on a different square.
+ * Same end state as stock.
  */
 public final class FliesSoundFix {
 
     public static volatile boolean active = true;
     public static final AtomicLong togglesAvoided = new AtomicLong();
 
-    // Game thread only: the square whose clear is pending between the two calls of one update
+    // Game thread only: the square with a pending clear, between the two calls of one update
     private static Object pendingClear;
 
     private FliesSoundFix() {}
@@ -59,7 +59,7 @@ public final class FliesSoundFix {
                 calls.add(mi);
             }
         }
-        // Stock order: the clear of the old square, the set on the new square, the clear when the flies fade out
+        // Stock order: clear the old square, set the new one, clear again when the flies fade out
         if (calls.size() != 3) return false;
         m.instructions.set(calls.get(0), new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/FliesSoundFix", "deferClear",
             "(Ljava/lang/Object;Z)V", false));

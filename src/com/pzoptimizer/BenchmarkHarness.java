@@ -26,23 +26,23 @@ import zombie.iso.IsoCamera;
 import zombie.ui.UIManager;
 
 /**
- * Automated A/B benchmark driven by bench/fsr_compare.py.
+ * Automated A/B benchmark, driven by bench/fsr_compare.py.
  *
- * Configuration comes from ~/Zomboid/Lua/pzo-bench.txt (key=value lines) written by the script before launch,
- * so nothing depends on the launcher forwarding arguments. The script also copies a disposable bench save from
- * a template and points latestSave.ini at it, so the run may quit normally; every file it touches is restored.
+ * Settings come from ~/Zomboid/Lua/pzo-bench.txt (key=value lines), written by the script before launch so I don't
+ * depend on the launcher passing arguments through. The script also makes a throwaway copy of the bench save and puts
+ * back everything it touched, so quitting normally is fine.
  *
- * Flow (all on the main thread, ticked from EngineThreadGovernor's MainThread loop hook):
- *   MENU     queue a Lua OnFETick handler that waits for MainScreen's start-up delay, then continues the latest save
- *   LOADING  press "Click to Start" (GameLoadingState.forceDone) once the load is finished
- *   WARMUP   god mode + invisible, remember the start tile, uncap the framerate
- *   per zoom: SETTLE at the start tile -> ROUTE (square loop, fixed tiles/second, frame times sampled)
- *             -> SHOTS (paused at the start tile: screenshot without UI, then with UI)
- *   DONE     results.json, then Core.quitToDesktop() with a halt fallback
+ * Flow, all on the main thread (ticked from EngineThreadGovernor's main loop hook):
+ *   MENU     Lua OnFETick handler waits out MainScreen's start-up delay, then continues the latest save
+ *   LOADING  press "Click to Start" (GameLoadingState.forceDone) once loading is done
+ *   WARMUP   god mode + invisible, note the start tile, uncap the framerate
+ *   per zoom: SETTLE on the start tile -> ROUTE (fixed tiles/s, frame times sampled)
+ *             -> SHOTS (paused on the start tile, screenshot without and then with UI)
+ *   DONE     results.json, then Core.quitToDesktop() (halt if that hangs)
  *
- * plan=<segment>;<segment>;... runs several scenarios in one launch, each through every zoom, in order. A segment is
+ * plan=<segment>;<segment>;... runs several scenarios in one launch, each through every zoom. A segment is
  * name,route,tiles,speed,dir,time,weather,threat (e.g. horde_storm,square,40,8,W,12,storm,1). Between segments the
- * player goes back to the start tile and the next segment's time, weather and threat are applied before it settles.
+ * player goes back to the start tile and gets the next segment's time, weather and threat before settling.
  */
 public final class BenchmarkHarness {
 
@@ -247,8 +247,8 @@ public final class BenchmarkHarness {
     }
 
     /**
-     * stock=1 in the bench config: the run is a vanilla baseline. PZO then applies no patches or governors and only
-     * drives this harness, so the same route and sampling can be compared against a normal PZO run.
+     * stock=1: a vanilla baseline. No patches or governors, PZO only drives the harness, so the same route and sampling
+     * can be compared against a normal PZO run.
      */
     /** True while a benchmark config is in place (the harness will run this launch). */
     public static boolean isConfigured() {
@@ -839,11 +839,16 @@ public final class BenchmarkHarness {
             w.println("  \"action_zombies_deferred\": " + ActionParallel.deferred.get() + ",");
             w.println("  \"action_values_pre_read\": " + ActionParallel.preRead.get() + ",");
             w.println("  \"action_pre_read_hits\": " + ActionParallel.preReadHits.get() + ",");
+            w.println("  \"action_pre_read_checks\": " + ActionParallel.checks.get() + ",");
+            w.println("  \"action_pre_read_mismatches\": " + ActionParallel.mismatches.get() + ",");
             w.println("  \"chunk_bakes_held\": " + ChunkBakeBudget.bakesHeld.get() + ",");
             w.println("  \"puddle_shader_units_rewritten\": " + ShaderEarlyDepth.unitsRewritten.get() + ",");
             w.println("  \"bone_batch_zombies\": " + BoneBatch.deferred.get() + ",");
             w.println("  \"bone_batch_batches\": " + BoneBatch.batches.get() + ",");
             w.println("  \"skins_precomputed\": " + BoneBatch.skinsPrecomputed.sum() + ",");
+            w.println("  \"skin_checks\": " + BoneBatch.checks.get() + ",");
+            w.println("  \"skin_mismatches\": " + BoneBatch.mismatches.get() + ",");
+            w.println("  \"frame_workers\": " + FrameWorkers.workerCount() + ",");
             w.println("  \"foliage_chunk_flips\": " + FoliageLod.chunkFlips.get() + ",");
             w.println("  \"script_lookup_hits\": " + ScriptLookupCache.hits.sum() + ",");
             w.println("  \"lua_handler_ms\": " + LuaEventPatches.report(40) + ",");

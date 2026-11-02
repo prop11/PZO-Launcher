@@ -4,8 +4,8 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 
 /**
- * Engine health numbers for the telemetry HUD: frame-time variance, GC overhead, direct buffer use,
- * horde culler status and chunk streaming rate.
+ * Engine health numbers for the telemetry HUD: frame-time variance, GC overhead, direct buffer use, horde culler status
+ * and chunk streaming rate.
  */
 public final class PZOTelemetryHUD {
 

@@ -10,10 +10,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Benchmark diagnostic: what the per-frame translucent pass actually draws. Each FBORenderCell.renderTranslucent call
- * tallies the objects it is about to draw by the reason vanilla puts them in that pass (the checks of
- * isObjectRenderLayer_Translucent / calculateObjectRenderInfo, in their order), plus the sprite names, so the
- * results show which kind of object is worth caching. Only active while a benchmark runs.
+ * Bench diagnostic: what the per-frame translucent pass actually draws. Each FBORenderCell.renderTranslucent call
+ * counts the objects it's about to draw by the reason vanilla put them in that pass (the checks in
+ * isObjectRenderLayer_Translucent / calculateObjectRenderInfo, in order), plus the sprite names, so the results show
+ * what's worth caching. Only while a benchmark runs.
  */
 public final class TranslucentStats {
 

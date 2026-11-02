@@ -10,10 +10,10 @@ import zombie.core.SpriteRenderer;
 import zombie.core.opengl.RenderThread;
 
 /**
- * Benchmark-only render thread timing. Each render frame in RenderThread.lockStepRenderStep is: wait for the main
- * thread's frame state, submit it to OpenGL (SpriteRenderer.postRender), then present (Display.update). With vsync
- * off the driver blocks in present only when the GPU is behind, so present time is the GPU-bound signal: a scene
- * where it dominates is limited by the GPU, one where the wait dominates is limited by the main thread.
+ * Render thread timing for benchmarks and the profiler. Each render frame in RenderThread.lockStepRenderStep waits for
+ * the main thread's frame state, submits it (SpriteRenderer.postRender) and presents (Display.update). With vsync off
+ * the driver only blocks in present when the GPU is behind, so a scene dominated by present time is GPU-bound and one
+ * dominated by the wait is main-thread-bound.
  */
 public final class GpuFrameTimer {
 
@@ -41,7 +41,7 @@ public final class GpuFrameTimer {
     }
 
     public static void displayUpdate(boolean processMessages) {
-        // Installed for everyone: without a benchmark or the profiler running this is just the stock call
+        // Installed for everyone; with no benchmark or profiler running it's just the stock call
         if (!recording && !LiveProfiler.on) {
             org.lwjglx.opengl.Display.update(processMessages);
             return;
@@ -49,7 +49,7 @@ public final class GpuFrameTimer {
         long t = System.nanoTime();
         org.lwjglx.opengl.Display.update(processMessages);
         if (LiveProfiler.on) {
-            // Render thread is the only writer; the profiler reads the pair on the game thread
+            // Only the render thread writes; the profiler reads the pair on the game thread
             presentTotalNs += System.nanoTime() - t;
             presentCount++;
         }
@@ -61,14 +61,14 @@ public final class GpuFrameTimer {
         }
     }
 
-    // Called from the main thread; the render thread only reads the flag, and totals are read after it is cleared
+    // Main thread calls this; the render thread only reads the flag, and the totals are read after it's cleared
     public static synchronized void start() {
         frames = 0;
         waitNs = submitNs = presentNs = 0;
         recording = true;
     }
 
-    /** Stops recording and returns a JSON object with per-frame averages, or null if no frames were seen. */
+    /** Stops recording and returns per-frame averages as JSON, or null if no frames came in. */
     public static synchronized String stopJson() {
         recording = false;
         try {

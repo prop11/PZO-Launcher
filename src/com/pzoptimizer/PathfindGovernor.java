@@ -18,22 +18,22 @@ import zombie.vehicles.BaseVehicle;
 /**
  * Throughput fixes for the native pathfinder (zombie.pathfind.nativeCode + PZPathFind64.dll).
  *
- * PathfindNativeThread runs at 20 Hz and vanilla answers only two path requests per iteration, so the
- * whole world gets about 40 paths a second. On top of that, any chunk, square or vehicle update since
- * the last search makes the DLL rebuild its entire navigation graph inside the next findPath, so while
- * vehicles move or doors change nearly every pair of paths pays for a full rebuild.
+ * PathfindNativeThread runs at 20 Hz and vanilla only answers two path requests per iteration, so the whole world gets
+ * about 40 paths a second. On top of that, any chunk, square or vehicle update since the last search makes the DLL
+ * rebuild its whole navigation graph inside the next findPath, so while cars move or doors change nearly every pair of
+ * paths pays for a full rebuild.
  *
- * - request budget: requests are answered until a time budget is spent (never fewer than vanilla's
- *   two), so one rebuild serves many paths
- * - square merge: repeated updates of one square within an iteration collapse to the latest
- * - vehicle throttle: a vehicle's navmesh polygon is resent after it moves 0.25 tiles or every
- *   250 ms, instead of on every tiny change
- * - native A*: replaces the DLL's linear-scan decrease-key with an indexed one (Windows, exact DLL
- *   build only, see pzo_native.c)
+ * - request budget: keep answering requests until a time budget is used up (never fewer than vanilla's two), so one
+ *   rebuild serves lots of paths
+ * - square merge: repeated updates of one square in an iteration collapse to the latest
+ * - vehicle throttle: a vehicle's navmesh polygon is only resent after it moves 0.25 tiles or every 250 ms, not on
+ *   every tiny change
+ * - native A*: swaps the DLL's linear-scan decrease-key for an indexed one (Windows, exact DLL build only, see
+ *   pzo_native.c)
  *
- * updateThread() is a prefix hook on PathfindNativeThread.updateThread(); when it returns true the
- * vanilla body is skipped. Its loop mirrors vanilla's order exactly: chunk tasks (10 chunk updates
- * max), squares, vehicles, request tasks, PathfindNative.update(), then the requests.
+ * updateThread() is a prefix hook on PathfindNativeThread.updateThread(); returning true skips the vanilla body. Its
+ * loop follows vanilla's order exactly: chunk tasks (10 chunk updates max), squares, vehicles, request tasks,
+ * PathfindNative.update(), then the requests.
  */
 public final class PathfindGovernor {
 
@@ -73,7 +73,7 @@ public final class PathfindGovernor {
     private static boolean nativeAStarUnavailable = false;
     private static long nativeAStarRetryAt = 0L;
 
-    // Counters are plain longs: telemetry only, written by a single thread each
+    // Plain longs, telemetry only, and each one is written by a single thread
     private static long statPaths, statFindNanos, statMaxFindNanos, statRebuilds;
     private static long statSquares, statSquaresMerged, statBacklogMax;
     private static long statVehicleSent, statVehicleSkipped;
@@ -98,7 +98,7 @@ public final class PathfindGovernor {
         try {
             runIteration(thread);
         } catch (Throwable t) {
-            // Same as vanilla: the exception reaches PathfindNativeThread.run(), which logs it and loops
+            // Same as vanilla: the exception goes up to PathfindNativeThread.run(), which logs it and carries on
             throw sneaky(t);
         }
         return true;
@@ -194,9 +194,9 @@ public final class PathfindGovernor {
     }
 
     /**
-     * squareChanged() queues the square and its 8 neighbours, so busy areas send the same square many
-     * times per iteration. Each task snapshots the square when queued, so only the newest one per
-     * square matters; it is executed in its original queue position relative to the other squares.
+     * squareChanged() queues the square and its 8 neighbours, so busy areas send the same square many times per
+     * iteration. Each task snapshots the square when it's queued, so only the newest one per square matters, and it
+     * runs at its original position in the queue relative to the other squares.
      */
     private static void drainSquaresMerged(ConcurrentLinkedQueue<Object> squares, ConcurrentLinkedQueue<Object> returnQ) throws Throwable {
         ArrayList<Object> tasks = squareScratch;
@@ -233,7 +233,7 @@ public final class PathfindGovernor {
         for (int i = 0; i < n; i++) {
             if (squareKeep[i]) taskExecute.invoke(tasks.get(i));
         }
-        // Released only after every execute, so the main thread cannot recycle a task we still read
+        // Released only after every execute, so the main thread can't recycle a task I'm still reading
         for (int i = 0; i < n; i++) returnQ.add(tasks.get(i));
         tasks.clear();
         statSquares += n;
@@ -245,7 +245,7 @@ public final class PathfindGovernor {
     public static boolean vehicleCheck(Object state) {
         boolean reflected = !vehicleReflectionFailed && reflectVehicle(state);
         if (!vehicleThrottle || !reflected) {
-            // Without a handle to the vanilla check, report a change: extra updates only cost rebuilds
+            // No handle to the vanilla check, so report a change. Extra updates only cost rebuilds
             if (vanillaCheck == null) return true;
             try {
                 boolean changed = (boolean) vanillaCheck.invoke(state);

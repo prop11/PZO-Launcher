@@ -6,13 +6,9 @@ import zombie.iso.IsoFloorBloodSplat;
 import zombie.iso.IsoGridSquare;
 
 /**
- * Per-tile floor blood cap. Every hit queues more splats on the chunk, and a tile that already shows
- * several layers of blood looks the same with more, but each extra splat still has to be rendered into
- * the chunk floor texture. Once a tile holds the configured number of splats, further splatBlood calls
- * on it are skipped.
- *
- * Driven by the Lua mod's Blood_CapPerTile and Blood_MaxPerTile options; JVM_BytecodeBloodCap is the
- * engine-side master switch.
+ * Caps floor blood per tile. Past a few layers a tile looks the same, but every extra splat still gets drawn into the
+ * chunk floor texture, so once a tile has the configured number I skip further splatBlood calls. Driven by
+ * Blood_CapPerTile / Blood_MaxPerTile in the Lua mod, with JVM_BytecodeBloodCap as the engine switch.
  */
 public final class BloodCapGovernor {
 

@@ -15,20 +15,18 @@ import zombie.iso.IsoGridSquare;
 import zombie.iso.fboRenderChunk.FBORenderLevels;
 
 /**
- * Settings screen "Re-draw cutaway walls only when they change" (JVM_CutawayRebakeFilter).
+ * Only re-bakes cutaway walls when they actually change (JVM_CutawayRebakeFilter).
  *
- * FBORenderCutaways.doCutawayVisitSquares runs whenever the cutaway state may have moved on (the player walks onto
- * another square, a room is entered, a wall is built). It clears the cutaway flag of every square it cut last time,
- * sets it again on every square it cuts now, and marks the chunk texture of each chunk holding either kind for a full
- * re-bake (DIRTY_CUTAWAYS). Walking along a house cuts mostly the same walls as one square ago, so most of those
- * chunks are re-baked into the same picture.
+ * FBORenderCutaways.doCutawayVisitSquares runs whenever the cutaway might have moved (new square, entering a room,
+ * building a wall). It clears the flag on every square it cut last time, sets it on everything it cuts now, and marks
+ * every chunk involved for a full re-bake. Walking along a house cuts mostly the same walls as a square ago, so most of
+ * those chunks get re-baked into the same picture.
  *
- * The visit's three re-bake calls are held until it ends. Each square's flags are recorded before the visit first
- * touches them (a square cut both times goes 1 -> 0 -> 1); a held re-bake runs only when a square of its chunk ended
- * with different flags, or a square of a neighbouring chunk on its edge did (wall bakes read the N/S/W/E neighbours'
- * flags, and vanilla's edge pass only tracks "any cut wall on this edge", plus mis-stores the south edge). In the FBO
- * renderer the bake reads exactly those target flags, so the skipped textures would have come out the same. The
- * visit's neighbour-edge pass is left as it is.
+ * So I hold the visit's re-bakes until it ends, recording each square's flags before the visit first touches them (a
+ * square cut both times goes 1 -> 0 -> 1). A held re-bake only runs if a square in that chunk ended up different, or an
+ * edge square of a neighbouring chunk did: wall bakes read the N/S/W/E neighbours' flags, and vanilla's edge pass only
+ * tracks "any cut wall on this edge" and stores the south edge wrong anyway. The bake reads exactly these flags, so the
+ * skipped textures would have come out identical. The visit's own neighbour-edge pass is left alone.
  */
 public final class CutawayRebakeFilter {
 
@@ -48,7 +46,7 @@ public final class CutawayRebakeFilter {
 
     /** Start of doCutawayVisitSquares(int, ArrayList). */
     public static void begin(zombie.iso.fboRenderChunk.FBORenderCutaways cutaways) {
-        // A visit that threw before its end left re-bakes behind; run them all, as vanilla would have
+        // A visit that threw before the end left re-bakes behind; run them all like vanilla would have
         flushAll();
         holding = active && zombie.core.PerformanceSettings.fboRenderChunk;
         lastSquare = null;
@@ -74,7 +72,10 @@ public final class CutawayRebakeFilter {
         lastPlayer = playerIndex;
     }
 
-    /** Replaces renderLevels.invalidateLevel(z, flags) in the visit; it always follows a flag write on that chunk's square. */
+    /**
+     * Replaces renderLevels.invalidateLevel(z, flags) in the visit; it always follows a flag write on that chunk's
+     * square.
+     */
     public static void invalidate(FBORenderLevels renderLevels, int level, long dirtyFlags) {
         IsoChunk chunk = lastSquare == null ? null : lastSquare.getChunk();
         if (!holding || chunk == null) {
@@ -95,7 +96,8 @@ public final class CutawayRebakeFilter {
             IsoGridSquare square = e.getKey();
             if (square.getPlayerCutawayFlag(lastPlayer, 0L) != e.getValue()) {
                 markChanged(square);
-                // Wall and door bakes read the N/S/W/E neighbours' flags, so a changed edge square also stales the next chunk
+                // Wall and door bakes read the N/S/W/E neighbours' flags, so a changed edge square also stales the next
+                // chunk
                 markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.N));
                 markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.S));
                 markChanged(square.getAdjacentSquare(zombie.iso.IsoDirections.W));
@@ -141,7 +143,7 @@ public final class CutawayRebakeFilter {
             self, "addFlag", "(Lzombie/iso/IsoGridSquare;IIJ)V");
         int invalidates = AsmSupport.redirectCalls(m, "zombie/iso/fboRenderChunk/FBORenderLevels", "invalidateLevel", "(IJ)V",
             self, "invalidate", "(Lzombie/iso/fboRenderChunk/FBORenderLevels;IJ)V");
-        // 42.22 shape: one clear, two sets, three re-bakes; anything else is a different visit
+        // 42.22 shape: one clear, two sets, three re-bakes. Anything else is a different visit
         if (sets != 1 || adds != 2 || invalidates != 3) return false;
         int returns = 0;
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {

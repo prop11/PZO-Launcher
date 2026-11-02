@@ -12,8 +12,8 @@ OS_TYPE="$(uname -s)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PZ_JAR=""
 
-# If running without a terminal in Linux desktop environment (e.g. Steam Deck Dolphin double-click),
-# relaunch in Konsole/terminal so user can see output and interact with prompts.
+# Started without a terminal (e.g. double-clicked in Dolphin on the Steam Deck):
+# relaunch in Konsole or a terminal so the output and prompts are visible.
 if [ "$OS_TYPE" != "Darwin" ] && [ ! -t 0 ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     if command -v konsole >/dev/null 2>&1; then
         exec konsole -e bash "$0" "$@"
@@ -91,7 +91,7 @@ fi
 RAM_MB=$((ALLOC_RAM * 1024))
 echo "[+] Detected $TOTAL_RAM GB System RAM -> Allocating $ALLOC_RAM GB (-Xmx${RAM_MB}m)"
 
-# Helper function to clean bridge files
+# Clean up bridge files
 clean_lua_bridge_files() {
     LUA_DIR="$HOME/Zomboid/Lua"
     if [ -d "$LUA_DIR" ]; then
@@ -451,7 +451,7 @@ else
     INSTALLED_JAR="$PZ_DIR/PZOptimEngine.jar"
     JSON_FILE="$PZ_DIR/ProjectZomboid64.json"
 
-    # Existing Installation Check on Linux
+    # Existing install on Linux
     if [ -f "$INSTALLED_JAR" ]; then
         echo ""
         echo "[!] PZOptimEngine is already installed on Linux."
@@ -626,7 +626,7 @@ else
         echo "[+] Backed up original JSON config -> ${JSON_FILE}.bak"
     fi
 
-    # Safely update JSON while preserving existing classpath and libraries using Python
+    # Update the JSON with Python, keeping the existing classpath and libraries
     python3 - << 'EOF' "$JSON_FILE" "$ALLOC_RAM" "$RAM_MB" "$IS_PROTON" "$IS_ZB_ACTIVE"
 import sys, json, os
 
@@ -644,7 +644,7 @@ if os.path.exists(json_file):
     except Exception:
         data = {}
 
-# Set optimized main entrypoint
+# Main class
 data["mainClass"] = "com/pzoptimizer/PZOEntrypoint"
 
 # Preserve existing classpath and ensure PZOptimEngine.jar and projectzomboid.jar are present
@@ -756,7 +756,7 @@ if is_proton:
         "-XX:+UseNUMA",
         "-XX:+AlwaysPreTouch"
     ])
-    # Platform sub-blocks for Windows 6.1 and 10.0 (sanitizing any duplicate agentlib entries)
+    # Windows 6.1 and 10.0 platform blocks (dropping duplicate agentlib entries)
     data["windows"] = {
         "6.1": {
             "vmArgs": [
@@ -877,7 +877,7 @@ EOF
     echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":$PRETOUCH,\"version\":\"1.6.6\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 
-    # Also sync to Proton prefixes across all drives & SD cards on Steam Deck
+    # Also sync to the Proton prefixes on every drive and SD card (Steam Deck)
     PROTON_CANDIDATES=(
         "$HOME/.local/share/Steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"
         "$HOME/.steam/steam/steamapps/compatdata/108600/pfx/drive_c/users/steamuser/Zomboid"

@@ -11,22 +11,20 @@ import zombie.iso.fboRenderChunk.FBORenderChunk;
 import zombie.iso.fboRenderChunk.FBORenderLevels;
 
 /**
- * Settings screen "Keep chunk images just off screen" (JVM_ChunkTextureKeep).
+ * Keeps chunk images that just went off screen (JVM_ChunkTextureKeep).
  *
- * Each chunk's two-level group is drawn once into a texture and re-drawn only when something in it changes. Stock
- * FBORenderCell.checkNewlyOnScreenChunks frees that texture the moment the group leaves the screen and, when it comes
- * back, marks it for a full re-draw (DIRTY_REDRAW) in that same frame. Walking back and forth, turning a corner or
- * driving along the screen edge re-draws the same chunks over and over, and those re-draws land in the frames that
- * are already busy streaming the world.
+ * Each chunk's two-level group is drawn once into a texture and only redrawn when something in it changes. Stock
+ * checkNewlyOnScreenChunks frees that texture the moment the group leaves the screen and fully redraws it the frame it
+ * comes back, so walking back and forth, turning a corner or driving along the screen edge keeps redrawing the same
+ * chunks, right in the frames that are already busy streaming.
  *
- * Here a group leaving the screen keeps its texture, oldest dropped first past a video memory budget. While it is off
- * screen every change still marks it dirty (lighting, objects, items, blood, occlusion and neighbour seams all
- * invalidate regardless of the screen), so when it comes back it is re-drawn only if something changed, as it would
- * have been on screen. The stock re-draw is kept when the texture was dropped, the chunk object was reused for another
- * place, the zoom picked another texture, or a graphics option that stock re-applies to on-screen chunks only (wind
- * sway, water shader, no-lighting debug) changed meanwhile.
+ * Now a group leaving the screen keeps its texture (oldest dropped first past a VRAM budget). Every change still marks
+ * it dirty while it's off screen (lighting, objects, items, blood, occlusion and seams all invalidate regardless), so
+ * when it comes back it's only redrawn if something changed. I fall back to the stock redraw if the texture was
+ * dropped, the chunk object got reused somewhere else, the zoom picked another texture, or an option that stock only
+ * re-applies to on-screen chunks (wind sway, water shader, no-lighting debug) changed in the meantime.
  *
- * Game thread only: every call comes from checkNewlyOnScreenChunks.
+ * Game thread only, everything comes from checkNewlyOnScreenChunks.
  */
 public final class ChunkTextureKeep {
 
@@ -149,7 +147,7 @@ public final class ChunkTextureKeep {
 
     private static void trimToBudget(Kept newest) {
         if (keptBytes <= budget()) return;
-        // Entries freed behind our back (chunk unloaded, manager reset) only hold budget; clear them first
+        // Entries freed behind my back (chunk unloaded, manager reset) just eat budget, clear them first
         ArrayList<Key> stale = new ArrayList<>();
         for (java.util.Map.Entry<Key, Kept> e : keptGroups.entrySet()) {
             if (!e.getValue().stillOurs()) stale.add(e.getKey());
@@ -166,7 +164,7 @@ public final class ChunkTextureKeep {
     }
 
     private static void release(Kept k) {
-        // A group that came back on screen without passing through invalidate is in use: just forget it
+        // Came back on screen without going through invalidate, so it's in use; just forget it
         if (k.stillOurs() && !k.levels.isOnScreen(k.minLevel)) {
             k.levels.freeFBOsForLevel(k.minLevel);
             evicted.incrementAndGet();
@@ -193,7 +191,7 @@ public final class ChunkTextureKeep {
         return s;
     }
 
-    // 96 MB on cards reporting 4 GB or less (or nothing), 192 MB above; a level-0 group is 16 MB at normal zoom
+    // 96 MB on cards reporting 4 GB or less (or nothing), 192 MB above. A level-0 group is 16 MB at normal zoom.
     private static long budget() {
         if (budgetBytes < 0L) {
             long vramMb = -1L;
@@ -205,7 +203,7 @@ public final class ChunkTextureKeep {
                     vramMb = Long.parseLong(summary.substring(i + 7, end < 0 ? summary.length() : end).trim());
                 } catch (NumberFormatException ignored) {}
             } else if (summary == null || summary.isEmpty()) {
-                return 96L << 20; // probe not finished: decide later
+                return 96L << 20; // probe not done yet, decide later
             }
             budgetBytes = (vramMb > 4096L ? 192L : 96L) << 20;
         }

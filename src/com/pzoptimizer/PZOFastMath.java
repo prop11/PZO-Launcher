@@ -20,7 +20,7 @@ public final class PZOFastMath {
     }
 
     public static void initialize() {
-        // Trigger class loading and static block
+        // Forces class loading and the static block
     }
 
     public static float sin(float radians) {

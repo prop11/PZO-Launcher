@@ -12,20 +12,20 @@ import zombie.popman.ZombiePopulationManager;
 import zombie.popman.ZombieStateFlags;
 
 /**
- * Settings screen "Pace zombie arrivals" (JVM_ZombieArrivalPacing).
+ * Paces zombie arrivals (JVM_ZombieArrivalPacing).
  *
- * When chunks next to a horde load, ZombiePopulationManager.updateMain receives the whole batch from the native
- * population manager and creates every zombie in that frame (dressing, animation set, model slot), a frame of several
- * milliseconds. The creations are queued here instead and made within BUDGET_NS a frame, oldest first:
- * - a zombie within NEAR_TILES of a local player is created at once, as before;
- * - while a local player drives faster than DRIVING_KMH everything is created at once, so nothing pops in ahead of
- *   the car;
- * - nothing waits longer than MAX_WAIT_NS;
- * - for GRACE_NS after the world starts everything is created at once (the loading burst is hidden anyway);
- * - before a chunk unloads, its queued zombies are created first, so stock virtualises them as usual;
- * - when the game saves (GameWindow.save, on the game thread) the queue is emptied first, so every zombie is saved.
- * The checks stock makes before creating (new chunk rooms, loaded-area edge) still run when the batch arrives; only
- * the creation call waits. Single player only (the server streams zombies to clients by itself).
+ * When chunks next to a horde load, ZombiePopulationManager.updateMain gets the whole batch from the native population
+ * manager and creates every zombie that frame (clothes, animation set, model slot), a frame of several milliseconds.
+ * Instead I queue the creations and make them within BUDGET_NS a frame, oldest first:
+ * - zombies within NEAR_TILES of a player are created straight away, as before
+ * - while a player drives faster than DRIVING_KMH everything is created straight away, so nothing pops in ahead of the
+ *   car
+ * - nothing waits longer than MAX_WAIT_NS
+ * - for GRACE_NS after the world starts everything is created at once (the loading burst is hidden anyway)
+ * - before a chunk unloads its queued zombies get created first, so stock virtualises them as usual
+ * - when the game saves (GameWindow.save, game thread) the queue is emptied first, so every zombie is saved
+ * The checks stock makes before creating (new chunk rooms, loaded-area edge) still run when the batch arrives; only the
+ * creation waits. Single player only (servers stream zombies to clients themselves).
  */
 public final class ZombieArrivalQueue {
 
@@ -85,7 +85,7 @@ public final class ZombieArrivalQueue {
         for (int i = 0; i < zombie.characters.IsoPlayer.numPlayers; i++) {
             zombie.characters.IsoPlayer p = players[i];
             if (p == null) continue;
-            // At driving speed a queued zombie could appear right in front of the car; create everything at once
+            // At driving speed a queued zombie could appear right in front of the car, so create everything now
             zombie.vehicles.BaseVehicle v = p.getVehicle();
             if (v != null && v.getCurrentAbsoluteSpeedKmHour() > DRIVING_KMH) return false;
             float dx = p.getX() - x, dy = p.getY() - y;
@@ -170,7 +170,7 @@ public final class ZombieArrivalQueue {
         while ((a = pending.poll()) != null) create(pm, a);
     }
 
-    /** Start of ZombiePopulationManager.removeChunkFromWorld: the chunk's queued zombies are made before it unloads. */
+    /** Start of ZombiePopulationManager.removeChunkFromWorld: the chunk's queued zombies get made before it unloads. */
     public static void beforeChunkUnload(ZombiePopulationManager pm, zombie.iso.IsoChunk chunk) {
         if (pending.isEmpty() || chunk == null) return;
         int n = pending.size();
@@ -184,7 +184,7 @@ public final class ZombieArrivalQueue {
         }
     }
 
-    /** Start of ZombiePopulationManager.stop: the world is gone, so is the queue. */
+    /** Start of ZombiePopulationManager.stop: the world's gone, and so is the queue. */
     public static void clear(Object ignored) {
         pending.clear();
         wasInGame = false;

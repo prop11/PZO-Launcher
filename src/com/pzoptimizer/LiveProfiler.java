@@ -22,20 +22,20 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * The Lua mod's performance profiler: a live overlay and timed recordings.
+ * The Lua mod's performance profiler: live overlay and timed recordings.
  *
- * Nothing is measured unless the overlay is open or a recording runs. Then each main thread frame is split into
- * update (GameWindow.logic), chunk streaming (IsoChunkMap.update and ProcessChunkPos, inside update), Lua events
- * (every Event.trigger callback, through LuaEventPatches), render preparation (GameWindow.renderInternal) and the
- * rest (frame cap, waits); garbage collection pauses come from the collector's pause counters and the render
- * thread's present time from GpuFrameTimer. Lua time is attributed to the file of each callback, which names its mod.
+ * Nothing is measured unless the overlay is open or a recording is running. Then each main thread frame is split into
+ * update (GameWindow.logic), chunk streaming (IsoChunkMap.update and ProcessChunkPos, inside update), Lua events (every
+ * Event.trigger callback, via LuaEventPatches), render prep (GameWindow.renderInternal) and the rest (frame cap,
+ * waits). GC pauses come from the collector's pause counters and present time from GpuFrameTimer. Lua time goes to the
+ * file of each callback, which tells me the mod.
  *
- * Game thread only, apart from the render thread's present counters, which it writes and this reads.
- * The Lua side talks to it through PZOEngine.profiler(op, arg); see dispatch.
+ * Game thread only, apart from the render thread's present counters. Lua talks to it through PZOEngine.profiler(op,
+ * arg), see dispatch.
  */
 public final class LiveProfiler {
 
-    // Read by the hooks on every call; true while the overlay is open or a recording runs
+    // Checked by the hooks on every call; true while the overlay is open or a recording runs
     public static volatile boolean on;
     private static boolean live, recording;
     private static long recordStartNs, recordDurationNs;
@@ -57,7 +57,7 @@ public final class LiveProfiler {
         String mod;
         long frameNs, windowNs, recordNs, slowNs, calls;
         boolean touched;
-        // PZO's own Lua (the profiler screen and overlay among it) is left out of the mod lists: recording makes it busy
+        // PZO's own Lua (profiler screen and overlay included) is left out of the mod lists, recording keeps it busy
         boolean self;
 
         Handler(Object prototype, String event, String where) {
@@ -96,20 +96,19 @@ public final class LiveProfiler {
     private static final List<double[]> slowest = new ArrayList<>();
     private static final List<String> slowestTop = new ArrayList<>();
 
-    // Scene context sampled every 30 recorded frames, so the report can say what was around when it was slow:
-    // zombies, animals, driving, rain, Java heap use
+    // Scene sampled every 30 recorded frames so the report can say what was around when it got slow: zombies, animals,
+    // driving, rain, heap use
     private static int ctxSamples, ctxDriving, ctxRaining;
     private static long ctxZombies, ctxAnimals;
     private static int ctxZombiesMax, ctxAnimalsMax;
     private static double ctxHeapPeak;
 
-    // Collector pause counters (cycle counters of concurrent collectors are left out)
+    // Collector pause counters (concurrent collectors' cycle counters are left out)
     private static GarbageCollectorMXBean[] pauseBeans;
     private static long gcLastMs = -1;
 
     private LiveProfiler() {}
 
-    // ---- Hooks ------------------------------------------------------------------------------------------------
 
     /** Before GameWindow.logic() in GameWindow.frameStep. */
     public static void logicBegin() {
@@ -153,7 +152,9 @@ public final class LiveProfiler {
         }
     }
 
-    /** Replaces IsoChunkMap.ProcessChunkPos(character) in IngameState.updateInternal (chunk grid shifts and unloads). */
+    /**
+     * Replaces IsoChunkMap.ProcessChunkPos(character) in IngameState.updateInternal (chunk grid shifts and unloads).
+     */
     public static void processChunkPos(zombie.iso.IsoChunkMap map, zombie.characters.IsoGameCharacter chr) {
         if (!on) {
             map.ProcessChunkPos(chr);
@@ -190,7 +191,7 @@ public final class LiveProfiler {
     public static void luaEnd(Object closure, String event, long start) {
         long dt = System.nanoTime() - start;
         if (--luaDepth > 0) {
-            // A callback that fired another event: its time is in the outer callback's total already
+            // A callback that fired another event: that time is already in the outer callback's total
             attribute(closure, event, dt);
             return;
         }
@@ -268,7 +269,7 @@ public final class LiveProfiler {
             int bin = Math.min(hist.length - 1, (int) (ms * 10));
             hist[bin]++;
             histCount++;
-            // After a short warm-up a frame at or above the running 99th percentile counts as one of the 1% lows
+            // After a short warm-up, a frame at or over the running p99 counts as one of the 1% lows
             if ((histCount & 63) == 0) p99Cached = p99Estimate();
             slow = histCount >= 200 && ms >= p99Cached;
             keepIfSlowest(now, ms, parts);
@@ -302,7 +303,7 @@ public final class LiveProfiler {
             zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
             if (cell != null) {
                 int z = cell.getZombieList().size();
-                // IsoCell.getAnimals() builds a new list on every call; count in place instead
+                // IsoCell.getAnimals() builds a new list every call, so count in place
                 int a = 0;
                 for (zombie.iso.IsoMovingObject o : cell.getObjectList()) {
                     if (o instanceof zombie.characters.animals.IsoAnimal) a++;
@@ -353,7 +354,7 @@ public final class LiveProfiler {
         }
     }
 
-    // ---- Collectors and render thread -------------------------------------------------------------------------
+    // Collectors and render thread
 
     private static double gcPauseMsSinceLast() {
         try {
@@ -389,7 +390,7 @@ public final class LiveProfiler {
         return dc > 0 ? dn / 1e6 / dc : 0;
     }
 
-    // ---- Windows, recording, reports --------------------------------------------------------------------------
+    // Windows, recording, reports
 
     private static void closeWindow(long now) {
         StringBuilder sb = new StringBuilder();
@@ -469,7 +470,7 @@ public final class LiveProfiler {
         }
     }
 
-    // Reused by liveText, which the overlay calls a few times a second on the game thread
+    // Reused by liveText, which the overlay calls a few times a second
     private static final int[] liveHist = new int[2501];
     private static final float[] liveBuckets = new float[100];
 
@@ -505,7 +506,7 @@ public final class LiveProfiler {
         return sb.toString();
     }
 
-    // The overlay's stats line from a 0.1 ms histogram: same fields as statsLine, percentiles to the nearest 0.1 ms
+    // Overlay stats line from a 0.1 ms histogram: same fields as statsLine, percentiles to the nearest 0.1 ms
     private static String histStatsLine(int[] h, int n, double total, double worst, int spikes) {
         if (n == 0) return "S\t0\t0\t0\t0\t0\t0";
         int n1 = Math.max(1, n / 100);
@@ -672,7 +673,7 @@ public final class LiveProfiler {
         }
     }
 
-    // ---- Lua entry point --------------------------------------------------------------------------------------
+    // Lua entry point
 
     /** PZOEngine.profiler(op, arg): "live" on/off, "poll", "start" seconds, "stop", "state", "report", "export". */
     public static Object dispatch(String op, Object arg) {
@@ -714,9 +715,9 @@ public final class LiveProfiler {
         }
     }
 
-    // ---- Helpers ----------------------------------------------------------------------------------------------
+    // Helpers
 
-    // PZO's Lua mod folder, as modOf returns it for both the Workshop staging copy and the subscribed copy
+    // My Lua mod's folder, as modOf returns it for both the Workshop staging copy and the subscribed one
     private static final String SELF_MOD = "MPOptimiser";
 
     // Mod folder from a Lua file path; "@game" for the game's own scripts
@@ -740,7 +741,7 @@ public final class LiveProfiler {
         return s == null ? "" : s.replace('\t', ' ').replace('\n', ' ');
     }
 
-    // Two decimals without String.format, which is slow enough to show up in the overlay's update
+    // Two decimals without String.format, which is slow enough to show up in the overlay
     private static String fmt(double v) {
         if (Double.isNaN(v) || Double.isInfinite(v)) return "0.00";
         long c = Math.round(Math.abs(v) * 100.0);
@@ -748,7 +749,7 @@ public final class LiveProfiler {
         return (v < 0 && c != 0 ? "-" : "") + (c / 100) + (frac < 10 ? ".0" : ".") + frac;
     }
 
-    // ---- Patches ----------------------------------------------------------------------------------------------
+    // Patches
 
     /** GameWindow.frameStep: timing calls around logic() and renderInternal(); GameWindow.save: a marker. */
     static boolean patchGameWindow(ClassNode node) {

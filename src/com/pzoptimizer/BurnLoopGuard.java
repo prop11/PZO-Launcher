@@ -10,15 +10,11 @@ import zombie.iso.IsoGridSquare;
 import zombie.iso.IsoObject;
 
 /**
- * Fixes a vanilla freeze in IsoGridSquare.BurnWalls, hit when a randomised burnt building (RBBurnt) generates in a
- * newly loaded chunk, typically while driving into unexplored areas. BurnWalls removes doors, windows and curtains
- * with RemoveTileObject(obj) and then steps its loop index back, assuming the object left the list. For a double
- * door or multi-tile window whose other half is in a chunk that is not loaded yet, the "safe" removal cannot find
- * every part, removes nothing and returns -1, so the loop revisits the same object forever.
- *
- * Inside BurnWalls only, RemoveTileObject is routed here: when the safe removal left the object in place, the
- * object is removed on its own the way RemoveTileObject already does while a chunk is loading. Any other caller of
- * RemoveTileObject is unchanged.
+ * Fixes a vanilla freeze in IsoGridSquare.BurnWalls, usually hit when a burnt building (RBBurnt) generates in a new
+ * chunk while you drive. BurnWalls removes doors, windows and curtains and steps its index back assuming they left
+ * the list. For a double door or multi-tile window whose other half isn't loaded, the safe removal removes nothing
+ * and returns -1, so it loops on the same object forever. Inside BurnWalls only, if the object is still there I
+ * remove it on its own, the way RemoveTileObject already does while a chunk is loading.
  */
 public final class BurnLoopGuard {
 

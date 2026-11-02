@@ -13,12 +13,12 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Keeps ProjectZomboid64.json launching through PZO: main class, classpath and JVM arguments.
+ * Keeps ProjectZomboid64.json launching through PZO: main class, classpath and JVM args.
  *
- * One function, buildTarget, says what the file should contain for this PC; a file needs updating exactly when that
- * differs from what is on disk, so the check and the update can never disagree. The user's own arguments (heap
- * size, Steam flags, other agents) are kept; only what PZO needs is added, and a few broken or superseded arguments are
- * dropped. In compatibility mode (CompatMode) the heap is not pre-touched, starts small and the collector is G1.
+ * buildTarget is the one place that says what the file should contain for this PC, and the file needs updating exactly
+ * when that differs from what's on disk, so the check and the update can't disagree. The user's own args (heap size,
+ * Steam flags, other agents) are kept; I only add what PZO needs and drop a few broken or outdated ones. In
+ * compatibility mode (CompatMode) the heap isn't pre-touched, starts small, and the collector is G1.
  */
 public final class ZomboidConfigMigrator {
 
@@ -28,7 +28,7 @@ public final class ZomboidConfigMigrator {
 
     private static final String PRE_TOUCH = "-XX:+AlwaysPreTouch";
 
-    // Added when missing; PRE_TOUCH is added separately, except in compatibility mode
+    // Added if missing. PRE_TOUCH goes in separately, except in compatibility mode
     private static final String[] PERFORMANCE_ARGS = {
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
@@ -97,7 +97,7 @@ public final class ZomboidConfigMigrator {
             buildTarget(target, jsonFile.getParentFile());
             return !Objects.equals(current.get("mainClass"), target.get("mainClass"))
                 || !Objects.equals(strings(current.get("classpath")), strings(target.get("classpath")))
-                // Order of JVM arguments does not matter, so a hand-edited order is not rewritten
+                // JVM arg order doesn't matter, so don't rewrite a hand-edited order
                 || !new LinkedHashSet<>(strings(current.get("vmArgs"))).equals(new LinkedHashSet<>(strings(target.get("vmArgs"))));
         } catch (Throwable t) {
             PZOLogger.warn("[ZomboidConfigMigrator] Notice checking " + jsonFile.getName() + ": " + t.getMessage());
@@ -153,8 +153,8 @@ public final class ZomboidConfigMigrator {
         boolean isLinux = os.contains("linux");
         boolean compat = CompatMode.isActive();
 
-        // On Linux and macOS, -agentlib:zbNative with no loadable library stops the game from starting (issue #40),
-        // and a Windows zbNative.dll left in the folder is not one
+        // On Linux and macOS, -agentlib:zbNative with no loadable library stops the game starting (issue #40), and a
+        // Windows zbNative.dll left in the folder doesn't count
         boolean zbInArgs = rawArgs.stream().anyMatch(a -> a.contains("zbNative") || a.contains("ZombieBuddy"));
         boolean zbLibFound = false;
         if (gameDir != null) {
@@ -168,10 +168,10 @@ public final class ZomboidConfigMigrator {
         }
         boolean zbActive = zbLibFound || (zbInArgs && (isWin || gameDir == null));
 
-        // The user's arguments minus what is rebuilt below, broken, or superseded
+        // The user's args minus anything rebuilt below, broken, or outdated
         List<String> user = new ArrayList<>();
         for (String arg : rawArgs) {
-            // Arguments once joined with spaces by hand are split back up
+            // Args someone joined with spaces by hand get split back up
             for (String tok : arg.split("\\s+")) {
                 if (tok.isEmpty() || user.contains(tok)) continue;
                 if (tok.startsWith("-Djava.awt.headless")) continue; // PZO needs AWT for its dialogs
@@ -201,8 +201,8 @@ public final class ZomboidConfigMigrator {
             args.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
         }
 
-        // Heap: the user's sizes are kept; the game's stock 3 GB maximum is raised to suit this PC, and in
-        // compatibility mode the starting heap is lowered so nothing large is committed up front
+        // Heap: the user's sizes are kept, the game's stock 3 GB max is raised to suit this PC, and in compatibility
+        // mode the starting heap is lowered so nothing big is committed up front
         int recMax = getRecommendedHeapMb();
         int recStart = getRecommendedInitialHeapMb(recMax);
         boolean hasXms = false, hasXmx = false;
@@ -257,8 +257,8 @@ public final class ZomboidConfigMigrator {
     }
 
     /**
-     * For the auto-updater (UpdateDialog): writes the updated file next to the current one as .new, so the updater
-     * script can swap it in once the game has exited.
+     * For the auto-updater (UpdateDialog): writes the updated file next to the current one as .new, for the updater
+     * script to swap in once the game has exited.
      */
     public static boolean prepareStagedUpdate(File gameDir) {
         if (gameDir == null) return false;
@@ -289,7 +289,7 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    /** Early in PZOEntrypoint: brings the game folder's ProjectZomboid64.json up to date for the next launch. */
+    /** Early in PZOEntrypoint: brings the game folder's ProjectZomboid64.json up to date for next launch. */
     public static void checkAndMigrateCurrentInstallation(File gameDir) {
         try {
             if (gameDir == null) gameDir = new File(".").getAbsoluteFile();

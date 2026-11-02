@@ -5,13 +5,15 @@ import java.lang.reflect.Method;
 import java.util.concurrent.locks.ReentrantLock;
 import sun.misc.Unsafe;
 
-/** Vehicle travel stutter fixes: a non-fair IsoChunkMap.bSettingChunk lock and distance-based simulation throttling for town zombies. */
+/**
+ * Stutter fixes for driving: a non-fair IsoChunkMap.bSettingChunk lock and distance-based throttling of town zombies.
+ */
 public final class VehicleTravelOptimizer {
 
     private static volatile boolean initialized = false;
     private static volatile boolean unfairLockInstalled = false;
     private static volatile boolean simulationGovernorInstalled = false;
-    // Set when this game build lacks the fields we hook; checkAndMaintain runs every second otherwise.
+    // Set if this game build doesn't have the fields I hook; otherwise checkAndMaintain retries every second
     private static volatile boolean unfairLockUnavailable = false;
     private static volatile boolean simulationGovernorUnavailable = false;
     private static volatile boolean unfairLockWarned = false;
@@ -54,7 +56,7 @@ public final class VehicleTravelOptimizer {
         }
     }
 
-    /** Replaces the IsoChunkMap.bSettingChunk fair lock with a non-fair one. */
+    /** Swaps the IsoChunkMap.bSettingChunk fair lock for a non-fair one. */
     public static synchronized boolean installUnfairChunkLock() {
         if (unfairLockInstalled) return true;
         if (unfairLockUnavailable) return false;
@@ -226,8 +228,8 @@ public final class VehicleTravelOptimizer {
     }
 
     /**
-     * Hooks MovingObjectUpdateScheduler's FULL bucket, where engine noise dumps 500+ alerted town zombies while
-     * driving, and moves zombies more than 20 tiles away to the QUARTER (15 FPS) and EIGHTH (7.5 FPS) buckets.
+     * Hooks MovingObjectUpdateScheduler's FULL bucket, where engine noise dumps 500+ alerted town zombies while you
+     * drive, and moves the ones more than 20 tiles away into the QUARTER (15 FPS) and EIGHTH (7.5 FPS) buckets.
      */
     public static synchronized boolean installSimulationGovernor() {
         if (simulationGovernorInstalled) return true;
@@ -289,9 +291,7 @@ public final class VehicleTravelOptimizer {
         return false;
     }
 
-    /**
-     * Specialized ArrayList that intercepts MovingObjectUpdateScheduler FULL bucket distribution.
-     */
+    /** ArrayList that intercepts how MovingObjectUpdateScheduler fills its FULL bucket. */
     public static final class GovernedSimulationList extends java.util.ArrayList<Object> {
         private static final long serialVersionUID = 4243L;
 

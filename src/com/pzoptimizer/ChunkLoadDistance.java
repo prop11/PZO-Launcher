@@ -7,19 +7,18 @@ import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 
 /**
- * Settings screen "Chunk load distance" (JVM_ChunkLoadDistance, 0 = Auto).
+ * Chunk load distance setting (JVM_ChunkLoadDistance, 0 = Auto).
  *
- * IsoChunkMap.CalcChunkWidth sizes the loaded chunk grid from the screen once per world load: 19x19 chunks at 1080p
- * and above, fewer below. Every loaded chunk is streamed, kept in memory and simulated (objects, lighting, zombies),
- * whether it is on screen or not. A smaller grid only shrinks that area; it never grows past the game's own width, so
- * Auto and any value at or above it leave the game as is. Runs before the chunk map, its swap buffers and LosUtil
- * are sized, so everything is built for the new width. Applies on the next world load.
+ * IsoChunkMap.CalcChunkWidth sizes the loaded chunk grid from the screen once per world load (19x19 at 1080p and up,
+ * fewer below), and every chunk in it is streamed, kept and simulated whether it's on screen or not. This can only
+ * shrink the grid, never grow it past the game's own width, so Auto or anything at/above it changes nothing. It runs
+ * before the chunk map, swap buffers and LosUtil are sized, so it takes effect on the next world load.
  */
 public final class ChunkLoadDistance {
 
     public static final int MIN_WIDTH = 11;
     private static volatile int setting = 0;
-    // Set by a benchmark run; the settings screen's value is then ignored
+    // Set by a benchmark run, which overrides the settings screen
     private static volatile boolean forced = false;
     public static volatile int vanillaWidth = 0;
     public static volatile int appliedWidth = 0;
@@ -41,7 +40,7 @@ public final class ChunkLoadDistance {
             return;
         }
         int w = Math.max(MIN_WIDTH, Math.min(19, value));
-        // The grid is centred on the player, so its width must be odd (see ChunkCrashShield)
+        // Grid is centred on the player, so the width has to be odd (see ChunkCrashShield)
         setting = (w % 2 == 0) ? w + 1 : w;
     }
 

@@ -7,16 +7,16 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
- * Debug-only main thread breakdown built from the game's own GameProfiler areas. The agent redirects
- * GameProfiler's calls into GameProfileRecording here, so while this is active the timings are kept in
- * memory instead of being written out as the vanilla per-frame CSV recording.
+ * Debug-only breakdown of the main thread, built from the game's own GameProfiler areas. The agent sends GameProfiler's
+ * calls into GameProfileRecording here, so while this is on the timings stay in memory instead of going to the vanilla
+ * per-frame CSV.
  */
 public final class PhaseProfiler {
 
     private static final int MAX_DEPTH = 5;
 
     private static volatile boolean active = false;
-    // The vanilla profiler was already switched on by the user, so its recording keeps working as normal
+    // The user already had the vanilla profiler on, so leave its recording working
     private static boolean passThrough = false;
     private static Thread mainThread;
 
@@ -99,7 +99,7 @@ public final class PhaseProfiler {
         }
     }
 
-    /** Called once per frame from the main thread: closes the frame that just finished. */
+    /** Called once a frame on the main thread to close off the frame that just ended. */
     public static void onFrameBoundary() {
         if (!active) return;
         window.mergeFrom(frame);
@@ -116,7 +116,7 @@ public final class PhaseProfiler {
         return describe(lastFrame, 1);
     }
 
-    /** Describes the window as per-frame averages, then starts a new window. */
+    /** Writes up the window as per-frame averages, then starts a new one. */
     public static String describeAndResetWindow(int frames) {
         String s = describe(window, Math.max(1, frames));
         window = new Node("window");
@@ -141,7 +141,7 @@ public final class PhaseProfiler {
             while (cur.kids != null && !cur.kids.isEmpty()) {
                 List<Node> k = sorted(cur);
                 Node top = k.get(0);
-                // Stop once the chain splits into many small pieces, the parent is the useful answer then
+                // Stop once the chain splits into lots of small pieces; the parent is the useful answer then
                 if (top.ns * 3 < cur.ns) break;
                 if (chain.length() > 0) chain.append(" > ");
                 chain.append(top.key).append(' ').append(ms(top.ns, divisor));
@@ -168,7 +168,7 @@ public final class PhaseProfiler {
         return String.format("%.1fms", ns / 1_000_000.0 / divisor);
     }
 
-    /** GameProfiler: its recorder calls (end -> logTimeSpan, startFrame -> writeLine) go through this class. */
+    /** GameProfiler: its recorder calls (end -> logTimeSpan, startFrame -> writeLine) come through here. */
     static boolean patch(ClassNode node) {
         int spans = 0, lines = 0;
         for (MethodNode m : node.methods) {

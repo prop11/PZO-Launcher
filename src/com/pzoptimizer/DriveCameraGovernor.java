@@ -11,8 +11,8 @@ import zombie.characters.IsoPlayer;
 import zombie.iso.PlayerCamera;
 
 /**
- * Eliminates 1-pixel stair-stepping judder of the camera while driving by preserving subpixel floating-point
- * coordinates instead of casting to whole integers. Only applies while the camera's player is in a vehicle.
+ * Stops the 1-pixel stair-step judder of the camera while driving by keeping the sub-pixel camera offset instead of
+ * rounding it to whole pixels. Only while the camera's player is in a vehicle.
  */
 public final class DriveCameraGovernor {
 
@@ -36,8 +36,8 @@ public final class DriveCameraGovernor {
         return cam == null ? 0.0f : offset(cam, cam.lastOffY + cam.rightClickY);
     }
 
-    // On foot the stock whole-pixel offset stays: chunk textures and sprites drawn at fractional offsets come out
-    // filtered (soft, with seams between chunks), and only a moving vehicle's camera shows the 1-pixel judder
+    // On foot keep the stock whole-pixel offset: chunk textures and sprites at fractional offsets come out filtered
+    // (soft, with seams between chunks), and only a moving car's camera shows the judder anyway
     private static float offset(PlayerCamera cam, float raw) {
         if (!active || !inVehicle(cam.playerIndex) || ViewpointStanddownGovernor.isStanddownActive()) {
             return (int) raw;
@@ -56,10 +56,7 @@ public final class DriveCameraGovernor {
         return player != null && player.getVehicle() != null;
     }
 
-    /**
-     * ASM transformer for zombie.iso.PlayerCamera: routes integer-truncated offset getters
-     * to DriveCameraGovernor subpixel float getters.
-     */
+    /** Transformer for zombie.iso.PlayerCamera: sends the rounded offset getters to my sub-pixel ones. */
     public static boolean patchPlayerCamera(ClassNode node) {
         boolean changed = false;
         changed |= rewriteGetter(node, "getOffX", "getSmoothOffX");

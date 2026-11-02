@@ -6,9 +6,8 @@ import jdk.jfr.Label;
 import jdk.jfr.Name;
 
 /**
- * One measured benchmark frame, from one IsoCamera frame boundary to the next on the main thread. Recorded into the
- * JFR profile so bench/jfr_hotspots.py can attribute samples to slow frames only (the 1% lows) instead of averaging
- * them away. Costs nothing when no recording is running.
+ * One benchmark frame as a JFR event, so bench/jfr_hotspots.py can look at just the slow frames instead of averaging
+ * them away. Free when nothing is recording.
  */
 @Name("pzo.BenchFrame")
 @Label("PZO Bench Frame")

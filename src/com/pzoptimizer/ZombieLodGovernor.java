@@ -4,9 +4,9 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Scales the 3D model and animation-blend budgets with measured frame time: the stock budgets are fixed
- * regardless of load. Under sustained slow frames (p50/p90 of the recent window) more distant zombies fall
- * back to atlas sprites, and the budgets climb back to stock once frames recover.
+ * Scales the 3D model and animation-blend budgets with measured frame time, where stock uses fixed budgets no matter
+ * the load. When frames stay slow (p50/p90 of the recent window) more distant zombies drop to atlas sprites, and the
+ * budgets climb back to stock once frames recover.
  */
 public final class ZombieLodGovernor {
 
@@ -26,7 +26,7 @@ public final class ZombieLodGovernor {
     private static long lastDecideNanos = 0L;
     private static long climbHoldUntilNanos = 0L;
     private static final long DECIDE_INTERVAL_NANOS = 250_000_000L; // 250ms
-    private static final long CLIMB_HOLD_NANOS = 2_000_000_000L;    // 2s hold after drop
+    private static final long CLIMB_HOLD_NANOS = 2_000_000_000L; // hold for 2 s after a drop
 
     private static final AtomicInteger dynamicMax3D = new AtomicInteger(STOCK_3D_MODELS);
     private static final AtomicInteger dynamicMaxBlend = new AtomicInteger(STOCK_BLENDED_ANIMATIONS);
@@ -91,12 +91,12 @@ public final class ZombieLodGovernor {
 
         long budgetNanos = 1_000_000_000L / targetFps;
 
-        // If median frame time misses 97% of the budget, step down
+        // Median frame time misses 97% of the budget: step down
         if (p50 > (long) (budgetNanos * 0.97f)) {
             currentLodLevel = Math.max(0.0f, currentLodLevel - 0.08f);
             climbHoldUntilNanos = now + CLIMB_HOLD_NANOS;
         } else if (now >= climbHoldUntilNanos && p90 < (long) (budgetNanos * 0.85f)) {
-            // If even 90th percentile fits comfortably with headroom, step up
+            // Even p90 fits with room to spare: step up
             currentLodLevel = Math.min(1.0f, currentLodLevel + 0.03f);
         }
 

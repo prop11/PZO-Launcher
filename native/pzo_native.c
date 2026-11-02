@@ -67,7 +67,7 @@ typedef void* HANDLE;
 #include "miniz_tinfl.c"
 
 #ifdef _WIN32
-// Dynamically resolved ntdll functions for high-precision sub-millisecond timer
+// ntdll functions for the sub-millisecond timer, looked up at runtime
 typedef LONG (NTAPI *pfnNtSetTimerResolution)(ULONG DesiredResolution, BOOLEAN SetResolution, PULONG CurrentResolution);
 typedef LONG (NTAPI *pfnNtQueryTimerResolution)(PULONG MinimumResolution, PULONG MaximumResolution, PULONG CurrentResolution);
 
@@ -85,7 +85,7 @@ static pfnSetProcessInformation g_SetProcessInformation = NULL;
 static HANDLE g_mmcssTaskHandle = NULL;
 #endif
 
-// CPU Topology & State Cache
+// CPU topology, worked out once
 static DWORD_PTR g_pCoreAffinityMask = 0;
 static int g_physicalCores = 0;
 static int g_pCoresCount = 0;
@@ -124,7 +124,7 @@ static BOOL checkCpuAvx2Support(void) {
 #endif
 }
 
-// Distinguishes performance cores from efficiency cores
+// Tells performance cores from efficiency cores
 static void detectCpuTopology(void) {
 #if defined(_WIN32)
     DWORD length = 0;
@@ -318,7 +318,7 @@ static BOOL setMMCSSProfile(const char* profile) {
 }
 #endif
 
-// Process Priority Governor
+// Process priority
 static BOOL setProcessPriority(int level) {
 #if defined(_WIN32)
     DWORD pClass = ABOVE_NORMAL_PRIORITY_CLASS;
@@ -335,7 +335,7 @@ static BOOL setProcessPriority(int level) {
 #endif
 }
 
-// P-Core Affinity Binding for Current Thread
+// Pin the calling thread to the P-cores
 static BOOL bindCurrentThreadToPCores(void) {
 #if defined(_WIN32)
     if (g_pCoreAffinityMask != 0) {
@@ -358,7 +358,7 @@ static BOOL bindCurrentThreadToPCores(void) {
 #endif
 }
 
-// Full optimization for the calling thread
+// All of the above, for the calling thread
 #if defined(_WIN32)
 static BOOL optimizeCallingThread(int priorityLevel, BOOL bindPCores, const wchar_t* mmcssProfile) {
     HANDLE hThread = GetCurrentThread();
@@ -2009,7 +2009,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *reserved) {
         snprintf(msg, sizeof(msg), "[PZONative] Notice: instrument.dll Agent_OnLoad returned %d (bypassing without abort)\n", res);
         write_pzo_console(msg);
     }
-    return 0; // Always JNI_OK (0) so HotSpot never aborts VM initialization
+    return 0; // always JNI_OK so the JVM never aborts startup
 }
 
 JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM *vm, char *options, void *reserved) {

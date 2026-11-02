@@ -24,14 +24,14 @@ import zombie.fileSystem.FileSystemImpl;
 import zombie.fileSystem.FileTask;
 
 /**
- * Moves TextureID.limitMaxSize off the main thread. A texture bigger than the "max texture size" option is
- * downscaled when its load finishes, in the main-thread callback, by generating mipmaps pixel by pixel (100-250 ms
- * for a large clothing or vehicle texture, a visible hitch). Here the same downscale runs on the file worker right
- * after the PNG decode, so the callback's own limitMaxSize finds the image already within the limit and returns it
- * unchanged. The output is built exactly as limitMaxSize builds it.
+ * Moves TextureID.limitMaxSize off the main thread. A texture bigger than the "max texture size" option gets scaled
+ * down when its load finishes, in the main-thread callback, by building mipmaps pixel by pixel (100-250 ms for a big
+ * clothing or vehicle texture, a visible hitch). I run the same downscale on the file worker right after the PNG
+ * decode, so the callback's own limitMaxSize finds the image already within the limit and returns it unchanged. The
+ * output is built exactly the way limitMaxSize builds it.
  *
- * TextureIDAssetManager.setTask records the size limit for each image load task (the only point where the
- * TextureID and its task are both known); FileSystemImpl.runAsync wraps that task's future before it is queued.
+ * TextureIDAssetManager.setTask records the size limit for each image load task (the only place the TextureID and its
+ * task are both known), and FileSystemImpl.runAsync wraps that task's future before it's queued.
  */
 public final class TextureDownscaleGovernor {
 

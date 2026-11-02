@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Update checks: stable reads releases/latest, beta/unstable reads the full releases list. */
+/** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "1.6.6";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
@@ -42,8 +42,8 @@ public class UpdateChecker {
     }
 
     /**
-     * Resolves the direct download URL for the native library matching the requested version
-     * or active release channel (including beta/unstable prereleases if opted-in or unstable build).
+     * Download URL for the native library matching the version or channel (beta/unstable prereleases included if opted
+     * in).
      */
     public static String resolveNativeDownloadUrl(String targetVersion, int timeoutMs) {
         String nativeFileName = getNativeFileName();
@@ -273,9 +273,7 @@ public class UpdateChecker {
         }
     }
 
-    /**
-     * Identifies tags or release titles denoting unstable/beta/preview builds.
-     */
+    /** Whether a tag or release title looks like an unstable/beta/preview build. */
     public static boolean isUnstableIdentifier(String text) {
         if (text == null || text.isEmpty()) return false;
         String lower = text.toLowerCase();

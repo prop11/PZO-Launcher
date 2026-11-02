@@ -10,16 +10,16 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Java side of the PZOApi Lua table that other mods use to stay compatible with PZO (docs/MODDING_API.md).
+ * Java side of the PZOApi Lua table other mods use to stay compatible with PZO (docs/MODDING_API.md).
  *
- * The Lua side owns the registrations: every Lua (re)load rebuilds them from the mods that are enabled now, and
- * pushes them here after reset(), so a mod disabled in game leaves nothing behind. Everything here is read on the
- * game thread in hot paths, so each check starts with a plain field test that is false when no mod used the API.
+ * Lua owns the registrations: every Lua (re)load rebuilds them from whichever mods are enabled and pushes them here
+ * after reset(), so a mod disabled in game leaves nothing behind. Everything here gets read on the game thread in hot
+ * paths, so each check starts with a plain field test that's false when no mod has used the API.
  */
 public final class ModApi {
 
     public static final int API_VERSION = 1;
-    /** modData key a mod sets to true on a zombie that PZO must update like one next to the player. */
+    /** modData key a mod sets to true on a zombie that PZO should update as if it were next to the player. */
     public static final String FULL_RATE_KEY = "PZOFullRate";
 
     private static volatile String[] exemptPaths = new String[0];
@@ -106,7 +106,7 @@ public final class ModApi {
         return standdowns.isEmpty() ? null : standdowns.get(key);
     }
 
-    /** True when a mod marked this zombie through PZOApi.markZombie (game thread only: reads its modData). */
+    /** True when a mod marked this zombie with PZOApi.markZombie (game thread only, reads its modData). */
     public static boolean isFullRate(zombie.characters.IsoZombie z) {
         if (!zombieMarks || z == null || !z.hasModData()) return false;
         try {

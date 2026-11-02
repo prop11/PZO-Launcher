@@ -5,8 +5,8 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 /**
- * Stands PZO's rendering changes down when a mod replaces the 3D projection, camera matrices or weather
- * shaders (Project Viewpoint: True Weathers & Lighting, IsoViewpoint, PZ3D). While active:
+ * Stands PZO's rendering changes down when a mod replaces the 3D projection, camera matrices or weather shaders
+ * (Project Viewpoint: True Weathers & Lighting, IsoViewpoint, PZ3D). While it's active:
  * - RenderFrustumCuller and HordeSpatialCuller skip 2D screen-space culling, which would hide 3D-projected objects
  * - RainAndWeatherOptimizer leaves weather masking and puddle settings alone
  */
@@ -34,7 +34,7 @@ public final class ViewpointStanddownGovernor {
         if (initialized) return;
         initialized = true;
 
-        // Persistent mode from PZOConfig
+        // Saved mode from PZOConfig
         try {
             String savedMode = PZOConfig.getViewpointStanddownMode();
             if (savedMode != null && !savedMode.isEmpty()) {
@@ -70,12 +70,11 @@ public final class ViewpointStanddownGovernor {
         return Mode.AUTO;
     }
 
-    /**
-     * Determines whether Project Viewpoint or related 3D camera / weather mods are present.
-     */
+    /** Whether Project Viewpoint or another 3D camera / weather mod is around. */
     public static boolean checkDetection() {
         long now = System.currentTimeMillis();
-        // Negative results are throttled too: without Viewpoint every per-frame caller re-ran the full class and mod-list scan
+        // Negative results are throttled too, otherwise without Viewpoint every per-frame caller re-ran the whole class
+        // and mod-list scan
         if (lastCheckTime != 0 && now - lastCheckTime < 3000L) {
             return modDetected;
         }
@@ -175,7 +174,7 @@ public final class ViewpointStanddownGovernor {
         if (!initialized) initialize();
         if (currentMode == Mode.ENABLED) return true;
         if (currentMode == Mode.DISABLED) return false;
-        // In AUTO mode:
+        // AUTO mode:
         return modDetected || checkDetection();
     }
 

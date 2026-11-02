@@ -1,11 +1,11 @@
 package com.pzoptimizer;
 
-/** Sizes ForkJoinPool and worker pools to the CPU's performance cores. */
+/** Sizes ForkJoinPool and the worker pools to the CPU's performance cores. */
 public class ThreadPoolTuner {
     public static void initialize() {
         try {
             int availableCores = Runtime.getRuntime().availableProcessors();
-            // Clamp between 2 and 16
+            // Between 2 and 16
             int targetParallelism = Math.max(2, Math.min(16, availableCores));
 
             System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", String.valueOf(targetParallelism));

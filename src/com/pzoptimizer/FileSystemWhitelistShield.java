@@ -15,8 +15,8 @@ import java.util.function.Supplier;
 import sun.misc.Unsafe;
 
 /**
- * B42's ZomboidFileSystem.validatePrefix(path) only allows whitelisted roots. This adds the Project Zomboid
- * workshop folder of every Steam library it finds, so Workshop mods on secondary drives are not rejected.
+ * B42's ZomboidFileSystem.validatePrefix(path) only allows whitelisted roots. This adds the Project Zomboid Workshop
+ * folder of every Steam library I can find, so Workshop mods on other drives aren't rejected.
  */
 public final class FileSystemWhitelistShield {
 
@@ -42,8 +42,8 @@ public final class FileSystemWhitelistShield {
         obtainUnsafe();
         collectAllSearchRoots();
 
-        // Retries until ZomboidFileSystem exists; the wrapper then stays in its final allowedPrefixes field for good
-        // (reset() only clears the cached list), so the thread ends after the first success
+        // Retries until ZomboidFileSystem exists. After that the wrapper stays in the final allowedPrefixes field for
+        // good (reset() only clears the cached list), so the thread can stop after the first success.
         Thread daemon = new Thread(() -> {
             while (true) {
                 try {
@@ -58,8 +58,8 @@ public final class FileSystemWhitelistShield {
         daemon.start();
     }
 
-    // Only folders the game legitimately reads mods and saves from. validatePrefix is a startsWith check, so a
-    // drive root or a whole Steam library here would let any Lua mod read and write anywhere under it.
+    // Only folders the game really reads mods and saves from. validatePrefix is just a startsWith check, so adding a
+    // drive root or a whole Steam library would let any Lua mod read and write anywhere under it.
     private static void collectAllSearchRoots() {
         try {
             File[] roots = File.listRoots();
@@ -198,7 +198,7 @@ public final class FileSystemWhitelistShield {
         return false;
     }
 
-    /** Supplier wrapper that always adds the discovered secondary-drive roots. */
+    /** Supplier wrapper that always adds the extra drive roots I found. */
     private static final class PZOShieldSupplier implements Supplier<List<Path>> {
         private final Supplier<List<Path>> delegate;
         private final Set<String> roots;

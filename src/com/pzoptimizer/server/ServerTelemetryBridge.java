@@ -141,7 +141,7 @@ public class ServerTelemetryBridge {
             for (GarbageCollectorMXBean gc : gcs) {
                 String name = gc.getName();
                 if (name != null && name.contains("Cycles")) {
-                    // Ignore concurrent background cycles under ZGC (sub-millisecond STW pause)
+                    // Skip ZGC's concurrent background cycles (their stop-the-world pause is under a millisecond)
                     continue;
                 }
                 long c = gc.getCollectionCount();

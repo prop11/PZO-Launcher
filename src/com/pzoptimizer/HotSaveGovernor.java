@@ -7,14 +7,12 @@ import zombie.iso.ChunkSaveWorker;
 import zombie.iso.IsoChunk;
 
 /**
- * While driving or running across chunks, ChunkSaveWorker's save queue drains about every 0.45 s and calls
- * HotsaveAncilliarySystems(), which serializes the whole IsoMetaGrid on the game thread via
- * MainThread.invokeOnMainThread: a 2-5 ms hitch twice a second.
+ * While driving or running across chunks, ChunkSaveWorker's queue drains about every 0.45 s and calls
+ * HotsaveAncilliarySystems(), which serialises the whole IsoMetaGrid on the game thread: a 2-5 ms hitch twice a second.
  *
- * Mid-travel ancillary hot-saves are throttled to a configurable interval (default 10 s). Deferred saves
- * are flushed from ChunkSaveWorker.Update on the WorldStreamer thread, the only thread vanilla hot-saves
- * from, because HotsaveAncilliarySystems shares a static SaveBufferMap and does disk I/O, so it must never
- * run concurrently or on the game thread.
+ * Those mid-travel hot-saves are throttled to an interval (10 s by default). Deferred ones are flushed from
+ * ChunkSaveWorker.Update on the WorldStreamer thread, the only thread vanilla hot-saves from: it shares a static
+ * SaveBufferMap and does disk I/O, so it must never run concurrently or on the game thread.
  */
 public final class HotSaveGovernor {
 
@@ -48,8 +46,8 @@ public final class HotSaveGovernor {
     }
 
     /**
-     * Redirect target for the invokevirtual ChunkSaveWorker.HotsaveAncilliarySystems() call inside
-     * ChunkSaveWorker.Update (vanilla only reaches it in singleplayer, after the save queue drains).
+     * Redirect target for the ChunkSaveWorker.HotsaveAncilliarySystems() call in ChunkSaveWorker.Update (vanilla only
+     * gets there in single player, once the save queue has drained).
      */
     public static void hotsaveAncilliarySystems(Object worker) {
         if (worldLoading()) {
@@ -69,8 +67,8 @@ public final class HotSaveGovernor {
     }
 
     /**
-     * Redirect target for ChunkSaveWorker.Update(IsoChunk) inside WorldStreamer. The idle streamer loop
-     * calls Update(null) every ~140 ms, which gives the deferred save a safe thread to run on.
+     * Redirect target for ChunkSaveWorker.Update(IsoChunk) in WorldStreamer. The idle streamer calls Update(null) every
+     * ~140 ms, which gives a deferred save a safe thread to run on.
      */
     public static void update(Object worker, Object aboutToLoad) {
         ((ChunkSaveWorker) worker).Update((IsoChunk) aboutToLoad);
@@ -108,12 +106,11 @@ public final class HotSaveGovernor {
     }
 
     /**
-     * The game's loading thread is still running. Loading reads several save files (map_symbols.bin in
-     * MapItem.LoadWorldMap among them) into the shared SliceY.SliceBuffer without SliceBufferLock, while the hot-save
-     * fills the same buffer on the game thread: both corrupt each other (BufferUnderflowException in LoadWorldMap,
-     * BufferOverflowException in IsoMetaGrid.savePart, the map symbols not loaded). Nothing needs a hot-save before
-     * the world is loaded, so it waits and runs on the first streamer update afterwards. Applies with or without the
-     * throttle.
+     * True while the game's loading thread is still going. Loading reads several save files (map_symbols.bin in
+     * MapItem.LoadWorldMap, among others) into the shared SliceY.SliceBuffer without SliceBufferLock, while a hot-save
+     * fills the same buffer on the game thread, and they corrupt each other (BufferUnderflowException in LoadWorldMap,
+     * BufferOverflowException in IsoMetaGrid.savePart, map symbols missing). Nothing needs a hot-save before the world
+     * is loaded, so it waits for the first streamer update after that. Applies with or without the throttle.
      */
     private static boolean worldLoading() {
         Thread loader = zombie.gameStates.GameLoadingState.loader;

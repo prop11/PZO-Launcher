@@ -16,13 +16,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Static audit of the animation-variable callbacks a zombie registers, deciding which ones are pure reads that a
- * worker thread may call. The getter lambda of every setVariable("key", getter, ...) in the registering classes is
- * found in their bytecode and analysed together with everything it calls: no field, static or array store, no
- * monitor, no invokedynamic other than string concatenation, and no call outside the game's own code except an
- * allowlist of side-effect-free JDK methods. Virtual calls are checked against the implementation in every class of
- * the receiver hierarchies a zombie callback can reach. Anything the analysis cannot prove is impure, and an impure
- * key is simply read on the game thread as stock does.
+ * Works out which animation-variable callbacks are pure reads, so a worker can call them. It finds the getter lambda
+ * of every setVariable("key", getter, ...) in the registering classes and checks it and everything it calls: no
+ * stores, no monitors, no invokedynamic except string concat, nothing outside game code apart from a list of safe JDK
+ * methods. Virtual calls are checked against every implementation a zombie can reach. Anything I can't prove is
+ * treated as impure and just read on the game thread like stock.
  */
 public final class CallbackPurity {
 
@@ -71,9 +69,8 @@ public final class CallbackPurity {
 
     private static final Set<String> GETTER_SAMS = Set.of("get", "getAsBoolean", "getAsInt", "getAsFloat", "getAsDouble", "getAsLong");
 
-    // setVariable("key", <getter>, ...): the getter is the invokedynamic right after the key constant (only the
-    // captured `this` may come between). A key whose getter is anything else is left out, and so is read on the
-    // game thread.
+    // setVariable("key", <getter>, ...): the getter is the invokedynamic right after the key constant (only a captured
+    // `this` can come between). Anything else is left out and read on the game thread.
     private void scanRegistrations(MethodNode m) {
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (!(insn instanceof LdcInsnNode ldc && ldc.cst instanceof String key)) continue;

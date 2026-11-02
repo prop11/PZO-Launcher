@@ -7,7 +7,7 @@ import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.List;
 
-/** JVM agent entry point: registers the bytecode transformer that applies the PZO engine patches. */
+/** JVM agent entry point: registers the transformer that applies PZO's engine patches. */
 public class PZOptimAgent {
     private static volatile Instrumentation instrumentationInstance = null;
 
@@ -20,7 +20,7 @@ public class PZOptimAgent {
             return;
         }
         if (BenchmarkHarness.isStockBaselineRequested()) {
-            // Only the benchmark's render thread timer is installed, so stock and PZO runs are measured alike
+            // Only the benchmark's render thread timer goes in, so stock and PZO runs get measured the same way
             inst.addTransformer(new java.lang.instrument.ClassFileTransformer() {
                 @Override
                 public byte[] transform(ClassLoader loader, String className, Class<?> redefined,
@@ -35,7 +35,7 @@ public class PZOptimAgent {
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
 
         try {
-            // Loaded before the transformer exists, which calls into it for every class
+            // Load this before the transformer exists, since it calls into it for every class
             ClassSightings.note("");
             inst.addTransformer(new EngineTransformer(), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
@@ -71,7 +71,10 @@ public class PZOptimAgent {
                         "zombie.iso.PlayerCamera".equals(name) ||
                         "zombie.vehicles.BaseVehicle".equals(name) ||
                         "zombie.iso.IsoChunkLevel".equals(name) ||
-                        "zombie.core.textures.TextureIDAssetManager".equals(name)) {
+                        "zombie.core.textures.TextureIDAssetManager".equals(name) ||
+                        "zombie.core.SpriteRenderer".equals(name) ||
+                        "zombie.tileDepth.TileDepthTextures$LoadTask".equals(name) ||
+                        "zombie.core.skinnedmodel.model.FileTask_AbstractLoadModel".equals(name)) {
                         try {
                             inst.retransformClasses(c);
                             PZOLogger.success("[PZO Agent] Retransformed early-loaded class: " + name);
@@ -112,9 +115,9 @@ public class PZOptimAgent {
     private static volatile boolean fsrRenderScaleHooks = false;
 
     /**
-     * Installs the FSR render-scale hooks. ProjectZomboid64.exe hands Steam launch options only to main(),
-     * not to the JVM, so -pzo_fsr is usually first seen in PZOEntrypoint.main after the agent started;
-     * zombie.* classes already loaded by then are retransformed so they get hooked too.
+     * Installs the FSR render-scale hooks. ProjectZomboid64.exe only passes Steam launch options to main(), not the
+     * JVM, so I usually first see -pzo_fsr in PZOEntrypoint.main after the agent has started. zombie.* classes already
+     * loaded by then get retransformed so they're hooked too.
      */
     public static synchronized void enableRenderScaleHooks() {
         if (fsrRenderScaleHooks) return;
@@ -185,8 +188,8 @@ public class PZOptimAgent {
 
         private static final String RS = "com/pzoptimizer/WorldRenderScale";
 
-        // {owner, name, desc, wrapper}: every LWJGL entry point the game uses for pixel-space state, from a
-        // scan of projectzomboid.jar. Wrappers are static with the identical descriptor.
+        // {owner, name, desc, wrapper}: every LWJGL entry point the game uses for pixel-space state, from a scan of
+        // projectzomboid.jar. Wrappers are static with the same descriptor.
         private static final String[][] RENDER_SCALE_REDIRECTS = {
             {"org/lwjgl/opengl/GL11", "glViewport", "(IIII)V", "glViewport"},
             {"org/lwjgl/opengl/GL30", "glViewport", "(IIII)V", "glViewport"},
@@ -239,7 +242,7 @@ public class PZOptimAgent {
                     sites++;
                 }
             }
-            // The composite hook queues the FSR pass ahead of every world -> screen blit
+            // The composite hook queues the FSR pass before every world -> screen blit
             if (containsAscii(current, "RenderOffScreenBuffer")) {
                 byte[] next = redirectCallSites(current, 0xB6, "zombie/core/Core", "RenderOffScreenBuffer", "()V",
                     "com/pzoptimizer/WorldUpscalerGovernor", "renderOffScreenBuffer", "(Ljava/lang/Object;)V", null);
@@ -392,7 +395,7 @@ public class PZOptimAgent {
                     boolean thread = GameThreadPatches.patchGameProfiler(n);
                     boolean fast = ThreadLocalFastPath.patchProfiler(n);
                     if (fast) PZOLogger.success("[PZO Agent] ASM-patched GameProfiler.getInstance: game thread's profiler handed back without a ThreadLocal lookup");
-                    // Was a raw-bytes patch further down that this branch made unreachable
+                    // Used to be a raw-bytes patch further down, which this branch made unreachable
                     boolean phases = PhaseProfiler.patch(n);
                     if (phases) PZOLogger.success("[PZO Agent] ASM-patched GameProfiler recorder calls: PhaseProfiler debug timing hook armed");
                     return thread || fast || phases;
@@ -558,7 +561,33 @@ public class PZOptimAgent {
                 if (tex != null) {
                     PZOLogger.success("[PZO Agent] Bytecode-patched TextureIDAssetManager: oversized texture loads tagged for worker downscale");
                 }
+                byte[] th = AsmSupport.transform(tex != null ? tex : classfileBuffer, loader, "TextureIDAssetManager texture hand-off", TextureHandoff::patchAssetManager);
+                if (th != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched TextureIDAssetManager.waitFileTask: more decoded textures may wait for upload while loading");
+                    tex = th;
+                }
                 return tex;
+            }
+            if ("zombie/core/SpriteRenderer".equals(className) && classfileBuffer != null) {
+                byte[] sr = AsmSupport.transform(classfileBuffer, loader, "SpriteRenderer texture hand-off", TextureHandoff::patchSpriteRenderer);
+                if (sr != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched SpriteRenderer.waitForReadyState: queued uploads flushed every 2 ms while loading");
+                }
+                return sr;
+            }
+            if ("zombie/tileDepth/TileDepthTextures$LoadTask".equals(className) && classfileBuffer != null) {
+                byte[] dm = AsmSupport.transform(classfileBuffer, loader, "TileDepthTextures.LoadTask parallel", DepthMapParallel::patchLoadTask);
+                if (dm != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched TileDepthTextures.LoadTask: depth maps decoded in parallel");
+                }
+                return dm;
+            }
+            if ("zombie/core/skinnedmodel/model/FileTask_AbstractLoadModel".equals(className) && classfileBuffer != null) {
+                byte[] ac = AsmSupport.transform(classfileBuffer, loader, "FileTask_AbstractLoadModel animation cache", AnimImportCache::patchLoadModel);
+                if (ac != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FileTask_AbstractLoadModel: imported animations kept between launches");
+                }
+                return ac;
             }
             if ("zombie/fileSystem/FileSystemImpl".equals(className) && classfileBuffer != null) {
                 byte[] fsb = BytecodeRedirect.virtualToStatic(classfileBuffer,
@@ -933,7 +962,7 @@ public class PZOptimAgent {
                 byte[] copy = b.clone();
                 int patchedSites = 0;
 
-                // Loop reduction: calculateZExtentsForChunkMap (28,561 loop down to 169)
+                // Loop reduction in calculateZExtentsForChunkMap (28,561 iterations down to 169)
                 for (int k = pos; k < copy.length - 4; k++) {
                     if (copy[k] == 0x2A && copy[k + 1] == (byte) 0xB4 &&
                         copy[k + 2] == oldRefHi && copy[k + 3] == oldRefLo &&
@@ -1117,7 +1146,8 @@ public class PZOptimAgent {
                             int codeLen = ((b[mpos + 4] & 0xFF) << 24) | ((b[mpos + 5] & 0xFF) << 16) | ((b[mpos + 6] & 0xFF) << 8) | (b[mpos + 7] & 0xFF);
                             int cstart = mpos + 8;
                             if (codeLen >= 8 && copy[cstart] == 28 && copy[cstart + 1] == 16 && copy[cstart + 6] == 3 && copy[cstart + 7] == 62) {
-                                // Replace istore_3 (0x3E) with ireturn (0xAC) to correctly return false upon reaching depth recursion limit
+                                // Swap istore_3 (0x3E) for ireturn (0xAC) so it returns false when it hits the
+                                // recursion depth limit
                                 copy[cstart + 7] = (byte) 0xAC;
                                 patched++;
                             }
@@ -1505,11 +1535,10 @@ public class PZOptimAgent {
         }
 
         /**
-         * Generic instruction-accurate call-site redirector.
-         * Redirects targetOpcode (0xB6 invokevirtual, 0xB8 invokestatic or 0xB9 invokeinterface) calling
-         * targetOwner.targetMethodName(targetMethodDesc) to invokestatic on (govClassName, govMethodName, govMethodDesc).
-         * The governor must take the receiver (if any) as its first parameter. invokeinterface is 5 bytes, so it
-         * becomes invokestatic + 2 nops; instruction offsets, exception tables and StackMapTable frames are preserved.
+         * Byte-level call-site redirector. Turns targetOpcode (0xB6 invokevirtual, 0xB8 invokestatic or 0xB9
+         * invokeinterface) calls of targetOwner.targetMethodName(targetMethodDesc) into invokestatic calls of
+         * govClassName.govMethodName(govMethodDesc), which takes the receiver (if any) first. invokeinterface is 5
+         * bytes, so it becomes invokestatic + 2 nops; offsets, exception tables and StackMapTable frames all stay put.
          */
         private byte[] redirectCallSites(
                 byte[] b,
@@ -1621,7 +1650,7 @@ public class PZOptimAgent {
                 System.arraycopy(b, pos, rest, 0, rest.length);
 
                 int thisClassIdx = ((rest[2] & 0xFF) << 8) | (rest[3] & 0xFF);
-                // Only the target method's own body is skipped (recursion guard), and only when it lives in this class
+                // Skip only the target method's own body (recursion guard), and only if it lives in this class
                 boolean ownerIsThisClass = targetOwner.equals(classNameAt(b, tags, tagOffsets, utf8Strings, cpCount, thisClassIdx));
 
                 int mpos = 6; // skip access_flags, this_class, super_class
@@ -1723,7 +1752,7 @@ public class PZOptimAgent {
             return (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : null;
         }
 
-        /** Applies redirects in order; each one builds on the previous result. Returns null if none applied. */
+        /** Applies redirects in order, each on top of the last. Null if none of them applied. */
         private byte[] chain(byte[] original, java.util.function.UnaryOperator<byte[]>... steps) {
             byte[] current = original;
             boolean changed = false;
@@ -1738,7 +1767,7 @@ public class PZOptimAgent {
         }
 
         private byte[] patchChunkSaveWorker(byte[] b) {
-            // HotsaveAncilliarySystems is a private instance method (invokevirtual on Java 11+ nestmates)
+            // HotsaveAncilliarySystems is a private instance method (invokevirtual with Java 11+ nestmates)
             return redirectCallSites(
                 b,
                 0xB6,
@@ -1753,7 +1782,7 @@ public class PZOptimAgent {
         }
 
         private byte[] patchWorldStreamer(byte[] b) {
-            // Deferred hot-saves are flushed on the WorldStreamer thread, the same thread vanilla saves on
+            // Deferred hot-saves get flushed on the WorldStreamer thread, the same one vanilla saves on
             byte[] b1 = redirectCallSites(
                 b,
                 0xB6,
@@ -1767,7 +1796,7 @@ public class PZOptimAgent {
             );
             byte[] base = b1 != null ? b1 : b;
 
-            // StreamerWake: replace fixed Thread.sleep with LockSupport interruptible idle park
+            // StreamerWake: swap the fixed Thread.sleep for an idle park that can be woken
             byte[] b2 = redirectCallSites(
                 base,
                 0xB8,
@@ -1781,7 +1810,7 @@ public class PZOptimAgent {
             );
             base = b2 != null ? b2 : base;
 
-            // StreamerWake: hook jobQueue.add to immediately signal the streamer thread
+            // StreamerWake: hook jobQueue.add so the streamer thread is woken right away
             byte[] b3 = redirectCallSites(
                 base,
                 0xB6,
@@ -1858,7 +1887,7 @@ public class PZOptimAgent {
         }
 
         private byte[] patchIsoWorld(byte[] b) {
-            // The alias map is regenerated in place on every world load; the cache must be rebuilt after it
+            // The alias map is rebuilt in place on every world load, so the cache has to be rebuilt after it
             return redirectCallSites(
                 b,
                 0xB6,
@@ -2083,10 +2112,7 @@ public class PZOptimAgent {
                 "Bytecode-patched PathfindNative.updateMain: PathfindGovernor vehicle navmesh throttle armed");
         }
 
-        /**
-         * Prepends "if (gov(this)) return;" to an instance method with no arguments and a void return.
-         * The governor is a static (Object)Z method.
-         */
+        /** Prepends "if (gov(this)) return;" to a no-arg void instance method. gov is a static (Object)Z method. */
         private byte[] prefixSkipIfTrue(byte[] b, String targetName, String targetDesc, String govClassName, String govMethodName) {
             try {
                 DataInputStream dis = new DataInputStream(new ByteArrayInputStream(b));
@@ -2211,7 +2237,7 @@ public class PZOptimAgent {
                                 (byte) 0xB1                 // 7: return
                             };
 
-                            // Shift exception table PCs by +8 if any exist
+                            // Shift the exception table PCs by 8 if there are any
                             for (int ex = 0; ex < exTableLen; ex++) {
                                 int base = ex * 8;
                                 int startPc = (((exTable[base] & 0xFF) << 8) | (exTable[base + 1] & 0xFF)) + prefix.length;
@@ -2261,7 +2287,7 @@ public class PZOptimAgent {
 
                                     if (numEntries > 0) {
                                         int firstTag = smDis.readUnsignedByte();
-                                        // A first frame at offset 0 cannot be shifted behind the inserted one
+                                        // A first frame at offset 0 can't be shifted behind the inserted one
                                         if (firstTag == 0 || firstTag == 64) return null;
                                         if (firstTag >= 0 && firstTag <= 63) {
                                             smDos.writeByte(firstTag - 1);

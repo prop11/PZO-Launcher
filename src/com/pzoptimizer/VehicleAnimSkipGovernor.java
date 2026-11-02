@@ -11,10 +11,10 @@ import zombie.core.skinnedmodel.animation.AnimationTrack;
 
 /**
  * Replaces AnimationPlayer.Update in BaseVehicle.updateAnimationPlayer. A vehicle part whose tracks are all stopped
- * (closed doors, trunks, hoods and windows at rest) never advances its track time, so every Update recomputes the
- * exact same pose. Each player's track state is fingerprinted, and Update is skipped while the fingerprint is the
- * same as at the last two real updates. Any change (a track starting, stopping, being added or removed, a window
- * moving, a blend weight changing) forces a real Update, as does anything playing.
+ * (closed doors, trunks, hoods, windows at rest) never moves its track time, so every Update works out the exact same
+ * pose. I fingerprint each player's track state and skip Update while the fingerprint matches the last two real
+ * updates. Any change (a track starting, stopping, being added or removed, a window moving, a blend weight changing)
+ * forces a real Update, and so does anything playing.
  */
 public final class VehicleAnimSkipGovernor {
 
@@ -22,10 +22,10 @@ public final class VehicleAnimSkipGovernor {
     public static final AtomicLong updatesSkipped = new AtomicLong();
     public static final AtomicLong updatesRun = new AtomicLong();
 
-    // Vehicles update on the main thread only. Weak keys so unloaded vehicles' players are not retained.
+    // Vehicles update on the main thread only. Weak keys so I don't hold on to unloaded vehicles' players
     private static final WeakHashMap<AnimationPlayer, long[]> state = new WeakHashMap<>();
 
-    // Set by AnimationPlayer resets (new model, skeleton change); the next Update must run to rebuild the pose
+    // Set by AnimationPlayer resets (new model, skeleton change); the next Update has to run to rebuild the pose
     private static final VarHandle NEED_FIRST_FRAME = lookupNeedFirstFrame();
 
     private VehicleAnimSkipGovernor() {}

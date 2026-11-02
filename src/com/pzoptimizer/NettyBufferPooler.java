@@ -1,6 +1,6 @@
 package com.pzoptimizer;
 
-/** Configures Netty direct buffer pooling for multiplayer to cut young-gen GC churn. */
+/** Netty direct buffer pooling for multiplayer, to cut young-gen GC churn. */
 public class NettyBufferPooler {
     public static void apply() {
         try {

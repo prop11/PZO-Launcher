@@ -16,28 +16,28 @@ import java.util.concurrent.atomic.AtomicLong;
  * Makes a translucent-flagged sprite (IsoSprite.depthFlags bit 2) that FoliageLod moved into a chunk texture look the
  * way vanilla's per-frame translucent pass draws it.
  *
- * Two things go wrong when such a sprite is baked as is:
- *  - Depth. The tile depth shader writes depth for every pixel the sprite's depth texture covers, however transparent.
- *    A character drawn after the chunk texture then fails the depth test on the fence's faint pixels and comes out
- *    stippled. Here the sprite is baked in two passes: colour with depth writes off, then depth only (colour mask off)
- *    through the opaque-pixels shader, which keeps depth for texels above 0.8 alpha. Faint pixels no longer hide what
- *    stands behind them; solid bars and table tops still do.
- *  - Transparency over an empty part of the texture. Chunk textures hold premultiplied colour but reach the screen
- *    through a SRC_ALPHA blend, so a half-transparent pixel with nothing under it in the texture (water is drawn
- *    separately) is darkened twice and shows black. Sprites with water in the squares they cover stay per frame.
+ * Baking one as is gets two things wrong:
+ * - Depth. The tile depth shader writes depth for every pixel the sprite's depth texture covers, however faint, so a
+ *   character drawn after the chunk texture fails the depth test on a fence's faint pixels and comes out stippled. I
+ *   bake it in two passes instead: colour with depth writes off, then depth only (colour mask off) through the
+ *   opaque-pixels shader, which only keeps depth above 0.8 alpha. Faint pixels stop hiding what's behind them; solid
+ *   bars and table tops still do.
+ * - Transparency over an empty bit of the texture. Chunk textures hold premultiplied colour but reach the screen
+ *   through a SRC_ALPHA blend, so a half-transparent pixel with nothing under it (water is drawn separately) gets
+ *   darkened twice and shows black. Sprites with water under them stay per frame.
  *
- * Also per frame, as in vanilla: lit light fixtures, mirrors, glass, curtains and decals lying on the floor (puddles
- * are drawn over the chunk texture, and vanilla draws those decals after the puddles).
+ * Also kept per frame, like vanilla: lit light fixtures, mirrors, glass, curtains, and decals lying on the floor
+ * (puddles are drawn over the chunk texture, and vanilla draws those decals after the puddles).
  */
 public final class TranslucentBake {
 
-    // Set by the agent once both patches are in; without them nothing translucent is baked
+    // Set by the agent once both patches are in; without them nothing translucent gets baked
     static volatile boolean spriteHooked, cellHooked;
     public static final AtomicLong twoPassBakes = new AtomicLong();
     public static final AtomicLong keptPerFrame = new AtomicLong();
 
     private static final int PASS_NONE = 0, PASS_COLOUR = 1, PASS_DEPTH = 2;
-    // Main thread only: the bake records its draws there
+    // Main thread only, the bake records its draws there
     private static int pass = PASS_NONE;
     private static final IdentityHashMap<Object, Boolean> spriteVerdicts = new IdentityHashMap<>();
 
@@ -121,7 +121,7 @@ public final class TranslucentBake {
             H.RENDER_MINUS_FLOOR.invokeExact(cell, object);
             return;
         }
-        // Vanilla never puts a translucent-flagged sprite in this layer; only FoliageLod's far classification does
+        // Vanilla never puts a translucent-flagged sprite in this layer, only FoliageLod's far classification does
         try {
             pass = PASS_COLOUR;
             H.RENDER_MINUS_FLOOR.invokeExact(cell, object);
@@ -140,7 +140,7 @@ public final class TranslucentBake {
     public static int shaderFlags(Object sprite) {
         int flags = ((zombie.iso.sprite.IsoSprite) sprite).depthFlags;
         if (pass == PASS_NONE) return flags;
-        // The draw paths set depth writes back on just before this, so it is switched off here
+        // The draw paths turn depth writes back on just before this, so switch them off here
         if (pass == PASS_COLOUR) {
             zombie.IndieGL.glDepthMask(false);
             return flags;

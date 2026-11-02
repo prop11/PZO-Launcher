@@ -19,9 +19,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Class rewrites for BoneBatch and PerThreadScratch. Kept apart from those runtime classes on purpose: these run
- * inside the agent while AnimationPlayer, HelperFunctions or the scheduler is being defined, and this class refers
- * to no game type, so verifying or initialising it can never load one of the classes being rewritten.
+ * The class rewrites for BoneBatch and PerThreadScratch. Kept apart from them on purpose: these run while
+ * AnimationPlayer, HelperFunctions or the scheduler is being defined, and this class touches no game types, so
+ * loading it can't drag in a class I'm halfway through rewriting.
  */
 final class AnimationThreadingPatches {
 
@@ -44,9 +44,9 @@ final class AnimationThreadingPatches {
             if (AsmSupport.findMethod(node, m[0], m[1]) == null) return false;
         }
 
-        // The bone pass's own blend-weight call goes through BoneBatch, which skips it for a queued player (the game
-        // thread already made it). No members are added: see BoneBatch. Finding no stock call (already patched
-        // bytes handed back by another agent) refuses the whole patch.
+        // The bone pass's blend-weight call goes through BoneBatch, which skips it for a queued player (the game thread
+        // already did it). No new members, see BoneBatch. No stock call to find means another agent handed back
+        // already-patched bytes, so give up on the whole patch.
         int redirected = 0;
         for (AbstractInsnNode insn = bones.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && "updateLayerBlendWeightings".equals(mi.name) && AP.equals(mi.owner)

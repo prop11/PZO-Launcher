@@ -5,7 +5,10 @@ import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Reads native library files into the OS page cache on a low-priority thread so the first world load does not page them in. */
+/**
+ * Reads the native libraries into the OS page cache on a low-priority thread, so the first world load doesn't page them
+ * in.
+ */
 public class NativeLibraryPreloader {
     public static void startPreloadingAsync() {
         Thread t = new Thread(() -> {
@@ -53,7 +56,7 @@ public class NativeLibraryPreloader {
             byte[] buf = new byte[65536]; // 64KB chunks
             for (File lib : nativeLibs) {
                 try (FileInputStream fis = new FileInputStream(lib)) {
-                    // Pre-read header and first 512KB into OS page cache
+                    // Read the header and the first 512 KB into the page cache
                     int bytesRead = fis.read(buf);
                     if (bytesRead > 0) count++;
                 } catch (Throwable ignored) {}

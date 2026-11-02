@@ -8,13 +8,13 @@ import com.pzoptimizer.shaded.asm.tree.LdcInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 
 /**
- * VBORenderer batch size. VBORenderer is the immediate-mode quad and line batcher behind weather particles, model
- * atlases, shadows, trees, the vision polygon and debug lines. Stock sizes its vertex buffer at 4 KB, so it uploads
- * and draws every ~30 quads; each flush is a buffer upload, an index upload, a shader and attribute set-up and a draw
- * call, which on a weak CPU or driver is most of the render thread in rain or at a wide zoom. The buffers become
- * 1 MB of vertices and 256 KB of indices (the stock 4:1 ratio). Indices stay 16-bit: the smallest vertex format is
- * 28 bytes, so a full buffer holds 37,449 vertices, under the 65,536 an unsigned short can address. Same draws,
- * same order, fewer and larger batches. Applied when the class loads, so it is fixed for the session.
+ * Bigger VBORenderer batches. VBORenderer is the immediate-mode quad and line batcher behind weather particles, model
+ * atlases, shadows, trees, the vision polygon and debug lines. Stock sizes its vertex buffer at 4 KB, so it uploads and
+ * draws every ~30 quads, and every flush is a buffer upload, an index upload, shader and attribute setup and a draw
+ * call. On a weak CPU or driver that's most of the render thread in rain or at a wide zoom. Now it's 1 MB of vertices
+ * and 256 KB of indices (same 4:1 ratio). Indices stay 16-bit: the smallest vertex format is 28 bytes, so a full buffer
+ * is 37,449 vertices, under the 65,536 a short can address. Same draws in the same order, just fewer and bigger
+ * batches. Set when the class loads, so it's fixed for the session.
  */
 public final class RenderBatchPatches {
 

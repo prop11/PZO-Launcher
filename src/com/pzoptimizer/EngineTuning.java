@@ -4,15 +4,15 @@ import zombie.core.PerformanceSettings;
 import zombie.iso.objects.RainManager;
 
 /**
- * Engine settings the Lua mod tunes. Kahlua copies a class's public static fields into Lua once, so
- * assigning them from Lua never reaches the game; the Lua side calls PZOEngine.setEngineTuning instead.
- * Only the names listed here can be set, each clamped to a sane range.
+ * Engine settings the Lua mod tunes. Kahlua copies public static fields into Lua once, so setting them from Lua never
+ * reaches the game; Lua calls PZOEngine.setEngineTuning instead. Only the names listed here can be set, and each is
+ * clamped to a sane range.
  */
 public final class EngineTuning {
 
     private EngineTuning() {}
 
-    /** Returns true when the name is known and the value was applied. */
+    /** True if the name is known and the value got applied. */
     public static boolean set(String name, double value) {
         if (name == null || Double.isNaN(value)) return false;
         int v = (int) Math.round(value);
