@@ -275,6 +275,9 @@ public final class ChunkIngestionPacer {
         private static volatile long lastFrameCount = -1;
         private static volatile long frameStartTime = 0;
         private static volatile int chunksThisFrame = 0;
+        // Budget runs from the first chunk taken this frame. Counting from the frame start used it up on busy frames
+        // before any chunk came in, so only the one guaranteed chunk got through and driving outran loading.
+        private static volatile long ingestStartTime = 0;
         private static volatile long lastDrivingCheckTime = 0;
         private static volatile boolean playerIsDriving = false;
 
@@ -412,7 +415,7 @@ public final class ChunkIngestionPacer {
                 budgetNanos = baseBudgetNanos;
             }
 
-            if (chunksThisFrame > 0 && (chunksThisFrame >= maxChunks || (now - frameStartTime) >= budgetNanos)) {
+            if (chunksThisFrame > 0 && (chunksThisFrame >= maxChunks || (now - ingestStartTime) >= budgetNanos)) {
                 // Out of budget, the rest goes next frame
                 return null;
             }
@@ -420,6 +423,7 @@ public final class ChunkIngestionPacer {
             Object chunk = super.poll();
             if (chunk != null) {
                 approximateSize.decrementAndGet();
+                if (chunksThisFrame == 0) ingestStartTime = now;
                 chunksThisFrame++;
             }
             return chunk;
