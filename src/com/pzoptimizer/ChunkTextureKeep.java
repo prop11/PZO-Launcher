@@ -18,11 +18,12 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
  * comes back, so walking back and forth, turning a corner or driving along the screen edge keeps redrawing the same
  * chunks, right in the frames that are already busy streaming.
  *
- * Now a group leaving the screen keeps its texture (oldest dropped first past a VRAM budget). Every change still marks
- * it dirty while it's off screen (lighting, objects, items, blood, occlusion and seams all invalidate regardless), so
- * when it comes back it's only redrawn if something changed. I fall back to the stock redraw if the texture was
- * dropped, the chunk object got reused somewhere else, the zoom picked another texture, or an option that stock only
- * re-applies to on-screen chunks (wind sway, water shader, no-lighting debug) changed in the meantime.
+ * Now a group leaving the screen keeps its texture (oldest dropped first past a VRAM budget, none at all on integrated
+ * graphics or cards with 4 GB or less). Every change still marks it dirty while it's off screen (lighting, objects,
+ * items, blood, occlusion and seams all invalidate regardless), so when it comes back it's only redrawn if something
+ * changed. I fall back to the stock redraw if the texture was dropped, the chunk object got reused somewhere else, the
+ * zoom picked another texture, or an option that stock only re-applies to on-screen chunks (wind sway, water shader,
+ * no-lighting debug) changed in the meantime.
  *
  * Game thread only, everything comes from checkNewlyOnScreenChunks.
  */
@@ -109,8 +110,14 @@ public final class ChunkTextureKeep {
             levels.freeFBOsForLevel(level);
             return;
         }
+        long budget = budget();
+        if (budget == 0L) {
+            if (!keptGroups.isEmpty()) dropAll();
+            levels.freeFBOsForLevel(level);
+            return;
+        }
         Kept nk = new Kept(levels, minLevel, fbo1, fbo2, chunk.wx, chunk.wy, optionsStamp());
-        if (nk.bytes > budget()) {
+        if (nk.bytes > budget) {
             levels.freeFBOsForLevel(level);
             return;
         }
@@ -191,23 +198,49 @@ public final class ChunkTextureKeep {
         return s;
     }
 
-    // 96 MB on cards reporting 4 GB or less (or nothing), 192 MB above. A level-0 group is 16 MB at normal zoom.
+    // 1/32 of VRAM, at most 256 MB (6 GB card -> 192 MB). 0 = keep nothing: integrated graphics, 4 GB or less, or VRAM
+    // unknown. Those cards are already tight and spilling over pushes the driver into swapping, which is a slideshow.
+    // A level-0 group is 16 MB at normal zoom.
     private static long budget() {
         if (budgetBytes < 0L) {
-            long vramMb = -1L;
             String summary = HardwareProbe.getSummary();
-            int i = summary == null ? -1 : summary.indexOf("vramMb=");
-            if (i >= 0) {
-                int end = summary.indexOf(';', i);
-                try {
-                    vramMb = Long.parseLong(summary.substring(i + 7, end < 0 ? summary.length() : end).trim());
-                } catch (NumberFormatException ignored) {}
-            } else if (summary == null || summary.isEmpty()) {
-                return 96L << 20; // probe not done yet, decide later
+            if (summary == null || summary.isEmpty()) {
+                // Probe still running: stock behaviour until it's done, then decide once
+                if (HardwareProbe.getGpuCount() != 0) return 0L;
+                budgetBytes = 0L;
+                return 0L;
             }
-            budgetBytes = (vramMb > 4096L ? 192L : 96L) << 20;
+            long vramMb = parseLong(field(summary, "vramMb"));
+            boolean integrated = isIntegratedGpu(field(summary, "gpu"));
+            budgetBytes = integrated || vramMb <= 4096L ? 0L : Math.min(256L << 20, (vramMb << 20) / 32L);
+            PZOLogger.info("[PZO ChunkTextureKeep] " + (budgetBytes == 0L
+                ? "off for this GPU (integrated or 4 GB VRAM or less)"
+                : "budget " + (budgetBytes >> 20) + " MB of " + vramMb + " MB VRAM"));
         }
         return budgetBytes;
+    }
+
+    private static String field(String summary, String key) {
+        for (String part : summary.split(";")) {
+            if (part.startsWith(key + "=")) return part.substring(key.length() + 1).trim();
+        }
+        return "";
+    }
+
+    private static long parseLong(String s) {
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
+    }
+
+    // Same list as the settings screen's isIntegratedGpu, so the verdict and the engine agree
+    static boolean isIntegratedGpu(String name) {
+        String n = name.toLowerCase(java.util.Locale.ROOT);
+        return n.contains("uhd") || n.contains("iris") || n.contains("intel(r) hd") || n.contains("radeon(tm) graphics")
+            || n.matches(".*vega \\d graphics.*") || n.contains("680m") || n.contains("780m") || n.contains("890m")
+            || n.contains("steam deck");
     }
 
     static boolean patchRenderCell(ClassNode node) {
