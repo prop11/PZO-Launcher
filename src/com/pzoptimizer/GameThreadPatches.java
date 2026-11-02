@@ -40,7 +40,8 @@ import zombie.iso.IsoWorld;
  * ChunkHandoffPacer (IsoChunkMap.updateInternal): newly loaded chunks are handed to the main thread (loot rolls,
  * recalc, lighting, 1-5 ms each) several at a time, which shows up as long frames when moving fast. Hand-offs stop once
  * the frame has used its budget (at least one per frame), and a backlog of a grid row or more lets stock's count
- * through so loading never falls behind. Same chunks, same order, they just land in different frames.
+ * through so loading never falls behind. While driving the budget is 12 ms and half a row of backlog is enough, since a
+ * car crosses a chunk border every second or so and the 4 ms budget let it reach unloaded (black) ground. Same chunks, same order, they just land in different frames.
  *
  * EcsClassCache (ECSComponent.getECSClass(Class)): every lookup by type walks the superclass chain to find the class
  * right below ECSComponent. That never changes for a class, so it goes in a ClassValue after the first walk.
@@ -71,6 +72,7 @@ public final class GameThreadPatches {
 
     private static final int LIGHT_SWITCH_FRAMES = 10;
     private static final long HANDOFF_BUDGET_NS = 4_000_000L;
+    private static final long HANDOFF_DRIVING_BUDGET_NS = 12_000_000L;
 
     private GameThreadPatches() {}
 
@@ -460,8 +462,10 @@ public final class GameThreadPatches {
     public static int handoffContinue(int count) {
         if (count <= 0) return count;
         if (handoffsThisFrame++ == 0 || !handoffPacer) return count;
-        if (IsoChunk.loadGridSquare.size() >= IsoChunkMap.chunkGridWidth) return count;
-        if (System.nanoTime() - handoffStart < HANDOFF_BUDGET_NS) return count;
+        boolean driving = ChunkIngestionPacer.PacedConcurrentQueue.isPlayerDriving();
+        int backlog = IsoChunk.loadGridSquare.size();
+        if (backlog >= (driving ? Math.max(1, IsoChunkMap.chunkGridWidth / 2) : IsoChunkMap.chunkGridWidth)) return count;
+        if (System.nanoTime() - handoffStart < (driving ? HANDOFF_DRIVING_BUDGET_NS : HANDOFF_BUDGET_NS)) return count;
         handoffsDeferred.addAndGet(count);
         return 0;
     }
