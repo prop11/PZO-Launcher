@@ -272,6 +272,11 @@ public final class VehicleMotionSmoother {
                 // Chassis and model matrices
                 updateTransformHandle.invokeExact(v);
 
+                // Shadow poly is only rebuilt when polyDirty is set, so without this it stays on the physics pose and
+                // trails the car (issue #54)
+                v.polyDirty = true;
+                v.getPoly();
+
                 // Passengers in seats
                 int seats = v.getMaxPassengers();
                 for (int p = 0; p < seats; p++) {
@@ -635,6 +640,9 @@ public final class VehicleMotionSmoother {
                 c.setLastZ(q[5]);
             }
             this.characters.clear();
+
+            // Collision and shadow polys get rebuilt from the real pose next time the game asks for them
+            v.polyDirty = true;
 
             if (updateHandle != null) {
                 try {

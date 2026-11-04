@@ -70,7 +70,7 @@ public final class MapLoadFixes {
         IntensityMemo m = intensityMemo;
         if (m != null && m.header == lotHeader && m.files == own && m.c300x == cell300X && m.c300y == cell300Y && m.maps == all.size()) {
             intensityLookupsSaved.incrementAndGet();
-            return m.hit ? m.found.getZombieIntensity(chunkX + chunkY * 32) & 0xFF : -1;
+            return m.hit && m.found != null ? m.found.getZombieIntensity(chunkX + chunkY * 32) & 0xFF : -1;
         }
         zombie.iso.LotHeader found = null;
         boolean hit = false;
@@ -83,7 +83,8 @@ public final class MapLoadFixes {
             }
         }
         intensityMemo = new IntensityMemo(lotHeader, own, cell300X, cell300Y, all.size(), found, hit);
-        return hit ? found.getZombieIntensity(chunkX + chunkY * 32) & 0xFF : -1;
+        // A map can claim the 300-tile cell without having this cell's lotheader (map mods); stock NPEs there
+        return hit && found != null ? found.getZombieIntensity(chunkX + chunkY * 32) & 0xFF : -1;
     }
 
     static boolean patchLotHeader(ClassNode node) {

@@ -203,8 +203,19 @@ public class EngineThreadGovernor {
          * Same maths as GameWindow.mainThreadStep(): with a capped framerate the next frameStep runs once accumulator +
          * (now - currentTime) reaches 1e9 / lockFPS.
          */
+        private static boolean viewpointLogged = false;
+
         private static void paceToNextFrame() {
             if (pacerReflectionFailed || zombie.core.PerformanceSettings.instance.isFramerateUncapped()) return;
+            // Viewpoint 0.1.7 nightly users get a 30 FPS lock with PZO. Likely Viewpoint draws its own frames between
+            // game updates and sleeping to lockFPS here blocks them. Stock just spins, so with Viewpoint I leave it be.
+            if (ViewpointStanddownGovernor.isStanddownActive()) {
+                if (!viewpointLogged) {
+                    viewpointLogged = true;
+                    PZOLogger.info("[EngineThreadGovernor] Viewpoint detected: frame pacer stood down, the game's own loop keeps frame timing");
+                }
+                return;
+            }
             try {
                 if (gwCurrentTime == null) {
                     java.lang.invoke.MethodHandles.Lookup lookup = java.lang.invoke.MethodHandles.privateLookupIn(
