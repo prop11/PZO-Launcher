@@ -16,6 +16,7 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   pzo_nonewfixes  as pzo, with the flies fix and chunk mip cap off (newfixes=0)
   pzo_treebake  as pzo, with distant trees baked into chunk textures (treebake=1)
   pzo_firstbake  as pzo, with distant first bakes spread over frames (firstbake=1)
+  pzo_no18  as pzo, with the options new in 1.8 off (new18=0)
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -153,6 +154,8 @@ def main():
                     extra["treebake"] = 1
                 if run == "pzo_firstbake":
                     extra["firstbake"] = 1
+                if run == "pzo_no18":
+                    extra["new18"] = 0
                 if args.start:
                     extra["start"] = args.start
                 if run == "pzo_nonewfixes":

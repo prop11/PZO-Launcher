@@ -250,6 +250,10 @@ public class PZOEngineBridge {
                 value = false;
                 PZOLogger.info("[PZO Bridge] " + key + " held off for " + heldBy);
             }
+            if (value && BenchmarkHarness.new18ForcedOff && BenchmarkHarness.NEW_18_KEYS.contains(key)) {
+                value = false;
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (new18=0)");
+            }
             if ("JVM_GLStateOptimizer".equals(key)) {
                 GLStateOptimizer.setEnabled(value);
             } else if ("JVM_StreamBufferBoost".equals(key)) {
@@ -1574,7 +1578,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.8\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.8.1\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1843,7 +1847,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.8'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.8.1'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

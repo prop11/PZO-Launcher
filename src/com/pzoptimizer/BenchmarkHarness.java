@@ -219,6 +219,18 @@ public final class BenchmarkHarness {
                 upkeepForcedOff = true;
                 notes.add("zombie upkeep patches disabled (upkeep=0)");
             }
+            if ("0".equals(cfg.get("new18"))) {
+                new18ForcedOff = true;
+                UsingPlayerTracker.active = false;
+                PersistentSpriteVbo.enabled = false;
+                FoliageLod.nearSprites = false;
+                LightInfoOnce.active = false;
+                CollapseMemo.setActive(false);
+                CutawayVisitTrim.active = false;
+                FogWalkSkip.active = false;
+                FirstBakeBudget.active = false;
+                notes.add("options new in 1.8 disabled (new18=0); puddle floor cache stays, it's part of the puddle cache");
+            }
             if ("0".equals(cfg.get("rebake"))) {
                 RoomIdCheckSkip.active = false;
                 CutawayRebakeFilter.active = false;
@@ -301,6 +313,11 @@ public final class BenchmarkHarness {
     // upkeep=0: the settings screen's values for those patches are ignored for the run
     static volatile boolean upkeepForcedOff = false;
     static volatile boolean rebakeFixesForcedOff = false;
+    // new18=0: the options new in 1.8 held off, for a with/without comparison. The sprite buffer key isn't in the list:
+    // through the bridge it would write the player's pzo_config.json, so it's switched off here directly instead
+    static volatile boolean new18ForcedOff = false;
+    static final java.util.Set<String> NEW_18_KEYS = java.util.Set.of("JVM_UsingPlayerTrack", "JVM_TranslucentNearBake",
+        "JVM_LightInfoOnce", "JVM_CollapseMemo", "JVM_CutawayVisitTrim", "JVM_FogWalkSkip", "JVM_FirstBakeBudget");
     static volatile boolean puddleFixesForcedOff = false;
     private static volatile long lastTickNs;
     private static final long MAIN_STALL_NS = 45_000_000_000L;
