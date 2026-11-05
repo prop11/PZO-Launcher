@@ -437,6 +437,20 @@ public class PZOptimAgent {
                 }
                 return ls;
             }
+            if ("zombie/core/VBO/GLVertexBufferObject".equals(className) && classfileBuffer != null) {
+                byte[] vb = AsmSupport.transform(classfileBuffer, loader, "GLVertexBufferObject persistent", PersistentSpriteVbo::patchBufferObject);
+                if (vb != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GLVertexBufferObject map/unmap/clear: persistent sprite buffers possible");
+                }
+                return vb;
+            }
+            if ("zombie/core/SpriteRenderer$RingBuffer".equals(className) && classfileBuffer != null) {
+                byte[] rb = AsmSupport.transform(classfileBuffer, loader, "SpriteRenderer ring persistent", PersistentSpriteVbo::patchRingBuffer);
+                if (rb != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched SpriteRenderer$RingBuffer.create: ring buffers registered for persistent mapping");
+                }
+                return rb;
+            }
             if ("zombie/entity/GameEntity".equals(className) && classfileBuffer != null) {
                 byte[] ge = AsmSupport.transform(classfileBuffer, loader, "GameEntity using player", UsingPlayerTracker::patchGameEntity);
                 if (ge != null) {

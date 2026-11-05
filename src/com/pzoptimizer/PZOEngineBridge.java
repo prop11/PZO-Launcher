@@ -419,6 +419,9 @@ public class PZOEngineBridge {
                 PZOConfig.setFastLoadEnabled(value);
             } else if ("JVM_LaptopFastGpu".equals(key)) {
                 GpuPreference.setActive(value);
+            } else if ("JVM_PersistentSpriteVbo".equals(key)) {
+                // The ring already exists by now, so this is for the next launch
+                PZOConfig.setPersistentSpriteVboEnabled(value);
             } else if ("JVM_TextureHandoff".equals(key)) {
                 TextureHandoff.active = value;
                 PZOConfig.setTextureHandoffEnabled(value);

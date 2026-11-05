@@ -21,6 +21,8 @@ public final class PZOConfig {
     private static volatile boolean gpuPrefWritten = false;
     // Loading features that kick in before the Lua settings arrive, so they're read at launch
     private static volatile boolean textureHandoff = true;
+    // The sprite ring is created with the window, before the Lua settings arrive
+    private static volatile boolean persistentSpriteVbo = true;
     private static volatile boolean depthMapParallel = true;
     private static volatile boolean animImportCache = true;
     // Testing aid: "key=value;..." merged over HardwareProbe's real values, "" for the real hardware
@@ -63,6 +65,7 @@ public final class PZOConfig {
                 luaCompileCache = !(content.contains("\"lua_compile_cache\":false") || content.contains("\"lua_compile_cache\": false"));
                 fastLoad = !(content.contains("\"fast_load\":false") || content.contains("\"fast_load\": false"));
                 textureHandoff = !(content.contains("\"texture_handoff\":false") || content.contains("\"texture_handoff\": false"));
+                persistentSpriteVbo = !(content.contains("\"persistent_sprite_vbo\":false") || content.contains("\"persistent_sprite_vbo\": false"));
                 depthMapParallel = !(content.contains("\"depth_map_parallel\":false") || content.contains("\"depth_map_parallel\": false"));
                 animImportCache = !(content.contains("\"anim_import_cache\":false") || content.contains("\"anim_import_cache\": false"));
                 gpuPrefWritten = content.contains("\"gpu_pref_written\":true") || content.contains("\"gpu_pref_written\": true");
@@ -79,11 +82,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"persistent_sprite_vbo\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, persistentSpriteVbo, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -240,6 +243,18 @@ public final class PZOConfig {
         fastLoad = enabled;
         save();
         PZOLogger.info("[PZO Config] Faster file and map loading set to: " + enabled + " (applies on next launch)");
+    }
+
+    public static boolean isPersistentSpriteVboEnabled() {
+        load();
+        return persistentSpriteVbo;
+    }
+
+    public static synchronized void setPersistentSpriteVboEnabled(boolean enabled) {
+        load();
+        if (persistentSpriteVbo == enabled) return;
+        persistentSpriteVbo = enabled;
+        save();
     }
 
     public static boolean isTextureHandoffEnabled() {
