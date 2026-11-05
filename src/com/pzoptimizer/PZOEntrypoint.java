@@ -16,6 +16,8 @@ public class PZOEntrypoint {
         PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + ")");
         PZOLogger.info("Log File: " + PZOLogger.getLogFilePath());
         PZOLogger.info("================================================================================");
+        StartupTimer.begin("PZO main");
+        StartupTimer.step("premain to main");
 
         try {
             Runtime rt = Runtime.getRuntime();
@@ -74,6 +76,7 @@ public class PZOEntrypoint {
             TelemetryReporter.writeStatusFile(json);
             PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB | Native: " + isNative + ")");
         } catch (Throwable ignored) {}
+        StartupTimer.step("native load and status files");
 
         HotSpotJITCompilerTuner.tuneRuntimeProperties();
 
@@ -105,6 +108,7 @@ public class PZOEntrypoint {
         ContainerEventGovernor.initialize();
         DiskIOPacer.initialize();
         com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
+        StartupTimer.step("engine init, first half");
         if (UnstableChannelGuard.isUnstableBuild()) {
             PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD AVX2 Batch Horde Spatial Culler & Skeletal LOD Armed");
             PZOLogger.success("[PZO Unstable Engine] RenderFrustumCuller, ZOcclusionCuller & ModelSkinningGovernor Armed");
@@ -122,6 +126,7 @@ public class PZOEntrypoint {
         // Pull the native libs into the page cache and turn off LWJGL's vertex array bounds checks
         NativeLibraryPreloader.startPreloadingAsync();
         SpriteBatchOptimizer.apply();
+        StartupTimer.step("engine init, second half");
 
         try {
             StreamBufferBooster.applyStreamTweaks();
@@ -167,6 +172,7 @@ public class PZOEntrypoint {
         } catch (Throwable t) {
             PZOLogger.warn("Non-fatal notice on Pre-Menu update checker: " + t.getMessage());
         }
+        StartupTimer.step("update check (and its prompt, if shown)");
 
         // Check the native library's version
         if (!fullUpdateHandled) {
@@ -176,6 +182,7 @@ public class PZOEntrypoint {
                 PZOLogger.warn("Non-fatal notice on Native Governor version verification: " + t.getMessage());
             }
         }
+        StartupTimer.step("native version check (and its prompt, if shown)");
 
         try {
             Thread.currentThread().setPriority(Thread.NORM_PRIORITY);
@@ -228,6 +235,7 @@ public class PZOEntrypoint {
     }
 
     private static void launchGame(String[] args) {
+        StartupTimer.handOver();
         PZOLogger.info("Handing execution over to Project Zomboid entrypoint (zombie.gameStates.MainScreenState)...");
         try {
             Class<?> mainClass = Class.forName("zombie.gameStates.MainScreenState");
@@ -241,7 +249,7 @@ public class PZOEntrypoint {
     }
 
     private static final java.util.Set<String> BROWSER_HOSTS = java.util.Set.of(
-        "github.com", "steamcommunity.com", "store.steampowered.com");
+        "github.com", "steamcommunity.com", "store.steampowered.com", "discord.gg", "discord.com");
 
     // Lua can reach this, and rundll32 FileProtocolHandler will happily launch local files, so only plain https links
     // to known hosts get through

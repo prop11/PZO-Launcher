@@ -23,8 +23,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * Same for sprites flagged translucent (IsoSprite.depthFlags bit 2): chain-link fences, scaffolding, street
  * decorations, ornamental plants. Vanilla draws all of them per frame, wind or not; on the bench route they were 94% of
- * that pass (~350 a frame). In far chunks the classifier sees the bit cleared so they bake too, through TranslucentBake
- * so depth and transparency match vanilla. Sprites it can't bake faithfully stay per frame.
+ * that pass (~350 a frame). The classifier sees the bit cleared so they bake too, through TranslucentBake so depth and
+ * transparency match vanilla; in far chunks always, and in near chunks as well with JVM_TranslucentNearBake, since
+ * nothing about them sways (on a 2026-11-05 bench 91% of the per-frame pass was still these, all near). Sprites it
+ * can't bake faithfully stay per frame.
  *
  * Idea from fmac (Atmospherics), who found translucent sprites disproportionately expensive and caches distant ones.
  * Atmospherics has its own version, so this stands down while that mod is active.
@@ -33,6 +35,8 @@ public final class FoliageLod {
 
     public static volatile boolean active = true;
     public static volatile boolean spritesActive = true;
+    // Translucent-flagged sprites bake in near chunks too, not only far ones
+    public static volatile boolean nearSprites = true;
     public static final AtomicLong spritesBaked = new AtomicLong();
     public static volatile float radiusTiles = 24.0f;
     private static final float HYSTERESIS_TILES = 8.0f;
@@ -85,6 +89,7 @@ public final class FoliageLod {
         }
         zombie.characters.IsoPlayer player = zombie.characters.IsoPlayer.players[0];
         if (player == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
+        TreeBake.frame(player);
         zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
         if (map == null) return;
         // Distance from whatever the camera follows (Viewpoint and spectating move it off the player)
@@ -116,6 +121,37 @@ public final class FoliageLod {
         }
         nextFar = farByChunk;
         farByChunk = seen;
+    }
+
+    /** JVM_TranslucentNearBake: every loaded chunk re-bakes with the new answer. */
+    public static void setNearSprites(boolean value) {
+        if (nearSprites == value) return;
+        nearSprites = value;
+        invalidateAllLoaded();
+    }
+
+    /** True when this chunk is in the far set (TreeBake asks outside the classifier too). */
+    public static boolean isFarChunk(zombie.iso.IsoChunk c) {
+        if (!enabled() || c == null) return false;
+        Boolean far = farByChunk.get(key(c.wx, c.wy));
+        return far != null && far;
+    }
+
+    /** Re-bakes every loaded chunk, for a setting whose answer changes what goes into the chunk texture. */
+    static void invalidateAllLoaded() {
+        try {
+            zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null ? null
+                : zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
+            if (map == null) return;
+            int n = zombie.iso.IsoChunkMap.chunkGridWidth;
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    zombie.iso.IsoChunk c = map.getChunk(x, y);
+                    if (c != null) c.invalidateRenderChunkLevels(zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_TREES);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     // Puts every far chunk back to near and re-bakes it, e.g. when Atmospherics takes over or wind gets switched off
@@ -164,7 +200,8 @@ public final class FoliageLod {
     // Replaces the IsoSprite.depthFlags reads in the classifier, so a far object's sprite doesn't count as translucent
     public static int depthFlags(Object sprite) {
         int flags = ((zombie.iso.sprite.IsoSprite) sprite).depthFlags;
-        if (classifyingFar && spritesActive && (flags & 2) != 0 && TranslucentBake.canBake(classifyingObject, sprite)) {
+        boolean eligible = classifyingFar || (nearSprites && classifyingObject != null && enabled());
+        if (eligible && spritesActive && (flags & 2) != 0 && TranslucentBake.canBake(classifyingObject, sprite)) {
             spritesBaked.incrementAndGet();
             return flags & ~2;
         }

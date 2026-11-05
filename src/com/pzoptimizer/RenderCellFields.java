@@ -8,7 +8,7 @@ import zombie.iso.IsoChunk;
 /** Read access to FBORenderCell's private per-player data (on-screen chunks, occlusion grid bounds). */
 final class RenderCellFields {
 
-    private static VarHandle perPlayerData, onScreenChunks, gridX1, gridY1, gridX2, gridY2;
+    private static VarHandle perPlayerData, onScreenChunks, gridX1, gridY1, gridX2, gridY2, occlusionChanged;
     private static boolean bound;
 
     private RenderCellFields() {}
@@ -24,6 +24,7 @@ final class RenderCellFields {
         gridY1 = ppdLookup.findVarHandle(ppd, "occludedGridY1", int.class);
         gridX2 = ppdLookup.findVarHandle(ppd, "occludedGridX2", int.class);
         gridY2 = ppdLookup.findVarHandle(ppd, "occludedGridY2", int.class);
+        occlusionChanged = ppdLookup.findVarHandle(ppd, "occlusionChanged", boolean.class);
         perPlayerData = cellLookup.findVarHandle(cell, "perPlayerData", ppd.arrayType());
         bound = true;
     }
@@ -36,6 +37,11 @@ final class RenderCellFields {
     @SuppressWarnings("unchecked")
     static ArrayList<IsoChunk> onScreenChunks(Object perPlayer) {
         return (ArrayList<IsoChunk>) onScreenChunks.get(perPlayer);
+    }
+
+    /** True in a frame where every on-screen level recounts its visible squares. */
+    static boolean occlusionChanged(Object perPlayer) {
+        return (boolean) occlusionChanged.get(perPlayer);
     }
 
     /** x1, y1, x2, y2 of the occlusion grid. */

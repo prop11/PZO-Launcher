@@ -3,8 +3,11 @@ package com.pzoptimizer;
 import com.pzoptimizer.shaded.asm.Opcodes;
 import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
+import com.pzoptimizer.shaded.asm.tree.FieldInsnNode;
+import com.pzoptimizer.shaded.asm.tree.InsnList;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
+import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -33,7 +36,7 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
  * First bakes and re-bakes for objects, items, cutaways, obscuring, creation, redraws or trees are never held: a bake
  * also rebuilds the per-frame square lists (trees, translucent objects), so holding those left trees missing or
  * stale. A held group stays dirty; I just hide the dirty bit from the call that would bake it, so the old texture
- * is drawn.
+ * is drawn. The invalidates behind a hold no longer empty those square lists either (see clearOnInvalidate).
  */
 public final class ChunkBakeBudget {
 
@@ -179,6 +182,17 @@ public final class ChunkBakeBudget {
         return baking;
     }
 
+    /** The zoom info of this chunk level group, for FirstBakeBudget. */
+    static Object zoomInfo(IsoChunk chunk, int playerIndex, int level, float zoom) throws Throwable {
+        FBORenderLevels renderLevels = chunk.getRenderLevels(playerIndex);
+        return (Object) H.GET_ZOOM_INFO.invokeExact((Object) H.GET_NLEVELS.invokeExact(renderLevels, level), zoom);
+    }
+
+    /** Dirty and never baked: the bake would be the group's first. */
+    static boolean isFirstBakePending(Object zi) {
+        return (boolean) H.ZI_DIRTY.get(zi) && H.ZI_CHUNK.get(zi) == null;
+    }
+
     // The group stays dirty; only this call sees it clean, so the existing texture is drawn
     private static boolean beginHidden(FBORenderChunkManager mgr, IsoChunk chunk, int level, float zoom, boolean canRender,
                                        boolean canClear, Object zi) {
@@ -188,6 +202,42 @@ public final class ChunkBakeBudget {
         } finally {
             H.ZI_DIRTY.set(zi, true);
         }
+    }
+
+    // Reasons this class may hold a re-bake for. None of them change which squares sit in a level's cached lists.
+    private static final long HOLDABLE = FBORenderChunk.DIRTY_LIGHTING | COSMETIC;
+
+    /**
+     * Replaces the FBORenderLevels.clearCachedSquares read in NLevels.invalidate(flags). Stock empties the cached
+     * square lists (translucent objects, grass, puddles, items...) on every invalidate and counts on the bake that
+     * same frame to refill them. A held bake left them empty, so all of that vanished for the whole lightning flash.
+     * Lighting, blood and corpse invalidates now keep the lists; a bake still clears and rebuilds them.
+     */
+    public static boolean clearOnInvalidate(long flags) {
+        if (!FBORenderLevels.clearCachedSquares) return false;
+        return !active || flags == 0 || (flags & ~HOLDABLE) != 0;
+    }
+
+    static boolean patchNLevels(ClassNode node) {
+        MethodNode m = AsmSupport.findMethod(node, "invalidate", "(J)V");
+        if (m == null || (m.access & Opcodes.ACC_STATIC) != 0) return false;
+        int n = 0;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof FieldInsnNode fi && fi.getOpcode() == Opcodes.GETSTATIC
+                    && "zombie/iso/fboRenderChunk/FBORenderLevels".equals(fi.owner) && "clearCachedSquares".equals(fi.name)
+                    && "Z".equals(fi.desc)) {
+                InsnList repl = new InsnList();
+                repl.add(new VarInsnNode(Opcodes.LLOAD, 1));
+                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ChunkBakeBudget",
+                    "clearOnInvalidate", "(J)Z", false);
+                repl.add(call);
+                m.instructions.insert(fi, repl);
+                m.instructions.remove(fi);
+                insn = call;
+                n++;
+            }
+        }
+        return n == 1;
     }
 
     public static final java.util.Comparator<IsoChunk> LIGHTING_COMPARATOR =
