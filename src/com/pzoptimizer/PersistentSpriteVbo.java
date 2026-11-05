@@ -39,7 +39,8 @@ import zombie.core.VBO.GLVertexBufferObject;
  */
 public final class PersistentSpriteVbo {
 
-    public static volatile boolean enabled = true;
+    // Off until the startup crash on AMD (2026-11-05, right after the ring is created) is understood
+    public static volatile boolean enabled = false;
     public static final AtomicLong mapsAvoided = new AtomicLong();
     public static final AtomicLong fenceWaits = new AtomicLong();
 
