@@ -661,6 +661,13 @@ public class PZOptimAgent {
                 }
                 return rl;
             }
+            if ("zombie/iso/fboRenderChunk/FBORenderLevels$NLevels".equals(className) && classfileBuffer != null) {
+                byte[] nl = AsmSupport.transform(classfileBuffer, loader, "FBORenderLevels$NLevels cached squares", ChunkBakeBudget::patchNLevels);
+                if (nl != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderLevels$NLevels.invalidate: held re-bakes keep their cached squares");
+                }
+                return nl;
+            }
             if ("zombie/iso/IsoPuddles".equals(className) && classfileBuffer != null) {
                 byte[] ip = AsmSupport.transform(classfileBuffer, loader, "IsoPuddles chunk texture record", PuddleRedraw::patchPuddles);
                 if (ip != null) {
