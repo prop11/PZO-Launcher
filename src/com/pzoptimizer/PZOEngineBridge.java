@@ -250,6 +250,10 @@ public class PZOEngineBridge {
                 value = false;
                 PZOLogger.info("[PZO Bridge] " + key + " held off for " + heldBy);
             }
+            if (value && BenchmarkHarness.new18ForcedOff && BenchmarkHarness.NEW_18_KEYS.contains(key)) {
+                value = false;
+                PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (new18=0)");
+            }
             if ("JVM_GLStateOptimizer".equals(key)) {
                 GLStateOptimizer.setEnabled(value);
             } else if ("JVM_StreamBufferBoost".equals(key)) {
