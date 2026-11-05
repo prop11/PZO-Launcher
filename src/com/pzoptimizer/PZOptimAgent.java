@@ -14,6 +14,7 @@ public class PZOptimAgent {
     public static void premain(String agentArgs, Instrumentation inst) {
         if (instrumentationInstance != null) return;
         instrumentationInstance = inst;
+        StartupTimer.begin("PZO premain");
         if (IncompatibleModGuard.isPzOptimizationInstalled()) {
             IncompatibleModGuard.reportAndWarn();
             PZOLogger.warn("[PZO Agent] Incompatible mod installed: no transformer registered, agent idle.");
@@ -87,6 +88,7 @@ public class PZOptimAgent {
         } catch (Throwable t) {
             PZOLogger.warn("[PZO Agent] Notice on transformer registration: " + t.getMessage());
         }
+        StartupTimer.step("transformer and early retransforms");
 
         try {
             HotSpotJITCompilerTuner.tuneRuntimeProperties();
@@ -94,6 +96,7 @@ public class PZOptimAgent {
             PZOEngineBridge.initialize();
             HighPrecisionTimer.initialize();
         } catch (Throwable ignored) {}
+        StartupTimer.step("engine bridge and timers");
 
         PZOLogger.success("[PZO Agent] Live Bytecode Instrumentation engine attached");
 
@@ -102,6 +105,7 @@ public class PZOptimAgent {
         } catch (Throwable t) {
             PZOLogger.warn("[PZO Agent] Notice during Java mod discovery: " + t.getMessage());
         }
+        StartupTimer.step("Java mod scan");
     }
 
     public static void agentmain(String agentArgs, Instrumentation inst) {

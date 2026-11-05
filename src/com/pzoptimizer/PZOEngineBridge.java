@@ -564,6 +564,15 @@ public class PZOEngineBridge {
     }
 
     /** Waits for zombie.Lua.LuaManager to initialize, then binds the PZO globals. */
+    // Lua functions that failed to attach on the last bind; each one is attached on its own so one failure costs only
+    // that function, and the list goes to Lua as PZOEngine.bindFailures for bug reports
+    private static final java.util.List<String> bindFailures = new java.util.ArrayList<>();
+
+    private static void bindFailed(String names, Throwable t) {
+        bindFailures.add(names);
+        PZOLogger.warn("[PZO Kahlua Bridge] Could not attach PZOEngine." + names + ": " + t);
+    }
+
     public static synchronized void initialize() {
         if (initialized) return;
         initialized = true;
@@ -662,640 +671,825 @@ public class PZOEngineBridge {
                             Class<?> callFrameClass = Class.forName("se.krka.kahlua.vm.LuaCallFrame");
                             Method pushObj = callFrameClass.getMethod("push", Object.class);
                             Method getArg = callFrameClass.getMethod("get", int.class);
+                            bindFailures.clear();
 
                             // isEnginePresent / isActive
-                            Object isPresentFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.TRUE);
-                                        return 1;
+                            try {
+                                Object isPresentFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.TRUE);
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isEnginePresent", isPresentFunc);
-                            tableRawset.invoke(pzoTable, "isActive", isPresentFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isEnginePresent", isPresentFunc);
+                                tableRawset.invoke(pzoTable, "isActive", isPresentFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isEnginePresent,isActive", bindError);
+                            }
 
                             // isWindowActive
-                            Object isWindowActiveFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(isWindowActive()));
-                                        return 1;
+                            try {
+                                Object isWindowActiveFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(isWindowActive()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isWindowActive", isWindowActiveFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isWindowActive", isWindowActiveFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isWindowActive", bindError);
+                            }
 
                             // getOptimizedRAM
-                            Object getRamFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Double.valueOf(cachedRamGb));
-                                        return 1;
+                            try {
+                                Object getRamFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Double.valueOf(cachedRamGb));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getOptimizedRAM", getRamFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getOptimizedRAM", getRamFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getOptimizedRAM", bindError);
+                            }
 
                             // getVersion
-                            Object getVersionFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], UpdateChecker.CURRENT_VERSION);
-                                        return 1;
+                            try {
+                                Object getVersionFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], UpdateChecker.CURRENT_VERSION);
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getVersion", getVersionFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getVersion", getVersionFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getVersion", bindError);
+                            }
 
                             // getTelemetryText
-                            Object getTelemetryFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], PZOTelemetryHUD.getFormattedHUDText());
-                                        return 1;
+                            try {
+                                Object getTelemetryFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], PZOTelemetryHUD.getFormattedHUDText());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getTelemetryText", getTelemetryFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getTelemetryText", getTelemetryFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getTelemetryText", bindError);
+                            }
 
                             // openBrowser
-                            Object openBrowserFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        Object urlArg = getArg.invoke(callFrame, 0);
-                                        if (urlArg != null) {
-                                            openBrowser(urlArg.toString());
+                            try {
+                                Object openBrowserFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            Object urlArg = getArg.invoke(callFrame, 0);
+                                            if (urlArg != null) {
+                                                openBrowser(urlArg.toString());
+                                            }
+                                            return 0;
                                         }
-                                        return 0;
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "openBrowser", openBrowserFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "openBrowser", openBrowserFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("openBrowser", bindError);
+                            }
 
                             // purgeRAM
-                            Object purgeRamFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        purgeRAM();
-                                        return 0;
+                            try {
+                                Object purgeRamFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            purgeRAM();
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "purgeRAM", purgeRamFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "purgeRAM", purgeRamFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("purgeRAM", bindError);
+                            }
 
                             // getHeapUsedMB
-                            Object getHeapUsedFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        long usedMB = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024);
-                                        pushObj.invoke(mArgs[0], Double.valueOf(usedMB));
-                                        return 1;
+                            try {
+                                Object getHeapUsedFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            long usedMB = (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024);
+                                            pushObj.invoke(mArgs[0], Double.valueOf(usedMB));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getHeapUsedMB", getHeapUsedFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getHeapUsedMB", getHeapUsedFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getHeapUsedMB", bindError);
+                            }
 
                             // getGlCallsFiltered
-                            Object getGlFilteredFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        long totalSkipped = GLStateOptimizer.getGlCallsFiltered() + GLStateOptimizer.getUniformsSkipped();
-                                        pushObj.invoke(mArgs[0], Double.valueOf(totalSkipped));
-                                        return 1;
+                            try {
+                                Object getGlFilteredFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            long totalSkipped = GLStateOptimizer.getGlCallsFiltered() + GLStateOptimizer.getUniformsSkipped();
+                                            pushObj.invoke(mArgs[0], Double.valueOf(totalSkipped));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getGlCallsFiltered", getGlFilteredFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getGlCallsFiltered", getGlFilteredFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getGlCallsFiltered", bindError);
+                            }
 
                             // openLogsFolder
-                            Object openLogsFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        openLogsFolder();
-                                        return 0;
+                            try {
+                                Object openLogsFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            openLogsFolder();
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "openLogsFolder", openLogsFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "openLogsFolder", openLogsFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("openLogsFolder", bindError);
+                            }
 
                             // copyDiagnosticsToClipboard
-                            Object copyDiagFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        copyDiagnosticsToClipboard();
-                                        return 0;
+                            try {
+                                Object copyDiagFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            copyDiagnosticsToClipboard();
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "copyDiagnosticsToClipboard", copyDiagFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "copyDiagnosticsToClipboard", copyDiagFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("copyDiagnosticsToClipboard", bindError);
+                            }
 
                             // getDiagnosticsReport
-                            Object getDiagReportFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], getDiagnosticsReport());
-                                        return 1;
+                            try {
+                                Object getDiagReportFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], getDiagnosticsReport());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getDiagnosticsReport", getDiagReportFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getDiagnosticsReport", getDiagReportFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getDiagnosticsReport", bindError);
+                            }
 
                             // isBetaOptIn
-                            Object isBetaFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(PZOConfig.isBetaOptIn()));
-                                        return 1;
+                            try {
+                                Object isBetaFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(PZOConfig.isBetaOptIn()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isBetaOptIn", isBetaFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isBetaOptIn", isBetaFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isBetaOptIn", bindError);
+                            }
 
                             // getHardwareSummary
-                            Object getHardwareFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], HardwareProbe.getSummary());
-                                        return 1;
+                            try {
+                                Object getHardwareFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], HardwareProbe.getSummary());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getHardwareSummary", getHardwareFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getHardwareSummary", getHardwareFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getHardwareSummary", bindError);
+                            }
 
                             // getCompatStatus: why compatibility mode is on this launch, "" when it's off
-                            Object getCompatFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], CompatMode.isActive() ? CompatMode.getReasons() : "");
-                                        return 1;
+                            try {
+                                Object getCompatFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], CompatMode.isActive() ? CompatMode.getReasons() : "");
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getCompatStatus", getCompatFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getCompatStatus", getCompatFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getCompatStatus", bindError);
+                            }
 
                             // modApi(op, a, b, c): the Java side of the Lua PZOApi other mods use (ModApi)
-                            Object modApiFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
-                                        Object op = n > 0 ? getArg.invoke(callFrame, 0) : null;
-                                        Object a = n > 1 ? getArg.invoke(callFrame, 1) : null;
-                                        Object b = n > 2 ? getArg.invoke(callFrame, 2) : null;
-                                        Object c = n > 3 ? getArg.invoke(callFrame, 3) : null;
-                                        pushObj.invoke(callFrame, op == null ? Boolean.FALSE : ModApi.dispatch(op.toString(), a, b, c));
-                                        return 1;
+                            try {
+                                Object modApiFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
+                                            Object op = n > 0 ? getArg.invoke(callFrame, 0) : null;
+                                            Object a = n > 1 ? getArg.invoke(callFrame, 1) : null;
+                                            Object b = n > 2 ? getArg.invoke(callFrame, 2) : null;
+                                            Object c = n > 3 ? getArg.invoke(callFrame, 3) : null;
+                                            pushObj.invoke(callFrame, op == null ? Boolean.FALSE : ModApi.dispatch(op.toString(), a, b, c));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "modApi", modApiFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "modApi", modApiFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("modApi", bindError);
+                            }
 
                             // profiler(op, arg): the Lua mod's performance overlay and recordings (LiveProfiler)
-                            Object profilerFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
-                                        Object op = n > 0 ? getArg.invoke(callFrame, 0) : null;
-                                        Object a = n > 1 ? getArg.invoke(callFrame, 1) : null;
-                                        pushObj.invoke(callFrame, op == null ? Boolean.FALSE : LiveProfiler.dispatch(op.toString(), a));
-                                        return 1;
+                            try {
+                                Object profilerFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
+                                            Object op = n > 0 ? getArg.invoke(callFrame, 0) : null;
+                                            Object a = n > 1 ? getArg.invoke(callFrame, 1) : null;
+                                            pushObj.invoke(callFrame, op == null ? Boolean.FALSE : LiveProfiler.dispatch(op.toString(), a));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "profiler", profilerFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "profiler", profilerFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("profiler", bindError);
+                            }
 
                             // setHardwareOverride(summary): pretend to be other hardware for the recommendations ("" =
                             // the real one)
-                            Object hwOverrideFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
-                                        Object v = n > 0 ? getArg.invoke(callFrame, 0) : null;
-                                        PZOConfig.setHardwareOverride(v == null ? "" : v.toString());
-                                        pushObj.invoke(callFrame, HardwareProbe.getRealSummary());
-                                        return 1;
+                            try {
+                                Object hwOverrideFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            int n = ((Number) callFrame.getClass().getField("nArguments").get(callFrame)).intValue();
+                                            Object v = n > 0 ? getArg.invoke(callFrame, 0) : null;
+                                            PZOConfig.setHardwareOverride(v == null ? "" : v.toString());
+                                            pushObj.invoke(callFrame, HardwareProbe.getRealSummary());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "setHardwareOverride", hwOverrideFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "setHardwareOverride", hwOverrideFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("setHardwareOverride", bindError);
+                            }
 
                             // getChannel
-                            Object getChannelFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], getChannel());
-                                        return 1;
+                            try {
+                                Object getChannelFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], getChannel());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getChannel", getChannelFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getChannel", getChannelFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getChannel", bindError);
+                            }
 
                             // getRenderTelemetry (live metrics on the Unstable channel)
-                            Object getRenderTelemetryFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], EnhancedRenderTelemetry.toJson());
-                                        return 1;
+                            try {
+                                Object getRenderTelemetryFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], EnhancedRenderTelemetry.toJson());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getRenderTelemetry", getRenderTelemetryFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getRenderTelemetry", getRenderTelemetryFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getRenderTelemetry", bindError);
+                            }
 
                             // isAVX2SpatialActive
-                            Object isAVX2SpatialFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(isAVX2SpatialActive()));
-                                        return 1;
+                            try {
+                                Object isAVX2SpatialFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(isAVX2SpatialActive()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isAVX2SpatialActive", isAVX2SpatialFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isAVX2SpatialActive", isAVX2SpatialFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isAVX2SpatialActive", bindError);
+                            }
 
                             // getHordeZombiesTracked
-                            Object getHordeTrackedFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Double.valueOf(getHordeZombiesTracked()));
-                                        return 1;
+                            try {
+                                Object getHordeTrackedFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Double.valueOf(getHordeZombiesTracked()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getHordeZombiesTracked", getHordeTrackedFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getHordeZombiesTracked", getHordeTrackedFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getHordeZombiesTracked", bindError);
+                            }
 
                             // getHordeCulledOffscreen
-                            Object getHordeCulledFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Double.valueOf(getHordeCulledOffscreen()));
-                                        return 1;
+                            try {
+                                Object getHordeCulledFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Double.valueOf(getHordeCulledOffscreen()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getHordeCulledOffscreen", getHordeCulledFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getHordeCulledOffscreen", getHordeCulledFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getHordeCulledOffscreen", bindError);
+                            }
 
                             // getBoneTransformsSaved
-                            Object getBonesSavedFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Double.valueOf(getBoneTransformsSaved()));
-                                        return 1;
+                            try {
+                                Object getBonesSavedFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Double.valueOf(getBoneTransformsSaved()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getBoneTransformsSaved", getBonesSavedFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getBoneTransformsSaved", getBonesSavedFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getBoneTransformsSaved", bindError);
+                            }
 
                             // setBetaOptIn
-                            Object setBetaFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        Object boolArg = getArg.invoke(callFrame, 0);
-                                        if (boolArg instanceof Boolean) {
-                                            PZOConfig.setBetaOptIn((Boolean) boolArg);
-                                        } else if (boolArg instanceof Number) {
-                                            PZOConfig.setBetaOptIn(((Number) boolArg).intValue() != 0);
+                            try {
+                                Object setBetaFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            Object boolArg = getArg.invoke(callFrame, 0);
+                                            if (boolArg instanceof Boolean) {
+                                                PZOConfig.setBetaOptIn((Boolean) boolArg);
+                                            } else if (boolArg instanceof Number) {
+                                                PZOConfig.setBetaOptIn(((Number) boolArg).intValue() != 0);
+                                            }
+                                            return 0;
                                         }
-                                        return 0;
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "setBetaOptIn", setBetaFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "setBetaOptIn", setBetaFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("setBetaOptIn", bindError);
+                            }
 
                             // checkForUpdates
-                            Object checkUpdateFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Thread checkThread = new Thread(() -> {
-                                            try {
-                                                UpdateChecker.UpdateResult res = UpdateChecker.checkForUpdatesSync(4000);
-                                                if (res != null && res.hasUpdate) {
-                                                    UpdateDialog.promptIfUpdateAvailable(res.latestVersion, res.downloadUrl, res.dllDownloadUrl);
-                                                }
-                                            } catch (Throwable ignored) {}
-                                        }, "PZO-AsyncUpdatePrompt");
-                                        checkThread.setDaemon(true);
-                                        checkThread.start();
-                                        return 0;
+                            try {
+                                Object checkUpdateFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Thread checkThread = new Thread(() -> {
+                                                try {
+                                                    UpdateChecker.UpdateResult res = UpdateChecker.checkForUpdatesSync(4000);
+                                                    if (res != null && res.hasUpdate) {
+                                                        UpdateDialog.promptIfUpdateAvailable(res.latestVersion, res.downloadUrl, res.dllDownloadUrl);
+                                                    }
+                                                } catch (Throwable ignored) {}
+                                            }, "PZO-AsyncUpdatePrompt");
+                                            checkThread.setDaemon(true);
+                                            checkThread.start();
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "checkForUpdates", checkUpdateFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "checkForUpdates", checkUpdateFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("checkForUpdates", bindError);
+                            }
 
                             // setJvmOption
-                            Object setJvmOptionFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        Object keyArg = getArg.invoke(callFrame, 0);
-                                        Object valArg = getArg.invoke(callFrame, 1);
-                                        if (keyArg != null && valArg != null) {
-                                            boolean bVal = Boolean.TRUE.equals(valArg) || (valArg instanceof Number && ((Number)valArg).intValue() != 0);
-                                            setJvmOption(keyArg.toString(), bVal);
+                            try {
+                                Object setJvmOptionFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            Object keyArg = getArg.invoke(callFrame, 0);
+                                            Object valArg = getArg.invoke(callFrame, 1);
+                                            if (keyArg != null && valArg != null) {
+                                                boolean bVal = Boolean.TRUE.equals(valArg) || (valArg instanceof Number && ((Number)valArg).intValue() != 0);
+                                                setJvmOption(keyArg.toString(), bVal);
+                                            }
+                                            return 0;
                                         }
-                                        return 0;
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "setJvmOption", setJvmOptionFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "setJvmOption", setJvmOptionFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("setJvmOption", bindError);
+                            }
 
                             // setJvmIntOption
-                            Object setJvmIntFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        Object keyArg = getArg.invoke(callFrame, 0);
-                                        Object valArg = getArg.invoke(callFrame, 1);
-                                        if (keyArg != null && valArg instanceof Number) {
-                                            setJvmIntOption(keyArg.toString(), ((Number)valArg).intValue());
+                            try {
+                                Object setJvmIntFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            Object keyArg = getArg.invoke(callFrame, 0);
+                                            Object valArg = getArg.invoke(callFrame, 1);
+                                            if (keyArg != null && valArg instanceof Number) {
+                                                setJvmIntOption(keyArg.toString(), ((Number)valArg).intValue());
+                                            }
+                                            return 0;
                                         }
-                                        return 0;
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "setJvmIntOption", setJvmIntFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "setJvmIntOption", setJvmIntFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("setJvmIntOption", bindError);
+                            }
 
                             // setEngineTuning
-                            Object setEngineTuningFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        Object callFrame = mArgs[0];
-                                        Object keyArg = getArg.invoke(callFrame, 0);
-                                        Object valArg = getArg.invoke(callFrame, 1);
-                                        if (keyArg != null && valArg instanceof Number) {
-                                            EngineTuning.set(keyArg.toString(), ((Number)valArg).doubleValue());
+                            try {
+                                Object setEngineTuningFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object callFrame = mArgs[0];
+                                            Object keyArg = getArg.invoke(callFrame, 0);
+                                            Object valArg = getArg.invoke(callFrame, 1);
+                                            if (keyArg != null && valArg instanceof Number) {
+                                                EngineTuning.set(keyArg.toString(), ((Number)valArg).doubleValue());
+                                            }
+                                            return 0;
                                         }
-                                        return 0;
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "setEngineTuning", setEngineTuningFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "setEngineTuning", setEngineTuningFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("setEngineTuning", bindError);
+                            }
 
                             // isMultithreadingNoticeAcknowledged
-                            Object isNoticeAckFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(PZOConfig.isMultithreadingNoticeAcknowledged()));
-                                        return 1;
+                            try {
+                                Object isNoticeAckFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(PZOConfig.isMultithreadingNoticeAcknowledged()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isMultithreadingNoticeAcknowledged", isNoticeAckFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isMultithreadingNoticeAcknowledged", isNoticeAckFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isMultithreadingNoticeAcknowledged", bindError);
+                            }
 
                             // isWorldUpscalerActive
-                            Object isWorldUpscalerActiveFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(WorldUpscalerGovernor.isActive()));
-                                        return 1;
+                            try {
+                                Object isWorldUpscalerActiveFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(WorldUpscalerGovernor.isActive()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isWorldUpscalerActive", isWorldUpscalerActiveFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isWorldUpscalerActive", isWorldUpscalerActiveFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isWorldUpscalerActive", bindError);
+                            }
 
                             // getWorldUpscalerRenderScale
-                            Object getUpscalerScaleFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Double.valueOf(WorldUpscalerGovernor.getRenderScale()));
-                                        return 1;
+                            try {
+                                Object getUpscalerScaleFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Double.valueOf(WorldUpscalerGovernor.getRenderScale()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getWorldUpscalerRenderScale", getUpscalerScaleFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getWorldUpscalerRenderScale", getUpscalerScaleFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getWorldUpscalerRenderScale", bindError);
+                            }
 
                             // getWorldUpscalerSharpness
-                            Object getUpscalerSharpFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Double.valueOf(WorldUpscalerGovernor.getSharpness()));
-                                        return 1;
+                            try {
+                                Object getUpscalerSharpFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Double.valueOf(WorldUpscalerGovernor.getSharpness()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getWorldUpscalerSharpness", getUpscalerSharpFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getWorldUpscalerSharpness", getUpscalerSharpFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getWorldUpscalerSharpness", bindError);
+                            }
 
                             // isViewpointStanddownActive
-                            Object isStanddownActiveFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(ViewpointStanddownGovernor.isStanddownActive()));
-                                        return 1;
+                            try {
+                                Object isStanddownActiveFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(ViewpointStanddownGovernor.isStanddownActive()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isViewpointStanddownActive", isStanddownActiveFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isViewpointStanddownActive", isStanddownActiveFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isViewpointStanddownActive", bindError);
+                            }
 
                             // isViewpointDetected
-                            Object isViewpointDetectedFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], Boolean.valueOf(ViewpointStanddownGovernor.isViewpointDetected()));
-                                        return 1;
+                            try {
+                                Object isViewpointDetectedFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], Boolean.valueOf(ViewpointStanddownGovernor.isViewpointDetected()));
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "isViewpointDetected", isViewpointDetectedFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "isViewpointDetected", isViewpointDetectedFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("isViewpointDetected", bindError);
+                            }
 
                             // getViewpointStanddownMode
-                            Object getViewpointModeFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        pushObj.invoke(mArgs[0], ViewpointStanddownGovernor.getStanddownModeString());
-                                        return 1;
+                            try {
+                                Object getViewpointModeFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], ViewpointStanddownGovernor.getStanddownModeString());
+                                            return 1;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "getViewpointStanddownMode", getViewpointModeFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "getViewpointStanddownMode", getViewpointModeFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getViewpointStanddownMode", bindError);
+                            }
 
                             // setStanddownMode / setViewpointStanddownMode
-                            Object setStanddownModeFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        try {
-                                            Object arg = getArg.invoke(mArgs[0], 0);
-                                            if (arg != null) {
-                                                ViewpointStanddownGovernor.setStanddownMode(arg.toString());
-                                            }
-                                        } catch (Throwable ignored) {}
-                                        return 0;
+                            try {
+                                Object setStanddownModeFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            try {
+                                                Object arg = getArg.invoke(mArgs[0], 0);
+                                                if (arg != null) {
+                                                    ViewpointStanddownGovernor.setStanddownMode(arg.toString());
+                                                }
+                                            } catch (Throwable ignored) {}
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "setStanddownMode", setStanddownModeFunc);
-                            tableRawset.invoke(pzoTable, "setViewpointStanddownMode", setStanddownModeFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "setStanddownMode", setStanddownModeFunc);
+                                tableRawset.invoke(pzoTable, "setViewpointStanddownMode", setStanddownModeFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("setStanddownMode,setViewpointStanddownMode", bindError);
+                            }
 
                             // toggleViewpointStanddown
-                            Object toggleStanddownFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        ViewpointStanddownGovernor.toggleStanddown();
-                                        return 0;
+                            try {
+                                Object toggleStanddownFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            ViewpointStanddownGovernor.toggleStanddown();
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "toggleViewpointStanddown", toggleStanddownFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "toggleViewpointStanddown", toggleStanddownFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("toggleViewpointStanddown", bindError);
+                            }
 
                             // acknowledgeMultithreadingNotice
-                            Object ackNoticeFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        PZOConfig.setMultithreadingNoticeAcknowledged(true);
-                                        return 0;
+                            try {
+                                Object ackNoticeFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            PZOConfig.setMultithreadingNoticeAcknowledged(true);
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "acknowledgeMultithreadingNotice", ackNoticeFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "acknowledgeMultithreadingNotice", ackNoticeFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("acknowledgeMultithreadingNotice", bindError);
+                            }
 
                             // openWorkshopPage
-                            Object openWorkshopFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        PZOEntrypoint.openBrowser("https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250");
-                                        return 0;
+                            try {
+                                Object openWorkshopFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            PZOEntrypoint.openBrowser("https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250");
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "openWorkshopPage", openWorkshopFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "openWorkshopPage", openWorkshopFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("openWorkshopPage", bindError);
+                            }
 
                             // openGithubPage
-                            Object openGithubFunc = Proxy.newProxyInstance(
-                                javaFuncClass.getClassLoader(),
-                                new Class<?>[]{javaFuncClass},
-                                (proxy, m, mArgs) -> {
-                                    if ("call".equals(m.getName())) {
-                                        PZOEntrypoint.openBrowser("https://github.com/prop11/PZO-Launcher/issues");
-                                        return 0;
+                            try {
+                                Object openGithubFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            PZOEntrypoint.openBrowser("https://github.com/prop11/PZO-Launcher/issues");
+                                            return 0;
+                                        }
+                                        return null;
                                     }
-                                    return null;
-                                }
-                            );
-                            tableRawset.invoke(pzoTable, "openGithubPage", openGithubFunc);
+                                );
+                                tableRawset.invoke(pzoTable, "openGithubPage", openGithubFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("openGithubPage", bindError);
+                            }
 
+                            // makeReportBundle(summaryText): zips the logs and settings for a bug report, returns the path
+                            try {
+                                Object reportFunc = Proxy.newProxyInstance(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            Object summary = getArg.invoke(mArgs[0], 0);
+                                            pushObj.invoke(mArgs[0], ReportBundle.create(summary == null ? "" : summary.toString()));
+                                            return 1;
+                                        }
+                                        return null;
+                                    }
+                                );
+                                tableRawset.invoke(pzoTable, "makeReportBundle", reportFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("makeReportBundle", bindError);
+                            }
+
+                            tableRawset.invoke(pzoTable, "bindFailures", String.join(",", bindFailures));
                         } catch (Throwable t) {
                             PZOLogger.warn("[PZO Kahlua Bridge] JavaFunction proxy warning: " + t.getMessage());
                         }
