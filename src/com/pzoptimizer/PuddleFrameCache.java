@@ -38,13 +38,15 @@ import zombie.iso.fboRenderChunk.ObjectRenderLayer;
  * My walk keeps, per chunk level:
  * - the squares that pass the tests that only change with a bake or a cut-away change (level, cut-away), rebuilt when
  *   the level is baked again, its cut-away flags change or the puddle setting changes
+ * - each square's floor object. IsoGridSquare.getFloor scans the square's objects, and doing that per puddle square per
+ *   frame was most of this walk's cost; a floor only changes with an object change, which re-bakes the level
  * - the corner lights, re-read when the level is re-baked or waiting for a lighting re-bake (every corner light change
  *   in the FBO renderer marks its level dirty for lighting first)
  * - the corner depths, redone when the player's square or the camera's model jiggle correction changes (so in practice,
  *   kept while the camera stands still)
  *
- * On screen, floor and its layer, and the puddle shape are still tested every frame in stock order, and the shape is
- * read fresh, so what gets packed matches the stock walk square for square and float for float. The translucent-floor
+ * On screen, the floor's layer and the puddle shape are still tested every frame in stock order, and the shape is
+ * read fresh. A floor added or removed is picked up at the next bake, at most a frame later. The translucent-floor
  * and chunk-texture puddle passes are left to the game.
  */
 public final class PuddleFrameCache {
@@ -63,6 +65,7 @@ public final class PuddleFrameCache {
         int bakeStamp = -1, epoch, srcSize, n;
         final byte[] flags = new byte[64];
         IsoGridSquare[] squares = new IsoGridSquare[16];
+        IsoObject[] floors = new IsoObject[16];
         float[] light = new float[64];
         float[] depth = new float[64];
         boolean lightValid, depthValid;
@@ -219,7 +222,7 @@ public final class PuddleFrameCache {
             IsoGridSquare sq = lv.squares[k];
             // Stock order: on screen, floor and its layer, puddle shape
             if (!sq.IsOnScreen()) continue;
-            IsoObject floor = sq.getFloor();
+            IsoObject floor = lv.floors[k];
             if (floor == null || floor.getRenderInfo(playerIndex).layer == ObjectRenderLayer.TranslucentFloor) continue;
             IsoPuddlesGeometry pg = sq.getPuddles();
             if (pg == null || !pg.shouldRender()) continue;
@@ -259,10 +262,15 @@ public final class PuddleFrameCache {
         for (int j = 0; j < src.size(); j++) {
             IsoGridSquare sq = src.get(j);
             if (sq.getZ() != z || !levelData.shouldRenderSquare(playerIndex, sq)) continue;
-            if (n == lv.squares.length) lv.squares = Arrays.copyOf(lv.squares, n * 2);
+            if (n == lv.squares.length) {
+                lv.squares = Arrays.copyOf(lv.squares, n * 2);
+                lv.floors = Arrays.copyOf(lv.floors, n * 2);
+            }
+            lv.floors[n] = sq.getFloor();
             lv.squares[n++] = sq;
         }
         Arrays.fill(lv.squares, n, lv.squares.length, null);
+        Arrays.fill(lv.floors, n, lv.floors.length, null);
         if (lv.light.length < n * 4) {
             lv.light = new float[n * 8];
             lv.depth = new float[n * 8];

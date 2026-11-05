@@ -395,6 +395,8 @@ public class PZOEngineBridge {
                 CutawayRebakeFilter.active = value;
             } else if ("JVM_OcclusionReuse".equals(key)) {
                 OcclusionReuse.setActive(value);
+            } else if ("JVM_UsingPlayerTrack".equals(key)) {
+                UsingPlayerTracker.active = value;
             } else if (BenchmarkHarness.puddleFixesForcedOff && ("JVM_PuddleFrameCache".equals(key) || "JVM_PuddleRedrawFilter".equals(key)
                     || "JVM_PuddleRedrawPacing".equals(key))) {
                 PZOLogger.info("[PZO Bridge] " + key + " held off for the benchmark run (puddles=0)");

@@ -437,6 +437,21 @@ public class PZOptimAgent {
                 }
                 return ls;
             }
+            if ("zombie/entity/GameEntity".equals(className) && classfileBuffer != null) {
+                byte[] ge = AsmSupport.transform(classfileBuffer, loader, "GameEntity using player", UsingPlayerTracker::patchGameEntity);
+                if (ge != null) {
+                    UsingPlayerTracker.entityHooked = true;
+                    PZOLogger.success("[PZO Agent] ASM-patched GameEntity.usingPlayer writes: entities in use are tracked");
+                }
+                return ge;
+            }
+            if ("zombie/entity/UsingPlayerUpdateSystem".equals(className) && classfileBuffer != null) {
+                byte[] us = AsmSupport.transform(classfileBuffer, loader, "UsingPlayerUpdateSystem", UsingPlayerTracker::patchSystem);
+                if (us != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched UsingPlayerUpdateSystem.update: only entities in use are checked");
+                }
+                return us;
+            }
             if ("zombie/entity/components/spriteconfig/SpriteConfig".equals(className) && classfileBuffer != null) {
                 return patchSpriteConfig(classfileBuffer);
             }
