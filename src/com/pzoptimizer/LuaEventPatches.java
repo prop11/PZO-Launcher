@@ -193,7 +193,13 @@ public final class LuaEventPatches {
     // - Project A-Life's NPCs are zombie shells. Its OnZombieUpdate fence re-applies NPC behaviour on every update (a
     //   staggered NPC runs plain zombie AI in between), and its OnTick animation client applies a fixed number of
     //   queued NPC animations per tick before they expire.
-    private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife"};
+    // - Aviation Core (and the UH-1B on top of it) steps helicopter physics and controls from OnTick, so paced ticks
+    //   made the controls sluggish above 60 FPS.
+    // - Horse Mod drives riding animations per tick; pacing broke them.
+    // Workshop IDs cover Workshop installs whatever the folder is called, folder names cover local copies.
+    private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife",
+        "/3783444342/", "/aviationcore/", "/3409723807/", "/uh-1bhelicopter/",
+        "/3661336777/", "/mods/horse/"};
 
     private static boolean isExemptMod(String path) {
         for (String p : EXEMPT_MOD_PATHS) {
