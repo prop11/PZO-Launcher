@@ -16,6 +16,11 @@ import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
  * loading it while that class is defined made the JVM define it twice (LinkageError at startup, 2026-11-05). */
 final class PersistentSpriteVboAsm {
 
+    // Set by the agent once GLVertexBufferObject really carries the map/unmap/clear hooks. The ring is only moved to
+    // persistent storage then: with stock map() on immutable, already-mapped buffers every frame fails to map
+    // (GL_INVALID_OPERATION), which is what another mod patching that class (VRAMSteady) caused in 1.8 (#60)
+    static volatile boolean bufferHooked;
+
     private PersistentSpriteVboAsm() {}
 
 

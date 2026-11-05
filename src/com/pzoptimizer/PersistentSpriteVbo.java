@@ -76,6 +76,10 @@ public final class PersistentSpriteVbo {
     public static void register(GLVertexBufferObject[] vbo, GLVertexBufferObject[] ibo) {
         try {
             if (!enabled || !PZOConfig.isPersistentSpriteVboEnabled() || F.SIZE == null) return;
+            if (!PersistentSpriteVboAsm.bufferHooked) {
+                PZOLogger.info("[PersistentSpriteVbo] GLVertexBufferObject isn't hooked (another mod patches it), sprite buffers stay stock");
+                return;
+            }
             org.lwjgl.opengl.GLCapabilities caps = org.lwjgl.opengl.GL.getCapabilities();
             boolean core = caps.OpenGL44;
             if (!core && !caps.GL_ARB_buffer_storage) {

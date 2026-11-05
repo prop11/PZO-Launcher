@@ -464,6 +464,7 @@ public class PZOptimAgent {
             if ("zombie/core/VBO/GLVertexBufferObject".equals(className) && classfileBuffer != null) {
                 byte[] vb = AsmSupport.transform(classfileBuffer, loader, "GLVertexBufferObject persistent", PersistentSpriteVboAsm::patchBufferObject);
                 if (vb != null) {
+                    PersistentSpriteVboAsm.bufferHooked = true;
                     PZOLogger.success("[PZO Agent] ASM-patched GLVertexBufferObject map/unmap/clear: persistent sprite buffers possible");
                 }
                 return vb;
