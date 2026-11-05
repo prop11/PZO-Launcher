@@ -317,6 +317,8 @@ public class PZOEngineBridge {
                 ChunkMipLimit.active = value;
             } else if ("JVM_TranslucentSpriteLod".equals(key)) {
                 FoliageLod.spritesActive = value;
+            } else if ("JVM_TranslucentNearBake".equals(key)) {
+                FoliageLod.setNearSprites(value);
             } else if ("JVM_FoliageLod".equals(key) || "GFX_ForestCanopyCull".equals(key)) {
                 FoliageLod.active = value;
             } else if ("JVM_DirectionVectorFix".equals(key)) {
