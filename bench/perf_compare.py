@@ -14,6 +14,7 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   pzo_noscriptcache  as pzo, with the script item lookup memo off (scriptcache=0)
   pzo_notsprites  as pzo, with distant translucent sprite baking off (tsprites=0)
   pzo_nonewfixes  as pzo, with the flies fix and chunk mip cap off (newfixes=0)
+  pzo_treebake  as pzo, with distant trees baked into chunk textures (treebake=1)
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -99,6 +100,7 @@ def main():
     ap.add_argument("--route-dir", choices=["E", "W", "N", "S"], default="W")
     ap.add_argument("--cores", type=int, default=0,
                     help="pin the game to this many physical cores (with SMT siblings) to stand in for a smaller CPU")
+    ap.add_argument("--start", help="x,y[,z] tile to test at instead of the save's position")
     ap.add_argument("--plan", help="segments run in one launch: name,route,tiles,speed,dir,time,weather,threat;...")
     ap.add_argument("--no-focus", action="store_true",
                     help="do not bring the game window to the front when it opens")
@@ -146,6 +148,10 @@ def main():
                     extra["scriptcache"] = 0
                 if run == "pzo_notsprites":
                     extra["tsprites"] = 0
+                if run == "pzo_treebake":
+                    extra["treebake"] = 1
+                if args.start:
+                    extra["start"] = args.start
                 if run == "pzo_nonewfixes":
                     extra["newfixes"] = 0
                 if run in ("without", "pzo_without", "pzo_nopacer_nolod"):

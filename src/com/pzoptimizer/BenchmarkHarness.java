@@ -90,6 +90,9 @@ public final class BenchmarkHarness {
     private static long lastQueueAttempt;
     private static int zoomIndex;
     private static float startX, startY;
+    // start=x,y[,z]: a fixed spot to test at instead of where the save left the player
+    private static float forcedStartX = Float.NaN, forcedStartY = Float.NaN;
+    private static int forcedStartZ;
     private static int startZ;
     private static long lastFrameNs;
     private static int lastFrameCount = -1;
@@ -187,6 +190,16 @@ public final class BenchmarkHarness {
                 FliesSoundFix.active = false;
                 ChunkMipLimit.active = false;
                 notes.add("flies fix and chunk mip cap disabled (newfixes=0)");
+            }
+            if (cfg.containsKey("treebake")) {
+                TreeBake.active = "1".equals(cfg.get("treebake"));
+                notes.add("tree bake " + (TreeBake.active ? "on" : "off") + " (treebake=" + cfg.get("treebake") + ")");
+            }
+            if (cfg.containsKey("start")) {
+                String[] p = cfg.get("start").split(",");
+                forcedStartX = Float.parseFloat(p[0].trim()) + 0.5f;
+                forcedStartY = Float.parseFloat(p[1].trim()) + 0.5f;
+                forcedStartZ = p.length > 2 ? Integer.parseInt(p[2].trim()) : 0;
             }
             if ("0".equals(cfg.get("tsprites"))) {
                 FoliageLod.spritesActive = false;
@@ -607,6 +620,11 @@ public final class BenchmarkHarness {
                         startX = (int) p.getX() + 0.5f;
                         startY = (int) p.getY() + 0.5f;
                         startZ = (int) p.getZ();
+                        if (!Float.isNaN(forcedStartX)) {
+                            startX = forcedStartX;
+                            startY = forcedStartY;
+                            startZ = forcedStartZ;
+                        }
                         notes.add(String.format(Locale.ROOT, "start tile %.0f,%.0f,%d", startX, startY, startZ));
                         normalizeScene();
                         enter(Phase.WARMUP);

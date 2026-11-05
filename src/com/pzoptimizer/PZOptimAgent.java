@@ -301,6 +301,13 @@ public class PZOptimAgent {
                 }
                 byte[] fl = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell foliage LOD", FoliageLod::patchRenderCell);
                 if (fl != null) {
+                    byte[] treeBake = AsmSupport.transform(fl, loader, "FBORenderCell tree bake", TreeBake::patchRenderCell);
+                    if (treeBake != null) {
+                        fl = treeBake;
+                        PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.isTreeRenderedEveryFrame: distant trees may bake (JVM_TreeBake)");
+                    }
+                }
+                if (fl != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell layer tests: distant wind-swayed foliage baked into the chunk texture");
                     fc = fl;
                 }
@@ -438,29 +445,29 @@ public class PZOptimAgent {
                 return ls;
             }
             if ("zombie/core/VBO/GLVertexBufferObject".equals(className) && classfileBuffer != null) {
-                byte[] vb = AsmSupport.transform(classfileBuffer, loader, "GLVertexBufferObject persistent", PersistentSpriteVbo::patchBufferObject);
+                byte[] vb = AsmSupport.transform(classfileBuffer, loader, "GLVertexBufferObject persistent", PersistentSpriteVboAsm::patchBufferObject);
                 if (vb != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched GLVertexBufferObject map/unmap/clear: persistent sprite buffers possible");
                 }
                 return vb;
             }
             if ("zombie/core/SpriteRenderer$RingBuffer".equals(className) && classfileBuffer != null) {
-                byte[] rb = AsmSupport.transform(classfileBuffer, loader, "SpriteRenderer ring persistent", PersistentSpriteVbo::patchRingBuffer);
+                byte[] rb = AsmSupport.transform(classfileBuffer, loader, "SpriteRenderer ring persistent", PersistentSpriteVboAsm::patchRingBuffer);
                 if (rb != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched SpriteRenderer$RingBuffer.create: ring buffers registered for persistent mapping");
                 }
                 return rb;
             }
             if ("zombie/entity/GameEntity".equals(className) && classfileBuffer != null) {
-                byte[] ge = AsmSupport.transform(classfileBuffer, loader, "GameEntity using player", UsingPlayerTracker::patchGameEntity);
+                byte[] ge = AsmSupport.transform(classfileBuffer, loader, "GameEntity using player", UsingPlayerTrackerAsm::patchGameEntity);
                 if (ge != null) {
-                    UsingPlayerTracker.entityHooked = true;
+                    UsingPlayerTrackerAsm.entityHooked = true;
                     PZOLogger.success("[PZO Agent] ASM-patched GameEntity.usingPlayer writes: entities in use are tracked");
                 }
                 return ge;
             }
             if ("zombie/entity/UsingPlayerUpdateSystem".equals(className) && classfileBuffer != null) {
-                byte[] us = AsmSupport.transform(classfileBuffer, loader, "UsingPlayerUpdateSystem", UsingPlayerTracker::patchSystem);
+                byte[] us = AsmSupport.transform(classfileBuffer, loader, "UsingPlayerUpdateSystem", UsingPlayerTrackerAsm::patchSystem);
                 if (us != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched UsingPlayerUpdateSystem.update: only entities in use are checked");
                 }

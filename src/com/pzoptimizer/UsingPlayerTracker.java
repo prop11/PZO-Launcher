@@ -30,8 +30,6 @@ import zombie.entity.GameEntity;
 public final class UsingPlayerTracker {
 
     public static volatile boolean active = true;
-    // Set by the agent once GameEntity really carries the hook; without it the stock walk has to run
-    static volatile boolean entityHooked;
     public static final AtomicLong checks = new AtomicLong();
 
     // Written from the game thread and, on a server, the network thread; weak so a removed entity doesn't linger
@@ -49,7 +47,7 @@ public final class UsingPlayerTracker {
 
     /** Start of UsingPlayerUpdateSystem.update(); true skips the stock walk. */
     public static boolean update() {
-        if (!active || !entityHooked) return false;
+        if (!active || !UsingPlayerTrackerAsm.entityHooked) return false;
         if (zombie.network.GameClient.client) return true;
         Object[] list;
         synchronized (using) {
@@ -72,43 +70,6 @@ public final class UsingPlayerTracker {
                 using.remove(e);
             }
         }
-        return true;
-    }
-
-    /** GameEntity: note the entity after each putfield of usingPlayer. */
-    static boolean patchGameEntity(ClassNode node) {
-        int n = 0;
-        for (MethodNode m : node.methods) {
-            if ((m.access & Opcodes.ACC_STATIC) != 0) continue;
-            for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-                if (insn instanceof FieldInsnNode fi && fi.getOpcode() == Opcodes.PUTFIELD && "usingPlayer".equals(fi.name)
-                        && "zombie/entity/GameEntity".equals(fi.owner)) {
-                    InsnList after = new InsnList();
-                    after.add(new VarInsnNode(Opcodes.ALOAD, 0));
-                    MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/UsingPlayerTracker", "note",
-                        "(Lzombie/entity/GameEntity;)V", false);
-                    after.add(call);
-                    m.instructions.insert(fi, after);
-                    insn = call;
-                    n++;
-                }
-            }
-        }
-        // setUsingPlayer, reset and receiveUpdateUsingPlayer at least; without the setter the tracking would be blind
-        return n >= 2;
-    }
-
-    /** UsingPlayerUpdateSystem.update(): return early when the tracker handled it. */
-    static boolean patchSystem(ClassNode node) {
-        MethodNode m = AsmSupport.findMethod(node, "update", "()V");
-        if (m == null) return false;
-        LabelNode go = new LabelNode();
-        InsnList pre = new InsnList();
-        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/UsingPlayerTracker", "update", "()Z", false));
-        pre.add(new JumpInsnNode(Opcodes.IFEQ, go));
-        pre.add(new InsnNode(Opcodes.RETURN));
-        pre.add(go);
-        m.instructions.insert(pre);
         return true;
     }
 }

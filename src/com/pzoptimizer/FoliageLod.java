@@ -89,6 +89,7 @@ public final class FoliageLod {
         }
         zombie.characters.IsoPlayer player = zombie.characters.IsoPlayer.players[0];
         if (player == null || zombie.iso.IsoWorld.instance.currentCell == null) return;
+        TreeBake.frame(player);
         zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
         if (map == null) return;
         // Distance from whatever the camera follows (Viewpoint and spectating move it off the player)
@@ -126,6 +127,18 @@ public final class FoliageLod {
     public static void setNearSprites(boolean value) {
         if (nearSprites == value) return;
         nearSprites = value;
+        invalidateAllLoaded();
+    }
+
+    /** True when this chunk is in the far set (TreeBake asks outside the classifier too). */
+    public static boolean isFarChunk(zombie.iso.IsoChunk c) {
+        if (!enabled() || c == null) return false;
+        Boolean far = farByChunk.get(key(c.wx, c.wy));
+        return far != null && far;
+    }
+
+    /** Re-bakes every loaded chunk, for a setting whose answer changes what goes into the chunk texture. */
+    static void invalidateAllLoaded() {
         try {
             zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null ? null
                 : zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
