@@ -191,6 +191,10 @@ public final class BenchmarkHarness {
                 ChunkMipLimit.active = false;
                 notes.add("flies fix and chunk mip cap disabled (newfixes=0)");
             }
+            if (cfg.containsKey("firstbake")) {
+                FirstBakeBudget.active = "1".equals(cfg.get("firstbake"));
+                notes.add("first bake budget " + (FirstBakeBudget.active ? "on" : "off") + " (firstbake=" + cfg.get("firstbake") + ")");
+            }
             if (cfg.containsKey("treebake")) {
                 TreeBake.active = "1".equals(cfg.get("treebake"));
                 notes.add("tree bake " + (TreeBake.active ? "on" : "off") + " (treebake=" + cfg.get("treebake") + ")");

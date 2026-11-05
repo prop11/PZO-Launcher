@@ -319,6 +319,16 @@ public class PZOEngineBridge {
                 FoliageLod.spritesActive = value;
             } else if ("JVM_TranslucentNearBake".equals(key)) {
                 FoliageLod.setNearSprites(value);
+            } else if ("JVM_FogWalkSkip".equals(key)) {
+                FogWalkSkip.active = value;
+            } else if ("JVM_FirstBakeBudget".equals(key)) {
+                FirstBakeBudget.active = value;
+            } else if ("JVM_CutawayVisitTrim".equals(key)) {
+                CutawayVisitTrim.active = value;
+            } else if ("JVM_CollapseMemo".equals(key)) {
+                CollapseMemo.setActive(value);
+            } else if ("JVM_LightInfoOnce".equals(key)) {
+                LightInfoOnce.active = value;
             } else if ("JVM_TreeBake".equals(key)) {
                 TreeBake.setActive(value);
             } else if ("JVM_FoliageLod".equals(key) || "GFX_ForestCanopyCull".equals(key)) {

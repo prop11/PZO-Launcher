@@ -299,6 +299,16 @@ public class PZOptimAgent {
                 if (fc != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderOneLevel: lighting and cosmetic re-bakes spread over frames");
                 }
+                byte[] fb = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell first bake budget", FirstBakeBudgetAsm::patchRenderCell);
+                if (fb != null) {
+                    fc = fb;
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderOneLevel: distant first bakes may spread over frames (JVM_FirstBakeBudget)");
+                }
+                byte[] fw = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell fog walk", FogWalkSkipAsm::patchRenderCell);
+                if (fw != null) {
+                    fc = fw;
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCell.renderFog: fog rows built without the per-square walk");
+                }
                 byte[] fl = AsmSupport.transform(fc != null ? fc : classfileBuffer, loader, "FBORenderCell foliage LOD", FoliageLod::patchRenderCell);
                 if (fl != null) {
                     byte[] treeBake = AsmSupport.transform(fl, loader, "FBORenderCell tree bake", TreeBake::patchRenderCell);
@@ -443,6 +453,13 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoLightSwitch.hasElectricityAround: per-switch power answer cached for a few frames");
                 }
                 return ls;
+            }
+            if ("zombie/iso/LightingJNI$JNILighting".equals(className) && classfileBuffer != null) {
+                byte[] li = AsmSupport.transform(classfileBuffer, loader, "JNILighting light info once", LightInfoOnce::patchLighting);
+                if (li != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched JNILighting.updateFBORenderChunk: a square's lighting asked once per lighting tick");
+                }
+                return li;
             }
             if ("zombie/core/VBO/GLVertexBufferObject".equals(className) && classfileBuffer != null) {
                 byte[] vb = AsmSupport.transform(classfileBuffer, loader, "GLVertexBufferObject persistent", PersistentSpriteVboAsm::patchBufferObject);
@@ -833,6 +850,16 @@ public class PZOptimAgent {
                 byte[] cw = AsmSupport.transform(classfileBuffer, loader, "FBORenderCutaways re-bake filter", CutawayRebakeFilter::patchCutaways);
                 if (cw != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderCutaways.doCutawayVisitSquares: chunks re-baked only where a cutaway changed");
+                }
+                byte[] cm = AsmSupport.transform(cw != null ? cw : classfileBuffer, loader, "FBORenderCutaways collapse memo", CollapseMemoAsm::patchCutaways);
+                if (cm != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCutaways.CalculateBuildingsToCollapse: reused while its inputs are unchanged");
+                    cw = cm;
+                }
+                byte[] vt = AsmSupport.transform(cw != null ? cw : classfileBuffer, loader, "FBORenderCutaways visit trim", CutawayVisitTrimAsm::patchCutaways);
+                if (vt != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FBORenderCutaways.doCutawayVisitSquares: walls walked once per frame, ones that can't cut skipped");
+                    cw = vt;
                 }
                 return cw;
             }

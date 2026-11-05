@@ -182,6 +182,17 @@ public final class ChunkBakeBudget {
         return baking;
     }
 
+    /** The zoom info of this chunk level group, for FirstBakeBudget. */
+    static Object zoomInfo(IsoChunk chunk, int playerIndex, int level, float zoom) throws Throwable {
+        FBORenderLevels renderLevels = chunk.getRenderLevels(playerIndex);
+        return (Object) H.GET_ZOOM_INFO.invokeExact((Object) H.GET_NLEVELS.invokeExact(renderLevels, level), zoom);
+    }
+
+    /** Dirty and never baked: the bake would be the group's first. */
+    static boolean isFirstBakePending(Object zi) {
+        return (boolean) H.ZI_DIRTY.get(zi) && H.ZI_CHUNK.get(zi) == null;
+    }
+
     // The group stays dirty; only this call sees it clean, so the existing texture is drawn
     private static boolean beginHidden(FBORenderChunkManager mgr, IsoChunk chunk, int level, float zoom, boolean canRender,
                                        boolean canClear, Object zi) {
