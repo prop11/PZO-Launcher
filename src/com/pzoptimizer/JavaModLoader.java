@@ -158,7 +158,16 @@ public class JavaModLoader {
         return new ArrayList<>(modMap.values());
     }
 
-    static List<File> findJavaModJars() {
+    private static List<File> foundJars;
+
+    // ZombieBuddyCompat asks again on the first class load. A big Workshop folder on a hard drive took 38 s per walk
+    // (#58), so the walk happens once per launch.
+    static synchronized List<File> findJavaModJars() {
+        if (foundJars == null) foundJars = java.util.Collections.unmodifiableList(scanForJavaModJars());
+        return foundJars;
+    }
+
+    private static List<File> scanForJavaModJars() {
         List<File> result = new ArrayList<>();
         Set<String> scannedDirs = new HashSet<>();
         List<File> searchRoots = new ArrayList<>();
@@ -224,15 +233,73 @@ public class JavaModLoader {
         } catch (Throwable ignored) {}
 
         Set<String> visitedScanDirs = new HashSet<>();
+        Set<String> enabled = getEnabledModIds();
+        int skipped = 0;
         for (File root : searchRoots) {
             String cPath = getCanonicalPath(root);
             if (!scannedDirs.contains(cPath)) {
                 scannedDirs.add(cPath);
-                scanDirectoryForJars(root, result, visitedScanDirs, 0, 10);
+                // Each child is a Workshop item or a mod folder. Jars of mods that are off get skipped by everything
+                // that uses this list, so their files aren't walked at all.
+                File[] children = root.listFiles();
+                if (children == null) continue;
+                for (File child : children) {
+                    if (child.isDirectory() && isTurnedOff(child, enabled)) {
+                        skipped++;
+                        continue;
+                    }
+                    if (child.isDirectory()) {
+                        String name = child.getName().toLowerCase();
+                        if (PRUNED_DIR_NAMES.contains(name) || name.startsWith("models_") || name.startsWith("anims_")) continue;
+                        scanDirectoryForJars(child, result, visitedScanDirs, 1, 10);
+                    } else {
+                        addJar(child, result);
+                    }
+                }
             }
         }
+        if (skipped > 0) PZOLogger.info("[JavaModLoader] " + skipped + " Workshop items / mod folders not walked: none of their mods are on");
 
         return result;
+    }
+
+    // True only when the folder's mod.info ids are known and none of them is on. No mod.info, no mod list, or a mod
+    // that is always on (ZombieBuddy, this one) means it gets walked.
+    private static boolean isTurnedOff(File dir, Set<String> enabled) {
+        if (enabled.isEmpty()) return false;
+        ModMetadata meta = new ModMetadata();
+        collectModInfo(dir, meta, 0);
+        if (meta.modIds.isEmpty()) return false;
+        for (String id : meta.modIds) {
+            if (enabled.contains(id) || enabled.contains(id.toLowerCase()) || id.equalsIgnoreCase("ZombieBuddy")
+                || id.equalsIgnoreCase("MPOptimizer") || id.equalsIgnoreCase("PZOptimEngine") || id.equalsIgnoreCase("ProjectZomboidOptimizer")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // mod.info in dir and up to three folders down (item/mods/<mod>/<version>/mod.info), skipping asset folders
+    private static void collectModInfo(File dir, ModMetadata meta, int depth) {
+        File info = new File(dir, "mod.info");
+        if (info.isFile()) parseModInfoFile(info, meta);
+        if (depth >= 3) return;
+        File[] subs = dir.listFiles(File::isDirectory);
+        if (subs == null) return;
+        for (File sub : subs) {
+            String name = sub.getName().toLowerCase();
+            if (name.equals("media") || PRUNED_DIR_NAMES.contains(name)) continue;
+            collectModInfo(sub, meta, depth + 1);
+        }
+    }
+
+    private static void addJar(File f, List<File> result) {
+        if (!f.isFile() || !f.getName().toLowerCase().endsWith(".jar")) return;
+        if (f.getName().equalsIgnoreCase("PZOptimEngine.jar") || f.getName().equalsIgnoreCase("projectzomboid.jar")
+            || f.getName().equalsIgnoreCase("ZombieBuddy.jar")) {
+            return;
+        }
+        if (!result.contains(f)) result.add(f);
     }
 
     private static void parseVdfForWorkshop(File vdfFile, List<File> searchRoots) {
@@ -270,16 +337,8 @@ public class JavaModLoader {
                     continue;
                 }
                 scanDirectoryForJars(f, result, visitedDirs, depth + 1, maxDepth);
-            } else if (f.isFile() && f.getName().toLowerCase().endsWith(".jar")) {
-                if (f.getName().equalsIgnoreCase("PZOptimEngine.jar") ||
-                    f.getName().equalsIgnoreCase("projectzomboid.jar") ||
-                    f.getName().equalsIgnoreCase("ZombieBuddy.jar")) {
-                    continue;
-                }
-
-                if (!result.contains(f)) {
-                    result.add(f);
-                }
+            } else {
+                addJar(f, result);
             }
         }
     }
