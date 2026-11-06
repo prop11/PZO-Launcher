@@ -40,6 +40,11 @@ import zombie.iso.fboRenderChunk.ObjectRenderLayer;
  *   the level is baked again, its cut-away flags change or the puddle setting changes
  * - each square's floor object. IsoGridSquare.getFloor scans the square's objects, and doing that per puddle square per
  *   frame was most of this walk's cost; a floor only changes with an object change, which re-bakes the level
+ * - each square's 32 packed floats, minus the camera jiggle. The puddle shape (pdne/pdnw/pda/pnon, x, y) is only
+ *   written by IsoPuddlesGeometry.init when its recalc flag is set, or by shouldRender's first pass on the lowest
+ *   puddle setting, so a square is packed again when its geometry object or recalc flag says so, after calling
+ *   shouldRender, and when the cached light or depth was refreshed. A frame then copies each shown square's block and
+ *   adds the jiggle to its 8 position floats, the same sums the stock walk does
  * - the corner lights, re-read when the level is re-baked or waiting for a lighting re-bake (every corner light change
  *   in the FBO renderer marks its level dirty for lighting first)
  * - the corner depths, redone when the player's square or the camera's model jiggle correction changes (so in practice,
@@ -68,7 +73,10 @@ public final class PuddleFrameCache {
         IsoObject[] floors = new IsoObject[16];
         float[] light = new float[64];
         float[] depth = new float[64];
-        boolean lightValid, depthValid;
+        IsoPuddlesGeometry[] pgs = new IsoPuddlesGeometry[16];
+        boolean[] shown = new boolean[16];
+        float[] packed = new float[16 * 32];
+        boolean lightValid, depthValid, packedValid;
         int depthCamX, depthCamY, depthJigX, depthJigY;
     }
 
@@ -81,7 +89,7 @@ public final class PuddleFrameCache {
     private static final WeakHashMap<FBORenderLevels, Levels> states = new WeakHashMap<>();
     private static volatile boolean broken;
     private static VarHandle renderDataField, numSquaresField, capacityField, dataField, perLevelField;
-    private static VarHandle geoX, geoY, geoNe, geoNw, geoAll, geoNone;
+    private static VarHandle geoX, geoY, geoNe, geoNw, geoAll, geoNone, geoRecalc;
 
     private PuddleFrameCache() {}
 
@@ -107,6 +115,7 @@ public final class PuddleFrameCache {
         geoNw = geo.findVarHandle(IsoPuddlesGeometry.class, "pdnw", float[].class);
         geoAll = geo.findVarHandle(IsoPuddlesGeometry.class, "pda", float[].class);
         geoNone = geo.findVarHandle(IsoPuddlesGeometry.class, "pnon", float[].class);
+        geoRecalc = geo.findVarHandle(IsoPuddlesGeometry.class, "recalc", boolean.class);
         dataField = data.findVarHandle(rd, "data", float[].class);
     }
 
@@ -183,7 +192,10 @@ public final class PuddleFrameCache {
             for (int k = 0; k < lv.n; k++) {
                 IsoGridSquare sq = lv.squares[k];
                 for (int c = 0; c < 4; c++) {
-                    lv.light[k * 4 + c] = Float.intBitsToFloat(noLighting ? -1 : sq.getVertLight(LIGHT_CORNER[c], framePlayer));
+                    float l = Float.intBitsToFloat(noLighting ? -1 : sq.getVertLight(LIGHT_CORNER[c], framePlayer));
+                    lv.light[k * 4 + c] = l;
+                    // straight into the packed block too, so a light change doesn't repack the shape
+                    lv.packed[k * 32 + c * 8 + 6] = l;
                 }
             }
             lv.lightValid = true;
@@ -200,7 +212,9 @@ public final class PuddleFrameCache {
                     float dy = (c == 1 || c == 2) ? 1.0F : 0.0F;
                     dx += camera.fixJigglyModelsSquareX;
                     dy += camera.fixJigglyModelsSquareY;
-                    lv.depth[k * 4 + c] = zombie.iso.IsoDepthHelper.getSquareDepthData(camX, camY, sq.x + dx, sq.y + dy, sq.z).depthStart - 1.0E-4F;
+                    float d = zombie.iso.IsoDepthHelper.getSquareDepthData(camX, camY, sq.x + dx, sq.y + dy, sq.z).depthStart - 1.0E-4F;
+                    lv.depth[k * 4 + c] = d;
+                    lv.packed[k * 32 + c * 8 + 7] = d;
                 }
             }
             lv.depthValid = true;
@@ -218,34 +232,29 @@ public final class PuddleFrameCache {
         float[] data = (float[]) dataField.get(threadData);
         if (data == null) data = new float[cap * 4 * 8];
         int drawn = 0;
+        boolean allPacked = lv.packedValid;
         for (int k = 0; k < lv.n; k++) {
             IsoGridSquare sq = lv.squares[k];
-            // Stock order: on screen, floor and its layer, puddle shape
-            if (!sq.IsOnScreen()) continue;
-            IsoObject floor = lv.floors[k];
-            if (floor == null || floor.getRenderInfo(playerIndex).layer == ObjectRenderLayer.TranslucentFloor) continue;
             IsoPuddlesGeometry pg = sq.getPuddles();
-            if (pg == null || !pg.shouldRender()) continue;
+            if (!allPacked || pg != lv.pgs[k] || (pg != null && (boolean) geoRecalc.get(pg))) pack(lv, k, pg);
+            if (!lv.shown[k]) continue;
+            // Stock order for the per-frame tests: on screen, then the floor's layer
+            if (!sq.IsOnScreen()) continue;
+            if (lv.floors[k].getRenderInfo(playerIndex).layer == ObjectRenderLayer.TranslucentFloor) continue;
             if (num + 1 > cap) {
                 cap += 128;
                 data = Arrays.copyOf(data, cap * 4 * 8);
             }
-            float[] x = (float[]) geoX.get(pg), y = (float[]) geoY.get(pg);
-            float[] ne = (float[]) geoNe.get(pg), nw = (float[]) geoNw.get(pg), all = (float[]) geoAll.get(pg), none = (float[]) geoNone.get(pg);
-            int o = num * 4 * 8;
+            int o = num * 32;
+            System.arraycopy(lv.packed, k * 32, data, o, 32);
             for (int c = 0; c < 4; c++) {
-                data[o++] = ne[c];
-                data[o++] = nw[c];
-                data[o++] = all[c];
-                data[o++] = none[c];
-                data[o++] = x[c] + jx;
-                data[o++] = y[c] + jy;
-                data[o++] = lv.light[k * 4 + c];
-                data[o++] = lv.depth[k * 4 + c];
+                data[o + c * 8 + 4] += jx;
+                data[o + c * 8 + 5] += jy;
             }
             num++;
             drawn++;
         }
+        lv.packedValid = true;
         if (drawn > 0) {
             ((int[]) perLevelField.get(threadData))[z + 32] += drawn;
             squaresDrawn.addAndGet(drawn);
@@ -253,6 +262,29 @@ public final class PuddleFrameCache {
         dataField.set(threadData, data);
         capacityField.set(threadData, cap);
         numSquaresField.set(threadData, num);
+    }
+
+    // One square's block as the stock walk would pack it without the jiggle; shouldRender runs first since it can
+    // rewrite the shape on its first pass
+    private static void pack(Level lv, int k, IsoPuddlesGeometry pg) {
+        lv.pgs[k] = pg;
+        boolean ok = lv.floors[k] != null && pg != null && pg.shouldRender();
+        lv.shown[k] = ok;
+        if (!ok) return;
+        float[] x = (float[]) geoX.get(pg), y = (float[]) geoY.get(pg);
+        float[] ne = (float[]) geoNe.get(pg), nw = (float[]) geoNw.get(pg), all = (float[]) geoAll.get(pg), none = (float[]) geoNone.get(pg);
+        float[] out = lv.packed;
+        int o = k * 32;
+        for (int c = 0; c < 4; c++) {
+            out[o++] = ne[c];
+            out[o++] = nw[c];
+            out[o++] = all[c];
+            out[o++] = none[c];
+            out[o++] = x[c];
+            out[o++] = y[c];
+            out[o++] = lv.light[k * 4 + c];
+            out[o++] = lv.depth[k * 4 + c];
+        }
     }
 
     // The stock walk's tests that only change with a bake or a cut-away change
@@ -271,6 +303,14 @@ public final class PuddleFrameCache {
         }
         Arrays.fill(lv.squares, n, lv.squares.length, null);
         Arrays.fill(lv.floors, n, lv.floors.length, null);
+        if (lv.pgs.length < lv.squares.length) {
+            lv.pgs = new IsoPuddlesGeometry[lv.squares.length];
+            lv.shown = new boolean[lv.squares.length];
+            lv.packed = new float[lv.squares.length * 32];
+        } else {
+            Arrays.fill(lv.pgs, null);
+        }
+        lv.packedValid = false;
         if (lv.light.length < n * 4) {
             lv.light = new float[n * 8];
             lv.depth = new float[n * 8];
