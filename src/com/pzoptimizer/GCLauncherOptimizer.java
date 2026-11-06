@@ -135,13 +135,6 @@ public final class GCLauncherOptimizer {
                                     verChanged = true;
                                     continue;
                                 }
-                                if (wantG1 && "-XX:+UseZGC".equals(vs)) {
-                                    verChanged = true;
-                                    if (!verArgs.contains("-XX:+UseG1GC")) {
-                                        verArgs.add("-XX:+UseG1GC");
-                                    }
-                                    continue;
-                                }
                                 verArgs.add(vs);
                             }
                             if (verChanged) {
@@ -152,6 +145,9 @@ public final class GCLauncherOptimizer {
                     }
                 }
             }
+
+            // A collector in a version block gets added next to the main list's one and the JVM won't start
+            if (ZomboidConfigMigrator.stripNestedJvmChoices(root)) changed = true;
 
             if (changed) {
                 File backupFile = new File(gameDir, BACKUP_FILENAME);
