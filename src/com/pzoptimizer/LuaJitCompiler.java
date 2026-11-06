@@ -13,8 +13,8 @@ import com.pzoptimizer.shaded.asm.Opcodes;
  * kept as the interpreter keeps it, and every helper called is the interpreter's own (tableget, tableSet,
  * primitiveMath, KahluaUtil). Two rules keep it exact:
  * - Control transfers stay in the interpreter, apart from calls between compiled functions on the main coroutine (see
- *   directLuaCall). TAILCALL, CLOSURE, VARARG, SETLIST, SETGLOBAL, calls to uncompiled Lua functions, and RETURN when
- *   the interpreter entered the function hand back: run() sets pc to that instruction and returns, luaMainloop executes
+ *   directLuaCall, tailCall). CLOSURE, VARARG, SETLIST, SETGLOBAL, calls to uncompiled Lua functions, and RETURN and
+ *   TAILCALL when the interpreter entered the function hand back: run() sets pc to that instruction and returns, luaMainloop executes
  *   it, and its next
  *   pass enters run() again at the new pc. Every instruction is an entry point, since all state is in the frame. So
  *   calls, returns, coroutines, pcall and error unwinding are vanilla.
@@ -509,6 +509,7 @@ final class LuaJitCompiler {
                 mv.visitLabel(handBack);
                 handBack(i);
             }
+            case TAILCALL -> tailCall(i, a, b);
             case CLOSE -> {
                 setPc(i + 1);
                 mv.visitVarInsn(Opcodes.ALOAD, CF);
@@ -516,7 +517,7 @@ final class LuaJitCompiler {
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "closeUpvalues", "(I)V", false);
             }
             default -> {
-                // SETGLOBAL, TAILCALL, SETLIST, CLOSURE, VARARG and anything unknown
+                // SETGLOBAL, SETLIST, CLOSURE, VARARG and anything unknown
                 handBack(i);
                 handedBackOps++;
                 return;
@@ -641,6 +642,146 @@ final class LuaJitCompiler {
         mv.visitVarInsn(Opcodes.ALOAD, EX);
         mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Throwable");
         mv.visitInsn(Opcodes.ATHROW);
+    }
+
+    /**
+     * TAILCALL in a directly called function (from the interpreter it's handed back, like RETURN). Same steps as the
+     * interpreter's TAILCALL: arguments moved down to returnBase, then a Java function is called and this frame popped
+     * (its fromLua is false, so the interpreter would return here too), or the frame is reused for a Lua function. That
+     * one runs straight away if it's compiled; if not, or when the Java stack is deep, the frame is left at pc 0 and
+     * returning 0 makes directLuaCall's nested luaMainloop run it. Callable tables and the coroutine library hand back.
+     */
+    private void tailCall(int i, int a, int b) {
+        Label handBack = new Label(), luaTail = new Label(), interp = new Label();
+        mv.visitVarInsn(Opcodes.ILOAD, DIRECT);
+        mv.visitJumpInsn(Opcodes.IFEQ, handBack);
+        setPc(i + 1);
+        get(a);
+        mv.visitVarInsn(Opcodes.ASTORE, X);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, JFN);
+        mv.visitJumpInsn(Opcodes.IFEQ, luaTail);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, "se/krka/kahlua/stdlib/CoroutineLib");
+        mv.visitJumpInsn(Opcodes.IFNE, handBack);
+        tailArgs(a, b);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, JFN);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+        mv.visitVarInsn(Opcodes.ILOAD, N);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, HOST, "callJava", "(L" + JFN + ";III)I", false);
+        mv.visitInsn(Opcodes.POP);
+        coroutine();
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "popCallFrame", "()V", false);
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitInsn(Opcodes.IRETURN);
+
+        mv.visitLabel(luaTail);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, LCLOSURE);
+        mv.visitJumpInsn(Opcodes.IFEQ, handBack);
+        tailArgs(a, b);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitFieldInsn(Opcodes.PUTFIELD, FRAME, "localBase", "I");
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitVarInsn(Opcodes.ILOAD, N);
+        mv.visitFieldInsn(Opcodes.PUTFIELD, FRAME, "nArguments", "I");
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, LCLOSURE);
+        mv.visitFieldInsn(Opcodes.PUTFIELD, FRAME, "closure", "L" + LCLOSURE + ";");
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "init", "()V", false);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, LCLOSURE);
+        mv.visitFieldInsn(Opcodes.GETFIELD, LCLOSURE, "prototype", "L" + PROTO + ";");
+        mv.visitFieldInsn(Opcodes.GETFIELD, PROTO, "pzoJit", "L" + OBJ + ";");
+        mv.visitVarInsn(Opcodes.ASTORE, Z);
+        mv.visitVarInsn(Opcodes.ALOAD, Z);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, FN);
+        mv.visitJumpInsn(Opcodes.IFEQ, interp);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitFieldInsn(Opcodes.GETFIELD, HOST, "pzoJitDepth", "I");
+        push(LuaJit.MAX_DIRECT_DEPTH);
+        mv.visitJumpInsn(Opcodes.IF_ICMPGE, interp);
+        depth(1);
+        Label runStart = new Label(), runEnd = new Label(), runFailed = new Label();
+        mv.visitTryCatchBlock(runStart, runEnd, runFailed, "java/lang/Throwable");
+        mv.visitLabel(runStart);
+        mv.visitVarInsn(Opcodes.ALOAD, Z);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, FN);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, FN, "run", "(L" + HOST + ";L" + FRAME + ";Z)I", true);
+        mv.visitLabel(runEnd);
+        mv.visitVarInsn(Opcodes.ISTORE, N);
+        depth(-1);
+        mv.visitVarInsn(Opcodes.ILOAD, N);
+        mv.visitInsn(Opcodes.IRETURN);
+        // The frame is the same one directLuaCall pushed, so its handler reports the error for it as usual
+        mv.visitLabel(runFailed);
+        mv.visitVarInsn(Opcodes.ASTORE, EX);
+        depth(-1);
+        mv.visitVarInsn(Opcodes.ALOAD, EX);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Throwable");
+        mv.visitInsn(Opcodes.ATHROW);
+        mv.visitLabel(interp);
+        mv.visitInsn(Opcodes.ICONST_0);
+        mv.visitInsn(Opcodes.IRETURN);
+
+        mv.visitLabel(handBack);
+        handBack(i);
+    }
+
+    // The interpreter's TAILCALL up to the call: close upvalues, N = argument count, arguments (with the function) moved
+    // down to returnBase
+    private void tailArgs(int a, int b) {
+        coroutine();
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "localBase", "I");
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "closeUpvalues", "(I)V", false);
+        if (b != 0) {
+            push(b - 1);
+        } else {
+            mv.visitVarInsn(Opcodes.ALOAD, CF);
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "getTop", "()I", false);
+            push(a + 1);
+            mv.visitInsn(Opcodes.ISUB);
+        }
+        mv.visitVarInsn(Opcodes.ISTORE, N);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitInsn(Opcodes.ICONST_0);
+        mv.visitFieldInsn(Opcodes.PUTFIELD, FRAME, "restoreTop", "Z");
+        coroutine();
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "localBase", "I");
+        push(a);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+        mv.visitVarInsn(Opcodes.ILOAD, N);
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "stackCopy", "(III)V", false);
+        coroutine();
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+        mv.visitVarInsn(Opcodes.ILOAD, N);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "setTop", "(I)V", false);
     }
 
     private void depth(int delta) {

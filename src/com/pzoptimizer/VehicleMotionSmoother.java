@@ -67,12 +67,29 @@ public final class VehicleMotionSmoother {
     private static float savedCamTOffX = 0.0f;
     private static float savedCamTOffY = 0.0f;
 
-    // Handles for private/protected game members
-    private static MethodHandle updateTransformHandle = null;
-    private static MethodHandle getTOffXHandle = null;
-    private static MethodHandle setTOffXHandle = null;
-    private static MethodHandle getTOffYHandle = null;
-    private static MethodHandle setTOffYHandle = null;
+    // Handles for private/protected game members, static final in a holder so the JIT can inline the calls; a missing
+    // member fails the holder and resolveHandles turns that into "unavailable" as before
+    private static final class H {
+        static final MethodHandle updateTransformHandle, getTOffXHandle, setTOffXHandle, getTOffYHandle, setTOffYHandle;
+
+        static {
+            try {
+                Method m = BaseVehicle.class.getDeclaredMethod("updateTransform");
+                m.setAccessible(true);
+                updateTransformHandle = MethodHandles.lookup().unreflect(m);
+                Field fX = PlayerCamera.class.getDeclaredField("tOffX");
+                fX.setAccessible(true);
+                getTOffXHandle = MethodHandles.lookup().unreflectGetter(fX);
+                setTOffXHandle = MethodHandles.lookup().unreflectSetter(fX);
+                Field fY = PlayerCamera.class.getDeclaredField("tOffY");
+                fY.setAccessible(true);
+                getTOffYHandle = MethodHandles.lookup().unreflectGetter(fY);
+                setTOffYHandle = MethodHandles.lookup().unreflectSetter(fY);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
     private static volatile boolean handlesResolved = false;
     private static volatile boolean handlesUnavailable = false;
 
@@ -83,19 +100,7 @@ public final class VehicleMotionSmoother {
         handlesResolved = true;
 
         try {
-            Method m = BaseVehicle.class.getDeclaredMethod("updateTransform");
-            m.setAccessible(true);
-            updateTransformHandle = MethodHandles.lookup().unreflect(m);
-
-            Field fX = PlayerCamera.class.getDeclaredField("tOffX");
-            fX.setAccessible(true);
-            getTOffXHandle = MethodHandles.lookup().unreflectGetter(fX);
-            setTOffXHandle = MethodHandles.lookup().unreflectSetter(fX);
-
-            Field fY = PlayerCamera.class.getDeclaredField("tOffY");
-            fY.setAccessible(true);
-            getTOffYHandle = MethodHandles.lookup().unreflectGetter(fY);
-            setTOffYHandle = MethodHandles.lookup().unreflectSetter(fY);
+            if (H.updateTransformHandle == null) throw new IllegalStateException("no updateTransform");
 
             PZOLogger.success("[VehicleMotionSmoother] Engine MethodHandles resolved (Fast-Path Transform Inlined)");
             return true;
@@ -270,7 +275,7 @@ public final class VehicleMotionSmoother {
                 v.setY(restore.origWorldY + worldDy);
 
                 // Chassis and model matrices
-                updateTransformHandle.invokeExact(v);
+                H.updateTransformHandle.invokeExact(v);
 
                 // Shadow poly is only rebuilt when polyDirty is set, so without this it stays on the physics pose and
                 // trails the car (issue #54)
@@ -316,8 +321,8 @@ public final class VehicleMotionSmoother {
 
         savedCamOffX = cam.offX;
         savedCamOffY = cam.offY;
-        savedCamTOffX = (float) getTOffXHandle.invokeExact(cam);
-        savedCamTOffY = (float) getTOffYHandle.invokeExact(cam);
+        savedCamTOffX = (float) H.getTOffXHandle.invokeExact(cam);
+        savedCamTOffY = (float) H.getTOffYHandle.invokeExact(cam);
         cameraSaved = true;
 
         IsoGameCharacter prevChr = IsoCamera.getCameraCharacter();
@@ -339,19 +344,19 @@ public final class VehicleMotionSmoother {
 
         for (int i = activeRestores.size() - 1; i >= 0; i--) {
             RenderRestore restore = activeRestores.get(i);
-            restore.restore(updateTransformHandle);
+            restore.restore(H.updateTransformHandle);
             restorePool.add(restore);
         }
         activeRestores.clear();
 
         if (cameraSaved) {
             PlayerCamera cam = IsoCamera.cameras[0];
-            if (cam != null && setTOffXHandle != null && setTOffYHandle != null) {
+            if (cam != null && H.setTOffXHandle != null && H.setTOffYHandle != null) {
                 cam.offX = savedCamOffX;
                 cam.offY = savedCamOffY;
                 try {
-                    setTOffXHandle.invokeExact(cam, savedCamTOffX);
-                    setTOffYHandle.invokeExact(cam, savedCamTOffY);
+                    H.setTOffXHandle.invokeExact(cam, savedCamTOffX);
+                    H.setTOffYHandle.invokeExact(cam, savedCamTOffY);
                 } catch (Throwable ignored) {}
             }
             cameraSaved = false;

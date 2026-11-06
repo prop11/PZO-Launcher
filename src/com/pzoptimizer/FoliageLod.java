@@ -6,8 +6,6 @@ import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -47,8 +45,8 @@ public final class FoliageLod {
     public static final AtomicLong objectsBaked = new AtomicLong();
 
     // Game thread only. Chunk world coords -> far; anything outside the loaded grid is dropped each frame
-    private static Map<Long, Boolean> farByChunk = new HashMap<>();
-    private static Map<Long, Boolean> nextFar = new HashMap<>();
+    private static LongFlagMap farByChunk = new LongFlagMap();
+    private static LongFlagMap nextFar = new LongFlagMap();
     private static boolean classifyingFar;
     private static Object classifyingObject;
     private static boolean otherModOwnsIt;
@@ -99,7 +97,7 @@ public final class FoliageLod {
             py = player.getY();
         }
         float r = radiusTiles, h = HYSTERESIS_TILES * 0.5f;
-        Map<Long, Boolean> seen = nextFar;
+        LongFlagMap seen = nextFar;
         seen.clear();
         int n = zombie.iso.IsoChunkMap.chunkGridWidth;
         for (int y = 0; y < n; y++) {
@@ -109,9 +107,9 @@ public final class FoliageLod {
                 float dx = c.wx * CHUNK_TILES + CHUNK_TILES * 0.5f - px, dy = c.wy * CHUNK_TILES + CHUNK_TILES * 0.5f - py;
                 float d = (float) Math.sqrt(dx * dx + dy * dy);
                 long k = key(c.wx, c.wy);
-                Boolean prev = farByChunk.get(k);
-                boolean far = prev == null ? d > r : (prev ? d > r - h : d > r + h);
-                if (prev != null && prev != far) {
+                int prev = farByChunk.get(k);
+                boolean far = prev < 0 ? d > r : (prev == 1 ? d > r - h : d > r + h);
+                if (prev >= 0 && (prev == 1) != far) {
                     // Re-bake with the new answer, same as vanilla does when the wind option itself changes
                     c.invalidateRenderChunkLevels(zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_TREES);
                     chunkFlips.incrementAndGet();
@@ -133,8 +131,7 @@ public final class FoliageLod {
     /** True when this chunk is in the far set (TreeBake asks outside the classifier too). */
     public static boolean isFarChunk(zombie.iso.IsoChunk c) {
         if (!enabled() || c == null) return false;
-        Boolean far = farByChunk.get(key(c.wx, c.wy));
-        return far != null && far;
+        return farByChunk.get(key(c.wx, c.wy)) == 1;
     }
 
     /** Re-bakes every loaded chunk, for a setting whose answer changes what goes into the chunk texture. */
@@ -165,7 +162,7 @@ public final class FoliageLod {
                 for (int y = 0; y < n; y++) {
                     for (int x = 0; x < n; x++) {
                         zombie.iso.IsoChunk c = map.getChunk(x, y);
-                        if (c != null && Boolean.TRUE.equals(farByChunk.get(key(c.wx, c.wy)))) {
+                        if (c != null && farByChunk.get(key(c.wx, c.wy)) == 1) {
                             c.invalidateRenderChunkLevels(zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_TREES);
                         }
                     }
@@ -184,8 +181,7 @@ public final class FoliageLod {
         zombie.iso.IsoGridSquare sq = ((zombie.iso.IsoObject) object).square;
         zombie.iso.IsoChunk c = sq == null ? null : sq.chunk;
         if (c == null) return;
-        Boolean far = farByChunk.get(key(c.wx, c.wy));
-        classifyingFar = far != null && far;
+        classifyingFar = farByChunk.get(key(c.wx, c.wy)) == 1;
     }
 
     // Replaces Core.getOptionDoWindSpriteEffects() inside the two layer tests

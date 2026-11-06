@@ -49,6 +49,8 @@ public final class LuaEventPatches {
     private static final String[] eventStack = new String[64];
     private static int depth;
     private static final Map<String, long[]> handlerTimes = new HashMap<>(); // key -> {nanos, calls}
+    // closure -> {event, its handlerTimes entry}, so a timed call doesn't build and hash the key string every time
+    private static final java.util.IdentityHashMap<Object, Object[]> timeSlots = new java.util.IdentityHashMap<>();
 
     // 60 Hz pacing for mod events (main thread only). Each handler has a schedule that moves on by one period per run,
     // so the average is 60 Hz at any frame rate; the slack stops a locked 60 FPS with jitter from skipping at all.
@@ -326,12 +328,17 @@ public final class LuaEventPatches {
             caller.protectedCallVoid(thread, closure, params);
         } finally {
             long dt = System.nanoTime() - start;
-            String where = "?";
-            if (closure instanceof se.krka.kahlua.vm.LuaClosure lc && lc.prototype != null) {
-                String file = lc.prototype.filename != null ? lc.prototype.filename : lc.prototype.file;
-                where = (file == null ? "?" : file.replace('\\', '/')) + ":" + lc.prototype.name;
+            Object[] slot = timeSlots.get(closure);
+            if (slot == null || !event.equals(slot[0])) {
+                String where = "?";
+                if (closure instanceof se.krka.kahlua.vm.LuaClosure lc && lc.prototype != null) {
+                    String file = lc.prototype.filename != null ? lc.prototype.filename : lc.prototype.file;
+                    where = (file == null ? "?" : file.replace('\\', '/')) + ":" + lc.prototype.name;
+                }
+                slot = new Object[] {event, handlerTimes.computeIfAbsent(event + " " + where, k -> new long[2])};
+                timeSlots.put(closure, slot);
             }
-            long[] t = handlerTimes.computeIfAbsent(event + " " + where, k -> new long[2]);
+            long[] t = (long[]) slot[1];
             t[0] += dt;
             t[1]++;
         }

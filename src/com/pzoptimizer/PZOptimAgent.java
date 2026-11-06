@@ -937,6 +937,11 @@ public class PZOptimAgent {
             if ("zombie/core/properties/PropertyContainer".equals(className) && classfileBuffer != null) {
                 return patchPropertyContainer(classfileBuffer);
             }
+            if ("zombie/iso/IsoDepthHelper".equals(className) && classfileBuffer != null) {
+                byte[] out = AsmSupport.transform(classfileBuffer, loader, "IsoDepthHelper results", GameThreadPatches::patchDepthHelper);
+                if (out != null) PZOLogger.success("[PZO Agent] ASM-patched IsoDepthHelper: MainThread skips the ThreadLocal lookup");
+                return out;
+            }
             if ("zombie/characters/IsoGameCharacter".equals(className) && classfileBuffer != null) {
                 byte[] gc = patchIsoGameCharacter(classfileBuffer);
                 byte[] smc = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter state machine cache",
@@ -945,6 +950,12 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getStateMachineComponent: " + (GameThreadPatches.stateMachineInPlace
                         ? "component read straight from the component map (class keeps its stock shape)" : "component kept per character"));
                     gc = smc;
+                }
+                byte[] minSim = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter simulation level",
+                    GameThreadPatches::patchMinSimulationLevel);
+                if (minSim != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getMinimumSimulationLevel: state machine read straight from the component map");
+                    gc = minSim;
                 }
                 byte[] split = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter postupdate split",
                     ActionParallel::patchCharacter);
