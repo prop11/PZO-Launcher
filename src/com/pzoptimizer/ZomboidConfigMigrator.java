@@ -101,8 +101,9 @@ public final class ZomboidConfigMigrator {
             Map<String, Object> current = parseRoot(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8));
             if (current == null) return false;
             Map<String, Object> target = parseRoot(JsonMini.format(current));
-            buildTarget(target, jsonFile.getParentFile());
-            return !Objects.equals(current.get("mainClass"), target.get("mainClass"))
+            boolean nestedChanged = buildTarget(target, jsonFile.getParentFile());
+            return nestedChanged
+                || !Objects.equals(current.get("mainClass"), target.get("mainClass"))
                 || !Objects.equals(strings(current.get("classpath")), strings(target.get("classpath")))
                 // JVM arg order doesn't matter, so don't rewrite a hand-edited order
                 || !new LinkedHashSet<>(strings(current.get("vmArgs"))).equals(new LinkedHashSet<>(strings(target.get("vmArgs"))));
@@ -136,10 +137,59 @@ public final class ZomboidConfigMigrator {
         return out;
     }
 
-    private static void buildTarget(Map<String, Object> root, File gameDir) {
+    // Returns true if a per-OS block had to be cleaned
+    private static boolean buildTarget(Map<String, Object> root, File gameDir) {
         root.put("mainClass", TARGET_MAIN_CLASS);
         root.put("classpath", targetClasspath(strings(root.get("classpath"))));
         root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir));
+        return stripNestedJvmChoices(root);
+    }
+
+    /**
+     * The game's launcher adds the vmArgs of the matching "windows" version block (and any other nested block) to the
+     * main list. A collector left in there next to the one targetVmArgs picks stops the JVM before anything of mine
+     * loads ("Multiple garbage collectors selected", 1.9 on fresh installs), so the collector and compact headers only
+     * live in the main list. Blocks left empty are removed.
+     */
+    @SuppressWarnings("unchecked")
+    static boolean stripNestedJvmChoices(Map<String, Object> root) {
+        boolean changed = false;
+        for (Map.Entry<String, Object> e : root.entrySet()) {
+            if (e.getValue() instanceof Map) changed |= stripBlock((Map<String, Object>) e.getValue());
+        }
+        changed |= root.entrySet().removeIf(e -> e.getValue() instanceof Map && ((Map<?, ?>) e.getValue()).isEmpty());
+        return changed;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean stripBlock(Map<String, Object> block) {
+        boolean changed = false;
+        Object vm = block.get("vmArgs");
+        if (vm instanceof List) {
+            List<String> kept = new ArrayList<>();
+            for (Object item : (List<?>) vm) {
+                if (item == null) continue;
+                for (String tok : item.toString().trim().split("\\s+")) {
+                    if (tok.isEmpty()) continue;
+                    if (isGcChoice(tok) || isZgcOnly(tok) || tok.contains("UseCompactObjectHeaders")) {
+                        changed = true;
+                    } else {
+                        kept.add(tok);
+                    }
+                }
+            }
+            if (kept.isEmpty()) {
+                block.remove("vmArgs");
+                changed = true;
+            } else if (changed) {
+                block.put("vmArgs", kept);
+            }
+        }
+        for (Map.Entry<String, Object> e : block.entrySet()) {
+            if (e.getValue() instanceof Map) changed |= stripBlock((Map<String, Object>) e.getValue());
+        }
+        changed |= block.entrySet().removeIf(e -> e.getValue() instanceof Map && ((Map<?, ?>) e.getValue()).isEmpty());
+        return changed;
     }
 
     // ".", then PZOptimEngine.jar, ahead of the game's jar
