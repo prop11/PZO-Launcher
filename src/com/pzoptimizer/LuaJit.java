@@ -51,9 +51,23 @@ public final class LuaJit {
     // States in Prototype.pzoJit besides a Fn
     private static final Object PENDING = new Object(), FAILED = new Object(), EXCLUDED = new Object();
 
-    private static volatile VarHandle jitField, hitsField;
     private static volatile boolean bound, broken;
     private static MethodHandles.Lookup hostLookup;
+
+    // static final, so the JIT turns them into plain field accesses; non-final handles cost a slow lookup per instruction
+    private static final class Fields {
+        static final VarHandle JIT, HITS;
+
+        static {
+            try {
+                MethodHandles.Lookup p = MethodHandles.privateLookupIn(Prototype.class, MethodHandles.lookup());
+                JIT = p.findVarHandle(Prototype.class, "pzoJit", Object.class);
+                HITS = p.findVarHandle(Prototype.class, "pzoJitHits", int.class);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("Prototype has no compiler fields", e);
+            }
+        }
+    }
     private static final ExecutorService compiler = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "PZO-LuaJit");
         t.setDaemon(true);
@@ -73,9 +87,8 @@ public final class LuaJit {
         synchronized (LuaJit.class) {
             if (bound) return !broken;
             try {
-                MethodHandles.Lookup p = MethodHandles.privateLookupIn(Prototype.class, MethodHandles.lookup());
-                jitField = p.findVarHandle(Prototype.class, "pzoJit", Object.class);
-                hitsField = p.findVarHandle(Prototype.class, "pzoJitHits", int.class);
+                // Loads Fields, which fails if the Prototype patch didn't go in
+                Object probe = Fields.JIT;
                 hostLookup = MethodHandles.privateLookupIn(KahluaThread.class, MethodHandles.lookup());
             } catch (Throwable t) {
                 broken = true;
@@ -94,42 +107,42 @@ public final class LuaJit {
         LuaClosure closure = callFrame.closure;
         if (closure == null) return;
         Prototype p = closure.prototype;
-        Object state = jitField.get(p);
+        Object state = Fields.JIT.get(p);
         if (state instanceof Fn fn) {
             fn.run(thread, callFrame);
             return;
         }
         if (state != null) return;
-        int hits = (int) hitsField.get(p) + 1;
-        hitsField.set(p, hits);
+        int hits = (int) Fields.HITS.get(p) + 1;
+        Fields.HITS.set(p, hits);
         if (hits == HOT_INSTRUCTIONS) request(p);
     }
 
     private static void request(Prototype p) {
         if (isExcluded(p)) {
-            jitField.setVolatile(p, EXCLUDED);
+            Fields.JIT.setVolatile(p, EXCLUDED);
             tracked.put(p, Boolean.TRUE);
             excluded.increment();
             return;
         }
-        jitField.setVolatile(p, PENDING);
+        Fields.JIT.setVolatile(p, PENDING);
         compiler.execute(() -> {
             try {
                 byte[] bytes = LuaJitCompiler.compile(p.code, sourceName(p));
                 if (bytes == null) {
-                    jitField.setVolatile(p, FAILED);
+                    Fields.JIT.setVolatile(p, FAILED);
                     return;
                 }
                 MethodHandles.Lookup hidden = hostLookup.defineHiddenClass(bytes, false, MethodHandles.Lookup.ClassOption.NESTMATE);
                 Fn fn = (Fn) hidden.findConstructor(hidden.lookupClass(), java.lang.invoke.MethodType.methodType(void.class)).invoke();
-                jitField.setVolatile(p, fn);
+                Fields.JIT.setVolatile(p, fn);
                 tracked.put(p, Boolean.TRUE);
                 compiled.increment();
             } catch (LuaJitCompiler.TooBig tooBig) {
-                jitField.setVolatile(p, FAILED);
+                Fields.JIT.setVolatile(p, FAILED);
                 failed.increment();
             } catch (Throwable t) {
-                jitField.setVolatile(p, FAILED);
+                Fields.JIT.setVolatile(p, FAILED);
                 failed.increment();
                 if (failed.sum() <= 5) PZOLogger.warn("[LuaJit] " + sourceName(p) + " stays interpreted: " + t);
             }
@@ -169,12 +182,12 @@ public final class LuaJit {
         }
         for (Prototype p : list) {
             boolean exclude = isExcluded(p);
-            Object state = jitField.getVolatile(p);
+            Object state = Fields.JIT.getVolatile(p);
             if (exclude && state instanceof Fn) {
-                jitField.setVolatile(p, EXCLUDED);
+                Fields.JIT.setVolatile(p, EXCLUDED);
             } else if (!exclude && state == EXCLUDED) {
-                hitsField.set(p, 0);
-                jitField.setVolatile(p, null);
+                Fields.HITS.set(p, 0);
+                Fields.JIT.setVolatile(p, null);
                 tracked.remove(p);
             }
         }
