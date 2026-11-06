@@ -390,6 +390,20 @@ public class PZOptimAgent {
                 }
                 return wd;
             }
+            if ("se/krka/kahlua/vm/Prototype".equals(className) && classfileBuffer != null) {
+                byte[] proto = AsmSupport.transform(classfileBuffer, loader, "Prototype Lua compiler fields", LuaJit::patchPrototype);
+                if (proto != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched Prototype: room for compiled Lua functions");
+                }
+                return proto;
+            }
+            if ("se/krka/kahlua/vm/KahluaThread".equals(className) && classfileBuffer != null) {
+                byte[] thread = AsmSupport.transform(classfileBuffer, loader, "KahluaThread.luaMainloop Lua compiler hook", LuaJit::patchThread);
+                if (thread != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched KahluaThread.luaMainloop: hot Lua functions can run compiled");
+                }
+                return thread;
+            }
             if ("se/krka/kahlua/j2se/KahluaTableImpl".equals(className) && classfileBuffer != null) {
                 byte[] lua = AsmSupport.transform(classfileBuffer, loader, "KahluaTableImpl.rawget", GameThreadPatches::patchKahluaTable);
                 if (lua != null) {

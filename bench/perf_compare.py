@@ -15,6 +15,7 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   pzo_notsprites  as pzo, with distant translucent sprite baking off (tsprites=0)
   pzo_nonewfixes  as pzo, with the flies fix and chunk mip cap off (newfixes=0)
   pzo_treebake  as pzo, with distant trees baked into chunk textures (treebake=1)
+  pzo_luajit / pzo_noluajit  as pzo, with the Lua compiler forced on / off (luajit=1 / luajit=0)
   pzo_firstbake  as pzo, with distant first bakes spread over frames (firstbake=1)
   pzo_no18  as pzo, with the options new in 1.8 off (new18=0)
 
@@ -152,6 +153,10 @@ def main():
                     extra["tsprites"] = 0
                 if run == "pzo_treebake":
                     extra["treebake"] = 1
+                if run == "pzo_luajit":
+                    extra["luajit"] = 1
+                if run == "pzo_noluajit":
+                    extra["luajit"] = 0
                 if run == "pzo_firstbake":
                     extra["firstbake"] = 1
                 if run == "pzo_no18":
