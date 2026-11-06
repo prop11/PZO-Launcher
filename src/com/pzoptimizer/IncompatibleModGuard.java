@@ -42,7 +42,7 @@ public final class IncompatibleModGuard {
         return found;
     }
 
-    private static Set<File> candidateGameDirs() {
+    static Set<File> candidateGameDirs() {
         Set<File> dirs = new LinkedHashSet<>();
         try {
             dirs.add(new File(".").getAbsoluteFile().getCanonicalFile());

@@ -1548,8 +1548,19 @@ public class PZOEngineBridge {
                                 "        button.title = newState and 'PZO Beta Channel: [ON]' or 'PZO Beta Channel: [OFF]'\n" +
                                 "        button.borderColor = newState and {r=0.45, g=0.90, b=0.55, a=0.9} or {r=0.18, g=0.24, b=0.35, a=0.9}\n" +
                                 "        button.textColor = newState and {r=0.45, g=0.90, b=0.55, a=1.0} or {r=0.92, g=0.93, b=0.95, a=1.0}\n" +
-                                "        if newState and PZOEngine and PZOEngine.checkForUpdates then\n" +
-                                "            PZOEngine.checkForUpdates()\n" +
+                                // No update check from here: it popped the PowerShell update dialog over the game the
+                                // moment beta was switched on, which some antivirus flagged. The startup check offers it.
+                                "        if newState and ISModalRichText then\n" +
+                                "            local sw, sh = getCore():getScreenWidth(), getCore():getScreenHeight()\n" +
+                                "            local w, h = math.min(560, sw - 40), 170\n" +
+                                "            local note = ISModalRichText:new((sw - w) / 2, (sh - h) / 2, w, h,\n" +
+                                "                ' <CENTRE> <SIZE:medium> <RGB:0.45,0.9,0.55> PZO Beta Channel on <LINE> <LINE> <SIZE:small> <RGB:0.9,0.9,0.9> ' ..\n" +
+                                "                'The latest beta build will be offered the next time you start the game. ' ..\n" +
+                                "                'Turn it off again to be offered stable releases only.', false, nil, nil)\n" +
+                                "            note:initialise()\n" +
+                                "            note.destroyOnClick = true\n" +
+                                "            note:addToUIManager()\n" +
+                                "            note:setAlwaysOnTop(true)\n" +
                                 "        end\n" +
                                 "    end)\n" +
                                 "    btn:initialise()\n" +
@@ -2057,29 +2068,17 @@ public class PZOEngineBridge {
                                 "    MPOptim.Config.SyncToEngine()\n" +
                                 "end\n";
 
-                            Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
-                            Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
-                            Object closure = loadstringMethod.invoke(null, luaCode, "PZOBetaUI", env);
-                            if (closure != null) {
-                                try {
-                                    Field protoField = closure.getClass().getField("prototype");
-                                    Object rootProto = protoField.get(closure);
-                                    sanitizePrototype(rootProto, "media/lua/client/OptionScreens/MainScreen.lua");
-                                } catch (Throwable ignored) {}
-
-                                Field callerField = lmClass.getField("caller");
-                                Object caller = callerField.get(null);
-                                Field threadField = lmClass.getField("thread");
-                                Object thread = threadField.get(null);
-                                if (caller != null && thread != null) {
-                                    Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
-                                    protCall.invoke(caller, thread, closure, new Object[0]);
-                                    PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
-                                }
+                            if (runLua(env, luaCode, "PZOBetaUI")) {
+                                PZOLogger.success("[PZO Kahlua Bridge] Main Menu Beta Opt-In Tickbox UI injected into Kahlua via protectedCall");
                             }
-
                         } catch (Throwable t) {
                             PZOLogger.warn("[PZO Kahlua Bridge] Main Menu Beta UI injection notice: " + t.getMessage());
+                        }
+                        // Warns on the main menu if the Lua mod is on but its Lua never loaded
+                        try {
+                            runLua(env, LuaModGuard.noticeLua("notloaded"), "PZOLuaModNotice");
+                        } catch (Throwable t) {
+                            PZOLogger.warn("[PZO Kahlua Bridge] Lua mod notice: " + t.getMessage());
                         }
                     }
                 }
@@ -2096,7 +2095,26 @@ public class PZOEngineBridge {
 
     // LuaManager.env exists before LuaEventManager has added every event to the Events table, so injecting as soon as
     // env is non-null can hit a nil Events.OnMainMenuEnter
-    private static boolean areLuaEventsRegistered(Object env) {
+    /** Compiles and runs a Lua chunk in env. Game thread only. True once it ran. */
+    static boolean runLua(Object env, String code, String chunkName) throws Exception {
+        Class<?> lmClass = Class.forName("zombie.Lua.LuaManager");
+        Class<?> compilerClass = Class.forName("se.krka.kahlua.luaj.compiler.LuaCompiler");
+        Method loadstringMethod = compilerClass.getMethod("loadstring", String.class, String.class, Class.forName("se.krka.kahlua.vm.KahluaTable"));
+        Object closure = loadstringMethod.invoke(null, code, chunkName, env);
+        if (closure == null) return false;
+        try {
+            Field protoField = closure.getClass().getField("prototype");
+            sanitizePrototype(protoField.get(closure), "media/lua/client/OptionScreens/MainScreen.lua");
+        } catch (Throwable ignored) {}
+        Object caller = lmClass.getField("caller").get(null);
+        Object thread = lmClass.getField("thread").get(null);
+        if (caller == null || thread == null) return false;
+        Method protCall = caller.getClass().getMethod("protectedCall", Class.forName("se.krka.kahlua.vm.KahluaThread"), Object.class, Object[].class);
+        protCall.invoke(caller, thread, closure, new Object[0]);
+        return true;
+    }
+
+    static boolean areLuaEventsRegistered(Object env) {
         try {
             Method envGet = env.getClass().getMethod("rawget", Object.class);
             Object events = envGet.invoke(env, "Events");

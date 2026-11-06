@@ -41,7 +41,13 @@ public class PZOEntrypoint {
         if (BenchmarkHarness.isStockBaselineRequested()) {
             PZOLogger.info("[PZO] Stock baseline benchmark run: no PZO patches or governors, harness only.");
             BenchmarkHarness.checkLaunchParams(args);
-            EngineThreadGovernor.initializeBenchmarkOnly();
+            EngineThreadGovernor.initializeQueueOnly("Stock baseline");
+            launchGame(args);
+            return;
+        }
+
+        if (LuaModGuard.shouldStandDown()) {
+            LuaModGuard.reportAndStandDown();
             launchGame(args);
             return;
         }

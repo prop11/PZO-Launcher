@@ -25,6 +25,8 @@ public final class PZOConfig {
     private static volatile boolean persistentSpriteVbo = true;
     private static volatile boolean depthMapParallel = true;
     private static volatile boolean animImportCache = true;
+    // Off only for running the Java engine without the Lua mod on purpose, see LuaModGuard
+    private static volatile boolean requireLuaMod = true;
     // Testing aid: "key=value;..." merged over HardwareProbe's real values, "" for the real hardware
     private static volatile String hardwareOverride = "";
     // "auto", "on" or "off": compatibility mode for older PCs, see CompatMode
@@ -68,6 +70,7 @@ public final class PZOConfig {
                 persistentSpriteVbo = !(content.contains("\"persistent_sprite_vbo\":false") || content.contains("\"persistent_sprite_vbo\": false"));
                 depthMapParallel = !(content.contains("\"depth_map_parallel\":false") || content.contains("\"depth_map_parallel\": false"));
                 animImportCache = !(content.contains("\"anim_import_cache\":false") || content.contains("\"anim_import_cache\": false"));
+                requireLuaMod = !(content.contains("\"require_lua_mod\":false") || content.contains("\"require_lua_mod\": false"));
                 gpuPrefWritten = content.contains("\"gpu_pref_written\":true") || content.contains("\"gpu_pref_written\": true");
                 String hw = extractJsonField(content, "hardware_override");
                 hardwareOverride = hw == null ? "" : hw;
@@ -82,11 +85,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"persistent_sprite_vbo\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, persistentSpriteVbo, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, persistentSpriteVbo, requireLuaMod, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -243,6 +246,11 @@ public final class PZOConfig {
         fastLoad = enabled;
         save();
         PZOLogger.info("[PZO Config] Faster file and map loading set to: " + enabled + " (applies on next launch)");
+    }
+
+    public static boolean isLuaModRequired() {
+        load();
+        return requireLuaMod;
     }
 
     public static boolean isPersistentSpriteVboEnabled() {

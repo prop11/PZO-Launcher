@@ -18,6 +18,7 @@ public class EngineThreadGovernor {
         if (!initialized.compareAndSet(false, true)) {
             return;
         }
+        governorsOn = true;
 
         try {
             if (PZONative.isLoaded() && PZOConfig.isPowerShieldEnabled()) {
@@ -50,14 +51,27 @@ public class EngineThreadGovernor {
 
     private static volatile boolean benchmarkOnly = false;
 
-    /**
-     * Stock baseline runs: only the mainThreadLoop wrapper goes in, so BenchmarkHarness ticks and nothing else runs.
-     */
-    public static void initializeBenchmarkOnly() {
+    // The per-frame governors in the loop wrapper only run once initialize() has
+    private static volatile boolean governorsOn = false;
+    private static final java.util.concurrent.atomic.AtomicBoolean queueHookStarted = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Only the main loop wrapper, for GameThreadQueue and the benchmark tick: no governors, pacing or thread tuning. */
+    public static void initializeQueueOnly(String why) {
         if (!initialized.compareAndSet(false, true)) {
             return;
         }
         benchmarkOnly = true;
+        ensureQueueHook();
+        PZOLogger.info("[EngineThreadGovernor] " + why + ": main loop hook only");
+    }
+
+    /**
+     * Puts the loop wrapper in so GameThreadQueue drains, without the governors. Called from premain: the macOS launcher
+     * keeps the game's own main class, so PZOEntrypoint.main and initialize() never run there, and the Lua bridge only
+     * attaches on the game thread, so without this it never attached on a Mac (#61).
+     */
+    public static void ensureQueueHook() {
+        if (!queueHookStarted.compareAndSet(false, true)) return;
         Thread hookDaemon = new Thread(() -> {
             while (!mainThreadPacerHooked) {
                 try {
@@ -67,10 +81,9 @@ public class EngineThreadGovernor {
                     return;
                 } catch (Throwable ignored) {}
             }
-        }, "PZO-BenchmarkHook");
+        }, "PZO-MainLoopHook");
         hookDaemon.setDaemon(true);
         hookDaemon.start();
-        PZOLogger.info("[EngineThreadGovernor] Stock baseline: benchmark tick hook only");
     }
 
     private static void governorLoop() {
@@ -258,7 +271,7 @@ public class EngineThreadGovernor {
                 if (BenchmarkHarness.isActive()) {
                     BenchmarkHarness.tick();
                 }
-                if (benchmarkOnly) return;
+                if (benchmarkOnly || !governorsOn) return;
                 try {
                     ensureReflection();
                     if (fsField != null) {
