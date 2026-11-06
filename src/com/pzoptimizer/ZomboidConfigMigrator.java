@@ -40,9 +40,16 @@ public final class ZomboidConfigMigrator {
         "-XX:+UseNUMA",
     };
 
-    // ZGC-only tuning, dropped with ZGC in compatibility mode
+    // ZGC-only tuning, dropped when the PC gets G1
     private static final String[] ZGC_ONLY_PREFIXES = {"-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZAllocationSpikeTolerance",
         "-XX:ZCollectionInterval", "-XX:+ZUncommit", "-XX:-ZUncommit", "-XX:ZUncommitDelay", "-XX:SoftMaxHeapSize"};
+
+    // The collector and its tuning are rebuilt from JvmRuntime.wantZgc every time; anything like this in the file goes.
+    // Someone who wants a particular collector sets it on the settings screen (pzo_config.json "gc_mode").
+    private static final String[] GC_CHOICE_PREFIXES = {"-XX:+UseG1GC", "-XX:-UseG1GC", "-XX:+UseZGC", "-XX:-UseZGC",
+        "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC", "-XX:MaxGCPauseMillis", "-XX:MetaspaceSize",
+        "-XX:InitiatingHeapOccupancyPercent", "-XX:G1"};
+    private static final String G1_IHOP = "-XX:InitiatingHeapOccupancyPercent=45";
 
     public static void main(String[] args) {
         File targetDir = args != null && args.length > 0 ? new File(args[0]) : new File(".").getAbsoluteFile();
@@ -178,10 +185,10 @@ public final class ZomboidConfigMigrator {
                 if (tok.startsWith("-Djava.library.path=")) continue;
                 if (tok.equals(TARGET_AGENTLIB) || tok.contains("pzo_native64")) continue;
                 if (tok.contains("zbNative")) continue;
-                if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
+                if (tok.contains("UseCompactObjectHeaders")) continue; // re-added below only on Java 25+
                 if (compat && tok.equals(PRE_TOUCH)) continue;
-                if (compat && isZgcOnly(tok)) continue;
-                user.add(compat && tok.equals("-XX:+UseZGC") ? "-XX:+UseG1GC" : tok);
+                if (isGcChoice(tok) || isZgcOnly(tok)) continue;
+                user.add(tok);
             }
         }
 
@@ -229,7 +236,23 @@ public final class ZomboidConfigMigrator {
             if (!args.contains(pf)) args.add(pf);
         }
         if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
+        if (JvmRuntime.wantCompactHeaders(gameDir)) args.add(JvmRuntime.COMPACT_HEADERS);
+        if (JvmRuntime.wantZgc(gameDir)) {
+            args.add("-XX:+UseZGC");
+        } else {
+            args.add("-XX:+UseG1GC");
+            args.add(JvmRuntime.G1_PAUSE_TARGET);
+            args.add(G1_IHOP);
+        }
+        args.add(JvmRuntime.METASPACE_SIZE);
         return args;
+    }
+
+    private static boolean isGcChoice(String arg) {
+        for (String p : GC_CHOICE_PREFIXES) {
+            if (arg.startsWith(p)) return true;
+        }
+        return false;
     }
 
     private static boolean isZgcOnly(String arg) {
