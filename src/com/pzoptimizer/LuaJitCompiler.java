@@ -12,8 +12,10 @@ import com.pzoptimizer.shaded.asm.Opcodes;
  * It works in Kahlua's own frame model: registers stay on the coroutine stack (callFrame.get/set), callFrame.pc is
  * kept as the interpreter keeps it, and every helper called is the interpreter's own (tableget, tableSet,
  * primitiveMath, KahluaUtil). Two rules keep it exact:
- * - Control transfers stay in the interpreter. Calls to Lua functions, TAILCALL, RETURN, CLOSURE, VARARG, SETLIST and
- *   SETGLOBAL hand back: run() sets pc to that instruction and returns, luaMainloop executes it, and its next
+ * - Control transfers stay in the interpreter, apart from calls between compiled functions on the main coroutine (see
+ *   directLuaCall). TAILCALL, CLOSURE, VARARG, SETLIST, SETGLOBAL, calls to uncompiled Lua functions, and RETURN when
+ *   the interpreter entered the function hand back: run() sets pc to that instruction and returns, luaMainloop executes
+ *   it, and its next
  *   pass enters run() again at the new pc. Every instruction is an entry point, since all state is in the frame. So
  *   calls, returns, coroutines, pcall and error unwinding are vanilla.
  * - An instruction only runs here in the cases it can do exactly (numbers with numbers, strings with strings, plain
@@ -41,7 +43,9 @@ final class LuaJitCompiler {
     private static final String JFN = "se/krka/kahlua/vm/JavaFunction";
 
     // Locals of run()
-    private static final int THIS = 0, T = 1, CF = 2, K = 3, CL = 4, X = 5, Y = 6, Z = 7, D1 = 8, D2 = 10, D3 = 12;
+    private static final int THIS = 0, T = 1, CF = 2, DIRECT = 3, K = 4, CL = 5, X = 6, Y = 7, Z = 8, EX = 9, N = 10,
+        D1 = 11, D2 = 13, D3 = 15;
+    private static final String COROUTINE = "se/krka/kahlua/vm/Coroutine";
 
     // Kahlua 5.1 opcodes
     private static final int MOVE = 0, LOADK = 1, LOADBOOL = 2, LOADNIL = 3, GETUPVAL = 4, GETGLOBAL = 5, GETTABLE = 6,
@@ -100,7 +104,7 @@ final class LuaJitCompiler {
         init.visitMaxs(0, 0);
         init.visitEnd();
 
-        mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL, "run", "(L" + HOST + ";L" + FRAME + ";)V", null, null);
+        mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL, "run", "(L" + HOST + ";L" + FRAME + ";Z)I", null, null);
         mv.visitCode();
         at = new Label[n];
         for (int i = 0; i < n; i++) at[i] = new Label();
@@ -121,6 +125,10 @@ final class LuaJitCompiler {
         mv.visitVarInsn(Opcodes.ASTORE, Y);
         mv.visitInsn(Opcodes.ACONST_NULL);
         mv.visitVarInsn(Opcodes.ASTORE, Z);
+        mv.visitInsn(Opcodes.ACONST_NULL);
+        mv.visitVarInsn(Opcodes.ASTORE, EX);
+        mv.visitInsn(Opcodes.ICONST_0);
+        mv.visitVarInsn(Opcodes.ISTORE, N);
         mv.visitInsn(Opcodes.DCONST_0);
         mv.visitVarInsn(Opcodes.DSTORE, D1);
         mv.visitInsn(Opcodes.DCONST_0);
@@ -136,7 +144,8 @@ final class LuaJitCompiler {
             emit(i, code[i]);
         }
         mv.visitLabel(end);
-        mv.visitInsn(Opcodes.RETURN);
+        mv.visitInsn(Opcodes.ICONST_0);
+        mv.visitInsn(Opcodes.IRETURN);
         mv.visitMaxs(0, 0);
         mv.visitEnd();
         cw.visitEnd();
@@ -406,12 +415,12 @@ final class LuaJitCompiler {
                 // CALL makes them. Lua functions, callable tables, nil and the coroutine library (resume/yield switch
                 // coroutines, which only the interpreter loop can follow) are handed back before anything changes.
                 setPc(i + 1);
-                Label handBack = new Label();
+                Label handBack = new Label(), luaCall = new Label();
                 get(a);
                 mv.visitVarInsn(Opcodes.ASTORE, X);
                 mv.visitVarInsn(Opcodes.ALOAD, X);
                 mv.visitTypeInsn(Opcodes.INSTANCEOF, JFN);
-                mv.visitJumpInsn(Opcodes.IFEQ, handBack);
+                mv.visitJumpInsn(Opcodes.IFEQ, luaCall);
                 mv.visitVarInsn(Opcodes.ALOAD, X);
                 mv.visitTypeInsn(Opcodes.INSTANCEOF, "se/krka/kahlua/stdlib/CoroutineLib");
                 mv.visitJumpInsn(Opcodes.IFNE, handBack);
@@ -453,6 +462,50 @@ final class LuaJitCompiler {
                     mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "setTop", "(I)V", false);
                 }
                 jumpTo(i, i + 1);
+                mv.visitLabel(luaCall);
+                directLuaCall(i, a, b, c, handBack);
+                mv.visitLabel(handBack);
+                handBack(i);
+            }
+            case RETURN -> {
+                // Only a directly called function returns here (its caller pushed it with fromLua false); from the
+                // interpreter RETURN is handed back
+                Label handBack = new Label();
+                mv.visitVarInsn(Opcodes.ILOAD, DIRECT);
+                mv.visitJumpInsn(Opcodes.IFEQ, handBack);
+                setPc(i + 1);
+                coroutine();
+                mv.visitVarInsn(Opcodes.ALOAD, CF);
+                mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "localBase", "I");
+                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "closeUpvalues", "(I)V", false);
+                if (b != 0) {
+                    push(b - 1);
+                } else {
+                    mv.visitVarInsn(Opcodes.ALOAD, CF);
+                    mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "getTop", "()I", false);
+                    push(a);
+                    mv.visitInsn(Opcodes.ISUB);
+                }
+                mv.visitVarInsn(Opcodes.ISTORE, N);
+                coroutine();
+                mv.visitVarInsn(Opcodes.ALOAD, CF);
+                mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "localBase", "I");
+                push(a);
+                mv.visitInsn(Opcodes.IADD);
+                mv.visitVarInsn(Opcodes.ALOAD, CF);
+                mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+                mv.visitVarInsn(Opcodes.ILOAD, N);
+                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "stackCopy", "(III)V", false);
+                coroutine();
+                mv.visitVarInsn(Opcodes.ALOAD, CF);
+                mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "returnBase", "I");
+                mv.visitVarInsn(Opcodes.ILOAD, N);
+                mv.visitInsn(Opcodes.IADD);
+                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "setTop", "(I)V", false);
+                coroutine();
+                mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "popCallFrame", "()V", false);
+                mv.visitInsn(Opcodes.ICONST_1);
+                mv.visitInsn(Opcodes.IRETURN);
                 mv.visitLabel(handBack);
                 handBack(i);
             }
@@ -463,13 +516,145 @@ final class LuaJitCompiler {
                 mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "closeUpvalues", "(I)V", false);
             }
             default -> {
-                // SETGLOBAL, TAILCALL, RETURN, SETLIST, CLOSURE, VARARG and anything unknown
+                // SETGLOBAL, TAILCALL, SETLIST, CLOSURE, VARARG and anything unknown
                 handBack(i);
                 handedBackOps++;
                 return;
             }
         }
         compiledOps++;
+    }
+
+    /**
+     * CALL to a compiled Lua function: push its frame as the interpreter does (but with fromLua false) and run its
+     * compiled code straight away. If it hands back, the interpreter finishes the callee in a nested luaMainloop, which
+     * returns at the callee's RETURN because of fromLua false. Only on the main coroutine (a yield can't cross these Java
+     * frames) and below MAX_DIRECT_DEPTH; everything else goes to handBack untouched.
+     */
+    private void directLuaCall(int i, int a, int b, int c, Label handBack) {
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, LCLOSURE);
+        mv.visitJumpInsn(Opcodes.IFEQ, handBack);
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, LCLOSURE);
+        mv.visitFieldInsn(Opcodes.GETFIELD, LCLOSURE, "prototype", "L" + PROTO + ";");
+        mv.visitFieldInsn(Opcodes.GETFIELD, PROTO, "pzoJit", "L" + OBJ + ";");
+        mv.visitVarInsn(Opcodes.ASTORE, Z);
+        mv.visitVarInsn(Opcodes.ALOAD, Z);
+        mv.visitTypeInsn(Opcodes.INSTANCEOF, FN);
+        mv.visitJumpInsn(Opcodes.IFEQ, handBack);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitFieldInsn(Opcodes.GETFIELD, HOST, "pzoJitDepth", "I");
+        push(LuaJit.MAX_DIRECT_DEPTH);
+        mv.visitJumpInsn(Opcodes.IF_ICMPGE, handBack);
+        coroutine();
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "coroutine", "L" + COROUTINE + ";");
+        mv.visitJumpInsn(Opcodes.IF_ACMPNE, handBack);
+        coroutine();
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "getParent", "()L" + COROUTINE + ";", false);
+        mv.visitJumpInsn(Opcodes.IFNONNULL, handBack);
+
+        // As the interpreter's CALL up to the frame push
+        if (b != 0) {
+            mv.visitVarInsn(Opcodes.ALOAD, CF);
+            push(a + b);
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "setTop", "(I)V", false);
+        }
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        push(c != 0 ? 1 : 0);
+        mv.visitFieldInsn(Opcodes.PUTFIELD, FRAME, "restoreTop", "Z");
+        coroutine();
+        mv.visitVarInsn(Opcodes.ALOAD, X);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, LCLOSURE);
+        mv.visitInsn(Opcodes.ACONST_NULL);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "localBase", "I");
+        push(a + 1);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "localBase", "I");
+        push(a);
+        mv.visitInsn(Opcodes.IADD);
+        if (b != 0) {
+            push(b - 1);
+        } else {
+            mv.visitVarInsn(Opcodes.ALOAD, CF);
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "getTop", "()I", false);
+            push(a + 1);
+            mv.visitInsn(Opcodes.ISUB);
+        }
+        mv.visitInsn(Opcodes.ICONST_0);
+        mv.visitVarInsn(Opcodes.ALOAD, CF);
+        mv.visitFieldInsn(Opcodes.GETFIELD, FRAME, "canYield", "Z");
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, COROUTINE, "pushNewCallFrame",
+            "(L" + LCLOSURE + ";L" + JFN + ";IIIZZ)L" + FRAME + ";", false);
+        mv.visitVarInsn(Opcodes.ASTORE, Y);
+        mv.visitVarInsn(Opcodes.ALOAD, Y);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "init", "()V", false);
+        depth(1);
+
+        Label runStart = new Label(), runEnd = new Label(), runFailed = new Label();
+        Label nestStart = new Label(), nestEnd = new Label(), nestFailed = new Label(), done = new Label();
+        mv.visitTryCatchBlock(runStart, runEnd, runFailed, "java/lang/Throwable");
+        mv.visitTryCatchBlock(nestStart, nestEnd, nestFailed, "java/lang/Throwable");
+        mv.visitLabel(runStart);
+        mv.visitVarInsn(Opcodes.ALOAD, Z);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, FN);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitVarInsn(Opcodes.ALOAD, Y);
+        mv.visitInsn(Opcodes.ICONST_1);
+        mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, FN, "run", "(L" + HOST + ";L" + FRAME + ";Z)I", true);
+        mv.visitLabel(runEnd);
+        mv.visitJumpInsn(Opcodes.IFNE, done);
+        // The callee handed back: the interpreter finishes it
+        mv.visitLabel(nestStart);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, HOST, "luaMainloop", "()V", false);
+        mv.visitLabel(nestEnd);
+        mv.visitLabel(done);
+        depth(-1);
+        if (c != 0) {
+            mv.visitVarInsn(Opcodes.ALOAD, CF);
+            mv.visitVarInsn(Opcodes.ALOAD, CL);
+            mv.visitFieldInsn(Opcodes.GETFIELD, LCLOSURE, "prototype", "L" + PROTO + ";");
+            mv.visitFieldInsn(Opcodes.GETFIELD, PROTO, "maxStacksize", "I");
+            mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, FRAME, "setTop", "(I)V", false);
+        }
+        jumpTo(i, i + 1);
+
+        // Thrown by the callee's compiled code: nothing caught it for that frame yet
+        mv.visitLabel(runFailed);
+        mv.visitVarInsn(Opcodes.ASTORE, EX);
+        depth(-1);
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitVarInsn(Opcodes.ALOAD, EX);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Throwable");
+        mv.visitVarInsn(Opcodes.ALOAD, Y);
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC, "com/pzoptimizer/LuaJit", "calleeFailed",
+            "(L" + HOST + ";Ljava/lang/Throwable;L" + FRAME + ";)Ljava/lang/Throwable;", false);
+        mv.visitInsn(Opcodes.ATHROW);
+        // Thrown out of the nested luaMainloop: its catch already handled the callee's frames
+        mv.visitLabel(nestFailed);
+        mv.visitVarInsn(Opcodes.ASTORE, EX);
+        depth(-1);
+        mv.visitVarInsn(Opcodes.ALOAD, EX);
+        mv.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/Throwable");
+        mv.visitInsn(Opcodes.ATHROW);
+    }
+
+    private void depth(int delta) {
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitInsn(Opcodes.DUP);
+        mv.visitFieldInsn(Opcodes.GETFIELD, HOST, "pzoJitDepth", "I");
+        push(delta);
+        mv.visitInsn(Opcodes.IADD);
+        mv.visitFieldInsn(Opcodes.PUTFIELD, HOST, "pzoJitDepth", "I");
+    }
+
+    private void coroutine() {
+        mv.visitVarInsn(Opcodes.ALOAD, T);
+        mv.visitFieldInsn(Opcodes.GETFIELD, HOST, "currentCoroutine", "L" + COROUTINE + ";");
     }
 
     // ADD..POW: both operands Double goes through primitiveMath like the interpreter; anything else is handed back,
@@ -685,7 +870,8 @@ final class LuaJitCompiler {
         mv.visitVarInsn(Opcodes.ALOAD, CF);
         push(i);
         mv.visitFieldInsn(Opcodes.PUTFIELD, FRAME, "pc", "I");
-        mv.visitInsn(Opcodes.RETURN);
+        mv.visitInsn(Opcodes.ICONST_0);
+        mv.visitInsn(Opcodes.IRETURN);
     }
 
     private void setPc(int pc) {

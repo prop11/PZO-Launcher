@@ -34,10 +34,17 @@ import se.krka.kahlua.vm.Prototype;
  */
 public final class LuaJit {
 
-    /** What a compiled function implements. */
+    /**
+     * What a compiled function implements. direct is true when another compiled function called it straight (it pushed
+     * the frame with fromLua false): then RETURN is done here and run returns 1. Otherwise run returns 0 once it hands
+     * back to the interpreter.
+     */
     public interface Fn {
-        void run(KahluaThread thread, LuaCallFrame callFrame);
+        int run(KahluaThread thread, LuaCallFrame callFrame, boolean direct);
     }
+
+    // Direct Lua-to-Lua calls nest Java frames; past this the call goes through the interpreter instead
+    static final int MAX_DIRECT_DEPTH = 40;
 
     public static volatile boolean active = false;
     // Instructions a function runs before it's compiled
@@ -109,7 +116,7 @@ public final class LuaJit {
         Prototype p = closure.prototype;
         Object state = Fields.JIT.get(p);
         if (state instanceof Fn fn) {
-            fn.run(thread, callFrame);
+            fn.run(thread, callFrame, false);
             return;
         }
         if (state != null) return;
@@ -197,6 +204,74 @@ public final class LuaJit {
         return "compiled " + compiled.sum() + ", stayed interpreted " + failed.sum() + ", excluded " + excluded.sum();
     }
 
+    // Error reporting. With direct calls an error can pass more than one luaMainloop catch (or calleeFailed) on its way
+    // out; vanilla, with one loop, reports it once, at the innermost frame. So each Throwable is reported the first
+    // time only. Also covers vanilla's own nesting (metamethods called through call()).
+    private static final class Reported {
+        Throwable last;
+        boolean skip;
+    }
+
+    private static final ThreadLocal<Reported> REPORTED = ThreadLocal.withInitial(Reported::new);
+
+    public static final LongAdder errorsReported = new LongAdder();
+    public static final LongAdder errorsSkipped = new LongAdder();
+
+    public static void reportLog(Throwable e) {
+        Reported r = REPORTED.get();
+        if (active && r.last == e) {
+            r.skip = true;
+            errorsSkipped.increment();
+            return;
+        }
+        r.last = e;
+        r.skip = false;
+        errorsReported.increment();
+        zombie.core.logger.ExceptionLogger.logException(e);
+    }
+
+    public static void reportDebug(KahluaThread thread, Throwable e) {
+        if (!REPORTED.get().skip) thread.debugException(e);
+    }
+
+    public static void reportStack(KahluaThread thread, LuaCallFrame callFrame) {
+        if (!REPORTED.get().skip) thread.doStacktraceProper(callFrame);
+    }
+
+    private static final class FrameFields {
+        static final VarHandle FROM_LUA;
+
+        static {
+            try {
+                FROM_LUA = MethodHandles.privateLookupIn(LuaCallFrame.class, MethodHandles.lookup())
+                    .findVarHandle(LuaCallFrame.class, "fromLua", boolean.class);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
+    /**
+     * A directly called compiled function threw (no luaMainloop was running it to catch the error): what luaMainloop's
+     * catch does for that frame. Report once, then pop frames with their stack trace lines down to the first one not
+     * entered from Lua (the callee, pushed with fromLua false), close its upvalues, and let the caller rethrow.
+     */
+    public static Throwable calleeFailed(KahluaThread thread, Throwable e, LuaCallFrame callee) {
+        reportLog(e);
+        reportDebug(thread, e);
+        reportStack(thread, callee);
+        se.krka.kahlua.vm.Coroutine co = thread.currentCoroutine;
+        LuaCallFrame f;
+        do {
+            f = co.currentCallFrame();
+            if (f == null) break;
+            co.addStackTrace(f);
+            co.popCallFrame();
+        } while ((boolean) FrameFields.FROM_LUA.get(f));
+        if (f != null) f.closeUpvalues(0);
+        return e;
+    }
+
     // Patches
 
     /** Prototype: the compiled function (or its state) and the instruction count, as plain fields. */
@@ -241,7 +316,44 @@ public final class LuaJit {
             sites++;
             insn = n;
         }
-        return sites == 1;
+        if (sites != 1) return false;
+        boolean hasDepth = false;
+        for (FieldNode f : node.fields) hasDepth |= f.name.equals("pzoJitDepth");
+        if (!hasDepth) node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "pzoJitDepth", "I", null, null));
+        return redirectReporting(loop);
+    }
+
+    // The Throwable handler of luaMainloop starts with ExceptionLogger.logException(e), debugException(e) and
+    // doStacktraceProper(callFrame); those go through report* so each error is reported once
+    private static boolean redirectReporting(MethodNode loop) {
+        String thread = "se/krka/kahlua/vm/KahluaThread", self = "com/pzoptimizer/LuaJit";
+        for (com.pzoptimizer.shaded.asm.tree.TryCatchBlockNode tc : loop.tryCatchBlocks) {
+            if (!"java/lang/Throwable".equals(tc.type)) continue;
+            int done = 0;
+            AbstractInsnNode insn = tc.handler;
+            for (int k = 0; k < 20 && insn != null && done < 3; k++, insn = insn.getNext()) {
+                if (!(insn instanceof MethodInsnNode mi)) continue;
+                MethodInsnNode repl = null;
+                if (mi.getOpcode() == Opcodes.INVOKESTATIC && "zombie/core/logger/ExceptionLogger".equals(mi.owner)
+                        && "logException".equals(mi.name) && "(Ljava/lang/Throwable;)V".equals(mi.desc)) {
+                    repl = new MethodInsnNode(Opcodes.INVOKESTATIC, self, "reportLog", "(Ljava/lang/Throwable;)V", false);
+                } else if (thread.equals(mi.owner) && "debugException".equals(mi.name)) {
+                    repl = new MethodInsnNode(Opcodes.INVOKESTATIC, self, "reportDebug",
+                        "(L" + thread + ";Ljava/lang/Throwable;)V", false);
+                } else if (thread.equals(mi.owner) && "doStacktraceProper".equals(mi.name)
+                        && "(Lse/krka/kahlua/vm/LuaCallFrame;)V".equals(mi.desc)) {
+                    repl = new MethodInsnNode(Opcodes.INVOKESTATIC, self, "reportStack",
+                        "(L" + thread + ";Lse/krka/kahlua/vm/LuaCallFrame;)V", false);
+                }
+                if (repl != null) {
+                    loop.instructions.set(mi, repl);
+                    insn = repl;
+                    done++;
+                }
+            }
+            if (done == 3) return true;
+        }
+        return false;
     }
 
     private static AbstractInsnNode next(AbstractInsnNode insn) {
