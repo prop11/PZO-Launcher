@@ -198,10 +198,13 @@ public final class LuaEventPatches {
     // - Aviation Core (and the UH-1B on top of it) steps helicopter physics and controls from OnTick, so paced ticks
     //   made the controls sluggish above 60 FPS.
     // - Horse Mod drives riding animations per tick; pacing broke them.
+    // - No More Sickness Inside Vehicle takes back the corpse sickness the game adds each update while you're in a
+    //   vehicle. Paced, the frames it skipped left sickness just above 0, so the Sick moodle popped in and out and
+    //   kept replaying its slide/wiggle.
     // Workshop IDs cover Workshop installs whatever the folder is called, folder names cover local copies.
     private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife",
         "/3783444342/", "/aviationcore/", "/3409723807/", "/uh-1bhelicopter/",
-        "/3661336777/", "/mods/horse/"};
+        "/3661336777/", "/mods/horse/", "/3405033818/", "/nomoresicknessinsidevehicle/"};
 
     private static boolean isExemptMod(String path) {
         for (String p : EXEMPT_MOD_PATHS) {
