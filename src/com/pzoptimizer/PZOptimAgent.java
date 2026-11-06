@@ -33,6 +33,11 @@ public class PZOptimAgent {
             PZOLogger.info("[PZO Agent] Stock baseline benchmark run: only the benchmark frame timer is registered.");
             return;
         }
+        if (LuaModGuard.shouldStandDown()) {
+            LuaModGuard.reportAndStandDown();
+            PZOLogger.warn("[PZO Agent] Lua mod not installed or not enabled: no transformer registered, agent idle.");
+            return;
+        }
         PZOLogger.info("[PZO Agent] Build 42 JVM Instrumentation Agent Active");
 
         try {
@@ -94,6 +99,7 @@ public class PZOptimAgent {
             HotSpotJITCompilerTuner.tuneRuntimeProperties();
             WorldUpscalerGovernor.checkLaunchParams(null);
             PZOEngineBridge.initialize();
+            EngineThreadGovernor.ensureQueueHook();
             HighPrecisionTimer.initialize();
         } catch (Throwable ignored) {}
         StartupTimer.step("engine bridge and timers");
