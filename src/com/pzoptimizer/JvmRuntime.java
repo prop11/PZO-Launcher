@@ -48,23 +48,4 @@ final class JvmRuntime {
     static boolean wantCompactHeaders(File gameDir) {
         return PZOConfig.isCompactHeadersEnabled() && featureVersion(gameDir) >= 25;
     }
-
-    // Collector choice. Stock B42 runs ZGC; PZO used to force untargeted G1 on most PCs, and bench recordings showed
-    // 60-120 ms young pauses with it against 0.2 ms worst on stock ZGC. Generational ZGC (the only kind from Java 23)
-    // pauses well under a millisecond but has no compressed pointers and runs background GC threads, so low-end PCs keep
-    // G1, now with a pause target.
-    static final String G1_PAUSE_TARGET = "-XX:MaxGCPauseMillis=20";
-    // Startup otherwise runs a few GCs just because class metadata passed the default 20 MB threshold
-    static final String METASPACE_SIZE = "-XX:MetaspaceSize=256m";
-    static final int ZGC_MIN_THREADS = 5;
-    // A "16 GB" PC reports a little under 16
-    static final double ZGC_MIN_RAM_GB = 15.0;
-
-    static boolean wantZgc(File gameDir) {
-        String mode = PZOConfig.getGcMode();
-        if ("g1".equals(mode) || featureVersion(gameDir) < 23) return false;
-        if ("zgc".equals(mode)) return true;
-        if (CompatMode.isActive()) return false;
-        return Runtime.getRuntime().availableProcessors() >= ZGC_MIN_THREADS && CompatMode.totalRamGb() >= ZGC_MIN_RAM_GB;
-    }
 }

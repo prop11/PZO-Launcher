@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * B42 launches with ZGC. PCs that JvmRuntime.wantZgc gives G1 (4 or fewer threads, under 16 GB of RAM, compatibility
- * mode, or the settings screen) are switched here if ZGC is still in ProjectZomboid64.json, with G1's pause target.
+ * B42 launches with ZGC, which runs slower with PZO than G1, so a ZGC still in ProjectZomboid64.json is switched to G1
+ * here. ZomboidConfigMigrator writes G1 too, so the two agree.
  */
 public final class GCLauncherOptimizer {
 
@@ -63,8 +63,7 @@ public final class GCLauncherOptimizer {
             boolean changed = false;
             double totalRamGb = CompatMode.totalRamGb();
 
-            // Same decision ZomboidConfigMigrator writes, so the two never undo each other
-            boolean wantG1 = !JvmRuntime.wantZgc(gameDir);
+            boolean wantG1 = true;
             // ZomboidConfigMigrator adds compact headers on Java 25+; only an unwanted one is dropped here
             boolean compactOk = JvmRuntime.wantCompactHeaders(gameDir);
 
@@ -91,8 +90,8 @@ public final class GCLauncherOptimizer {
                     if (!vmArgs.contains("-XX:+UseG1GC")) {
                         vmArgs.add("-XX:+UseG1GC");
                     }
-                    if (!vmArgs.contains(JvmRuntime.G1_PAUSE_TARGET)) {
-                        vmArgs.add(JvmRuntime.G1_PAUSE_TARGET);
+                    if (!vmArgs.contains("-XX:MaxGCPauseMillis=16")) {
+                        vmArgs.add("-XX:MaxGCPauseMillis=16");
                     }
                     continue;
                 }

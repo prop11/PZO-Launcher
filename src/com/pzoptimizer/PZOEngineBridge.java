@@ -482,12 +482,6 @@ public class PZOEngineBridge {
             } else if ("JVM_CompatMode".equals(key)) {
                 // CompatMode is decided once per launch, so a rewrite now would still use the old answer
                 PZOConfig.setCompatMode(value == 1 ? "on" : value == 2 ? "off" : "auto");
-            } else if ("JVM_GcMode".equals(key)) {
-                String mode = value == 1 ? "zgc" : value == 2 ? "g1" : "auto";
-                if (!mode.equals(PZOConfig.getGcMode())) {
-                    PZOConfig.setGcMode(mode);
-                    rewriteLaunchOptions();
-                }
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
