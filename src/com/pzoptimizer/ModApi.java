@@ -55,10 +55,6 @@ public final class ModApi {
                 return Boolean.TRUE;
             case "invalidate":
                 return Boolean.valueOf(invalidate(a == null ? "" : a.toString()));
-            case "luaJitExclude":
-                // The whole list at once: path tokens ("/mods/<folder>/") joined with ;
-                LuaJit.setExcludedPaths(a == null ? java.util.List.of() : java.util.Arrays.asList(a.toString().split(";")));
-                return Boolean.TRUE;
             case "apiVersion":
                 return Double.valueOf(API_VERSION);
             default:

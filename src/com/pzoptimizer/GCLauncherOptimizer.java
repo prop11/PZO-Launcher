@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * B42 launches with ZGC, which runs slower with PZO than G1, so a ZGC still in ProjectZomboid64.json is switched to G1
- * here. ZomboidConfigMigrator writes G1 too, so the two agree.
+ * B42 launches with ZGC. On 4-8 core CPUs its concurrent threads fight PZO's chunk and simulation workers and cause
+ * stutter, so there I switch ProjectZomboid64.json to G1 with low pause targets and leave the cores to the workers.
  */
 public final class GCLauncherOptimizer {
 
@@ -61,24 +61,40 @@ public final class GCLauncherOptimizer {
             List<?> rawList = (List<?>) vmObj;
             List<String> vmArgs = new ArrayList<>();
             boolean changed = false;
-            double totalRamGb = CompatMode.totalRamGb();
+            double totalRamGb = 16.0;
+            try {
+                java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+                java.lang.reflect.Method m = null;
+                try {
+                    m = osBean.getClass().getMethod("getTotalMemorySize");
+                } catch (NoSuchMethodException e) {
+                    try {
+                        m = osBean.getClass().getMethod("getTotalPhysicalMemorySize");
+                    } catch (NoSuchMethodException ignored) {}
+                }
+                if (m != null) {
+                    m.setAccessible(true);
+                    Object val = m.invoke(osBean);
+                    if (val instanceof Number) {
+                        totalRamGb = ((Number) val).doubleValue() / (1024.0 * 1024.0 * 1024.0);
+                    }
+                }
+            } catch (Throwable ignored) {}
 
-            boolean wantG1 = true;
-            // ZomboidConfigMigrator adds compact headers on Java 25+; only an unwanted one is dropped here
-            boolean compactOk = JvmRuntime.wantCompactHeaders(gameDir);
+            boolean wantG1 = cores <= 8 || totalRamGb < 20.0 || CompatMode.isActive();
 
             for (Object item : rawList) {
                 if (item == null) continue;
                 String s = item.toString().trim();
-                if (s.contains("UseCompactObjectHeaders") && !compactOk) {
+                if (s.contains("UseCompactObjectHeaders")) {
                     changed = true;
-                    continue;
+                    continue; // drop the bad flag
                 }
                 if (s.contains(" ")) {
                     // Split back up any args that got joined with spaces
                     String[] tokens = s.split("\\s+");
                     for (String tok : tokens) {
-                        if (!tok.isEmpty() && (compactOk || !tok.contains("UseCompactObjectHeaders")) && !vmArgs.contains(tok)) {
+                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
                             vmArgs.add(tok);
                         }
                     }
@@ -134,6 +150,13 @@ public final class GCLauncherOptimizer {
                                     verChanged = true;
                                     continue;
                                 }
+                                if (wantG1 && "-XX:+UseZGC".equals(vs)) {
+                                    verChanged = true;
+                                    if (!verArgs.contains("-XX:+UseG1GC")) {
+                                        verArgs.add("-XX:+UseG1GC");
+                                    }
+                                    continue;
+                                }
                                 verArgs.add(vs);
                             }
                             if (verChanged) {
@@ -144,9 +167,6 @@ public final class GCLauncherOptimizer {
                     }
                 }
             }
-
-            // A collector in a version block gets added next to the main list's one and the JVM won't start
-            if (ZomboidConfigMigrator.stripNestedJvmChoices(root)) changed = true;
 
             if (changed) {
                 File backupFile = new File(gameDir, BACKUP_FILENAME);

@@ -428,9 +428,6 @@ public class PZOEngineBridge {
                 ModelLoadFixes.active = value;
             } else if ("JVM_ThreadLocalFastPath".equals(key)) {
                 ThreadLocalFastPath.active = value;
-            } else if ("JVM_LuaJit".equals(key)) {
-                Boolean forced = BenchmarkHarness.luaJitForced;
-                LuaJit.active = forced != null ? forced : value;
             } else if ("JVM_ChunkTextureKeep".equals(key)) {
                 ChunkTextureKeep.active = value;
             } else if ("JVM_LuaCompileCache".equals(key)) {
@@ -440,12 +437,6 @@ public class PZOEngineBridge {
                 PZOConfig.setFastLoadEnabled(value);
             } else if ("JVM_LaptopFastGpu".equals(key)) {
                 GpuPreference.setActive(value);
-            } else if ("JVM_CompactHeaders".equals(key)) {
-                // A JVM launch option: rewrite ProjectZomboid64.json now so it applies on the very next launch
-                if (PZOConfig.isCompactHeadersEnabled() != value) {
-                    PZOConfig.setCompactHeadersEnabled(value);
-                    rewriteLaunchOptions();
-                }
             } else if ("JVM_PersistentSpriteVbo".equals(key)) {
                 // The ring already exists by now, so this is for the next launch
                 PZOConfig.setPersistentSpriteVboEnabled(value);
@@ -480,20 +471,10 @@ public class PZOEngineBridge {
             } else if ("JVM_ChunkLoadDistance".equals(key)) {
                 ChunkLoadDistance.setWidth(value);
             } else if ("JVM_CompatMode".equals(key)) {
-                // CompatMode is decided once per launch, so a rewrite now would still use the old answer
                 PZOConfig.setCompatMode(value == 1 ? "on" : value == 2 ? "off" : "auto");
             }
             PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
         } catch (Throwable ignored) {}
-    }
-
-    // Launch options live in ProjectZomboid64.json, which the game's launcher reads before Java starts. Rewriting it as
-    // soon as a setting changes makes that change apply on the very next launch, not the one after.
-    private static void rewriteLaunchOptions() {
-        Thread t = new Thread(() -> ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile()),
-            "PZO-LaunchOptions");
-        t.setDaemon(true);
-        t.start();
     }
 
     public static File getZomboidDir() {
@@ -1608,7 +1589,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.9.2\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.9.3\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1877,7 +1858,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.9.2'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.9.3'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

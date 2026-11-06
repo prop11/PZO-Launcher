@@ -49,8 +49,6 @@ public final class LuaEventPatches {
     private static final String[] eventStack = new String[64];
     private static int depth;
     private static final Map<String, long[]> handlerTimes = new HashMap<>(); // key -> {nanos, calls}
-    // closure -> {event, its handlerTimes entry}, so a timed call doesn't build and hash the key string every time
-    private static final java.util.IdentityHashMap<Object, Object[]> timeSlots = new java.util.IdentityHashMap<>();
 
     // 60 Hz pacing for mod events (main thread only). Each handler has a schedule that moves on by one period per run,
     // so the average is 60 Hz at any frame rate; the slack stops a locked 60 FPS with jitter from skipping at all.
@@ -198,13 +196,10 @@ public final class LuaEventPatches {
     // - Aviation Core (and the UH-1B on top of it) steps helicopter physics and controls from OnTick, so paced ticks
     //   made the controls sluggish above 60 FPS.
     // - Horse Mod drives riding animations per tick; pacing broke them.
-    // - No More Sickness Inside Vehicle takes back the corpse sickness the game adds each update while you're in a
-    //   vehicle. Paced, the frames it skipped left sickness just above 0, so the Sick moodle popped in and out and
-    //   kept replaying its slide/wiggle.
     // Workshop IDs cover Workshop installs whatever the folder is called, folder names cover local copies.
     private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife",
         "/3783444342/", "/aviationcore/", "/3409723807/", "/uh-1bhelicopter/",
-        "/3661336777/", "/mods/horse/", "/3405033818/", "/nomoresicknessinsidevehicle/"};
+        "/3661336777/", "/mods/horse/"};
 
     private static boolean isExemptMod(String path) {
         for (String p : EXEMPT_MOD_PATHS) {
@@ -331,17 +326,12 @@ public final class LuaEventPatches {
             caller.protectedCallVoid(thread, closure, params);
         } finally {
             long dt = System.nanoTime() - start;
-            Object[] slot = timeSlots.get(closure);
-            if (slot == null || !event.equals(slot[0])) {
-                String where = "?";
-                if (closure instanceof se.krka.kahlua.vm.LuaClosure lc && lc.prototype != null) {
-                    String file = lc.prototype.filename != null ? lc.prototype.filename : lc.prototype.file;
-                    where = (file == null ? "?" : file.replace('\\', '/')) + ":" + lc.prototype.name;
-                }
-                slot = new Object[] {event, handlerTimes.computeIfAbsent(event + " " + where, k -> new long[2])};
-                timeSlots.put(closure, slot);
+            String where = "?";
+            if (closure instanceof se.krka.kahlua.vm.LuaClosure lc && lc.prototype != null) {
+                String file = lc.prototype.filename != null ? lc.prototype.filename : lc.prototype.file;
+                where = (file == null ? "?" : file.replace('\\', '/')) + ":" + lc.prototype.name;
             }
-            long[] t = (long[]) slot[1];
+            long[] t = handlerTimes.computeIfAbsent(event + " " + where, k -> new long[2]);
             t[0] += dt;
             t[1]++;
         }

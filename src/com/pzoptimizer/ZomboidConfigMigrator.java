@@ -40,17 +40,9 @@ public final class ZomboidConfigMigrator {
         "-XX:+UseNUMA",
     };
 
-    // ZGC-only tuning, dropped when the PC gets G1
+    // ZGC-only tuning, dropped with ZGC in compatibility mode
     private static final String[] ZGC_ONLY_PREFIXES = {"-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZAllocationSpikeTolerance",
         "-XX:ZCollectionInterval", "-XX:+ZUncommit", "-XX:-ZUncommit", "-XX:ZUncommitDelay", "-XX:SoftMaxHeapSize"};
-
-    // The collector is set once, in the main list, as G1. ZGC measured up to 40% lower average fps with PZO on an
-    // 8 GB heap (1.9 A/B), and 1.8.x ended up on G1 on every PC anyway. The user's own G1 tuning is kept.
-    private static final String[] GC_CHOICE_PREFIXES = {"-XX:+UseG1GC", "-XX:-UseG1GC", "-XX:+UseZGC", "-XX:-UseZGC",
-        "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC"};
-    // What 1.9's collector choice added to the main list
-    private static final java.util.Set<String> GC_LEFTOVERS_19 = java.util.Set.of("-XX:MetaspaceSize=256m",
-        "-XX:MaxGCPauseMillis=20", "-XX:InitiatingHeapOccupancyPercent=45");
 
     public static void main(String[] args) {
         File targetDir = args != null && args.length > 0 ? new File(args[0]) : new File(".").getAbsoluteFile();
@@ -102,9 +94,8 @@ public final class ZomboidConfigMigrator {
             Map<String, Object> current = parseRoot(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8));
             if (current == null) return false;
             Map<String, Object> target = parseRoot(JsonMini.format(current));
-            boolean nestedChanged = buildTarget(target, jsonFile.getParentFile());
-            return nestedChanged
-                || !Objects.equals(current.get("mainClass"), target.get("mainClass"))
+            buildTarget(target, jsonFile.getParentFile());
+            return !Objects.equals(current.get("mainClass"), target.get("mainClass"))
                 || !Objects.equals(strings(current.get("classpath")), strings(target.get("classpath")))
                 // JVM arg order doesn't matter, so don't rewrite a hand-edited order
                 || !new LinkedHashSet<>(strings(current.get("vmArgs"))).equals(new LinkedHashSet<>(strings(target.get("vmArgs"))));
@@ -138,59 +129,10 @@ public final class ZomboidConfigMigrator {
         return out;
     }
 
-    // Returns true if a per-OS block had to be cleaned
-    private static boolean buildTarget(Map<String, Object> root, File gameDir) {
+    private static void buildTarget(Map<String, Object> root, File gameDir) {
         root.put("mainClass", TARGET_MAIN_CLASS);
         root.put("classpath", targetClasspath(strings(root.get("classpath"))));
         root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir));
-        return stripNestedJvmChoices(root);
-    }
-
-    /**
-     * The game's launcher adds the vmArgs of the matching "windows" version block (and any other nested block) to the
-     * main list. A collector left in there next to the one targetVmArgs picks stops the JVM before anything of mine
-     * loads ("Multiple garbage collectors selected", 1.9 on fresh installs), so the collector and compact headers only
-     * live in the main list. Blocks left empty are removed.
-     */
-    @SuppressWarnings("unchecked")
-    static boolean stripNestedJvmChoices(Map<String, Object> root) {
-        boolean changed = false;
-        for (Map.Entry<String, Object> e : root.entrySet()) {
-            if (e.getValue() instanceof Map) changed |= stripBlock((Map<String, Object>) e.getValue());
-        }
-        changed |= root.entrySet().removeIf(e -> e.getValue() instanceof Map && ((Map<?, ?>) e.getValue()).isEmpty());
-        return changed;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static boolean stripBlock(Map<String, Object> block) {
-        boolean changed = false;
-        Object vm = block.get("vmArgs");
-        if (vm instanceof List) {
-            List<String> kept = new ArrayList<>();
-            for (Object item : (List<?>) vm) {
-                if (item == null) continue;
-                for (String tok : item.toString().trim().split("\\s+")) {
-                    if (tok.isEmpty()) continue;
-                    if (isGcChoice(tok) || isZgcOnly(tok) || tok.contains("UseCompactObjectHeaders")) {
-                        changed = true;
-                    } else {
-                        kept.add(tok);
-                    }
-                }
-            }
-            if (kept.isEmpty()) {
-                block.remove("vmArgs");
-                changed = true;
-            } else if (changed) {
-                block.put("vmArgs", kept);
-            }
-        }
-        for (Map.Entry<String, Object> e : block.entrySet()) {
-            if (e.getValue() instanceof Map) changed |= stripBlock((Map<String, Object>) e.getValue());
-        }
-        changed |= block.entrySet().removeIf(e -> e.getValue() instanceof Map && ((Map<?, ?>) e.getValue()).isEmpty());
-        return changed;
     }
 
     // ".", then PZOptimEngine.jar, ahead of the game's jar
@@ -236,10 +178,10 @@ public final class ZomboidConfigMigrator {
                 if (tok.startsWith("-Djava.library.path=")) continue;
                 if (tok.equals(TARGET_AGENTLIB) || tok.contains("pzo_native64")) continue;
                 if (tok.contains("zbNative")) continue;
-                if (tok.contains("UseCompactObjectHeaders")) continue; // re-added below only on Java 25+
+                if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
                 if (compat && tok.equals(PRE_TOUCH)) continue;
-                if (isGcChoice(tok) || isZgcOnly(tok) || GC_LEFTOVERS_19.contains(tok)) continue;
-                user.add(tok);
+                if (compat && isZgcOnly(tok)) continue;
+                user.add(compat && tok.equals("-XX:+UseZGC") ? "-XX:+UseG1GC" : tok);
             }
         }
 
@@ -287,16 +229,7 @@ public final class ZomboidConfigMigrator {
             if (!args.contains(pf)) args.add(pf);
         }
         if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
-        if (JvmRuntime.wantCompactHeaders(gameDir)) args.add(JvmRuntime.COMPACT_HEADERS);
-        args.add("-XX:+UseG1GC");
         return args;
-    }
-
-    private static boolean isGcChoice(String arg) {
-        for (String p : GC_CHOICE_PREFIXES) {
-            if (arg.startsWith(p)) return true;
-        }
-        return false;
     }
 
     private static boolean isZgcOnly(String arg) {
