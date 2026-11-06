@@ -44,12 +44,13 @@ public final class ZomboidConfigMigrator {
     private static final String[] ZGC_ONLY_PREFIXES = {"-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZAllocationSpikeTolerance",
         "-XX:ZCollectionInterval", "-XX:+ZUncommit", "-XX:-ZUncommit", "-XX:ZUncommitDelay", "-XX:SoftMaxHeapSize"};
 
-    // The collector and its tuning are rebuilt from JvmRuntime.wantZgc every time; anything like this in the file goes.
-    // Someone who wants a particular collector sets it on the settings screen (pzo_config.json "gc_mode").
+    // The collector is set once, in the main list, as G1. ZGC measured up to 40% lower average fps with PZO on an
+    // 8 GB heap (1.9 A/B), and 1.8.x ended up on G1 on every PC anyway. The user's own G1 tuning is kept.
     private static final String[] GC_CHOICE_PREFIXES = {"-XX:+UseG1GC", "-XX:-UseG1GC", "-XX:+UseZGC", "-XX:-UseZGC",
-        "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC", "-XX:MaxGCPauseMillis", "-XX:MetaspaceSize",
-        "-XX:InitiatingHeapOccupancyPercent", "-XX:G1"};
-    private static final String G1_IHOP = "-XX:InitiatingHeapOccupancyPercent=45";
+        "-XX:+UseParallelGC", "-XX:+UseSerialGC", "-XX:+UseShenandoahGC"};
+    // What 1.9's collector choice added to the main list
+    private static final java.util.Set<String> GC_LEFTOVERS_19 = java.util.Set.of("-XX:MetaspaceSize=256m",
+        "-XX:MaxGCPauseMillis=20", "-XX:InitiatingHeapOccupancyPercent=45");
 
     public static void main(String[] args) {
         File targetDir = args != null && args.length > 0 ? new File(args[0]) : new File(".").getAbsoluteFile();
@@ -237,7 +238,7 @@ public final class ZomboidConfigMigrator {
                 if (tok.contains("zbNative")) continue;
                 if (tok.contains("UseCompactObjectHeaders")) continue; // re-added below only on Java 25+
                 if (compat && tok.equals(PRE_TOUCH)) continue;
-                if (isGcChoice(tok) || isZgcOnly(tok)) continue;
+                if (isGcChoice(tok) || isZgcOnly(tok) || GC_LEFTOVERS_19.contains(tok)) continue;
                 user.add(tok);
             }
         }
@@ -287,14 +288,7 @@ public final class ZomboidConfigMigrator {
         }
         if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
         if (JvmRuntime.wantCompactHeaders(gameDir)) args.add(JvmRuntime.COMPACT_HEADERS);
-        if (JvmRuntime.wantZgc(gameDir)) {
-            args.add("-XX:+UseZGC");
-        } else {
-            args.add("-XX:+UseG1GC");
-            args.add(JvmRuntime.G1_PAUSE_TARGET);
-            args.add(G1_IHOP);
-        }
-        args.add(JvmRuntime.METASPACE_SIZE);
+        args.add("-XX:+UseG1GC");
         return args;
     }
 

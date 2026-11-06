@@ -18,6 +18,10 @@ Uses the same in-engine BenchmarkHarness route as fsr_compare.py, run twice on b
   pzo_luajit / pzo_noluajit  as pzo, with the Lua compiler forced on / off (luajit=1 / luajit=0)
   pzo_firstbake  as pzo, with distant first bakes spread over frames (firstbake=1)
   pzo_no18  as pzo, with the options new in 1.8 off (new18=0)
+  pzo_g1  as pzo, with G1 (1.9 pause target) instead of ZGC
+  pzo_nocompact  as pzo, without -XX:+UseCompactObjectHeaders
+  pzo_182cfg  the JVM options 1.8.2 wrote: G1 with a 16 ms target, no compact headers, no MetaspaceSize
+              (put the 1.8.2 jar and DLL in the game folder for this one)
 
 Both runs add -XX:StartFlightRecording; BenchmarkHarness dumps it to <run>/profile.jfr before quitting.
 ProjectZomboid64.json is backed up and restored around each run, like latestSave.ini and options.ini.
@@ -59,7 +63,7 @@ def jfr_arg(run_dir):
     return "-XX:StartFlightRecording=settings=profile,filename=%s" % os.path.join(run_dir, "exit.jfr")
 
 
-def write_launcher_json(path, original, run, run_dir):
+def write_launcher_json(path, original, run, run_dir, heap=None):
     data = json.loads(json.dumps(original))
     if run == "stock":
         data["vmArgs"] = list(STOCK_VM_ARGS)
@@ -76,6 +80,23 @@ def write_launcher_json(path, original, run, run_dir):
     elif run == "pzo_nolod":
         data["vmArgs"].append("-Dpzo.mod_paced=1")
         data["vmArgs"].append("-Dpzo.zombie_lod=0")
+    gc_flags = ("-XX:+UseZGC", "-XX:+UseG1GC", "-XX:MaxGCPauseMillis", "-XX:InitiatingHeapOccupancyPercent")
+    if run == "pzo_g1":
+        data["vmArgs"] = [a for a in data["vmArgs"] if not a.startswith(gc_flags)]
+        data["vmArgs"] += ["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=20", "-XX:InitiatingHeapOccupancyPercent=45"]
+    elif run == "pzo_nocompact":
+        data["vmArgs"] = [a for a in data["vmArgs"] if "UseCompactObjectHeaders" not in a]
+    elif run == "pzo_182cfg":
+        data["vmArgs"] = [a for a in data["vmArgs"] if not a.startswith(gc_flags) and "UseCompactObjectHeaders" not in a
+                          and not a.startswith("-XX:MetaspaceSize")]
+        data["vmArgs"] += ["-XX:+UseG1GC", "-XX:MaxGCPauseMillis=16"]
+    if heap and run != "stock":
+        data["vmArgs"] = [a for a in data["vmArgs"] if not a.startswith(("-Xms", "-Xmx"))]
+        data["vmArgs"] += ["-Xms%dm" % heap[0], "-Xmx%dm" % heap[1]]
+    # The version blocks get added to the main list by the game's launcher; keep them from adding a collector
+    for block in data.get("windows", {}).values():
+        if isinstance(block, dict) and "vmArgs" in block:
+            block["vmArgs"] = [a for a in block["vmArgs"] if not a.startswith(gc_flags) and "UseCompactObjectHeaders" not in a]
     data["vmArgs"].append(jfr_arg(run_dir))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -105,6 +126,7 @@ def main():
                     help="pin the game to this many physical cores (with SMT siblings) to stand in for a smaller CPU")
     ap.add_argument("--start", help="x,y[,z] tile to test at instead of the save's position")
     ap.add_argument("--plan", help="segments run in one launch: name,route,tiles,speed,dir,time,weather,threat;...")
+    ap.add_argument("--heap", help="start,max heap in MB for the PZO runs, e.g. 4096,8192 (what a 16 GB PC gets)")
     ap.add_argument("--no-focus", action="store_true",
                     help="do not bring the game window to the front when it opens")
     args = ap.parse_args()
@@ -135,7 +157,7 @@ def main():
                 run_dir = os.path.join(args.out, label)
                 os.makedirs(run_dir, exist_ok=True)
                 print("[%s]" % label)
-                write_launcher_json(launcher_json, original, run, run_dir)
+                write_launcher_json(launcher_json, original, run, run_dir, [int(x) for x in args.heap.split(",")] if args.heap else None)
                 extra = {"stock": 1} if run == "stock" else {}
                 if run == "pzo_nocap":
                     extra["simcap"] = 0
