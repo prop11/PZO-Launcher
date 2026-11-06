@@ -50,11 +50,35 @@ public final class ScriptLookupCache {
     public static void invalidate() {
         withBase.clear();
         withoutBase.clear();
+        models.clear();
+    }
+
+    // Model scripts: the item, object and model renderers look names up every frame, many of them with a _Fluid,
+    // _Cooked, _Burnt or _Rotten suffix that usually doesn't exist, and a miss walks the module's imports each time.
+    // Misses are remembered too (MISS); that's safe because every way a model script gets added is a mutator below.
+    private static final Object MISS = new Object();
+    private static final ConcurrentHashMap<String, Object> models = new ConcurrentHashMap<>();
+    public static final LongAdder modelHits = new LongAdder();
+
+    public static Object getModel(String name) {
+        if (!active || name == null) return null;
+        Object script = models.get(name);
+        if (script != null) modelHits.increment();
+        return script;
+    }
+
+    public static Object unwrapModel(Object cached) {
+        return cached == MISS ? null : cached;
+    }
+
+    public static void putModel(Object script, String name) {
+        if (!active || name == null) return;
+        models.put(name, script == null ? MISS : script);
     }
 
     private static final String[] MUTATORS = {
         "Reset", "Load", "LoadFile", "ParseScript", "ReloadScripts", "LoadedAfterLua", "PostTileDefinitions",
-        "PostWorldDictionaryInit",
+        "PostWorldDictionaryInit", "addModelScript",
     };
 
     static boolean patchScriptManager(ClassNode node) {
@@ -86,6 +110,8 @@ public final class ScriptLookupCache {
         pre.add(new InsnNode(Opcodes.POP));
         find.instructions.insert(pre);
 
+        patchModelLookup(node, self);
+
         int mutators = 0;
         for (MethodNode m : node.methods) {
             if ((m.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT)) != 0) continue;
@@ -102,5 +128,36 @@ public final class ScriptLookupCache {
             mutators++;
         }
         return mutators >= 4;
+    }
+
+    // getModelScript(name): answer from the memo, else the stock lookup and remember what it returned. Optional: if the
+    // method isn't there the FindItem memo still goes in.
+    private static void patchModelLookup(ClassNode node, String self) {
+        String modelDesc = "Lzombie/scripting/objects/ModelScript;";
+        MethodNode get = AsmSupport.findMethod(node, "getModelScript", "(Ljava/lang/String;)" + modelDesc);
+        if (get == null || (get.access & Opcodes.ACC_STATIC) != 0) {
+            PZOLogger.warn("[ScriptLookupCache] getModelScript(String) not found, model lookups stay stock");
+            return;
+        }
+        for (AbstractInsnNode insn = get.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() != Opcodes.ARETURN) continue;
+            InsnList store = new InsnList();
+            store.add(new InsnNode(Opcodes.DUP));
+            store.add(new VarInsnNode(Opcodes.ALOAD, 1));
+            store.add(new MethodInsnNode(Opcodes.INVOKESTATIC, self, "putModel", "(Ljava/lang/Object;Ljava/lang/String;)V", false));
+            get.instructions.insertBefore(insn, store);
+        }
+        InsnList pre = new InsnList();
+        LabelNode stock = new LabelNode();
+        pre.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, self, "getModel", "(Ljava/lang/String;)Ljava/lang/Object;", false));
+        pre.add(new InsnNode(Opcodes.DUP));
+        pre.add(new JumpInsnNode(Opcodes.IFNULL, stock));
+        pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, self, "unwrapModel", "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+        pre.add(new TypeInsnNode(Opcodes.CHECKCAST, "zombie/scripting/objects/ModelScript"));
+        pre.add(new InsnNode(Opcodes.ARETURN));
+        pre.add(stock);
+        pre.add(new InsnNode(Opcodes.POP));
+        get.instructions.insert(pre);
     }
 }

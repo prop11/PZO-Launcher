@@ -6,7 +6,7 @@ import java.nio.file.Files;
 /** Persistent preferences (beta opt-in, ignored versions, Java mod approvals) in pzo_config.json. */
 public final class PZOConfig {
     private static final String CONFIG_FILE = "pzo_config.json";
-    public static final String CURRENT_NOTICE_VERSION = "1.8.2";
+    public static final String CURRENT_NOTICE_VERSION = "1.9";
     private static volatile boolean betaOptIn = false;
     private static volatile String ignoredVersion = "";
     private static volatile boolean isolateConflictingFpsMods = true;
@@ -27,10 +27,14 @@ public final class PZOConfig {
     private static volatile boolean animImportCache = true;
     // Off only for running the Java engine without the Lua mod on purpose, see LuaModGuard
     private static volatile boolean requireLuaMod = true;
+    // A launch option, so it goes into ProjectZomboid64.json for the next launch (Java 25+ only, see JvmRuntime)
+    private static volatile boolean compactHeaders = true;
     // Testing aid: "key=value;..." merged over HardwareProbe's real values, "" for the real hardware
     private static volatile String hardwareOverride = "";
     // "auto", "on" or "off": compatibility mode for older PCs, see CompatMode
     private static volatile String compatMode = "auto";
+    // "auto", "zgc" or "g1": the collector written into ProjectZomboid64.json, see JvmRuntime.wantZgc
+    private static volatile String gcMode = "auto";
     private static final java.util.Set<String> approvedJavaMods = new java.util.LinkedHashSet<>();
     private static final java.util.Set<String> blockedJavaMods = new java.util.LinkedHashSet<>();
     private static volatile boolean loaded = false;
@@ -71,11 +75,14 @@ public final class PZOConfig {
                 depthMapParallel = !(content.contains("\"depth_map_parallel\":false") || content.contains("\"depth_map_parallel\": false"));
                 animImportCache = !(content.contains("\"anim_import_cache\":false") || content.contains("\"anim_import_cache\": false"));
                 requireLuaMod = !(content.contains("\"require_lua_mod\":false") || content.contains("\"require_lua_mod\": false"));
+                compactHeaders = !(content.contains("\"compact_object_headers\":false") || content.contains("\"compact_object_headers\": false"));
                 gpuPrefWritten = content.contains("\"gpu_pref_written\":true") || content.contains("\"gpu_pref_written\": true");
                 String hw = extractJsonField(content, "hardware_override");
                 hardwareOverride = hw == null ? "" : hw;
                 String cm = extractJsonField(content, "compat_mode");
                 compatMode = ("on".equalsIgnoreCase(cm) || "off".equalsIgnoreCase(cm)) ? cm.toLowerCase() : "auto";
+                String gm = extractJsonField(content, "gc_mode");
+                gcMode = ("zgc".equalsIgnoreCase(gm) || "g1".equalsIgnoreCase(gm)) ? gm.toLowerCase() : "auto";
                 parseHashList(extractJsonField(content, "approved_java_mods"), approvedJavaMods);
                 parseHashList(extractJsonField(content, "blocked_java_mods"), blockedJavaMods);
             }
@@ -85,11 +92,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"compact_object_headers\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"gc_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, persistentSpriteVbo, requireLuaMod, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, persistentSpriteVbo, requireLuaMod, compactHeaders, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, gcMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -253,6 +260,18 @@ public final class PZOConfig {
         return requireLuaMod;
     }
 
+    public static boolean isCompactHeadersEnabled() {
+        load();
+        return compactHeaders;
+    }
+
+    public static synchronized void setCompactHeadersEnabled(boolean enabled) {
+        load();
+        if (compactHeaders == enabled) return;
+        compactHeaders = enabled;
+        save();
+    }
+
     public static boolean isPersistentSpriteVboEnabled() {
         load();
         return persistentSpriteVbo;
@@ -324,6 +343,21 @@ public final class PZOConfig {
         hardwareOverride = summary == null ? "" : summary.trim();
         save();
         PZOLogger.info("[PZO Config] Hardware override: " + (hardwareOverride.isEmpty() ? "off (real hardware)" : hardwareOverride));
+    }
+
+    /** "auto", "zgc" or "g1"; a launch option, see JvmRuntime.wantZgc. */
+    public static String getGcMode() {
+        load();
+        return gcMode;
+    }
+
+    public static synchronized void setGcMode(String mode) {
+        load();
+        String m = ("zgc".equalsIgnoreCase(mode) || "g1".equalsIgnoreCase(mode)) ? mode.toLowerCase() : "auto";
+        if (m.equals(gcMode)) return;
+        gcMode = m;
+        save();
+        PZOLogger.info("[PZO Config] Garbage collector set to: " + m + " (applies on next launch)");
     }
 
     /** "auto", "on" or "off"; read once at launch by CompatMode. */

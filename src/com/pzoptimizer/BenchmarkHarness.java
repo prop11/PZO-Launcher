@@ -195,6 +195,11 @@ public final class BenchmarkHarness {
                 FirstBakeBudget.active = "1".equals(cfg.get("firstbake"));
                 notes.add("first bake budget " + (FirstBakeBudget.active ? "on" : "off") + " (firstbake=" + cfg.get("firstbake") + ")");
             }
+            if (cfg.containsKey("luajit")) {
+                luaJitForced = "1".equals(cfg.get("luajit"));
+                LuaJit.active = luaJitForced;
+                notes.add("Lua compiler " + (luaJitForced ? "on" : "off") + " (luajit=" + cfg.get("luajit") + ")");
+            }
             if (cfg.containsKey("treebake")) {
                 TreeBake.active = "1".equals(cfg.get("treebake"));
                 notes.add("tree bake " + (TreeBake.active ? "on" : "off") + " (treebake=" + cfg.get("treebake") + ")");
@@ -316,6 +321,8 @@ public final class BenchmarkHarness {
     // new18=0: the options new in 1.8 held off, for a with/without comparison. The sprite buffer key isn't in the list:
     // through the bridge it would write the player's pzo_config.json, so it's switched off here directly instead
     static volatile boolean new18ForcedOff = false;
+    // luajit=0/1: the Lua compiler held off or on whatever the Lua settings send; null when the run doesn't say
+    static volatile Boolean luaJitForced = null;
     static final java.util.Set<String> NEW_18_KEYS = java.util.Set.of("JVM_UsingPlayerTrack", "JVM_TranslucentNearBake",
         "JVM_LightInfoOnce", "JVM_CollapseMemo", "JVM_CutawayVisitTrim", "JVM_FogWalkSkip", "JVM_FirstBakeBudget");
     static volatile boolean puddleFixesForcedOff = false;
@@ -890,6 +897,11 @@ public final class BenchmarkHarness {
             w.println("  \"frame_workers\": " + FrameWorkers.workerCount() + ",");
             w.println("  \"foliage_chunk_flips\": " + FoliageLod.chunkFlips.get() + ",");
             w.println("  \"script_lookup_hits\": " + ScriptLookupCache.hits.sum() + ",");
+            w.println("  \"model_script_memo_hits\": " + ScriptLookupCache.modelHits.sum() + ",");
+            w.println("  \"luajit_active\": " + LuaJit.active + ",");
+            w.println("  \"luajit_compiled\": " + LuaJit.compiled.sum() + ",");
+            w.println("  \"luajit_interpreted\": " + LuaJit.failed.sum() + ",");
+            w.println("  \"luajit_excluded\": " + LuaJit.excluded.sum() + ",");
             w.println("  \"lua_handler_ms\": " + LuaEventPatches.report(40) + ",");
             w.println("  \"translucent_draws_by_reason\": " + TranslucentStats.reasonsJson() + ",");
             w.println("  \"translucent_draws_by_sprite\": " + TranslucentStats.spritesJson() + ",");

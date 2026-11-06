@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * B42 launches with ZGC. On 4-8 core CPUs its concurrent threads fight PZO's chunk and simulation workers and cause
- * stutter, so there I switch ProjectZomboid64.json to G1 with low pause targets and leave the cores to the workers.
+ * B42 launches with ZGC. PCs that JvmRuntime.wantZgc gives G1 (4 or fewer threads, under 16 GB of RAM, compatibility
+ * mode, or the settings screen) are switched here if ZGC is still in ProjectZomboid64.json, with G1's pause target.
  */
 public final class GCLauncherOptimizer {
 
@@ -61,40 +61,25 @@ public final class GCLauncherOptimizer {
             List<?> rawList = (List<?>) vmObj;
             List<String> vmArgs = new ArrayList<>();
             boolean changed = false;
-            double totalRamGb = 16.0;
-            try {
-                java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-                java.lang.reflect.Method m = null;
-                try {
-                    m = osBean.getClass().getMethod("getTotalMemorySize");
-                } catch (NoSuchMethodException e) {
-                    try {
-                        m = osBean.getClass().getMethod("getTotalPhysicalMemorySize");
-                    } catch (NoSuchMethodException ignored) {}
-                }
-                if (m != null) {
-                    m.setAccessible(true);
-                    Object val = m.invoke(osBean);
-                    if (val instanceof Number) {
-                        totalRamGb = ((Number) val).doubleValue() / (1024.0 * 1024.0 * 1024.0);
-                    }
-                }
-            } catch (Throwable ignored) {}
+            double totalRamGb = CompatMode.totalRamGb();
 
-            boolean wantG1 = cores <= 8 || totalRamGb < 20.0 || CompatMode.isActive();
+            // Same decision ZomboidConfigMigrator writes, so the two never undo each other
+            boolean wantG1 = !JvmRuntime.wantZgc(gameDir);
+            // ZomboidConfigMigrator adds compact headers on Java 25+; only an unwanted one is dropped here
+            boolean compactOk = JvmRuntime.wantCompactHeaders(gameDir);
 
             for (Object item : rawList) {
                 if (item == null) continue;
                 String s = item.toString().trim();
-                if (s.contains("UseCompactObjectHeaders")) {
+                if (s.contains("UseCompactObjectHeaders") && !compactOk) {
                     changed = true;
-                    continue; // drop the bad flag
+                    continue;
                 }
                 if (s.contains(" ")) {
                     // Split back up any args that got joined with spaces
                     String[] tokens = s.split("\\s+");
                     for (String tok : tokens) {
-                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
+                        if (!tok.isEmpty() && (compactOk || !tok.contains("UseCompactObjectHeaders")) && !vmArgs.contains(tok)) {
                             vmArgs.add(tok);
                         }
                     }
@@ -106,8 +91,8 @@ public final class GCLauncherOptimizer {
                     if (!vmArgs.contains("-XX:+UseG1GC")) {
                         vmArgs.add("-XX:+UseG1GC");
                     }
-                    if (!vmArgs.contains("-XX:MaxGCPauseMillis=16")) {
-                        vmArgs.add("-XX:MaxGCPauseMillis=16");
+                    if (!vmArgs.contains(JvmRuntime.G1_PAUSE_TARGET)) {
+                        vmArgs.add(JvmRuntime.G1_PAUSE_TARGET);
                     }
                     continue;
                 }

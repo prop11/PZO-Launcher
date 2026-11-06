@@ -390,6 +390,20 @@ public class PZOptimAgent {
                 }
                 return wd;
             }
+            if ("se/krka/kahlua/vm/Prototype".equals(className) && classfileBuffer != null) {
+                byte[] proto = AsmSupport.transform(classfileBuffer, loader, "Prototype Lua compiler fields", LuaJit::patchPrototype);
+                if (proto != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched Prototype: room for compiled Lua functions");
+                }
+                return proto;
+            }
+            if ("se/krka/kahlua/vm/KahluaThread".equals(className) && classfileBuffer != null) {
+                byte[] thread = AsmSupport.transform(classfileBuffer, loader, "KahluaThread.luaMainloop Lua compiler hook", LuaJit::patchThread);
+                if (thread != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched KahluaThread.luaMainloop: hot Lua functions can run compiled");
+                }
+                return thread;
+            }
             if ("se/krka/kahlua/j2se/KahluaTableImpl".equals(className) && classfileBuffer != null) {
                 byte[] lua = AsmSupport.transform(classfileBuffer, loader, "KahluaTableImpl.rawget", GameThreadPatches::patchKahluaTable);
                 if (lua != null) {
@@ -923,6 +937,11 @@ public class PZOptimAgent {
             if ("zombie/core/properties/PropertyContainer".equals(className) && classfileBuffer != null) {
                 return patchPropertyContainer(classfileBuffer);
             }
+            if ("zombie/iso/IsoDepthHelper".equals(className) && classfileBuffer != null) {
+                byte[] out = AsmSupport.transform(classfileBuffer, loader, "IsoDepthHelper results", GameThreadPatches::patchDepthHelper);
+                if (out != null) PZOLogger.success("[PZO Agent] ASM-patched IsoDepthHelper: MainThread skips the ThreadLocal lookup");
+                return out;
+            }
             if ("zombie/characters/IsoGameCharacter".equals(className) && classfileBuffer != null) {
                 byte[] gc = patchIsoGameCharacter(classfileBuffer);
                 byte[] smc = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter state machine cache",
@@ -931,6 +950,12 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getStateMachineComponent: " + (GameThreadPatches.stateMachineInPlace
                         ? "component read straight from the component map (class keeps its stock shape)" : "component kept per character"));
                     gc = smc;
+                }
+                byte[] minSim = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter simulation level",
+                    GameThreadPatches::patchMinSimulationLevel);
+                if (minSim != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoGameCharacter.getMinimumSimulationLevel: state machine read straight from the component map");
+                    gc = minSim;
                 }
                 byte[] split = AsmSupport.transform(gc != null ? gc : classfileBuffer, loader, "IsoGameCharacter postupdate split",
                     ActionParallel::patchCharacter);

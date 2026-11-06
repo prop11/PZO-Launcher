@@ -88,8 +88,35 @@ public final class PuddleFrameCache {
     // Main thread only, bakes and the puddle pass both run on it
     private static final WeakHashMap<FBORenderLevels, Levels> states = new WeakHashMap<>();
     private static volatile boolean broken;
-    private static VarHandle renderDataField, numSquaresField, capacityField, dataField, perLevelField;
-    private static VarHandle geoX, geoY, geoNe, geoNw, geoAll, geoNone, geoRecalc;
+    // static final in a holder, so the JIT turns them into plain field accesses (non-final handles cost a slow lookup
+    // on every square); built on first use, and a missing field fails the holder, which bind() reports as before
+    private static final class F {
+        static final VarHandle renderDataField, numSquaresField, capacityField, dataField, perLevelField;
+        static final VarHandle geoX, geoY, geoNe, geoNw, geoAll, geoNone, geoRecalc;
+
+        static {
+            try {
+                Class<?> rd = Class.forName("zombie.iso.IsoPuddles$RenderData", false, IsoPuddles.class.getClassLoader());
+                MethodHandles.Lookup puddles = MethodHandles.privateLookupIn(IsoPuddles.class, MethodHandles.lookup());
+                MethodHandles.Lookup data = MethodHandles.privateLookupIn(rd, MethodHandles.lookup());
+                MethodHandles.Lookup geo = MethodHandles.privateLookupIn(IsoPuddlesGeometry.class, MethodHandles.lookup());
+                renderDataField = puddles.findVarHandle(IsoPuddles.class, "renderData", rd.arrayType().arrayType());
+                numSquaresField = data.findVarHandle(rd, "numSquares", int.class);
+                capacityField = data.findVarHandle(rd, "capacity", int.class);
+                perLevelField = data.findVarHandle(rd, "squaresPerLevel", int[].class);
+                geoX = geo.findVarHandle(IsoPuddlesGeometry.class, "x", float[].class);
+                geoY = geo.findVarHandle(IsoPuddlesGeometry.class, "y", float[].class);
+                geoNe = geo.findVarHandle(IsoPuddlesGeometry.class, "pdne", float[].class);
+                geoNw = geo.findVarHandle(IsoPuddlesGeometry.class, "pdnw", float[].class);
+                geoAll = geo.findVarHandle(IsoPuddlesGeometry.class, "pda", float[].class);
+                geoNone = geo.findVarHandle(IsoPuddlesGeometry.class, "pnon", float[].class);
+                geoRecalc = geo.findVarHandle(IsoPuddlesGeometry.class, "recalc", boolean.class);
+                dataField = data.findVarHandle(rd, "data", float[].class);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
 
     private PuddleFrameCache() {}
 
@@ -100,23 +127,11 @@ public final class PuddleFrameCache {
     }
 
     private static void bind() throws ReflectiveOperationException {
-        if (dataField != null) return;
-        Class<?> rd = Class.forName("zombie.iso.IsoPuddles$RenderData", false, IsoPuddles.class.getClassLoader());
-        MethodHandles.Lookup puddles = MethodHandles.privateLookupIn(IsoPuddles.class, MethodHandles.lookup());
-        MethodHandles.Lookup data = MethodHandles.privateLookupIn(rd, MethodHandles.lookup());
-        MethodHandles.Lookup geo = MethodHandles.privateLookupIn(IsoPuddlesGeometry.class, MethodHandles.lookup());
-        renderDataField = puddles.findVarHandle(IsoPuddles.class, "renderData", rd.arrayType().arrayType());
-        numSquaresField = data.findVarHandle(rd, "numSquares", int.class);
-        capacityField = data.findVarHandle(rd, "capacity", int.class);
-        perLevelField = data.findVarHandle(rd, "squaresPerLevel", int[].class);
-        geoX = geo.findVarHandle(IsoPuddlesGeometry.class, "x", float[].class);
-        geoY = geo.findVarHandle(IsoPuddlesGeometry.class, "y", float[].class);
-        geoNe = geo.findVarHandle(IsoPuddlesGeometry.class, "pdne", float[].class);
-        geoNw = geo.findVarHandle(IsoPuddlesGeometry.class, "pdnw", float[].class);
-        geoAll = geo.findVarHandle(IsoPuddlesGeometry.class, "pda", float[].class);
-        geoNone = geo.findVarHandle(IsoPuddlesGeometry.class, "pnon", float[].class);
-        geoRecalc = geo.findVarHandle(IsoPuddlesGeometry.class, "recalc", boolean.class);
-        dataField = data.findVarHandle(rd, "data", float[].class);
+        try {
+            if (F.dataField == null) throw new ReflectiveOperationException("no data field");
+        } catch (LinkageError e) {
+            throw new ReflectiveOperationException(e.getCause() != null ? e.getCause() : e);
+        }
     }
 
     private static int epoch() {
@@ -142,7 +157,7 @@ public final class PuddleFrameCache {
         try {
             bind();
             onScreen = RenderCellFields.onScreenChunks(RenderCellFields.perPlayer(playerIndex));
-            threadData = ((Object[][]) renderDataField.get(puddles))[zombie.core.SpriteRenderer.instance.getMainStateIndex()][framePlayer];
+            threadData = ((Object[][]) F.renderDataField.get(puddles))[zombie.core.SpriteRenderer.instance.getMainStateIndex()][framePlayer];
         } catch (Throwable t) {
             broken = true;
             PZOLogger.warn("[PuddleFrameCache] Stood down, puddles drawn by the stock pass: " + t);
@@ -153,7 +168,7 @@ public final class PuddleFrameCache {
             if (zombie.core.Core.getInstance().getPerfPuddles() > 0) maxZ = 0;
             int epoch = epoch();
             for (int z = 0; z <= maxZ; z++) {
-                int first = (int) numSquaresField.get(threadData);
+                int first = (int) F.numSquaresField.get(threadData);
                 for (int i = 0; i < onScreen.size(); i++) {
                     IsoChunk chunk = onScreen.get(i);
                     if (z < chunk.minLevel || z > chunk.maxLevel) continue;
@@ -163,7 +178,7 @@ public final class PuddleFrameCache {
                     if (squares.isEmpty()) continue;
                     emitLevel(chunk, renderLevels, z, squares, playerIndex, framePlayer, epoch, threadData);
                 }
-                int added = (int) numSquaresField.get(threadData) - first;
+                int added = (int) F.numSquaresField.get(threadData) - first;
                 if (added > 0) zombie.core.SpriteRenderer.instance.drawPuddles(framePlayer, z, first, added);
             }
             return true;
@@ -227,16 +242,16 @@ public final class PuddleFrameCache {
 
         float jx = camera.fixJigglyModelsX * camera.zoom;
         float jy = camera.fixJigglyModelsY * camera.zoom;
-        int num = (int) numSquaresField.get(threadData);
-        int cap = (int) capacityField.get(threadData);
-        float[] data = (float[]) dataField.get(threadData);
+        int num = (int) F.numSquaresField.get(threadData);
+        int cap = (int) F.capacityField.get(threadData);
+        float[] data = (float[]) F.dataField.get(threadData);
         if (data == null) data = new float[cap * 4 * 8];
         int drawn = 0;
         boolean allPacked = lv.packedValid;
         for (int k = 0; k < lv.n; k++) {
             IsoGridSquare sq = lv.squares[k];
             IsoPuddlesGeometry pg = sq.getPuddles();
-            if (!allPacked || pg != lv.pgs[k] || (pg != null && (boolean) geoRecalc.get(pg))) pack(lv, k, pg);
+            if (!allPacked || pg != lv.pgs[k] || (pg != null && (boolean) F.geoRecalc.get(pg))) pack(lv, k, pg);
             if (!lv.shown[k]) continue;
             // Stock order for the per-frame tests: on screen, then the floor's layer
             if (!sq.IsOnScreen()) continue;
@@ -256,12 +271,12 @@ public final class PuddleFrameCache {
         }
         lv.packedValid = true;
         if (drawn > 0) {
-            ((int[]) perLevelField.get(threadData))[z + 32] += drawn;
+            ((int[]) F.perLevelField.get(threadData))[z + 32] += drawn;
             squaresDrawn.addAndGet(drawn);
         }
-        dataField.set(threadData, data);
-        capacityField.set(threadData, cap);
-        numSquaresField.set(threadData, num);
+        F.dataField.set(threadData, data);
+        F.capacityField.set(threadData, cap);
+        F.numSquaresField.set(threadData, num);
     }
 
     // One square's block as the stock walk would pack it without the jiggle; shouldRender runs first since it can
@@ -271,8 +286,8 @@ public final class PuddleFrameCache {
         boolean ok = lv.floors[k] != null && pg != null && pg.shouldRender();
         lv.shown[k] = ok;
         if (!ok) return;
-        float[] x = (float[]) geoX.get(pg), y = (float[]) geoY.get(pg);
-        float[] ne = (float[]) geoNe.get(pg), nw = (float[]) geoNw.get(pg), all = (float[]) geoAll.get(pg), none = (float[]) geoNone.get(pg);
+        float[] x = (float[]) F.geoX.get(pg), y = (float[]) F.geoY.get(pg);
+        float[] ne = (float[]) F.geoNe.get(pg), nw = (float[]) F.geoNw.get(pg), all = (float[]) F.geoAll.get(pg), none = (float[]) F.geoNone.get(pg);
         float[] out = lv.packed;
         int o = k * 32;
         for (int c = 0; c < 4; c++) {

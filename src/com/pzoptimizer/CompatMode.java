@@ -2,7 +2,6 @@ package com.pzoptimizer;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.OperatingSystemMXBean;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -111,18 +110,15 @@ public final class CompatMode {
         return PZOConfig.getCompatMode();
     }
 
+    // Through the exported com.sun.management interface. Reflecting on the bean's own class (the old way) hits the JDK's
+    // internal OperatingSystemImpl, which module rules won't open, so this always came back -1 and the low-RAM check
+    // never fired.
     static double totalRamGb() {
         try {
             OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
-            Method m;
-            try {
-                m = os.getClass().getMethod("getTotalMemorySize");
-            } catch (NoSuchMethodException e) {
-                m = os.getClass().getMethod("getTotalPhysicalMemorySize");
+            if (os instanceof com.sun.management.OperatingSystemMXBean sun) {
+                return sun.getTotalMemorySize() / (1024.0 * 1024.0 * 1024.0);
             }
-            m.setAccessible(true);
-            Object v = m.invoke(os);
-            if (v instanceof Number n) return n.longValue() / (1024.0 * 1024.0 * 1024.0);
         } catch (Throwable ignored) {}
         return -1;
     }
