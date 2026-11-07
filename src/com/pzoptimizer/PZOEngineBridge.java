@@ -11,6 +11,8 @@ public class PZOEngineBridge {
     private static volatile boolean initialized = false;
     // LuaManager.init() builds a fresh env on every Lua reload, which drops the PZOEngine globals
     private static volatile Object boundEnv = null;
+    // Lua state that has the globals but not yet the main menu Lua (bound from the LuaManager.init hook)
+    private static volatile Object globalsEnv = null;
     private static volatile int cachedRamGb = 0;
 
     public static boolean isEnginePresent() {
@@ -607,27 +609,21 @@ public class PZOEngineBridge {
         HardwareProbe.start();
 
         Thread bridgeHookThread = new Thread(() -> {
-            boolean attached = false;
-            // Poll for LuaManager.env during boot (up to 2.5 minutes for heavy modpacks)
-            for (int i = 0; i < 600; i++) {
+            // Backup for the LuaManager.init hook (onLuaEnvCreated). It used to give up after 2.5 minutes, and big
+            // modpacks can take longer than that to reach the menu, which left the Lua mod without the engine for the
+            // whole session. Now it keeps trying, slower after the first minute.
+            for (int i = 0; ; i++) {
+                if (boundEnv != null) break;
                 try {
                     // Lua's tables aren't thread-safe, so the attempt itself runs on the game thread
-                    if (GameThreadQueue.runOnGameThread(PZOEngineBridge::attemptAttach)) {
-                        attached = true;
-                        break;
-                    }
+                    if (GameThreadQueue.runOnGameThread(PZOEngineBridge::attemptAttach)) break;
                 } catch (Throwable ignored) {}
 
                 try {
-                    Thread.sleep(i < 30 ? 100 : 250);
+                    Thread.sleep(i < 30 ? 100 : i < 270 ? 250 : 1000);
                 } catch (InterruptedException ie) {
-                    break;
+                    return;
                 }
-            }
-
-            if (!attached) {
-                PZOLogger.info("[PZO Kahlua Bridge] LuaManager polling finished (Fallback status files active)");
-                return;
             }
 
             while (true) {
@@ -651,8 +647,43 @@ public class PZOEngineBridge {
         bridgeHookThread.start();
     }
 
+    private static boolean initHookFailedLogged = false;
+
+    /**
+     * After every LuaManager.init (agent hook): binds the globals into the new Lua state right away, on the game
+     * thread, before any mod file loads. Waiting for the bridge thread's next poll meant mod files and OnGameStart ran
+     * without PZOEngine, so the Lua mod decided the engine wasn't there and didn't send its settings.
+     */
+    public static void onLuaEnvCreated() {
+        if (!initialized) return;
+        try {
+            // Globals only: the main menu Lua needs the game's own Lua (MainOptions, MainScreen), which isn't loaded
+            // yet. The bridge thread sees a new state and does the full attach once loading is done.
+            attemptAttach(false);
+        } catch (Throwable t) {
+            if (!initHookFailedLogged) {
+                initHookFailedLogged = true;
+                PZOLogger.warn("[PZO Kahlua Bridge] bind on LuaManager.init failed, the bridge thread keeps trying: " + t);
+            }
+        }
+    }
+
+    /** True once the PZO globals are in the current Lua state; for the Lua mod's "check again". */
+    public static boolean isBoundToCurrentEnv() {
+        try {
+            Object env = Class.forName("zombie.Lua.LuaManager").getField("env").get(null);
+            return env != null && (env == boundEnv || env == globalsEnv);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** One attach attempt. Runs on the game thread (GameThreadQueue) because it writes Lua's tables. */
     private static boolean attemptAttach() throws Exception {
+        return attemptAttach(true);
+    }
+
+    private static boolean attemptAttach(boolean withUi) throws Exception {
         // Never touch Lua from another thread, the game thread might be halfway through loading a mod's file. A
         // dedicated server has no GameWindow thread and keeps the queue's fallback.
         Thread gameThread = (Thread) Class.forName("zombie.GameWindow").getField("gameThread").get(null);
@@ -1524,6 +1555,7 @@ public class PZOEngineBridge {
                         rawset.invoke(env, "PZOEngineBridge", pzoTable);
 
                         // Main menu beta opt-in tickbox UI
+                        if (withUi) {
                         try {
                             String luaCode =
                                 "local function addPZOBetaToggle()\n" +
@@ -2083,12 +2115,18 @@ public class PZOEngineBridge {
                         } catch (Throwable t) {
                             PZOLogger.warn("[PZO Kahlua Bridge] Lua mod notice: " + t.getMessage());
                         }
+                        }
                     }
                 }
             } catch (Throwable t) {
                 PZOLogger.warn("[PZO Kahlua Bridge] Table binding warning: " + t.getMessage());
             }
 
+            if (!withUi) {
+                globalsEnv = env;
+                PZOLogger.info("[PZO Kahlua Bridge] PZOEngine globals bound into a new Lua state before mods load");
+                return true;
+            }
             boundEnv = env;
             PZOLogger.success("[PZO Kahlua Bridge] Native Java methods and PZOEngine globals bound to LuaManager.env");
                         return true;

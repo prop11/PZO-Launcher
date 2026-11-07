@@ -13,11 +13,16 @@ import java.util.Set;
  * settings screen and the Lua half of most features. Without it PZO stands down for the launch the same way it does for
  * PZ_Optimization, and a small notice is put on the main menu through the game's own Lua.
  *
- * Decided at startup from files, before any patch goes in, since patches can't be taken out later:
- *  - enabled: Zomboid/mods/default.txt is the main menu's mod list; no file means no mods are on
- *  - installed: the Workshop item next to the game's Steam library, or a local copy under Zomboid/mods or
- *    Zomboid/Workshop
- * Anything I can't read counts as "fine", so a broken check never turns PZO off for a working setup.
+ * Decided at startup from files, before any patch goes in, since patches can't be taken out later. Turning PZO off
+ * by mistake costs a working setup its whole launch, so it only stands down when every check agrees the mod isn't
+ * there:
+ *  - not listed in Zomboid/mods/default.txt (the main menu's list; a save or a server can still turn it on, so being
+ *    unlisted alone is not enough)
+ *  - and not found as a Workshop item in any Steam library (libraryfolders.vdf), nor as a local copy under
+ *    Zomboid/mods or Zomboid/Workshop
+ *  - and at least one Workshop folder was there to look in
+ * Anything else runs normally; if the mod's Lua then never loads, the main menu says so (noticeLua "notloaded").
+ * Anything I can't read counts as "fine".
  *
  * Off with -Dpzo.requireLua=false or "require_lua_mod":false in pzo_config.json.
  */
@@ -37,18 +42,46 @@ public final class LuaModGuard {
 
     /** True when PZO should stay off for this launch. */
     public static boolean shouldStandDown() {
-        return state() != State.OK;
+        return state() == State.NOT_INSTALLED;
     }
+
+    // Runs before the game window, so it gets a hard limit. Past it (a sleeping drive or a network library in
+    // libraryfolders.vdf can take seconds to answer) the answer is "fine": a slow disk must never turn PZO off.
+    static final long CHECK_LIMIT_MS = 2000;
 
     public static synchronized State state() {
         if (cached != null) return cached;
         State s = State.OK;
         try {
-            if (isRequired()) s = detect();
+            if (isRequired()) s = detectWithin(CHECK_LIMIT_MS);
         } catch (Throwable t) {
             PZOLogger.warn("[LuaModGuard] check failed, PZO stays on: " + t);
         }
         cached = s;
+        return s;
+    }
+
+    private static State detectWithin(long limitMs) throws InterruptedException {
+        long start = System.nanoTime();
+        State[] result = { null };
+        Thread t = new Thread(() -> {
+            try {
+                result[0] = detect();
+            } catch (Throwable e) {
+                PZOLogger.warn("[LuaModGuard] check failed, PZO stays on: " + e);
+                result[0] = State.OK;
+            }
+        }, "PZO-LuaModCheck");
+        t.setDaemon(true);
+        t.start();
+        t.join(limitMs);
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        State s = result[0];
+        if (s == null) {
+            PZOLogger.warn("[LuaModGuard] mod check still running after " + ms + " ms (slow disk?), PZO stays on");
+            return State.OK;
+        }
+        if (ms >= 200) PZOLogger.info("[LuaModGuard] mod check took " + ms + " ms");
         return s;
     }
 
@@ -61,7 +94,8 @@ public final class LuaModGuard {
     private static State detect() {
         File zomboid = PZOEngineBridge.getZomboidDir();
         Boolean enabled = isEnabled(new File(zomboid, "mods" + File.separator + "default.txt"));
-        if (enabled == null) return State.OK;
+        // Listed means the player has it, wherever it is installed; unreadable means I can't tell
+        if (enabled == null || enabled) return State.OK;
 
         Set<File> workshopDirs = workshopItemDirs();
         boolean installed = false;
@@ -85,9 +119,13 @@ public final class LuaModGuard {
         }
 
         // Without a Workshop folder to look in I can't tell "not installed" apart from "installed somewhere else"
-        boolean installKnown = installed || !workshopDirs.isEmpty();
-        if (!installed && installKnown) return State.NOT_INSTALLED;
-        return enabled ? State.OK : State.NOT_ENABLED;
+        if (!installed && !workshopDirs.isEmpty()) {
+            PZOLogger.info("[LuaModGuard] mod " + MOD_ID + " not in default.txt and not found in " + workshopDirs);
+            return State.NOT_INSTALLED;
+        }
+        // Installed but not on the main menu's list: a save or server may still turn it on, so PZO runs
+        if (installed) PZOLogger.info("[LuaModGuard] mod installed but not in default.txt; PZO runs, a save or server may enable it");
+        return State.OK;
     }
 
     // null when the list exists but can't be read
@@ -109,17 +147,54 @@ public final class LuaModGuard {
         }
     }
 
-    // <library>/steamapps/workshop/content/108600 for the library the game runs from
+    // <library>/steamapps/workshop/content/108600 for every Steam library I can find: the one above the game folder
+    // (any depth, so the macOS .app layout works too), every library in libraryfolders.vdf, and Steam's usual homes
     private static Set<File> workshopItemDirs() {
-        Set<File> dirs = new LinkedHashSet<>();
+        Set<File> steamapps = new LinkedHashSet<>();
         for (File gameDir : IncompatibleModGuard.candidateGameDirs()) {
-            File common = gameDir.getParentFile();
-            File steamapps = common != null ? common.getParentFile() : null;
-            if (steamapps == null) continue;
-            File ws = new File(steamapps, "workshop" + File.separator + "content" + File.separator + "108600");
+            for (File f = gameDir; f != null; f = f.getParentFile()) {
+                if (f.getName().equalsIgnoreCase("steamapps")) {
+                    steamapps.add(f);
+                    break;
+                }
+            }
+        }
+        String home = System.getProperty("user.home", "");
+        String[] roots = {
+            System.getenv("ProgramFiles(x86)") == null ? null : System.getenv("ProgramFiles(x86)") + File.separator + "Steam",
+            System.getenv("ProgramFiles") == null ? null : System.getenv("ProgramFiles") + File.separator + "Steam",
+            home + "/.steam/steam", home + "/.local/share/Steam", home + "/.var/app/com.valvesoftware.Steam/.local/share/Steam",
+            home + "/Library/Application Support/Steam",
+        };
+        for (String r : roots) {
+            if (r == null) continue;
+            File sa = new File(r, "steamapps");
+            if (sa.isDirectory()) steamapps.add(sa);
+        }
+        for (File sa : new java.util.ArrayList<>(steamapps)) {
+            for (File lib : libraryFolders(new File(sa, "libraryfolders.vdf"))) {
+                File more = new File(lib, "steamapps");
+                if (more.isDirectory()) steamapps.add(more);
+            }
+        }
+        Set<File> dirs = new LinkedHashSet<>();
+        for (File sa : steamapps) {
+            File ws = new File(sa, "workshop" + File.separator + "content" + File.separator + "108600");
             if (ws.isDirectory()) dirs.add(ws);
         }
         return dirs;
+    }
+
+    // The "path" entries of Steam's libraryfolders.vdf
+    private static Set<File> libraryFolders(File vdf) {
+        Set<File> out = new LinkedHashSet<>();
+        if (!vdf.isFile()) return out;
+        try {
+            String text = Files.readString(vdf.toPath(), StandardCharsets.UTF_8);
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"path\"\\s+\"([^\"]+)\"").matcher(text);
+            while (m.find()) out.add(new File(m.group(1).replace("\\\\", "\\")));
+        } catch (Throwable ignored) {}
+        return out;
     }
 
     // A mods folder holding the mod, by folder name or by the id in any mod.info one level down (B41 root or 42/)

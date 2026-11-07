@@ -856,6 +856,11 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched LuaManager.RunLuaInternal: compiled Lua kept between launches");
                     lm = lc;
                 }
+                byte[] li = AsmSupport.transform(lm != null ? lm : classfileBuffer, loader, "LuaManager init bind", LuaInitHook::patchLuaManager);
+                if (li != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched LuaManager.init: PZO globals bound into every new Lua state before mods load");
+                    lm = li;
+                }
                 return lm;
             }
             if ("zombie/FliesSound$ChunkLevelData".equals(className) && classfileBuffer != null) {
