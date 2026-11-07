@@ -877,6 +877,13 @@ public class PZOptimAgent {
                 }
                 return be;
             }
+            if ("zombie/iso/objects/IsoTree".equals(className) && classfileBuffer != null) {
+                byte[] tr = AsmSupport.transform(classfileBuffer, loader, "IsoTree room guard", TreeRoomGuard::patchTree);
+                if (tr != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoTree.isPlayerInsideARoom: no crash when the player's square has no room");
+                }
+                return tr;
+            }
             if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null) {
                 byte[] mip = AsmSupport.transform(classfileBuffer, loader, "FBORenderChunk mip levels", ChunkMipLimit::patchRenderChunk);
                 if (mip != null) {
