@@ -89,6 +89,9 @@ public final class LiveProfiler {
     private static int recFrames;
     private static final double[] recParts = new double[8];
     private static double recGcMax;
+    // The game's own frame limit when the recording started, for the smart FPS cap analysis
+    private static boolean recUncapped;
+    private static int recLockFps, recRefreshHz;
     // Running estimate of the 99th percentile frame time, from a histogram of 0.1 ms bins up to 250 ms
     private static final int[] hist = new int[2501];
     private static int histCount;
@@ -431,6 +434,14 @@ public final class LiveProfiler {
         recFrames = 0;
         Arrays.fill(recParts, 0);
         recGcMax = 0;
+        try {
+            recUncapped = zombie.core.PerformanceSettings.instance.isFramerateUncapped();
+            recLockFps = zombie.core.PerformanceSettings.getLockFPS();
+        } catch (Throwable t) {
+            recUncapped = true;
+            recLockFps = 0;
+        }
+        recRefreshHz = SmartFpsCap.refreshHz();
         Arrays.fill(hist, 0);
         histCount = 0;
         p99Cached = Double.MAX_VALUE;
@@ -570,6 +581,7 @@ public final class LiveProfiler {
             .append(fmt((double) ctxAnimals / cs)).append('\t').append(ctxAnimalsMax).append('\t')
             .append(fmt(100.0 * ctxDriving / cs)).append('\t').append(fmt(100.0 * ctxRaining / cs)).append('\t')
             .append(fmt(100.0 * ctxHeapPeak)).append('\t').append(Runtime.getRuntime().maxMemory() >> 20).append('\n');
+        sb.append(SmartFpsCap.line(recMs, recFrames, recUncapped, recLockFps, recRefreshHz)).append('\n');
         // Timeline: the longest frame in each of 120 equal slices of the recorded time
         double total = 0;
         for (int i = 0; i < recFrames; i++) total += recMs[i];
@@ -660,6 +672,9 @@ public final class LiveProfiler {
                         case "C" -> w.println(String.format(Locale.ROOT,
                             "Scene: zombies %s average (%s at most), animals %s average (%s at most), driving %s%% of the time, raining %s%%, Java heap peak %s%% of %s MB",
                             c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]));
+                        case "K" -> w.println(String.format(Locale.ROOT,
+                            "Smart FPS cap: %s (steady %s FPS, median %s FPS, %s hitch frames for %s s, refresh %s Hz, game limit during recording %s, %s)",
+                            "0".equals(c[1]) ? "none" : c[1] + " FPS", c[2], c[3], c[4], c[5], c[6], "0".equals(c[7]) ? "off" : c[7], c[8]));
                         case "F" -> w.println(String.format(Locale.ROOT,
                             "  slow frame at %s s: %s ms (update %s, chunks %s%s, Lua %s, render %s, other %s, GC %s%s)%s",
                             c[1], c[2], c[3], c[4], c.length > 12 ? " incl. mod map-load scripts " + c[12] : "", c[5], c[6], c[7], c[8], "1".equals(c[9]) ? ", saving" : "",
