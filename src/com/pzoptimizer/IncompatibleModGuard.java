@@ -16,10 +16,34 @@ public final class IncompatibleModGuard {
     private static volatile Boolean cachedDetected = null;
     private static volatile File detectedMarker = null;
     private static volatile boolean warningShown = false;
+    private static volatile boolean scanned = false;
+    private static final Object CLEARANCE = new Object();
+    private static volatile Object granted = null;
 
     private IncompatibleModGuard() {}
 
+    static synchronized Object clearance() {
+        Object g = granted;
+        if (g != null) return g;
+        if (isPzOptimizationInstalled() || !StartupIntegrity.verify()) return null;
+        granted = CLEARANCE;
+        return CLEARANCE;
+    }
+
+    static boolean cleared(Object token) {
+        return token != null && token == CLEARANCE && granted == CLEARANCE;
+    }
+
+    static boolean hasScanned() {
+        return scanned;
+    }
+
+    static boolean detectsIn(File dir) {
+        return findPzOptimizationMarker(dir) != null;
+    }
+
     public static boolean isPzOptimizationInstalled() {
+        scanned = true;
         Boolean cached = cachedDetected;
         if (cached != null) return cached;
 

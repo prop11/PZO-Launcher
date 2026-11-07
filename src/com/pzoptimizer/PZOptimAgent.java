@@ -20,6 +20,11 @@ public class PZOptimAgent {
             PZOLogger.warn("[PZO Agent] Incompatible mod installed: no transformer registered, agent idle.");
             return;
         }
+        if (!StartupIntegrity.verify()) {
+            StartupIntegrity.reportAndStandDown();
+            PZOLogger.warn("[PZO Agent] Startup check failed: no transformer registered, agent idle.");
+            return;
+        }
         if (BenchmarkHarness.isStockBaselineRequested()) {
             // Only the benchmark's render thread timer goes in, so stock and PZO runs get measured the same way
             inst.addTransformer(new java.lang.instrument.ClassFileTransformer() {
@@ -43,7 +48,7 @@ public class PZOptimAgent {
         try {
             // Load this before the transformer exists, since it calls into it for every class
             ClassSightings.note("");
-            inst.addTransformer(new EngineTransformer(), true);
+            inst.addTransformer(new EngineTransformer(IncompatibleModGuard.clearance()), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
 
             if (inst.isRetransformClassesSupported()) {
@@ -170,9 +175,16 @@ public class PZOptimAgent {
     }
 
     static class EngineTransformer implements ClassFileTransformer {
+        private final boolean live;
+
+        EngineTransformer(Object token) {
+            live = IncompatibleModGuard.cleared(token);
+        }
+
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                  ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+            if (!live) return null;
             if (className != null && className.startsWith("reallimbs/")) {
                 RealLimbsCompat.noteLoader(loader);
                 return null;

@@ -600,6 +600,7 @@ public class PZOEngineBridge {
 
     public static synchronized void initialize() {
         if (initialized) return;
+        if (!IncompatibleModGuard.cleared(IncompatibleModGuard.clearance())) return;
         initialized = true;
 
         cachedRamGb = getOptimizedRAM();
