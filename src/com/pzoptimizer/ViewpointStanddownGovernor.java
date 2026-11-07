@@ -178,6 +178,40 @@ public final class ViewpointStanddownGovernor {
         return modDetected || checkDetection();
     }
 
+    private static volatile Field viewEnabled;
+    private static volatile boolean viewLookupFailed;
+
+    /**
+     * Whether Viewpoint is drawing its own 3D view (first or third person) rather than the game's isometric one. When
+     * I can't tell (class not seen yet, or another Viewpoint version without viewpoint.core.View.enabled) this says
+     * true, so callers keep the full stand-down.
+     */
+    public static boolean isOwnViewActive() {
+        if (viewLookupFailed) return true;
+        Field f = viewEnabled;
+        if (f == null) {
+            ClassLoader loader = ClassSightings.viewpointLoader;
+            if (loader == null) return true;
+            try {
+                f = Class.forName("viewpoint.core.View", false, loader).getField("enabled");
+                if (f.getType() != boolean.class || !java.lang.reflect.Modifier.isStatic(f.getModifiers())) {
+                    throw new NoSuchFieldException("enabled is not a static boolean");
+                }
+                viewEnabled = f;
+            } catch (Throwable t) {
+                viewLookupFailed = true;
+                PZOLogger.info("[ViewpointStanddownGovernor] Viewpoint's view flag not found (" + t + "), treating its view as always on");
+                return true;
+            }
+        }
+        try {
+            return f.getBoolean(null);
+        } catch (Throwable t) {
+            viewLookupFailed = true;
+            return true;
+        }
+    }
+
     public static boolean isViewpointDetected() {
         return modDetected || checkDetection();
     }

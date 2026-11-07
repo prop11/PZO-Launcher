@@ -191,7 +191,7 @@ public class PZOptimAgent {
             }
             if (className != null && classBeingRedefined == null && !className.startsWith("zombie/")
                     && !className.startsWith("com/pzoptimizer/")) {
-                ClassSightings.note(className);
+                ClassSightings.note(className, loader);
             }
             AsmSupport.REDEFINING.set(classBeingRedefined);
             byte[] specific;
