@@ -191,6 +191,10 @@ public class UpdateDialog {
             showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", IncompatibleModGuard.warningMessage());
             devResult("PZ_Optimization warning", "closed");
         }
+        if (all || flags.contains("-pzo_startupbox")) {
+            showWarningNotice("Project Zomboid Optimiser - Startup Error", StartupIntegrity.message("PZO-S0"));
+            devResult("startup check error", "closed");
+        }
         if (all || flags.contains("-pzo_noticebox")) {
             showNoticePopup("Update Notice", "Dev preview of the update failure notice.\nPlease update manually using install.bat / pzo_optimizer.sh.");
             devResult("update notice", "closed");

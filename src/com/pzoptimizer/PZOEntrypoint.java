@@ -37,6 +37,12 @@ public class PZOEntrypoint {
             launchGame(args);
             return;
         }
+        if (!StartupIntegrity.verify()) {
+            StartupIntegrity.reportAndStandDown();
+            launchGame(args);
+            return;
+        }
+        Object clearance = IncompatibleModGuard.clearance();
 
         if (BenchmarkHarness.isStockBaselineRequested()) {
             PZOLogger.info("[PZO] Stock baseline benchmark run: no PZO patches or governors, harness only.");
@@ -52,6 +58,10 @@ public class PZOEntrypoint {
             return;
         }
 
+        if (!IncompatibleModGuard.cleared(clearance)) {
+            launchGame(args);
+            return;
+        }
         System.setProperty("pzo.optimized", "true");
         System.setProperty("pzo.target", "Build42");
         LogSpamShield.initialize();

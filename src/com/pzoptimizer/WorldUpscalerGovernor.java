@@ -174,13 +174,16 @@ public final class WorldUpscalerGovernor {
 
     /** Scale the world should render at next frame (1.0 = native, no upscale). */
     public static float getEffectiveScale() {
-        if (!WorldRenderScale.isInstalled() || !isActive() || "native".equals(upscalerMode)) {
+        if (!WorldRenderScale.isInstalled() || !isActive() || "native".equals(upscalerMode) || viewpointHold) {
             return 1.0f;
         }
         return renderScale;
     }
 
     private static int lastQueuedFrame = Integer.MIN_VALUE;
+
+    // Set on the game thread, read by WorldUpscaleRenderer on the render thread through getEffectiveScale
+    private static volatile boolean viewpointHold = false;
 
     /**
      * Redirect target for Core.RenderOffScreenBuffer(). Queues the FSR pass on the render thread right before the world
@@ -189,8 +192,23 @@ public final class WorldUpscalerGovernor {
     public static void renderOffScreenBuffer(Object core) {
         try {
             if (WorldRenderScale.isInstalled()) {
+                // In its own 3D view Viewpoint 0.1.7 draws frames between its 30 Hz game steps only while every drawer
+                // in the frame is one of its own; with the FSR pass in there it drops to one frame per step (30 FPS).
+                // Its scene is also drawn by its own GL code, which my render-scale wrappers don't scale, and it has
+                // its own upscalers there. So in that view FSR goes back to native and I stop queuing the pass once
+                // the render thread is at native scale (otherwise the last shrunk frame would go out without its
+                // upscale). Its isometric view is the game's own rendering, so FSR stays on there.
+                boolean hold = ViewpointStanddownGovernor.isStanddownActive()
+                    && ViewpointStanddownGovernor.isOwnViewActive();
+                if (hold != viewpointHold) {
+                    viewpointHold = hold;
+                    PZOLogger.info(hold
+                        ? "[WorldUpscalerGovernor] Viewpoint 3D view: FSR held at native (use Viewpoint's own upscaler settings there)"
+                        : "[WorldUpscalerGovernor] Viewpoint isometric view or no Viewpoint: FSR on");
+                }
                 int frame = zombie.iso.IsoCamera.frameState.frameCount;
-                if (frame != lastQueuedFrame) {
+                boolean idle = hold && WorldRenderScale.getRenderThreadScale() >= 0.999f;
+                if (frame != lastQueuedFrame && !idle) {
                     lastQueuedFrame = frame;
                     zombie.core.SpriteRenderer.instance.drawGeneric(WorldUpscaleRenderer.INSTANCE);
                 }

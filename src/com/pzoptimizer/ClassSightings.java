@@ -7,8 +7,17 @@ package com.pzoptimizer;
 public final class ClassSightings {
 
     public static volatile boolean viewpointLoaded;
+    // Loader of Viewpoint's own classes (ZombieBuddy's), so its View flag can be looked up by name
+    public static volatile ClassLoader viewpointLoader;
 
     private ClassSightings() {}
+
+    static void note(String internalName, ClassLoader loader) {
+        if (loader != null && viewpointLoader == null && internalName.startsWith("viewpoint/")) {
+            viewpointLoader = loader;
+        }
+        note(internalName);
+    }
 
     static void note(String internalName) {
         if (internalName.startsWith("viewpoint/") || internalName.startsWith("com/viewpoint/")
