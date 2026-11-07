@@ -185,6 +185,7 @@ public final class LuaEventPatches {
     /** Forgets which handlers are mods' ones; ModApi calls it when a mod's exemption changes. */
     static void clearModCache() {
         modPrototypeCache.clear();
+        MapLoadScriptPacer.clearCache();
     }
 
     // Mods whose handlers have to run on every event, matched on the lower-cased script path (other mods ask through
@@ -269,6 +270,9 @@ public final class LuaEventPatches {
     public static void call(se.krka.kahlua.integration.LuaCaller caller, se.krka.kahlua.vm.KahluaThread thread, Object closure,
                             Object[] params) {
         String event = depth > 0 && depth <= eventStack.length ? eventStack[depth - 1] : "?";
+
+        // Mod LoadGridsquare handlers: queued and run after the chunk update under a time budget
+        if (MapLoadScriptPacer.defer(caller, thread, closure, event, params)) return;
 
         // Mod OnTick / OnPlayerUpdate at 60 Hz, spread over frames
         if (modPaced && isModClosure(closure)) {

@@ -270,6 +270,8 @@ public class PZOEngineBridge {
                 LuaEventPatches.modPaced = value;
             } else if ("Mod_ZombieScriptLOD".equals(key) || "JVM_ModZombieScriptLOD".equals(key)) {
                 LuaEventPatches.zombieLod = value;
+            } else if ("Mod_SpreadMapLoadScripts".equals(key)) {
+                MapLoadScriptPacer.active = value;
             } else if ("JVM_VRRDisplayGovernor".equals(key)) {
                 VRRDisplayGovernor.setActive(value);
             } else if ("JVM_WorldUpscaler".equals(key)) {

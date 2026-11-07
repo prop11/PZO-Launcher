@@ -57,6 +57,9 @@ public final class ModApi {
                 return Boolean.valueOf(invalidate(a == null ? "" : a.toString()));
             case "apiVersion":
                 return Double.valueOf(API_VERSION);
+            case "mapLoadExempt":
+                MapLoadScriptPacer.setExemptPaths(a == null ? "" : a.toString());
+                return Boolean.TRUE;
             default:
                 return Boolean.FALSE;
         }

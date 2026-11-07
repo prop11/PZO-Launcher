@@ -80,14 +80,14 @@ public final class LiveProfiler {
     // Rolling 2 s window for the overlay's breakdown and top mods
     private static long windowStart;
     private static int windowFrames;
-    private static final double[] windowParts = new double[7];
+    private static final double[] windowParts = new double[8];
     private static String windowSnapshot = "";
 
     // Recording
     private static final int MAX_FRAMES = 1 << 20;
     private static float[] recMs = new float[4096];
     private static int recFrames;
-    private static final double[] recParts = new double[7];
+    private static final double[] recParts = new double[8];
     private static double recGcMax;
     // Running estimate of the 99th percentile frame time, from a histogram of 0.1 ms bins up to 250 ms
     private static final int[] hist = new int[2501];
@@ -142,11 +142,13 @@ public final class LiveProfiler {
     public static void chunkUpdate(zombie.iso.IsoChunkMap map) {
         if (!on) {
             map.update();
+            MapLoadScriptPacer.drain();
             return;
         }
         chunkBegin();
         try {
             map.update();
+            MapLoadScriptPacer.drain();
         } finally {
             chunkEnd();
         }
@@ -250,7 +252,9 @@ public final class LiveProfiler {
         double update = Math.max(0, (logicNs - chunkNs - luaLogicNs) / 1e6);
         double render = Math.max(0, (renderNs - luaRenderNs) / 1e6);
         double other = Math.max(0, ms - logicNs / 1e6 - renderNs / 1e6);
-        double[] parts = {update, chunks, luaMs, render, other, gc, presentMsSinceLast()};
+        // Last on purpose: readers that expect seven parts ignore it. Mod Lua run inside the chunk update (LoadGridsquare)
+        // is part of "chunks"; this says how much of it
+        double[] parts = {update, chunks, luaMs, render, other, gc, presentMsSinceLast(), luaChunkNs / 1e6};
 
         ringEnd[ringHead] = now;
         ringMs[ringHead] = (float) ms;
@@ -337,12 +341,13 @@ public final class LiveProfiler {
 
     private static void keepIfSlowest(long now, double ms, double[] parts) {
         if (slowest.size() == SLOW_KEEP && ms <= slowest.get(SLOW_KEEP - 1)[1]) return;
-        double[] row = new double[10];
+        double[] row = new double[11];
         row[0] = (now - recordStartNs) / 1e9;
         row[1] = ms;
         System.arraycopy(parts, 0, row, 2, 6);
         row[8] = savedThisFrame ? 1 : 0;
         row[9] = frameTopNs / 1e6;
+        row[10] = parts[7];
         String top = frameTop == null ? "" : frameTop.mod + "  " + frameTop.event + " " + shortWhere(frameTop.where);
         int at = 0;
         while (at < slowest.size() && slowest.get(at)[1] >= ms) at++;
@@ -581,8 +586,9 @@ public final class LiveProfiler {
         for (int i = 0; i < slowest.size(); i++) {
             double[] r = slowest.get(i);
             sb.append('F');
-            for (double v : r) sb.append('\t').append(fmt(v));
-            sb.append('\t').append(clean(slowestTop.get(i))).append('\n');
+            for (int j = 0; j < 10; j++) sb.append('\t').append(fmt(r[j]));
+            // Mod map-load Lua goes after the top handler so older readers keep their field positions
+            sb.append('\t').append(clean(slowestTop.get(i))).append('\t').append(fmt(r[10])).append('\n');
         }
         // Each mod: ms per frame, share of the time spent in the slowest 1% of frames, calls, its costliest handler
         HashMap<String, double[]> byMod = new HashMap<>();
@@ -645,15 +651,18 @@ public final class LiveProfiler {
                         case "S" -> w.println(String.format(Locale.ROOT,
                             "%s s, %s frames: %s FPS average, 1%% low %s FPS, 99th percentile %s ms, worst %s ms, %s frames over 33 ms, GC pauses %s ms in total (longest %s ms)",
                             c[7], c[6], c[1], c[2], c[3], c[4], c[5], c[8], c[9]));
-                        case "B" -> w.println(String.format(Locale.ROOT,
-                            "Per frame: update %s ms, chunk streaming %s ms, Lua events %s ms, render %s ms, other/waiting %s ms, GC %s ms; render thread present %s ms",
-                            c[1], c[2], c[3], c[4], c[5], c[6], c[7]));
+                        case "B" -> {
+                            w.println(String.format(Locale.ROOT,
+                                "Per frame: update %s ms, chunk streaming %s ms (of which other mods' map-load scripts %s ms), Lua events %s ms, render %s ms, other/waiting %s ms, GC %s ms; render thread present %s ms",
+                                c[1], c[2], c.length > 8 ? c[8] : "?", c[3], c[4], c[5], c[6], c[7]));
+                            w.println(MapLoadScriptPacer.summary());
+                        }
                         case "C" -> w.println(String.format(Locale.ROOT,
                             "Scene: zombies %s average (%s at most), animals %s average (%s at most), driving %s%% of the time, raining %s%%, Java heap peak %s%% of %s MB",
                             c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]));
                         case "F" -> w.println(String.format(Locale.ROOT,
-                            "  slow frame at %s s: %s ms (update %s, chunks %s, Lua %s, render %s, other %s, GC %s%s)%s",
-                            c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], "1".equals(c[9]) ? ", saving" : "",
+                            "  slow frame at %s s: %s ms (update %s, chunks %s%s, Lua %s, render %s, other %s, GC %s%s)%s",
+                            c[1], c[2], c[3], c[4], c.length > 12 ? " incl. mod map-load scripts " + c[12] : "", c[5], c[6], c[7], c[8], "1".equals(c[9]) ? ", saving" : "",
                             c.length > 11 && !c[11].isEmpty() ? "  top Lua: " + c[11] + " " + c[10] + " ms" : ""));
                         case "M" -> w.println(String.format(Locale.ROOT, "  %-40s %8s ms/frame  %6s%% of slowest 1%%  %10s calls  %s",
                             c[1], c[2], c[3], c[4], c.length > 5 ? c[5] : ""));
