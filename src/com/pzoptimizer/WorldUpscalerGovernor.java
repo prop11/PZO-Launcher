@@ -174,13 +174,16 @@ public final class WorldUpscalerGovernor {
 
     /** Scale the world should render at next frame (1.0 = native, no upscale). */
     public static float getEffectiveScale() {
-        if (!WorldRenderScale.isInstalled() || !isActive() || "native".equals(upscalerMode)) {
+        if (!WorldRenderScale.isInstalled() || !isActive() || "native".equals(upscalerMode) || viewpointHold) {
             return 1.0f;
         }
         return renderScale;
     }
 
     private static int lastQueuedFrame = Integer.MIN_VALUE;
+
+    // Set on the game thread, read by WorldUpscaleRenderer on the render thread through getEffectiveScale
+    private static volatile boolean viewpointHold = false;
 
     /**
      * Redirect target for Core.RenderOffScreenBuffer(). Queues the FSR pass on the render thread right before the world
@@ -189,8 +192,20 @@ public final class WorldUpscalerGovernor {
     public static void renderOffScreenBuffer(Object core) {
         try {
             if (WorldRenderScale.isInstalled()) {
+                // Viewpoint 0.1.7 draws its own frames between its 30 Hz game steps only while every drawer in the
+                // frame is one of its own; with the FSR pass in there it drops to one frame per step (30 FPS). It has
+                // its own upscaler, so FSR goes back to native and I stop queuing the pass once the render thread is
+                // at native scale (otherwise the last shrunk frame would go out without its upscale).
+                boolean hold = ViewpointStanddownGovernor.isStanddownActive();
+                if (hold != viewpointHold) {
+                    viewpointHold = hold;
+                    PZOLogger.info(hold
+                        ? "[WorldUpscalerGovernor] Viewpoint detected: FSR held at native so Viewpoint can draw frames between game steps"
+                        : "[WorldUpscalerGovernor] Viewpoint stand-down off: FSR back on");
+                }
                 int frame = zombie.iso.IsoCamera.frameState.frameCount;
-                if (frame != lastQueuedFrame) {
+                boolean idle = hold && WorldRenderScale.getRenderThreadScale() >= 0.999f;
+                if (frame != lastQueuedFrame && !idle) {
                     lastQueuedFrame = frame;
                     zombie.core.SpriteRenderer.instance.drawGeneric(WorldUpscaleRenderer.INSTANCE);
                 }
