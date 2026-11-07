@@ -49,9 +49,11 @@ public final class ThreadLocalFastPath {
         return v;
     }
 
-    // By name, because GameProfiler gets used before GameWindow (which holds the game thread) may be initialised
+    // By name, because GameProfiler gets used before GameWindow (which holds the game thread) may be initialised.
+    // EngineThreadGovernor renames it once the main loop runs, so the depth slot (first read in game) needs both.
     private static boolean isGameThread(Thread t) {
-        return "MainThread".equals(t.getName());
+        String n = t.getName();
+        return "MainThread".equals(n) || "PZO-MainSimulationThread".equals(n);
     }
 
     static boolean patchProfiler(ClassNode node) {

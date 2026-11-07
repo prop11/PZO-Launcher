@@ -29,12 +29,21 @@ public final class LuaLookupTrace {
         Thread t = Thread.currentThread();
         StringBuilder sb = new StringBuilder();
         sb.append("[LuaLookupTrace] getFunctionObject(\"").append(name).append("\") returned null on thread '").append(t.getName())
-            .append("'").append("MainThread".equals(t.getName()) ? " (game thread)" : " (NOT the game thread)").append(":");
+            .append("'").append(isGameThread(t) ? " (game thread)" : " (NOT the game thread)").append(":");
         for (StackTraceElement e : new Throwable().getStackTrace()) {
             sb.append("\n    at ").append(e);
         }
         PZOLogger.warn(sb.toString());
         return value;
+    }
+
+    // By identity, not name: PZO renames the game's main thread to PZO-MainSimulationThread
+    private static boolean isGameThread(Thread t) {
+        try {
+            Thread main = zombie.MainThread.mainThread;
+            if (main != null) return t == main;
+        } catch (Throwable ignored) {}
+        return "MainThread".equals(t.getName()) || "PZO-MainSimulationThread".equals(t.getName());
     }
 
     static boolean patchLuaManager(ClassNode node) {

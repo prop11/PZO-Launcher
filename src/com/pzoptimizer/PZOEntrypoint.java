@@ -87,7 +87,8 @@ public class PZOEntrypoint {
             TelemetryReporter.refreshDiscoveredDirectories(args);
             long maxMemMB = Runtime.getRuntime().maxMemory() / (1024 * 1024);
             int ramGb = Math.max(2, (int) Math.round(maxMemMB / 1024.0));
-            String json = String.format("{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\",\"native\":%s,\"timer_ms\":%.2f}",
+            // Locale.ROOT: a decimal-comma locale wrote "timer_ms":0,50 and broke the JSON
+            String json = String.format(java.util.Locale.ROOT, "{\"optimized\":true,\"ram_gb\":%d,\"g1gc\":true,\"pretouch\":true,\"version\":\"%s\",\"native\":%s,\"timer_ms\":%.2f}",
                 ramGb, UpdateChecker.CURRENT_VERSION, isNative ? "true" : "false", timerMs);
             TelemetryReporter.writeStatusFile(json);
             PZOLogger.info("Broadcast live engine status bridge across all user drives and cachedir paths (RAM: " + ramGb + "GB | Native: " + isNative + ")");
