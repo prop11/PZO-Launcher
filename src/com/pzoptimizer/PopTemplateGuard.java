@@ -3,13 +3,58 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Guards HumanVisual and CharacterCreationMain against out-of-range PopTemplateManager lists. */
 public class PopTemplateGuard {
 
     private static volatile boolean initialized = false;
     private static volatile sun.misc.Unsafe unsafeInstance = null;
+
+    private static final String[] SKIN_FIELDS = {
+        "maleSkins", "femaleSkins", "maleSkinsZombie1", "femaleSkinsZombie1", "maleSkinsZombie2", "femaleSkinsZombie2",
+        "maleSkinsZombie3", "femaleSkinsZombie3", "skeletonMaleSkinsZombie", "skeletonFemaleSkinsZombie", "cowSkins", "ratSkins"
+    };
+    private static final Map<String, List<String>> earlyFill = new HashMap<>();
+    private static boolean guardCallingInit = false;
+    private static boolean gameInitStarted = false;
+
+    // PopTemplateManager.init only appends, so anything I filled early would be doubled by the game's own call.
+    // 10 skins against the character screen's 5 colours is the disableBtn error on the Random button.
+    public static boolean patchPopTemplateManager(com.pzoptimizer.shaded.asm.tree.ClassNode node) {
+        com.pzoptimizer.shaded.asm.tree.MethodNode init = AsmSupport.findMethod(node, "init", "()V");
+        if (init == null) return false;
+        AsmSupport.prependCall(init, "com/pzoptimizer/PopTemplateGuard", "beforeGameInit", "(Ljava/lang/Object;)V");
+        return true;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static synchronized void beforeGameInit(Object ptm) {
+        if (guardCallingInit) return;
+        gameInitStarted = true;
+        try {
+            // Takes back only what I added, one entry each, so skins from mods stay
+            for (Map.Entry<String, List<String>> e : earlyFill.entrySet()) {
+                List<String> list = (List<String>) ptm.getClass().getField(e.getKey()).get(ptm);
+                if (list != null) {
+                    for (String skin : e.getValue()) list.remove(skin);
+                }
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[PopTemplateGuard] Could not undo the early skin fill: " + t);
+        }
+        earlyFill.clear();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void rememberEarlyFill(Object ptm) throws ReflectiveOperationException {
+        for (String field : SKIN_FIELDS) {
+            List<String> list = (List<String>) ptm.getClass().getField(field).get(ptm);
+            if (list != null) earlyFill.put(field, new ArrayList<>(list));
+        }
+    }
 
     private static void obtainUnsafe() {
         if (unsafeInstance != null) return;
@@ -60,12 +105,16 @@ public class PopTemplateGuard {
                 Field maleField = ptmClass.getField("maleSkins");
                 List<String> maleSkins = (List<String>) maleField.get(ptm);
 
-                if (maleSkins == null || maleSkins.isEmpty()) {
+                if (!gameInitStarted && (maleSkins == null || maleSkins.isEmpty())) {
+                    guardCallingInit = true;
                     try {
                         Method initMethod = ptmClass.getMethod("init");
                         initMethod.invoke(ptm);
+                        rememberEarlyFill(ptm);
                     } catch (Throwable t) {
                         PZOLogger.warn("[PopTemplateGuard] PopTemplateManager.init() fallback: " + t.getMessage());
+                    } finally {
+                        guardCallingInit = false;
                     }
                 }
 
@@ -235,11 +284,14 @@ public class PopTemplateGuard {
                 list = new ArrayList<>();
                 f.set(ptm, list);
             }
-            if (list.isEmpty()) {
+            if (list.isEmpty() && !gameInitStarted) {
+                List<String> added = new ArrayList<>();
                 for (int i = 1; i <= expectedSize; i++) {
                     String val = defaultPrefix.endsWith("01") ? defaultPrefix.substring(0, defaultPrefix.length() - 2) + String.format("%02d", i) : defaultPrefix;
                     list.add(val);
+                    added.add(val);
                 }
+                earlyFill.put(fieldName, added);
             }
         } catch (Throwable ignored) {}
     }

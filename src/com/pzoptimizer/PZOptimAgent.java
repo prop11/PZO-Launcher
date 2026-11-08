@@ -831,6 +831,13 @@ public class PZOptimAgent {
                 }
                 return ap;
             }
+            if ("zombie/core/skinnedmodel/population/PopTemplateManager".equals(className) && classfileBuffer != null) {
+                byte[] pt = AsmSupport.transform(classfileBuffer, loader, "PopTemplateManager.init", PopTemplateGuard::patchPopTemplateManager);
+                if (pt != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched PopTemplateManager.init: skin lists no longer doubled by the early fill");
+                }
+                return pt;
+            }
             if ("zombie/core/skinnedmodel/advancedanimation/AnimatedModel$AnimatedModelInstanceRenderData".equals(className) && classfileBuffer != null) {
                 byte[] st = BytecodeRedirect.virtualToStatic(classfileBuffer,
                     "org/lwjgl/util/vector/Matrix4f", "store", "(Ljava/nio/FloatBuffer;)Lorg/lwjgl/util/vector/Matrix;",
