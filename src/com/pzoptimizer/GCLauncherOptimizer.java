@@ -90,9 +90,8 @@ public final class GCLauncherOptimizer {
                     changed = true;
                     continue; // drop the bad flag
                 }
-                if (s.contains(" ")) {
-                    // Split back up any args that got joined with spaces
-                    String[] tokens = s.split("\\s+");
+                List<String> tokens = ZomboidConfigMigrator.splitJoinedArgs(s);
+                if (tokens.size() > 1) {
                     for (String tok : tokens) {
                         if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
                             vmArgs.add(tok);
