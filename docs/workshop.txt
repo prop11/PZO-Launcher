@@ -1,14 +1,16 @@
-[h1]Project Zomboid Optimiser (Build 42 & Build 41)[/h1]
+[h1]Project Zomboid Optimiser (Build 42)[/h1]
+
+
 
 [hr][/hr]
-[url=https://prop11.github.io/PZO-Launcher/index.html][h2]Evidence of mod theft[/h2]
+[url=https://github.com/prop11/PZO-Launcher/blob/main/docs/MODDING_API.md][h2]Mod Author? Want to add PZO Compatability? Click Here[/h2]
 [/url]
- 
+
 
 [hr][/hr]
 [h1]DOWNLOAD THE OPTIONAL JAVA ENGINE / LAUNCHER ON GITHUB HERE (RECOMMENDED):[/h1]
 [url=https://github.com/prop11/PZO-Launcher/releases][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_download_button.gif[/img][/url]
-[url=https://github.com/prop11/PZO-Launcher][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_repo_button.png[/img][/url]
+[url=https://github.com/prop11/PZO-Launcher/wiki/Client-Installation][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/github_repo_button.png[/img][/url]
 [b]IMPORTANT:[/b] Steam Workshop only allows Lua/media files! To get the [b]Multi-Threaded Java Engine, Native AVX2/SIMD C++ Accelerator, Bytecode Patches, and Automatic RAM/GC Optimizer[/b], click the giant GitHub buttons above and download the latest release!
 [hr][/hr]
 
@@ -18,7 +20,7 @@
 It dynamically mitigates game engine bottlenecks, reduces memory fragmentation, eliminates combat micro-hitches, optimizes vehicle streaming, and includes an in-game [b]F10 Control Center[/b] with 7 dedicated configuration tabs.
 [hr][/hr]
 [h2]Benchmark[/h2]
-[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/339eadb95e33396ccd1c420f7b261a90563bb536/docs/benchmarks.svg[/img]
+[img]https://raw.githubusercontent.com/prop11/PZO-Launcher/37aae495e64f8b4302b9418b2401aedd6b0c2c51/docs/benchmark_b42_22_pzo_158.svg[/img]
 [hr][/hr]
 [img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/01_framerate_and_stutter_boost.gif[/img]
 [img]https://raw.githubusercontent.com/prop11/PZO-Launcher/Unstable/docs/gifs/01_pzo_vs_stock_frametime.gif[/img]
@@ -94,8 +96,11 @@ It dynamically mitigates game engine bottlenecks, reduces memory fragmentation, 
 [url=https://github.com/prop11/PZO-Launcher][h1]>>> MAIN GITHUB PAGE: https://github.com/prop11/PZO-Launcher <<<[/h1][/url]
 [hr][/hr]
 
-Workshop ID: 3787481250
-Mod ID: MPOptimizer
+[hr][/hr]
+[h2]Join our Discord for quick support[/h2]
+[url=https://discord.com/invite/pxG8ZKYARD][img]https://raw.githubusercontent.com/prop11/PZO-Launcher/refs/heads/main/docs/2y94rgbqas691.jpg[/img][/url]
 
+
+[hr][/hr]
 Workshop ID: 3787481250
 Mod ID: MPOptimizer
