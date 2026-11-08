@@ -266,7 +266,8 @@ public class PZOEntrypoint {
     }
 
     private static final java.util.Set<String> BROWSER_HOSTS = java.util.Set.of(
-        "github.com", "steamcommunity.com", "store.steampowered.com", "discord.gg", "discord.com");
+        "github.com", "steamcommunity.com", "store.steampowered.com", "discord.gg", "discord.com",
+        "buymeacoffee.com", "www.buymeacoffee.com");
 
     // Lua can reach this, and rundll32 FileProtocolHandler will happily launch local files, so only plain https links
     // to known hosts get through
