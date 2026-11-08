@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.9.6)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.9.7)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -65,7 +65,7 @@ $Json5OrLess = @"
         "-Xmx4096m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
-        "-Djava.library.path=win64/;.",
+        "-Djava.library.path=win64/;.;natives/",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
@@ -109,7 +109,7 @@ $Json6To12 = @"
         "-Xmx6144m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
-        "-Djava.library.path=win64/;.",
+        "-Djava.library.path=win64/;.;natives/",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
@@ -154,7 +154,7 @@ $Json13To20_G1GC = @"
         "-Xmx8192m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
-        "-Djava.library.path=win64/;.",
+        "-Djava.library.path=win64/;.;natives/",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
@@ -199,7 +199,7 @@ $Json13To20_ZGC = @"
         "-Xmx8192m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
-        "-Djava.library.path=win64/;.",
+        "-Djava.library.path=win64/;.;natives/",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
@@ -245,7 +245,7 @@ $JsonAbove20 = @"
         "-Xmx16384m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
-        "-Djava.library.path=win64/;.",
+        "-Djava.library.path=win64/;.;natives/",
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
         "-XX:+PerfDisableSharedMem",
@@ -509,6 +509,249 @@ function Get-PZOCompatMode($TotalRamBytes) {
     [pscustomobject]@{ Active = $active; Reasons = ($why -join ", ") }
 }
 
+# Two args with the same key are the same setting with different values
+function Get-PZOArgKey([string]$arg) {
+    if ($arg -match '^-XX:\+Use(ZGC|G1GC|SerialGC|ParallelGC|ShenandoahGC)$') { return "gc" }
+    if ($arg -match '^-agent.*zbNative') { return "zb" }
+    if ($arg -cmatch '^-Xm[sx]') { return $arg.Substring(0, 4) }
+    if ($arg -match '^-XX:[+-]?([A-Za-z0-9_]+)') { return "-XX:" + $Matches[1] }
+    if ($arg -match '^-D([^=]+)') { return "-D" + $Matches[1] }
+    if ($arg -match '^-(agentlib|agentpath|javaagent):([^=]+)') { return "-" + $Matches[1] + ":" + $Matches[2] }
+    return $arg
+}
+
+# Args someone joined with spaces get split back up; a value that just contains a space (a folder path) stays whole
+function Split-PZOJoinedArgs($values) {
+    foreach ($value in @($values)) {
+        if ($null -eq $value) { continue }
+        $text = ([string]$value).Trim()
+        if (-not $text) { continue }
+        $parts = @($text -split '\s+')
+        if (@($parts | Where-Object { -not $_.StartsWith("-") }).Count -gt 0) { $text } else { $parts }
+    }
+}
+
+function Test-PZOZgcOnlyArg([string]$arg) {
+    return $arg -match '^-XX:[+-]?(ZGenerational|ZAllocationSpikeTolerance|ZCollectionInterval|ZUncommit|ZUncommitDelay|SoftMaxHeapSize)\b'
+}
+
+function Get-PZOHeapMb([string]$arg) {
+    if ($arg -notmatch '^-Xm[sx](\d+)([gGmMkK]?)$') { return -1 }
+    $n = [double]$Matches[1]
+    switch ($Matches[2].ToLower()) {
+        "g" { return $n * 1024 }
+        "m" { return $n }
+        "k" { return $n / 1024 }
+        default { return $n / 1MB }
+    }
+}
+
+function Get-PZONormalizedPath([string]$entry) {
+    $e = $entry.Trim().Replace('\', '/')
+    while ($e.Length -gt 1 -and $e.EndsWith("/")) { $e = $e.Substring(0, $e.Length - 1) }
+    while ($e.Length -gt 2 -and $e.StartsWith("./")) { $e = $e.Substring(2) }
+    return $e
+}
+
+function Format-PZOJson($value, [int]$indent = 0) {
+    $pad = " " * ($indent + 4)
+    $end = " " * $indent
+    if ($null -eq $value) { return "null" }
+    if ($value -is [bool]) { if ($value) { return "true" } else { return "false" } }
+    if ($value -is [string]) {
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($c in $value.ToCharArray()) {
+            switch ($c) {
+                '"' { [void]$sb.Append('\"') }
+                '\' { [void]$sb.Append('\\') }
+                "`n" { [void]$sb.Append('\n') }
+                "`r" { [void]$sb.Append('\r') }
+                "`t" { [void]$sb.Append('\t') }
+                default {
+                    if ([int]$c -lt 32) { [void]$sb.Append(('\u{0:x4}' -f [int]$c)) } else { [void]$sb.Append($c) }
+                }
+            }
+        }
+        return '"' + $sb.ToString() + '"'
+    }
+    if ($value -is [array] -or $value -is [System.Collections.ArrayList]) {
+        if ($value.Count -eq 0) { return "[]" }
+        $items = foreach ($item in $value) { $pad + (Format-PZOJson $item ($indent + 4)) }
+        return "[`n" + ($items -join ",`n") + "`n$end]"
+    }
+    if ($value -is [System.Management.Automation.PSCustomObject]) {
+        $props = @($value.PSObject.Properties)
+        if ($props.Count -eq 0) { return "{}" }
+        $items = foreach ($p in $props) { $pad + (Format-PZOJson $p.Name) + ": " + (Format-PZOJson $p.Value ($indent + 4)) }
+        return "{`n" + ($items -join ",`n") + "`n$end}"
+    }
+    return ([System.IConvertible]$value).ToString([System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# Applies what PZO needs on top of the user's file, so their own args, classpath entries and other keys stay. If the
+# file can't be read as JSON the template is used; Apply-PZOConfiguration has already backed it up by then.
+function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
+    if (-not (Test-Path -LiteralPath $Path -ErrorAction SilentlyContinue)) { return $TemplateJson }
+    try {
+        $old = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
+        $tpl = $TemplateJson | ConvertFrom-Json
+    } catch {
+        Write-Host "    [!] $([System.IO.Path]::GetFileName($Path)) is not valid JSON, so custom settings could not be carried over. The old file is in $BackupFolder." -ForegroundColor Yellow
+        return $TemplateJson
+    }
+    if ($null -eq $old -or $null -eq $old.vmArgs) { return $TemplateJson }
+
+    $oldArgs = @(Split-PZOJoinedArgs $old.vmArgs | Where-Object {
+        $_ -notmatch 'java\.awt\.headless|pzo_native64|UseCompactObjectHeaders' -and
+        -not ($CompatActive -and ($_ -eq "-XX:+AlwaysPreTouch" -or $_ -eq "-XX:+UseZGC" -or (Test-PZOZgcOnlyArg $_)))
+    })
+
+    # ZGC is what the game ships and the template picks it by hardware, so only another collector counts as a choice
+    $userGc = @($oldArgs | Where-Object { (Get-PZOArgKey $_) -eq "gc" -and $_ -ne "-XX:+UseZGC" }) | Select-Object -First 1
+
+    $merged = New-Object System.Collections.ArrayList
+    foreach ($a in @($tpl.vmArgs)) {
+        if ($userGc -and (Get-PZOArgKey $a) -eq "gc") { continue }
+        [void]$merged.Add([string]$a)
+    }
+    if ($userGc) { [void]$merged.Add([string]$userGc) }
+
+    $zgcInUse = $merged -contains "-XX:+UseZGC"
+    if (-not $userGc -and $tpl.windows) {
+        foreach ($p in $tpl.windows.PSObject.Properties) {
+            if ($p.Name -ne "6.1" -and @($p.Value.vmArgs) -contains "-XX:+UseZGC") { $zgcInUse = $true }
+        }
+    }
+    if (-not $zgcInUse) {
+        foreach ($a in @($merged | Where-Object { Test-PZOZgcOnlyArg $_ })) { $merged.Remove($a) }
+    }
+
+    $oldHasXms = $false
+    $oldHasXmx = $false
+    foreach ($arg in $oldArgs) {
+        $key = Get-PZOArgKey $arg
+        if ($key -eq "gc") { continue }
+        if (-not $zgcInUse -and (Test-PZOZgcOnlyArg $arg)) { continue }
+        if ($arg -eq "-Xmx3072m") { continue }  # the game's stock max, raised by the template
+
+        if ($key -eq "-Djava.library.path") {
+            for ($i = 0; $i -lt $merged.Count; $i++) {
+                if ((Get-PZOArgKey $merged[$i]) -ne $key) { continue }
+                $value = $merged[$i]
+                $known = @(($value.Substring($value.IndexOf("=") + 1) -split ";") | ForEach-Object { Get-PZONormalizedPath $_ })
+                foreach ($entry in ($arg.Substring($arg.IndexOf("=") + 1) -split ";")) {
+                    if (-not $entry.Trim()) { continue }
+                    $norm = Get-PZONormalizedPath $entry
+                    if ($known -notcontains $norm) {
+                        $value += ";" + $entry.Trim()
+                        $known += $norm
+                    }
+                }
+                $merged[$i] = $value
+            }
+            continue
+        }
+
+        if ($key -ceq "-Xms") { $oldHasXms = $true }
+        if ($key -ceq "-Xmx") { $oldHasXmx = $true }
+
+        $found = $false
+        for ($i = 0; $i -lt $merged.Count; $i++) {
+            if ((Get-PZOArgKey $merged[$i]) -ceq $key) {
+                $merged[$i] = $arg
+                $found = $true
+                break
+            }
+        }
+        if (-not $found) { [void]$merged.Add($arg) }
+    }
+
+    # The JVM won't start with the starting heap above the max, so whichever size the user didn't set gives way
+    $xmsIndex = -1
+    $xmxIndex = -1
+    for ($i = 0; $i -lt $merged.Count; $i++) {
+        if ($merged[$i] -cmatch '^-Xms') { $xmsIndex = $i }
+        if ($merged[$i] -cmatch '^-Xmx') { $xmxIndex = $i }
+    }
+    if ($xmsIndex -ge 0 -and $xmxIndex -ge 0) {
+        if ($CompatActive -and (Get-PZOHeapMb $merged[$xmsIndex]) -gt 1024) { $merged[$xmsIndex] = "-Xms1024m" }
+        $xmsMb = Get-PZOHeapMb $merged[$xmsIndex]
+        $xmxMb = Get-PZOHeapMb $merged[$xmxIndex]
+        if ($xmsMb -gt 0 -and $xmxMb -gt 0 -and $xmsMb -gt $xmxMb) {
+            if ($oldHasXms -and -not $oldHasXmx) {
+                $merged[$xmxIndex] = "-Xmx" + $merged[$xmsIndex].Substring(4)
+            } elseif ($oldHasXmx -and -not $oldHasXms) {
+                $merged[$xmsIndex] = "-Xms" + $merged[$xmxIndex].Substring(4)
+            }
+        }
+    }
+
+    $classpath = New-Object System.Collections.ArrayList
+    foreach ($c in @($old.classpath)) {
+        if ($c -and -not $classpath.Contains([string]$c)) { [void]$classpath.Add([string]$c) }
+    }
+    if (-not $classpath.Contains(".")) { $classpath.Insert(0, ".") }
+    if (-not $classpath.Contains("PZOptimEngine.jar")) { $classpath.Insert($classpath.IndexOf(".") + 1, "PZOptimEngine.jar") }
+    if (-not $classpath.Contains("projectzomboid.jar")) { [void]$classpath.Add("projectzomboid.jar") }
+    foreach ($c in @($tpl.classpath)) {
+        if (-not $classpath.Contains([string]$c)) { $classpath.Insert($classpath.IndexOf("projectzomboid.jar"), [string]$c) }
+    }
+
+    # Version blocks: the template decides the collector, anything else the user added there stays
+    $topHasGc = @($merged | Where-Object { (Get-PZOArgKey $_) -eq "gc" }).Count -gt 0
+    $versions = New-Object System.Collections.ArrayList
+    foreach ($source in @($tpl.windows, $old.windows)) {
+        if ($null -eq $source) { continue }
+        foreach ($p in $source.PSObject.Properties) {
+            if (-not $versions.Contains($p.Name)) { [void]$versions.Add($p.Name) }
+        }
+    }
+    $windows = New-Object PSObject
+    foreach ($name in $versions) {
+        $tplBlock = if ($tpl.windows) { $tpl.windows.PSObject.Properties[$name] } else { $null }
+        $oldBlock = if ($old.windows) { $old.windows.PSObject.Properties[$name] } else { $null }
+        $blockArgs = New-Object System.Collections.ArrayList
+        if ($tplBlock) { foreach ($a in @($tplBlock.Value.vmArgs)) { [void]$blockArgs.Add([string]$a) } }
+        if ($oldBlock) {
+            foreach ($arg in @(Split-PZOJoinedArgs $oldBlock.Value.vmArgs)) {
+                if ($arg -match 'pzo_native64|zbNative|UseCompactObjectHeaders') { continue }
+                $key = Get-PZOArgKey $arg
+                if ($key -eq "gc") {
+                    if (-not $tplBlock -and -not $CompatActive) { [void]$blockArgs.Add($arg) }
+                    continue
+                }
+                if ((Test-PZOZgcOnlyArg $arg) -and $blockArgs -notcontains "-XX:+UseZGC") { continue }
+                $found = $false
+                for ($i = 0; $i -lt $blockArgs.Count; $i++) {
+                    if ((Get-PZOArgKey $blockArgs[$i]) -ceq $key) {
+                        $blockArgs[$i] = $arg
+                        $found = $true
+                        break
+                    }
+                }
+                if (-not $found) { [void]$blockArgs.Add($arg) }
+            }
+        }
+        if ($topHasGc) {
+            foreach ($a in @($blockArgs | Where-Object { (Get-PZOArgKey $_) -eq "gc" -or (Test-PZOZgcOnlyArg $_) })) { $blockArgs.Remove($a) }
+        }
+        if ($blockArgs.Count -eq 0) { continue }
+        $block = if ($oldBlock) { $oldBlock.Value } else { New-Object PSObject }
+        $block | Add-Member -NotePropertyName "vmArgs" -NotePropertyValue $blockArgs -Force
+        $windows | Add-Member -NotePropertyName $name -NotePropertyValue $block -Force
+    }
+
+    $old | Add-Member -NotePropertyName "mainClass" -NotePropertyValue $tpl.mainClass -Force
+    $old | Add-Member -NotePropertyName "classpath" -NotePropertyValue $classpath -Force
+    $old | Add-Member -NotePropertyName "vmArgs" -NotePropertyValue $merged -Force
+    if (@($windows.PSObject.Properties).Count -gt 0) {
+        $old | Add-Member -NotePropertyName "windows" -NotePropertyValue $windows -Force
+    } elseif ($old.PSObject.Properties["windows"]) {
+        $old.PSObject.Properties.Remove("windows")
+    }
+    return (Format-PZOJson $old) + "`n"
+}
+
 function Apply-PZOConfiguration {
     $TotalRamBytes = 0
     try {
@@ -620,7 +863,7 @@ function Apply-PZOConfiguration {
         $chosenJson = $chosenJson.Replace('"projectzomboid.jar"', '"ZombieBuddy.jar",' + "`n        " + '"projectzomboid.jar"')
     }
 
-    Write-JsonNoBOM $TargetFilePath $chosenJson
+    Write-JsonNoBOM $TargetFilePath (Merge-PZOUserSettings $chosenJson $TargetFilePath $Compat.Active)
 
     if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
         Write-Host "[SUCCESS] Updated $TargetFileName with PZO Entrypoint & RAM settings." -ForegroundColor Green
@@ -639,7 +882,7 @@ function Apply-PZOConfiguration {
         pretouch    = -not $Compat.Active
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
-        version     = "1.9.6"
+        version     = "1.9.7"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress

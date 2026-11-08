@@ -27,6 +27,7 @@ public final class ZomboidConfigMigrator {
     public static final String TARGET_AGENTLIB = "-agentlib:pzo_native64";
 
     private static final String PRE_TOUCH = "-XX:+AlwaysPreTouch";
+    private static final String STOCK_MAX_HEAP = "-Xmx3072m";
 
     // Added if missing. PRE_TOUCH goes in separately, except in compatibility mode
     private static final String[] PERFORMANCE_ARGS = {
@@ -170,14 +171,22 @@ public final class ZomboidConfigMigrator {
 
         // The user's args minus anything rebuilt below, broken, or outdated
         List<String> user = new ArrayList<>();
+        List<String> userLibraryPaths = new ArrayList<>();
+        String zbArg = null;
         for (String arg : rawArgs) {
-            // Args someone joined with spaces by hand get split back up
-            for (String tok : arg.split("\\s+")) {
+            for (String tok : splitJoinedArgs(arg)) {
                 if (tok.isEmpty() || user.contains(tok)) continue;
                 if (tok.startsWith("-Djava.awt.headless")) continue; // PZO needs AWT for its dialogs
-                if (tok.startsWith("-Djava.library.path=")) continue;
+                if (tok.startsWith("-Djava.library.path=")) {
+                    userLibraryPaths.add(tok.substring("-Djava.library.path=".length()));
+                    continue;
+                }
                 if (tok.equals(TARGET_AGENTLIB) || tok.contains("pzo_native64")) continue;
-                if (tok.contains("zbNative")) continue;
+                // Kept whole: ZombieBuddy's policy and other options are written after the name
+                if (tok.startsWith("-agent") && tok.contains("zbNative")) {
+                    if (zbArg == null) zbArg = tok;
+                    continue;
+                }
                 if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
                 if (compat && tok.equals(PRE_TOUCH)) continue;
                 if (compat && isZgcOnly(tok)) continue;
@@ -188,48 +197,79 @@ public final class ZomboidConfigMigrator {
         List<String> args = new ArrayList<>();
         args.add(TARGET_AGENTLIB);
         if (zbActive) {
-            args.add("-agentlib:zbNative");
+            args.add(zbArg != null ? zbArg : "-agentlib:zbNative");
             PZOLogger.info("[ZomboidConfigMigrator] Preserved ZombieBuddy bridge (-agentlib:zbNative)");
         }
         args.add("--enable-native-access=ALL-UNNAMED");
         args.add("--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED");
-        if (isWin) {
-            args.add("-Djava.library.path=win64/;.;natives/");
-        } else if (isLinux) {
-            args.add("-Djava.library.path=linux64/:natives/:.");
-        } else {
-            args.add("-Djava.library.path=.:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/");
-        }
+        String libraryPath = isWin ? "win64/;.;natives/" : isLinux ? "linux64/:natives/:."
+            : ".:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/";
+        args.add("-Djava.library.path=" + withUserLibraryPaths(libraryPath, userLibraryPaths, isWin));
 
-        // Heap: the user's sizes are kept, the game's stock 3 GB max is raised to suit this PC, and in compatibility
+        // Heap: the user's sizes are kept and only the game's exact stock max is raised to suit this PC. In compatibility
         // mode the starting heap is lowered so nothing big is committed up front
         int recMax = getRecommendedHeapMb();
         int recStart = getRecommendedInitialHeapMb(recMax);
         boolean hasXms = false, hasXmx = false;
+        long startMb = -1, maxMb = -1;
         for (String arg : user) {
             if (arg.startsWith("-Xms")) {
                 hasXms = true;
                 long mb = parseHeapArgMb(arg);
                 if (compat && mb > recStart) {
                     arg = "-Xms" + recStart + "m";
-                } else if (!compat && mb > 0 && mb <= 1800 && recStart > 1800) {
-                    arg = "-Xms" + recStart + "m";
+                    mb = recStart;
                 }
+                startMb = mb;
             } else if (arg.startsWith("-Xmx")) {
                 hasXmx = true;
-                long mb = parseHeapArgMb(arg);
-                if (mb > 0 && mb <= 3072 && recMax > 3072) arg = "-Xmx" + recMax + "m";
+                if (arg.equals(STOCK_MAX_HEAP) && recMax > 3072) arg = "-Xmx" + recMax + "m";
+                maxMb = parseHeapArgMb(arg);
             }
             if (!args.contains(arg)) args.add(arg);
         }
-        if (!hasXms) args.add("-Xms" + recStart + "m");
-        if (!hasXmx) args.add("-Xmx" + recMax + "m");
+        // The JVM won't start if the starting heap is above the max, so the size I add has to fit the one the user set
+        if (!hasXms) args.add("-Xms" + (maxMb > 1 ? Math.min(recStart, maxMb) : recStart) + "m");
+        if (!hasXmx) args.add("-Xmx" + (startMb > 1 ? Math.max(recMax, startMb) : recMax) + "m");
 
         for (String pf : PERFORMANCE_ARGS) {
             if (!args.contains(pf)) args.add(pf);
         }
         if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
         return args;
+    }
+
+    /** Args someone joined with spaces get split back up; a value that just contains a space (a folder path) stays whole. */
+    static List<String> splitJoinedArgs(String arg) {
+        List<String> parts = new ArrayList<>();
+        for (String tok : arg.trim().split("\\s+")) {
+            if (!tok.startsWith("-")) return List.of(arg.trim());
+            parts.add(tok);
+        }
+        return parts;
+    }
+
+    // PZO's entries first, then whatever else the user had on the path
+    private static String withUserLibraryPaths(String base, List<String> userPaths, boolean isWin) {
+        String sep = isWin ? ";" : ":";
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        for (String entry : base.split(sep)) seen.add(normalizeLibraryEntry(entry));
+        StringBuilder out = new StringBuilder(base);
+        for (String value : userPaths) {
+            for (String entry : value.split(sep)) {
+                // A Windows path list left in the file on Linux or macOS is one unusable entry
+                if (entry.isBlank() || (!isWin && entry.contains(";"))) continue;
+                if (seen.add(normalizeLibraryEntry(entry))) out.append(sep).append(entry.trim());
+            }
+        }
+        return out.toString();
+    }
+
+    private static String normalizeLibraryEntry(String entry) {
+        String e = entry.trim().replace('\\', '/');
+        while (e.length() > 1 && e.endsWith("/")) e = e.substring(0, e.length() - 1);
+        while (e.length() > 2 && e.startsWith("./")) e = e.substring(2);
+        return e;
     }
 
     private static boolean isZgcOnly(String arg) {
@@ -387,6 +427,12 @@ public final class ZomboidConfigMigrator {
                     else if (esc == 'n') sb.append('\n');
                     else if (esc == 'r') sb.append('\r');
                     else if (esc == 't') sb.append('\t');
+                    else if (esc == 'b') sb.append('\b');
+                    else if (esc == 'f') sb.append('\f');
+                    else if (esc == 'u' && pos[0] + 4 <= s.length()) {
+                        sb.append((char) Integer.parseInt(s.substring(pos[0], pos[0] + 4), 16));
+                        pos[0] += 4;
+                    }
                     else sb.append(esc);
                 } else {
                     sb.append(c);
@@ -414,12 +460,12 @@ public final class ZomboidConfigMigrator {
 
         private static Object parseNumber(String s, int[] pos) {
             int start = pos[0];
-            while (pos[0] < s.length() && (Character.isDigit(s.charAt(pos[0])) || s.charAt(pos[0]) == '.' || s.charAt(pos[0]) == '-')) {
+            while (pos[0] < s.length() && (Character.isDigit(s.charAt(pos[0])) || "+-.eE".indexOf(s.charAt(pos[0])) >= 0)) {
                 pos[0]++;
             }
             String num = s.substring(start, pos[0]);
             try {
-                if (num.contains(".")) return Double.parseDouble(num);
+                if (num.contains(".") || num.contains("e") || num.contains("E")) return Double.parseDouble(num);
                 return Long.parseLong(num);
             } catch (Exception e) {
                 return num;
