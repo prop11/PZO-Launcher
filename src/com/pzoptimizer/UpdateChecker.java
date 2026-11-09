@@ -14,6 +14,9 @@ import java.util.regex.Pattern;
 /** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
     public static final String CURRENT_VERSION = "1.9.9";
+    // Smart App Control trusts the DLL per file and a rebuild is a new file, so Windows stays on this release's DLL.
+    // Only bump it when pzo_native.c really changes.
+    public static final String WINDOWS_NATIVE_VERSION = "1.9.7";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String GITHUB_ALL_RELEASES_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases";
     private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
@@ -30,7 +33,28 @@ public class UpdateChecker {
         }
     }
 
+    private static boolean isWindowsNative() {
+        return getNativeFileName().endsWith(".dll");
+    }
+
+    /** The native version this engine wants on this OS. Mac and Linux natives still follow the release version. */
+    public static String getExpectedNativeVersion() {
+        return isWindowsNative() ? WINDOWS_NATIVE_VERSION : CURRENT_VERSION;
+    }
+
+    public static String getWindowsNativeDownloadUrl() {
+        return "https://github.com/prop11/PZO-Launcher/releases/download/V" + WINDOWS_NATIVE_VERSION + "/pzo_native64.dll";
+    }
+
+    /** True for the pinned DLL or a newer one, so players already on a 1.9.8 or 1.9.9 DLL don't get prompted. */
+    public static boolean isWindowsNativeCurrent(String installedVersion) {
+        if (!isWindowsNative() || installedVersion == null) return false;
+        String clean = installedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
+        return clean.equalsIgnoreCase(WINDOWS_NATIVE_VERSION) || isNewerVersion(clean, WINDOWS_NATIVE_VERSION);
+    }
+
     public static String getDefaultNativeDownloadUrl() {
+        if (isWindowsNative()) return getWindowsNativeDownloadUrl();
         String nativeFile = getNativeFileName();
         boolean beta = PZOConfig.isBetaOptIn() || isUnstableIdentifier(CURRENT_VERSION);
         if (beta) {
@@ -46,6 +70,7 @@ public class UpdateChecker {
      * in).
      */
     public static String resolveNativeDownloadUrl(String targetVersion, int timeoutMs) {
+        if (isWindowsNative()) return getWindowsNativeDownloadUrl();
         String nativeFileName = getNativeFileName();
         String cleanVer = targetVersion != null && !targetVersion.isEmpty() ? targetVersion.trim() : CURRENT_VERSION;
         String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
@@ -252,7 +277,7 @@ public class UpdateChecker {
             boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
             String downloadUrl = (jarAssetUrl != null && !jarAssetUrl.isEmpty()) ? jarAssetUrl : DEFAULT_JAR_DOWNLOAD_URL;
             String defaultNativeUrl = getDefaultNativeDownloadUrl();
-            String nativeUrl = (nativeAssetUrl != null && !nativeAssetUrl.isEmpty()) ? nativeAssetUrl :
+            String nativeUrl = isWindowsNative() ? defaultNativeUrl : (nativeAssetUrl != null && !nativeAssetUrl.isEmpty()) ? nativeAssetUrl :
                 (tagName != null && !tagName.isEmpty() ?
                     "https://github.com/prop11/PZO-Launcher/releases/download/" + tagName + "/" + nativeFileName :
                     defaultNativeUrl);

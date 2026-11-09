@@ -91,9 +91,9 @@ public class UpdateDialog {
     public static boolean checkAndPromptNativeMismatch(String dllDownloadUrl) {
         boolean filePresent = PZONative.isNativeFilePresent();
         String installedVersion = PZONative.getInstalledNativeVersion();
-        String expectedVersion = UpdateChecker.CURRENT_VERSION;
+        String expectedVersion = UpdateChecker.getExpectedNativeVersion();
 
-        if (filePresent && expectedVersion.equalsIgnoreCase(installedVersion)) {
+        if (filePresent && (expectedVersion.equalsIgnoreCase(installedVersion) || UpdateChecker.isWindowsNativeCurrent(installedVersion))) {
             return false;
         }
 
@@ -651,6 +651,13 @@ public class UpdateDialog {
                 nativeCandidates.add(directNativeLowerUrl);
             }
 
+            // Windows only ever takes the pinned DLL, and doesn't touch one that's already good enough
+            boolean keepDll = isWin && UpdateChecker.isWindowsNativeCurrent(PZONative.getInstalledNativeVersion());
+            if (isWin) {
+                nativeCandidates.clear();
+                if (!keepDll) nativeCandidates.add(UpdateChecker.getWindowsNativeDownloadUrl());
+            }
+
             for (String tryNative : nativeCandidates) {
                 PZOLogger.info("Downloading matching " + nativeFileName + " for v" + latestVersion + " from: " + tryNative);
                 if (downloadFileWithRedirects(tryNative, newNative) && newNative.exists() && newNative.length() > 5000) {
@@ -663,7 +670,7 @@ public class UpdateDialog {
             }
 
             // With the native library installed, never update the jar on its own
-            if (nativeInstalled && !hasNewNative) {
+            if (nativeInstalled && !hasNewNative && !keepDll) {
                 if (newNative.exists()) newNative.delete();
                 PZOLogger.error("Failed to download matching native library (" + nativeFileName + ") for version " + latestVersion + ". Aborting update to avoid library mismatch.");
                 showNoticePopup("Update Notice", "Could not download the matching " + nativeFileName + " for version " + latestVersion + " from GitHub Releases.\n\nTo prevent version mismatch errors, the update has been cancelled. Please check your internet connection or update manually.");

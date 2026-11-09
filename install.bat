@@ -288,8 +288,9 @@ function Download-PZOGitHubJar($targetFile) {
 }
 
 function Download-PZOGitHubDll($targetFile) {
-    $downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll"
-    Write-Host "`n[*] Downloading latest pzo_native64.dll from GitHub Releases..." -ForegroundColor Cyan
+    # Pinned to the release Smart App Control accepts, same version as UpdateChecker.WINDOWS_NATIVE_VERSION
+    $downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/download/V1.9.7/pzo_native64.dll"
+    Write-Host "`n[*] Downloading pzo_native64.dll from GitHub Releases..." -ForegroundColor Cyan
     Write-Host "    URL: $downloadUrl" -ForegroundColor Gray
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
