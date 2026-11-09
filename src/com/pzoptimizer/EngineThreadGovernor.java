@@ -271,7 +271,7 @@ public class EngineThreadGovernor {
                 if (BenchmarkHarness.isActive()) {
                     BenchmarkHarness.tick();
                 }
-                if (benchmarkOnly || !governorsOn) return;
+                if (benchmarkOnly || (!governorsOn && !LiveProfiler.on)) return;
                 try {
                     ensureReflection();
                     if (fsField != null) {
@@ -284,6 +284,11 @@ public class EngineThreadGovernor {
                             int fc = fcField.getInt(fs);
                             if (fc != lastFrameCount) {
                                 lastFrameCount = fc;
+                                // Mac launches skip initialize(), so only the profiler runs here
+                                if (!governorsOn) {
+                                    FrameDropDiagnosticEngine.profilerTickOnly();
+                                    return;
+                                }
                                 ChunkIngestionPacer.onFrameBoundary(fc);
                                 FrameDropDiagnosticEngine.onFrameTick();
                                 PopmanGovernor.onFrameBoundary(fc);
