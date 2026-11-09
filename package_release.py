@@ -11,6 +11,10 @@ import shutil
 import zipfile
 import hashlib
 
+# The V1.9.7 release DLL. Smart App Control trusts it per file, so a rebuilt DLL must never ship by accident.
+# When pzo_native.c really changes: build_all.py --rebuild-native, then update this hash and UpdateChecker.WINDOWS_NATIVE_VERSION.
+PINNED_DLL_SHA256 = "0e9a322c3ba7e7f14bbd2fc9e27ab0f43db7b9586a76b9e338063f4574b08d26"
+
 def sha256_file(filepath):
     h = hashlib.sha256()
     with open(filepath, "rb") as f:
@@ -83,6 +87,10 @@ def main():
 
     # Natives come from native/ (CI builds land there), scripts and readmes from the repo root; never from dist/
     search_dirs = [native_dir, root_dir]
+
+    pinned_dll = os.path.join(native_dir, "pzo_native64.dll")
+    if os.path.isfile(pinned_dll) and sha256_file(pinned_dll) != PINNED_DLL_SHA256:
+        sys.exit(f"[!] Refusing to package: native/pzo_native64.dll is not the pinned DLL (sha256 {sha256_file(pinned_dll)})")
 
     # Standalone binaries and scripts for dist/
     files_to_copy = [
