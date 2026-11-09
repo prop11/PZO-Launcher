@@ -177,6 +177,14 @@ public final class FrameDropDiagnosticEngine {
         } catch (Throwable ignored) {}
     }
 
+    /** Frame timing for the profiler alone, on launches without the governors. */
+    public static void profilerTickOnly() {
+        long now = System.nanoTime();
+        long deltaNanos = now - lastFrameTimeNanos;
+        lastFrameTimeNanos = now;
+        if (deltaNanos > 0 && deltaNanos <= 2_000_000_000L) LiveProfiler.onFrame(deltaNanos);
+    }
+
     public static void onFrameTick() {
         long now = System.nanoTime();
         long deltaNanos = now - lastFrameTimeNanos;

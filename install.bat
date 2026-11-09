@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.9.8)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.9.9)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -882,7 +882,7 @@ function Apply-PZOConfiguration {
         pretouch    = -not $Compat.Active
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
-        version     = "1.9.8"
+        version     = "1.9.9"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress

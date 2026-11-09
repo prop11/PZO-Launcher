@@ -595,6 +595,21 @@ public class PZOEngineBridge {
     // that function, and the list goes to Lua as PZOEngine.bindFailures for bug reports
     private static final java.util.List<String> bindFailures = new java.util.ArrayList<>();
 
+    // Lua can use these as table keys, and a null from hashCode throws when Java unboxes it
+    private static Object newLuaFunction(ClassLoader loader, Class<?>[] interfaces, java.lang.reflect.InvocationHandler handler) {
+        return Proxy.newProxyInstance(loader, interfaces, (proxy, m, mArgs) -> {
+            if (m.getDeclaringClass() == Object.class) {
+                switch (m.getName()) {
+                    case "hashCode": return System.identityHashCode(proxy);
+                    case "equals": return proxy == mArgs[0];
+                    case "toString": return "PZOEngine function";
+                    default: return null;
+                }
+            }
+            return handler.invoke(proxy, m, mArgs);
+        });
+    }
+
     private static void bindFailed(String names, Throwable t) {
         bindFailures.add(names);
         PZOLogger.warn("[PZO Kahlua Bridge] Could not attach PZOEngine." + names + ": " + t);
@@ -732,7 +747,7 @@ public class PZOEngineBridge {
 
                             // isEnginePresent / isActive
                             try {
-                                Object isPresentFunc = Proxy.newProxyInstance(
+                                Object isPresentFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -751,7 +766,7 @@ public class PZOEngineBridge {
 
                             // isWindowActive
                             try {
-                                Object isWindowActiveFunc = Proxy.newProxyInstance(
+                                Object isWindowActiveFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -769,7 +784,7 @@ public class PZOEngineBridge {
 
                             // getOptimizedRAM
                             try {
-                                Object getRamFunc = Proxy.newProxyInstance(
+                                Object getRamFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -787,7 +802,7 @@ public class PZOEngineBridge {
 
                             // getVersion
                             try {
-                                Object getVersionFunc = Proxy.newProxyInstance(
+                                Object getVersionFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -805,7 +820,7 @@ public class PZOEngineBridge {
 
                             // getTelemetryText
                             try {
-                                Object getTelemetryFunc = Proxy.newProxyInstance(
+                                Object getTelemetryFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -823,7 +838,7 @@ public class PZOEngineBridge {
 
                             // openBrowser
                             try {
-                                Object openBrowserFunc = Proxy.newProxyInstance(
+                                Object openBrowserFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -845,7 +860,7 @@ public class PZOEngineBridge {
 
                             // purgeRAM
                             try {
-                                Object purgeRamFunc = Proxy.newProxyInstance(
+                                Object purgeRamFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -863,7 +878,7 @@ public class PZOEngineBridge {
 
                             // getHeapUsedMB
                             try {
-                                Object getHeapUsedFunc = Proxy.newProxyInstance(
+                                Object getHeapUsedFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -882,7 +897,7 @@ public class PZOEngineBridge {
 
                             // getGlCallsFiltered
                             try {
-                                Object getGlFilteredFunc = Proxy.newProxyInstance(
+                                Object getGlFilteredFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -901,7 +916,7 @@ public class PZOEngineBridge {
 
                             // openLogsFolder
                             try {
-                                Object openLogsFunc = Proxy.newProxyInstance(
+                                Object openLogsFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -919,7 +934,7 @@ public class PZOEngineBridge {
 
                             // copyDiagnosticsToClipboard
                             try {
-                                Object copyDiagFunc = Proxy.newProxyInstance(
+                                Object copyDiagFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -937,7 +952,7 @@ public class PZOEngineBridge {
 
                             // getDiagnosticsReport
                             try {
-                                Object getDiagReportFunc = Proxy.newProxyInstance(
+                                Object getDiagReportFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -955,7 +970,7 @@ public class PZOEngineBridge {
 
                             // isBetaOptIn
                             try {
-                                Object isBetaFunc = Proxy.newProxyInstance(
+                                Object isBetaFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -973,7 +988,7 @@ public class PZOEngineBridge {
 
                             // getHardwareSummary
                             try {
-                                Object getHardwareFunc = Proxy.newProxyInstance(
+                                Object getHardwareFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -991,7 +1006,7 @@ public class PZOEngineBridge {
 
                             // getCompatStatus: why compatibility mode is on this launch, "" when it's off
                             try {
-                                Object getCompatFunc = Proxy.newProxyInstance(
+                                Object getCompatFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1009,7 +1024,7 @@ public class PZOEngineBridge {
 
                             // modApi(op, a, b, c): the Java side of the Lua PZOApi other mods use (ModApi)
                             try {
-                                Object modApiFunc = Proxy.newProxyInstance(
+                                Object modApiFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1033,7 +1048,7 @@ public class PZOEngineBridge {
 
                             // profiler(op, arg): the Lua mod's performance overlay and recordings (LiveProfiler)
                             try {
-                                Object profilerFunc = Proxy.newProxyInstance(
+                                Object profilerFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1056,7 +1071,7 @@ public class PZOEngineBridge {
                             // setHardwareOverride(summary): pretend to be other hardware for the recommendations ("" =
                             // the real one)
                             try {
-                                Object hwOverrideFunc = Proxy.newProxyInstance(
+                                Object hwOverrideFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1078,7 +1093,7 @@ public class PZOEngineBridge {
 
                             // getChannel
                             try {
-                                Object getChannelFunc = Proxy.newProxyInstance(
+                                Object getChannelFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1096,7 +1111,7 @@ public class PZOEngineBridge {
 
                             // getRenderTelemetry (live metrics on the Unstable channel)
                             try {
-                                Object getRenderTelemetryFunc = Proxy.newProxyInstance(
+                                Object getRenderTelemetryFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1114,7 +1129,7 @@ public class PZOEngineBridge {
 
                             // isAVX2SpatialActive
                             try {
-                                Object isAVX2SpatialFunc = Proxy.newProxyInstance(
+                                Object isAVX2SpatialFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1132,7 +1147,7 @@ public class PZOEngineBridge {
 
                             // getHordeZombiesTracked
                             try {
-                                Object getHordeTrackedFunc = Proxy.newProxyInstance(
+                                Object getHordeTrackedFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1150,7 +1165,7 @@ public class PZOEngineBridge {
 
                             // getHordeCulledOffscreen
                             try {
-                                Object getHordeCulledFunc = Proxy.newProxyInstance(
+                                Object getHordeCulledFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1168,7 +1183,7 @@ public class PZOEngineBridge {
 
                             // getBoneTransformsSaved
                             try {
-                                Object getBonesSavedFunc = Proxy.newProxyInstance(
+                                Object getBonesSavedFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1186,7 +1201,7 @@ public class PZOEngineBridge {
 
                             // setBetaOptIn
                             try {
-                                Object setBetaFunc = Proxy.newProxyInstance(
+                                Object setBetaFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1210,7 +1225,7 @@ public class PZOEngineBridge {
 
                             // checkForUpdates
                             try {
-                                Object checkUpdateFunc = Proxy.newProxyInstance(
+                                Object checkUpdateFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1237,7 +1252,7 @@ public class PZOEngineBridge {
 
                             // setJvmOption
                             try {
-                                Object setJvmOptionFunc = Proxy.newProxyInstance(
+                                Object setJvmOptionFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1261,7 +1276,7 @@ public class PZOEngineBridge {
 
                             // setJvmIntOption
                             try {
-                                Object setJvmIntFunc = Proxy.newProxyInstance(
+                                Object setJvmIntFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1284,7 +1299,7 @@ public class PZOEngineBridge {
 
                             // setEngineTuning
                             try {
-                                Object setEngineTuningFunc = Proxy.newProxyInstance(
+                                Object setEngineTuningFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1307,7 +1322,7 @@ public class PZOEngineBridge {
 
                             // isMultithreadingNoticeAcknowledged
                             try {
-                                Object isNoticeAckFunc = Proxy.newProxyInstance(
+                                Object isNoticeAckFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1325,7 +1340,7 @@ public class PZOEngineBridge {
 
                             // isWorldUpscalerActive
                             try {
-                                Object isWorldUpscalerActiveFunc = Proxy.newProxyInstance(
+                                Object isWorldUpscalerActiveFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1343,7 +1358,7 @@ public class PZOEngineBridge {
 
                             // getWorldUpscalerRenderScale
                             try {
-                                Object getUpscalerScaleFunc = Proxy.newProxyInstance(
+                                Object getUpscalerScaleFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1361,7 +1376,7 @@ public class PZOEngineBridge {
 
                             // getWorldUpscalerSharpness
                             try {
-                                Object getUpscalerSharpFunc = Proxy.newProxyInstance(
+                                Object getUpscalerSharpFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1379,7 +1394,7 @@ public class PZOEngineBridge {
 
                             // isViewpointStanddownActive
                             try {
-                                Object isStanddownActiveFunc = Proxy.newProxyInstance(
+                                Object isStanddownActiveFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1397,7 +1412,7 @@ public class PZOEngineBridge {
 
                             // isViewpointDetected
                             try {
-                                Object isViewpointDetectedFunc = Proxy.newProxyInstance(
+                                Object isViewpointDetectedFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1415,7 +1430,7 @@ public class PZOEngineBridge {
 
                             // getViewpointStanddownMode
                             try {
-                                Object getViewpointModeFunc = Proxy.newProxyInstance(
+                                Object getViewpointModeFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1433,7 +1448,7 @@ public class PZOEngineBridge {
 
                             // setStanddownMode / setViewpointStanddownMode
                             try {
-                                Object setStanddownModeFunc = Proxy.newProxyInstance(
+                                Object setStanddownModeFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1457,7 +1472,7 @@ public class PZOEngineBridge {
 
                             // toggleViewpointStanddown
                             try {
-                                Object toggleStanddownFunc = Proxy.newProxyInstance(
+                                Object toggleStanddownFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1475,7 +1490,7 @@ public class PZOEngineBridge {
 
                             // acknowledgeMultithreadingNotice
                             try {
-                                Object ackNoticeFunc = Proxy.newProxyInstance(
+                                Object ackNoticeFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1493,7 +1508,7 @@ public class PZOEngineBridge {
 
                             // openWorkshopPage
                             try {
-                                Object openWorkshopFunc = Proxy.newProxyInstance(
+                                Object openWorkshopFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1511,7 +1526,7 @@ public class PZOEngineBridge {
 
                             // openGithubPage
                             try {
-                                Object openGithubFunc = Proxy.newProxyInstance(
+                                Object openGithubFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1529,7 +1544,7 @@ public class PZOEngineBridge {
 
                             // makeReportBundle(summaryText): zips the logs and settings for a bug report, returns the path
                             try {
-                                Object reportFunc = Proxy.newProxyInstance(
+                                Object reportFunc = newLuaFunction(
                                     javaFuncClass.getClassLoader(),
                                     new Class<?>[]{javaFuncClass},
                                     (proxy, m, mArgs) -> {
@@ -1624,7 +1639,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.9.8\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"1.9.9\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1893,7 +1908,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.9.8'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '1.9.9'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +
