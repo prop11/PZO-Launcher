@@ -735,6 +735,15 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched FBORenderLevels.clearCachedSquares: puddle cache told of each bake");
                     return stamp;
                 }
+                // The stamp also fails when rl itself is unreadable; never hand the JVM bytes ASM can't parse
+                if (rl != null) {
+                    try {
+                        new com.pzoptimizer.shaded.asm.ClassReader(rl).accept(new com.pzoptimizer.shaded.asm.tree.ClassNode(), 0);
+                    } catch (Throwable t) {
+                        PZOLogger.warn("[PZO Agent] FBORenderLevels boundary guards produced an unreadable class, left unchanged: " + t);
+                        return null;
+                    }
+                }
                 return rl;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderLevels$NLevels".equals(className) && classfileBuffer != null) {
@@ -1277,6 +1286,25 @@ public class PZOptimAgent {
             }
             return null;
         }
+        // Stock 42.21 bodies, -1 = constant pool index byte
+        private static final int[] STOCK_IS_ON_SCREEN = {
+            0x2a, 0x1b, 0xb6, -1, -1, 0xb4, -1, -1, 0xac };
+        private static final int[] STOCK_INDEX_FOR_LEVEL = {
+            0x10, 0xe0, 0xb8, -1, -1, 0x3d, 0x1b, 0xb8, -1, -1, 0x1c, 0x64, 0x05, 0x6c, 0xac };
+
+        /** Whether the Code attribute at attrPos holds exactly this body, with no exception table. */
+        private static boolean isStockCode(byte[] b, int attrPos, int[] expected) {
+            int codePos = attrPos + 14;
+            if (codePos + expected.length + 2 > b.length) return false;
+            int codeLen = ((b[attrPos + 10] & 0xFF) << 24) | ((b[attrPos + 11] & 0xFF) << 16)
+                | ((b[attrPos + 12] & 0xFF) << 8) | (b[attrPos + 13] & 0xFF);
+            if (codeLen != expected.length) return false;
+            for (int k = 0; k < expected.length; k++) {
+                if (expected[k] >= 0 && (b[codePos + k] & 0xFF) != expected[k]) return false;
+            }
+            return b[codePos + codeLen] == 0 && b[codePos + codeLen + 1] == 0;
+        }
+
         private byte[] patchFBORenderLevels(byte[] b) {
             try {
                 int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
@@ -1358,7 +1386,18 @@ public class PZOptimAgent {
                         String aname = (anameIdx > 0 && anameIdx < cpCount) ? utf8Strings[anameIdx] : "";
                         int alen = ((b[pos + 2] & 0xFF) << 24) | ((b[pos + 3] & 0xFF) << 16) | ((b[pos + 4] & 0xFF) << 8) | (b[pos + 5] & 0xFF);
 
-                        if ("Code".equals(aname) && "isOnScreen".equals(mname) && "(I)Z".equals(mdesc)) {
+                        boolean isOnScreen = "Code".equals(aname) && "isOnScreen".equals(mname) && "(I)Z".equals(mdesc);
+                        boolean indexForLevel = "Code".equals(aname) && "indexForLevel".equals(mname) && "(I)I".equals(mdesc);
+                        // The rewrite reads the stock body's constant pool indices at fixed offsets. Once another mod's
+                        // advice is woven in (Viewpoint patches isOnScreen) those bytes are its code, so I leave it alone.
+                        if ((isOnScreen && !isStockCode(b, pos, STOCK_IS_ON_SCREEN))
+                                || (indexForLevel && !isStockCode(b, pos, STOCK_INDEX_FOR_LEVEL))) {
+                            PZOLogger.info("[PZO Agent] FBORenderLevels." + mname + " was changed by another mod, boundary guard skipped");
+                            isOnScreen = false;
+                            indexForLevel = false;
+                        }
+
+                        if (isOnScreen) {
                             byte origGetNLevelsHi = b[pos + 17];
                             byte origGetNLevelsLo = b[pos + 18];
                             byte origOnScreenHi = b[pos + 20];
@@ -1408,7 +1447,7 @@ public class PZOptimAgent {
                             System.arraycopy(stackmapAttr, 0, result, rpos, stackmapAttr.length);
                             rpos += stackmapAttr.length;
                             patched++;
-                        } else if ("Code".equals(aname) && "indexForLevel".equals(mname) && "(I)I".equals(mdesc)) {
+                        } else if (indexForLevel) {
                             byte calcMinHi = b[pos + 17];
                             byte calcMinLo = b[pos + 18];
 
@@ -1477,7 +1516,7 @@ public class PZOptimAgent {
                 if (patched > 0) {
                     byte[] trimmed = new byte[rpos];
                     System.arraycopy(result, 0, trimmed, 0, rpos);
-                    PZOLogger.success("[PZO Agent] Bytecode-patched FBORenderLevels: Boundary guards installed on isOnScreen & indexForLevel (ArrayIndexOutOfBoundsException & Black Void eliminated)");
+                    PZOLogger.success("[PZO Agent] Bytecode-patched FBORenderLevels: boundary guards installed on " + patched + " of 2 methods (isOnScreen, indexForLevel)");
                     return trimmed;
                 }
             } catch (Throwable t) {
