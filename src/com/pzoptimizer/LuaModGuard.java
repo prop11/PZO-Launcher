@@ -2,6 +2,7 @@ package com.pzoptimizer;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.LinkedHashSet;
@@ -245,7 +246,6 @@ public final class LuaModGuard {
         EngineThreadGovernor.initializeQueueOnly("Lua mod notice");
         Thread t = new Thread(() -> {
             Object injected = null;
-            String code = noticeLua(reason);
             while (true) {
                 try {
                     Thread.sleep(500);
@@ -255,7 +255,7 @@ public final class LuaModGuard {
                 try {
                     Object env = Class.forName("zombie.Lua.LuaManager").getField("env").get(null);
                     if (env == null || env == injected || !PZOEngineBridge.areLuaEventsRegistered(env)) continue;
-                    if (Boolean.TRUE.equals(GameThreadQueue.runOnGameThread(() -> PZOEngineBridge.runLua(env, code, "PZOLuaModNotice")))) {
+                    if (Boolean.TRUE.equals(GameThreadQueue.runOnGameThread(() -> showNotice(env, reason)))) {
                         injected = env;
                         PZOLogger.info("[LuaModGuard] main menu notice added (" + reason + ")");
                     }
@@ -267,20 +267,53 @@ public final class LuaModGuard {
     }
 
     /**
-     * Lua that shows the notice on the main menu. "missing" and "disabled" are for a launch where PZO stood down;
-     * "notloaded" goes in on normal launches and only shows when the mod's Lua never defined MPOptim.Version, i.e. the
-     * mod is on but failed to load.
+     * Shows the notice on the main menu. "missing" and "disabled" are for a launch where PZO stood down; "notloaded"
+     * goes in on normal launches and only shows when the mod's Lua never defined MPOptim.Version, i.e. the mod is on
+     * but failed to load. Game thread only.
      */
-    static String noticeLua(String reason) {
-        StringBuilder strings = new StringBuilder("{");
-        for (String[] row : TEXT) {
-            strings.append(row[0]).append("={title=").append(luaQuote(row[1]))
-                .append(",body=").append(luaQuote(row["missing".equals(reason) ? 2 : "disabled".equals(reason) ? 3 : 4]))
-                .append(",workshop=").append(luaQuote(row[5])).append(",close=").append(luaQuote(row[6])).append("},");
+    static boolean showNotice(Object env, String reason) throws Exception {
+        try {
+            env.getClass().getMethod("rawset", Object.class, Object.class).invoke(env, TEXT_GLOBAL, noticeTable(reason));
+        } catch (Throwable t) {
+            // The Lua still has English to fall back on
+            PZOLogger.warn("[LuaModGuard] notice translations not set: " + t);
         }
-        strings.append("}");
+        return PZOEngineBridge.runLua(env, noticeLua(reason), "PZOLuaModNotice");
+    }
+
+    private static final String TEXT_GLOBAL = "PZOLuaModNoticeText";
+
+    private static int bodyColumn(String reason) {
+        return "missing".equals(reason) ? 2 : "disabled".equals(reason) ? 3 : 4;
+    }
+
+    // Kahlua's lexer keeps only the low byte of each char in a string literal, so Cyrillic and CJK typed into Lua
+    // source come out as garbage (U+0443 shows as 'C'). The translations go in as a table of Java Strings
+    // instead and the Lua source stays ASCII.
+    private static Object noticeTable(String reason) throws Exception {
+        Object platform = Class.forName("zombie.Lua.LuaManager").getField("platform").get(null);
+        Method newTable = platform.getClass().getMethod("newTable");
+        Object all = newTable.invoke(platform);
+        Method rawset = all.getClass().getMethod("rawset", Object.class, Object.class);
+        for (String[] row : TEXT) {
+            Object lang = newTable.invoke(platform);
+            rawset.invoke(lang, "title", row[1]);
+            rawset.invoke(lang, "body", row[bodyColumn(reason)]);
+            rawset.invoke(lang, "workshop", row[5]);
+            rawset.invoke(lang, "close", row[6]);
+            rawset.invoke(all, row[0], lang);
+        }
+        return all;
+    }
+
+    static String noticeLua(String reason) {
+        String[] en = TEXT[0];
         return "local REASON = " + luaQuote(reason) + "\n"
-            + "local STRINGS = " + strings + "\n"
+            + "local STRINGS = { EN = { title = " + luaQuote(en[1]) + ", body = " + luaQuote(en[bodyColumn(reason)])
+            + ", workshop = " + luaQuote(en[5]) + ", close = " + luaQuote(en[6]) + " } }\n"
+            + "if type(" + TEXT_GLOBAL + ") == 'table' then\n"
+            + "    for k, v in pairs(" + TEXT_GLOBAL + ") do STRINGS[k] = v end\n"
+            + "end\n"
             + "local function pzoLuaModNotice()\n"
             + "    local ms = MainScreen and MainScreen.instance\n"
             + "    if not ms or ms.inGame or ms.pzoLuaModNoticeShown or not ISModalRichText then return end\n"
@@ -328,8 +361,8 @@ public final class LuaModGuard {
         return b.append('"').toString();
     }
 
-    // Language code, title, missing, disabled, notloaded, Workshop button, close button. Kahlua reads the Lua source as
-    // Java strings, so these go in as they are
+    // Language code, title, missing, disabled, notloaded, Workshop button, close button. EN first: it is the one inlined
+    // into the Lua as the fallback, so it has to stay ASCII
     private static final String[][] TEXT = {
         {"EN", "Project Zomboid Optimiser: mod missing", "The PZO Java engine is installed, but the Project Zomboid Optimiser mod from the Steam Workshop is not. The engine needs the mod, so it is switched off for this launch and the game runs without it.\n\nSubscribe to the mod on the Steam Workshop, turn it on under Mods, then restart the game.", "The PZO Java engine is installed, but the Project Zomboid Optimiser mod is not turned on. The engine needs the mod, so it is switched off for this launch and the game runs without it.\n\nTurn on Project Zomboid Optimiser under Mods, then restart the game.", "The Project Zomboid Optimiser mod is turned on, but its Lua did not load, so its settings are missing. The PZO Java engine is still running.\n\nLook in console.txt for errors from MPOptimiser, or unsubscribe from the mod and subscribe again. If it keeps happening, send console.txt with a bug report.", "Open Workshop page", "Close"},
         {"DE", "Project Zomboid Optimiser: Mod fehlt", "Die PZO-Java-Engine ist installiert, aber die Mod Project Zomboid Optimiser aus dem Steam Workshop nicht. Die Engine braucht die Mod, deshalb ist sie f\u00fcr diesen Start ausgeschaltet und das Spiel l\u00e4uft ohne sie.\n\nAbonniere die Mod im Steam Workshop, aktiviere sie unter Mods und starte das Spiel dann neu.", "Die PZO-Java-Engine ist installiert, aber die Mod Project Zomboid Optimiser ist nicht aktiviert. Die Engine braucht die Mod, deshalb ist sie f\u00fcr diesen Start ausgeschaltet und das Spiel l\u00e4uft ohne sie.\n\nAktiviere Project Zomboid Optimiser unter Mods und starte das Spiel dann neu.", "Die Mod Project Zomboid Optimiser ist aktiviert, aber ihr Lua-Code wurde nicht geladen, deshalb fehlen ihre Einstellungen. Die PZO-Java-Engine l\u00e4uft weiter.\n\nSuche in console.txt nach Fehlern von MPOptimiser oder deabonniere die Mod und abonniere sie erneut. Wenn es weiter passiert, schick console.txt mit einem Fehlerbericht.", "Workshop-Seite \u00f6ffnen", "Schlie\u00dfen"},

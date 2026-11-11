@@ -1,13 +1,17 @@
 package com.pzoptimizer;
 
+import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL13C;
+import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.opengl.GL30C;
+import org.lwjgl.opengl.GLCapabilities;
 import zombie.core.Core;
 import zombie.core.ShaderHelper;
 import zombie.core.SpriteRenderer;
 import zombie.core.opengl.GLStateRenderThread;
+import zombie.core.textures.IGLFramebufferObject;
 import zombie.core.textures.Texture;
 import zombie.core.textures.TextureDraw;
 import zombie.core.textures.TextureFBO;
@@ -22,24 +26,34 @@ import zombie.core.textures.TextureFBO;
  * The vanilla composite (screen.frag weather shader, reticle, cursor) then runs on a full-resolution world texture
  * exactly like it would without FSR, and the UI is never scaled.
  *
- * The shaders are ports of ffx_fsr1.h (MIT, AMD) to GLSL 3.30 using texelFetch with manual edge clamping, so the unused
- * part of the world texture is never sampled. Any GL or compile failure turns FSR off (scale goes back to 1.0) rather
- * than wrecking the frame.
+ * The shaders are ports of ffx_fsr1.h (MIT, AMD) with manual edge clamping, so the unused part of the world texture is
+ * never sampled. Any GL or compile failure turns FSR off (scale goes back to 1.0) rather than wrecking the frame.
+ *
+ * Two paths: GLSL 3.30 with texelFetch and an attribute-less triangle, and a GLSL 1.20 one for GL 2.1 contexts (every
+ * Mac, since the game never asks macOS for a core profile). The 1.20 path reads texel centres from a NEAREST texture,
+ * draws from its own 3-vertex VBO (no VAOs in Apple's 2.1) and uses the game's own FBO functions (GL30, ARB or EXT).
  */
 public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
 
     static final WorldUpscaleRenderer INSTANCE = new WorldUpscaleRenderer();
 
+    // Forces the GL 2.1 path on a 3.3 PC, so it can be checked without a Mac
+    private static final boolean FORCE_LEGACY = Boolean.getBoolean("pzo.fsr.legacy");
+
     private static boolean initialized = false;
     private static boolean failed = false;
+    private static boolean legacy = false;
+    private static IGLFramebufferObject legacyFbo;
+    private static boolean legacyReadBinding = false;
 
     private static int easuProgram = 0;
     private static int bilinearProgram = 0;
     private static int rcasProgram = 0;
-    private static int easuCon0 = -1, easuInputMax = -1, easuTex = -1;
+    private static int easuCon0 = -1, easuInputMax = -1, easuTex = -1, easuInvSize = -1;
     private static int bilCon0 = -1, bilInputMax = -1, bilTex = -1;
-    private static int rcasSharp = -1, rcasInputMax = -1, rcasTex = -1;
+    private static int rcasSharp = -1, rcasInputMax = -1, rcasTex = -1, rcasInvSize = -1;
     private static int vao = 0;
+    private static int vbo = 0;
 
     private static int tempFbo = 0;
     private static int tempTex = 0;
@@ -93,9 +107,11 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         int inH = Math.max(1, Math.round(outH * scale));
         if (outW <= 0 || outH <= 0) return;
 
-        int prevDraw = GL11C.glGetInteger(0x8CA6 /* GL_DRAW_FRAMEBUFFER_BINDING */);
-        int prevRead = GL11C.glGetInteger(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */);
-        int prevVao = GL11C.glGetInteger(0x85B5 /* GL_VERTEX_ARRAY_BINDING */);
+        int prevDraw = GL11C.glGetInteger(0x8CA6 /* GL_DRAW_FRAMEBUFFER_BINDING, = FRAMEBUFFER_BINDING_EXT */);
+        int prevRead = (!legacy || legacyReadBinding) ? GL11C.glGetInteger(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */) : prevDraw;
+        int prevVao = legacy ? 0 : GL11C.glGetInteger(0x85B5 /* GL_VERTEX_ARRAY_BINDING */);
+        LegacyVertexState savedVerts = legacy ? LegacyVertexState.save() : null;
+        int worldMin = -1, worldMag = -1;
         try {
             ensureTemp(outW, outH);
 
@@ -105,13 +121,17 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
             GL11C.glDisable(0x0B90 /* GL_STENCIL_TEST */);
             GL11C.glDepthMask(false);
             GL11C.glColorMask(true, true, true, true);
-            GL30C.glBindVertexArray(vao);
+            if (legacy) {
+                bindLegacyTriangle(savedVerts);
+            } else {
+                GL30C.glBindVertexArray(vao);
+            }
             GL13C.glActiveTexture(0x84C0 /* GL_TEXTURE0 */);
 
             boolean fsr = "fsr1".equals(WorldUpscalerGovernor.getUpscalerMode());
 
             // Pass 1: world sub-rect -> temp (EASU, or plain bilinear for the non-FSR mode)
-            GL30C.glBindFramebuffer(0x8D40, tempFbo);
+            bindFramebuffer(tempFbo);
             GL11C.glViewport(0, 0, outW, outH);
             int prog = fsr ? easuProgram : bilinearProgram;
             GL20C.glUseProgram(prog);
@@ -120,37 +140,137 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
             float rx = (float) inW / outW;
             float ry = (float) inH / outH;
             if (fsr) {
+                if (legacy) {
+                    // texture2D at texel centres only matches texelFetch exactly with NEAREST
+                    worldMin = GL11C.glGetTexParameteri(0x0DE1, 0x2801 /* MIN_FILTER */);
+                    worldMag = GL11C.glGetTexParameteri(0x0DE1, 0x2800 /* MAG_FILTER */);
+                    GL11C.glTexParameteri(0x0DE1, 0x2801, 0x2600 /* NEAREST */);
+                    GL11C.glTexParameteri(0x0DE1, 0x2800, 0x2600);
+                    GL20C.glUniform2f(easuInvSize, 1.0f / worldTex.getWidthHW(), 1.0f / worldTex.getHeightHW());
+                }
                 GL20C.glUniform1i(easuTex, 0);
                 GL20C.glUniform4f(easuCon0, rx, ry, 0.5f * rx - 0.5f, 0.5f * ry - 0.5f);
-                GL20C.glUniform2i(easuInputMax, inW - 1, inH - 1);
+                setInputMax(easuInputMax, inW - 1, inH - 1);
             } else {
                 GL20C.glUniform1i(bilTex, 0);
                 GL20C.glUniform4f(bilCon0, rx, ry, worldTex.getWidthHW(), worldTex.getHeightHW());
-                GL20C.glUniform2i(bilInputMax, inW - 1, inH - 1);
+                setInputMax(bilInputMax, inW - 1, inH - 1);
             }
             GL11C.glDrawArrays(0x0004 /* GL_TRIANGLES */, 0, 3);
+            if (worldMin != -1) {
+                GL11C.glTexParameteri(0x0DE1, 0x2801, worldMin);
+                GL11C.glTexParameteri(0x0DE1, 0x2800, worldMag);
+                worldMin = -1;
+            }
 
             // Pass 2: temp -> world full rect (RCAS; sharpness 0 is an exact copy for the non-FSR mode)
-            GL30C.glBindFramebuffer(0x8D40, world.getBufferId());
+            bindFramebuffer(world.getBufferId());
             GL11C.glViewport(0, 0, outW, outH);
             GL20C.glUseProgram(rcasProgram);
             WorldRenderScale.notifyRawProgram(rcasProgram);
             GL11C.glBindTexture(0x0DE1, tempTex);
             GL20C.glUniform1i(rcasTex, 0);
+            if (legacy) GL20C.glUniform2f(rcasInvSize, 1.0f / outW, 1.0f / outH);
             float stops = (1.0f - WorldUpscalerGovernor.getSharpness()) * 2.0f;
             GL20C.glUniform1f(rcasSharp, fsr ? (float) Math.pow(2.0, -stops) : 0.0f);
-            GL20C.glUniform2i(rcasInputMax, outW - 1, outH - 1);
+            setInputMax(rcasInputMax, outW - 1, outH - 1);
             GL11C.glDrawArrays(0x0004, 0, 3);
 
             WorldUpscalerGovernor.framesUpscaled.incrementAndGet();
         } finally {
-            GL30C.glBindVertexArray(prevVao);
-            GL30C.glBindFramebuffer(0x8CA9 /* DRAW */, prevDraw);
-            GL30C.glBindFramebuffer(0x8CA8 /* READ */, prevRead);
+            if (worldMin != -1) {
+                GL11C.glBindTexture(0x0DE1, worldTex.getID());
+                GL11C.glTexParameteri(0x0DE1, 0x2801, worldMin);
+                GL11C.glTexParameteri(0x0DE1, 0x2800, worldMag);
+            }
+            if (legacy) {
+                savedVerts.restore();
+                legacyFbo.glBindFramebuffer(legacyFbo.GL_FRAMEBUFFER(), prevDraw);
+                if (legacyReadBinding && prevRead != prevDraw) {
+                    GL30C.glBindFramebuffer(0x8CA8 /* READ */, prevRead);
+                }
+            } else {
+                GL30C.glBindVertexArray(prevVao);
+                GL30C.glBindFramebuffer(0x8CA9 /* DRAW */, prevDraw);
+                GL30C.glBindFramebuffer(0x8CA8 /* READ */, prevRead);
+            }
             GL11C.glBindTexture(0x0DE1, 0);
             GL11C.glDepthMask(true);
             WorldRenderScale.reapplyViewportAndScissor();
             resyncEngineState();
+        }
+    }
+
+    private static void setInputMax(int loc, int x, int y) {
+        if (legacy) {
+            GL20C.glUniform2f(loc, x, y);
+        } else {
+            GL20C.glUniform2i(loc, x, y);
+        }
+    }
+
+    private static void bindFramebuffer(int fbo) {
+        if (legacy) {
+            legacyFbo.glBindFramebuffer(legacyFbo.GL_FRAMEBUFFER(), fbo);
+        } else {
+            GL30C.glBindFramebuffer(0x8D40, fbo);
+        }
+    }
+
+    // Attribute 0 from our VBO; every other enabled array is switched off for the draw so nothing reads past a buffer
+    private static void bindLegacyTriangle(LegacyVertexState saved) {
+        for (int i = 1; i < saved.enabled.length; i++) {
+            if (saved.enabled[i]) GL20C.glDisableVertexAttribArray(i);
+        }
+        GL15C.glBindBuffer(0x8892 /* GL_ARRAY_BUFFER */, vbo);
+        GL20C.glVertexAttribPointer(0, 2, 0x1406 /* GL_FLOAT */, false, 0, 0L);
+        GL20C.glEnableVertexAttribArray(0);
+    }
+
+    /**
+     * Vertex array state the 2.1 path touches. The game's ring buffer re-sets its own pointers after restoreVbos, but
+     * other code (models) may not, so attribute 0 and every enable flag go back exactly as they were.
+     */
+    private static final class LegacyVertexState {
+        final boolean[] enabled;
+        final int arrayBuffer;
+        final int buf0, size0, type0, stride0;
+        final boolean norm0;
+        final long ptr0;
+
+        private LegacyVertexState() {
+            int max = Math.min(16, Math.max(1, GL11C.glGetInteger(0x8869 /* GL_MAX_VERTEX_ATTRIBS */)));
+            enabled = new boolean[max];
+            for (int i = 0; i < max; i++) {
+                enabled[i] = GL20C.glGetVertexAttribi(i, 0x8622 /* ARRAY_ENABLED */) != 0;
+            }
+            arrayBuffer = GL11C.glGetInteger(0x8894 /* GL_ARRAY_BUFFER_BINDING */);
+            buf0 = GL20C.glGetVertexAttribi(0, 0x889F /* ARRAY_BUFFER_BINDING */);
+            size0 = GL20C.glGetVertexAttribi(0, 0x8623 /* ARRAY_SIZE */);
+            stride0 = GL20C.glGetVertexAttribi(0, 0x8624 /* ARRAY_STRIDE */);
+            type0 = GL20C.glGetVertexAttribi(0, 0x8625 /* ARRAY_TYPE */);
+            norm0 = GL20C.glGetVertexAttribi(0, 0x886A /* ARRAY_NORMALIZED */) != 0;
+            ptr0 = GL20C.glGetVertexAttribPointer(0, 0x8645 /* ARRAY_POINTER */);
+        }
+
+        static LegacyVertexState save() {
+            return new LegacyVertexState();
+        }
+
+        void restore() {
+            // A client-memory pointer (buffer 0) can't be put back safely from here; the next draw sets its own
+            if (buf0 != 0) {
+                GL15C.glBindBuffer(0x8892, buf0);
+                GL20C.glVertexAttribPointer(0, size0, type0, norm0, stride0, ptr0);
+            }
+            GL15C.glBindBuffer(0x8892, arrayBuffer);
+            for (int i = 0; i < enabled.length; i++) {
+                if (enabled[i]) {
+                    GL20C.glEnableVertexAttribArray(i);
+                } else {
+                    GL20C.glDisableVertexAttribArray(i);
+                }
+            }
         }
     }
 
@@ -173,7 +293,11 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
     private static void ensureTemp(int w, int h) {
         if (tempFbo != 0 && tempW == w && tempH == h) return;
         if (tempFbo != 0) {
-            GL30C.glDeleteFramebuffers(tempFbo);
+            if (legacy) {
+                legacyFbo.glDeleteFramebuffers(tempFbo);
+            } else {
+                GL30C.glDeleteFramebuffers(tempFbo);
+            }
             GL11C.glDeleteTextures(tempTex);
         }
         tempTex = GL11C.glGenTextures();
@@ -183,10 +307,18 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         GL11C.glTexParameteri(0x0DE1, 0x2800, 0x2600);
         GL11C.glTexParameteri(0x0DE1, 0x2802, 0x812F /* CLAMP_TO_EDGE */);
         GL11C.glTexParameteri(0x0DE1, 0x2803, 0x812F);
-        tempFbo = GL30C.glGenFramebuffers();
-        GL30C.glBindFramebuffer(0x8D40, tempFbo);
-        GL30C.glFramebufferTexture2D(0x8D40, 0x8CE0 /* COLOR_ATTACHMENT0 */, 0x0DE1, tempTex, 0);
-        int status = GL30C.glCheckFramebufferStatus(0x8D40);
+        int status;
+        if (legacy) {
+            tempFbo = legacyFbo.glGenFramebuffers();
+            legacyFbo.glBindFramebuffer(legacyFbo.GL_FRAMEBUFFER(), tempFbo);
+            legacyFbo.glFramebufferTexture2D(legacyFbo.GL_FRAMEBUFFER(), legacyFbo.GL_COLOR_ATTACHMENT0(), 0x0DE1, tempTex, 0);
+            status = legacyFbo.glCheckFramebufferStatus(legacyFbo.GL_FRAMEBUFFER());
+        } else {
+            tempFbo = GL30C.glGenFramebuffers();
+            GL30C.glBindFramebuffer(0x8D40, tempFbo);
+            GL30C.glFramebufferTexture2D(0x8D40, 0x8CE0 /* COLOR_ATTACHMENT0 */, 0x0DE1, tempTex, 0);
+            status = GL30C.glCheckFramebufferStatus(0x8D40);
+        }
         if (status != 0x8CD5) {
             throw new IllegalStateException("FSR temp FBO incomplete: 0x" + Integer.toHexString(status));
         }
@@ -195,24 +327,43 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
     }
 
     private static void init() {
-        int vs = compile(0x8B31 /* VERTEX */, FULLSCREEN_VERT);
-        easuProgram = link(vs, compile(0x8B30, EASU_FRAG));
-        bilinearProgram = link(vs, compile(0x8B30, BILINEAR_FRAG));
-        rcasProgram = link(vs, compile(0x8B30, RCAS_FRAG));
+        GLCapabilities caps = GL.getCapabilities();
+        legacy = FORCE_LEGACY || !caps.OpenGL33;
+        if (legacy) {
+            if (!caps.OpenGL21) throw new IllegalStateException("FSR needs OpenGL 2.1 or newer");
+            legacyFbo = TextureFBO.getFuncs();
+            if (legacyFbo == null) throw new IllegalStateException("no framebuffer object support");
+            legacyReadBinding = caps.OpenGL30 || caps.GL_ARB_framebuffer_object;
+        }
+
+        int vs = compile(0x8B31 /* VERTEX */, vertexSource(legacy));
+        easuProgram = link(vs, compile(0x8B30, fragmentSource(legacy, EASU_BODY)));
+        bilinearProgram = link(vs, compile(0x8B30, fragmentSource(legacy, BILINEAR_BODY)));
+        rcasProgram = link(vs, compile(0x8B30, fragmentSource(legacy, RCAS_BODY)));
         GL20C.glDeleteShader(vs);
 
         easuTex = GL20C.glGetUniformLocation(easuProgram, "InputTex");
         easuCon0 = GL20C.glGetUniformLocation(easuProgram, "Con0");
         easuInputMax = GL20C.glGetUniformLocation(easuProgram, "InputMax");
+        easuInvSize = GL20C.glGetUniformLocation(easuProgram, "InvSize");
         bilTex = GL20C.glGetUniformLocation(bilinearProgram, "InputTex");
         bilCon0 = GL20C.glGetUniformLocation(bilinearProgram, "Con0");
         bilInputMax = GL20C.glGetUniformLocation(bilinearProgram, "InputMax");
         rcasTex = GL20C.glGetUniformLocation(rcasProgram, "InputTex");
         rcasSharp = GL20C.glGetUniformLocation(rcasProgram, "Sharp");
         rcasInputMax = GL20C.glGetUniformLocation(rcasProgram, "InputMax");
-        vao = GL30C.glGenVertexArrays();
+        rcasInvSize = GL20C.glGetUniformLocation(rcasProgram, "InvSize");
+        if (legacy) {
+            int prevBuf = GL11C.glGetInteger(0x8894 /* GL_ARRAY_BUFFER_BINDING */);
+            vbo = GL15C.glGenBuffers();
+            GL15C.glBindBuffer(0x8892, vbo);
+            GL15C.glBufferData(0x8892, FULLSCREEN_TRIANGLE, 0x88E4 /* GL_STATIC_DRAW */);
+            GL15C.glBindBuffer(0x8892, prevBuf);
+        } else {
+            vao = GL30C.glGenVertexArrays();
+        }
         initialized = true;
-        PZOLogger.success("[WorldUpscaler] AMD FSR 1.0 EASU + RCAS pipeline ready");
+        PZOLogger.success("[WorldUpscaler] AMD FSR 1.0 EASU + RCAS pipeline ready" + (legacy ? " (GLSL 1.20, OpenGL 2.1 path)" : ""));
     }
 
     private static int compile(int type, String src) {
@@ -231,6 +382,7 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         int p = GL20C.glCreateProgram();
         GL20C.glAttachShader(p, vs);
         GL20C.glAttachShader(p, fs);
+        GL20C.glBindAttribLocation(p, 0, "Pos");
         GL20C.glLinkProgram(p);
         GL20C.glDeleteShader(fs);
         if (GL20C.glGetProgrami(p, 0x8B82 /* LINK_STATUS */) == 0) {
@@ -241,21 +393,51 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         return p;
     }
 
-    // Attribute-less fullscreen triangle
-    static final String FULLSCREEN_VERT = String.join("\n",
-        "#version 330",
-        "void main() {",
-        "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));",
-        "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);",
-        "}");
+    static final float[] FULLSCREEN_TRIANGLE = { -1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f };
 
-    static final String EASU_FRAG = String.join("\n",
-        "#version 330",
-        "uniform sampler2D InputTex;",
+    static String vertexSource(boolean legacy) {
+        if (legacy) {
+            return String.join("\n",
+                "#version 120",
+                "attribute vec2 Pos;",
+                "void main() {",
+                "    gl_Position = vec4(Pos, 0.0, 1.0);",
+                "}");
+        }
+        // Attribute-less fullscreen triangle
+        return String.join("\n",
+            "#version 330",
+            "void main() {",
+            "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));",
+            "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);",
+            "}");
+    }
+
+    /**
+     * Shared header: InputTex, InputMax (last valid texel) and T(p), a clamped single-texel read. GLSL 1.20 has no
+     * texelFetch and no integer clamp, so it clamps in float (exact for these sizes) and samples the texel centre.
+     */
+    static String fragmentSource(boolean legacy, String body) {
+        String header = legacy
+            ? String.join("\n",
+                "#version 120",
+                "#define FragColor gl_FragColor",
+                "#define texture texture2D",
+                "uniform sampler2D InputTex;",
+                "uniform vec2 InputMax;",
+                "uniform vec2 InvSize;",
+                "vec3 T(ivec2 p) { return texture2D(InputTex, (clamp(vec2(p), vec2(0.0), InputMax) + 0.5) * InvSize).rgb; }")
+            : String.join("\n",
+                "#version 330",
+                "out vec4 FragColor;",
+                "uniform sampler2D InputTex;",
+                "uniform ivec2 InputMax;",
+                "vec3 T(ivec2 p) { return texelFetch(InputTex, clamp(p, ivec2(0), InputMax), 0).rgb; }");
+        return header + "\n" + body;
+    }
+
+    static final String EASU_BODY = String.join("\n",
         "uniform vec4 Con0;",
-        "uniform ivec2 InputMax;",
-        "out vec4 FragColor;",
-        "vec3 T(ivec2 p) { return texelFetch(InputTex, clamp(p, ivec2(0), InputMax), 0).rgb; }",
         "float Lum(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }",
         "float Rcp(float x) { return 1.0 / max(x, 1e-10); }",
         "void SetF(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE) {",
@@ -342,25 +524,16 @@ public final class WorldUpscaleRenderer extends TextureDraw.GenericDrawer {
         "    FragColor = vec4(pix, 1.0);",
         "}");
 
-    // Con0 = (in/out ratio x, y, texture width, texture height)
-    static final String BILINEAR_FRAG = String.join("\n",
-        "#version 330",
-        "uniform sampler2D InputTex;",
+    // Con0 = (in/out ratio x, y, texture width, texture height); filtered read, so no T()
+    static final String BILINEAR_BODY = String.join("\n",
         "uniform vec4 Con0;",
-        "uniform ivec2 InputMax;",
-        "out vec4 FragColor;",
         "void main() {",
         "    vec2 src = clamp(gl_FragCoord.xy * Con0.xy, vec2(0.5), vec2(InputMax) + 0.5);",
         "    FragColor = vec4(texture(InputTex, src / Con0.zw).rgb, 1.0);",
         "}");
 
-    static final String RCAS_FRAG = String.join("\n",
-        "#version 330",
-        "uniform sampler2D InputTex;",
+    static final String RCAS_BODY = String.join("\n",
         "uniform float Sharp;",
-        "uniform ivec2 InputMax;",
-        "out vec4 FragColor;",
-        "vec3 T(ivec2 p) { return texelFetch(InputTex, clamp(p, ivec2(0), InputMax), 0).rgb; }",
         "void main() {",
         "    ivec2 sp = ivec2(gl_FragCoord.xy);",
         //   b / d e f / h

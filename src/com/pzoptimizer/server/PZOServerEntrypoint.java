@@ -5,7 +5,7 @@ import java.lang.reflect.Method;
 
 /** Dedicated server entry point: applies PZO's server tuning, then hands over to zombie.network.GameServer. */
 public class PZOServerEntrypoint {
-    public static final String SERVER_VERSION = "1.9.9";
+    public static final String SERVER_VERSION = "2.0-alpha";
 
     private static volatile boolean initialized = false;
 

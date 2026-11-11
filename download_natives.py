@@ -161,9 +161,11 @@ def download_artifacts_for_run(token, run_id, root_dir):
                 extracted_bytes = zf.read(item)
                 target_filename = os.path.basename(item)
 
-                # The Windows DLL is pinned, see package_release.py; a CI build is a different file
-                if target_filename == "pzo_native64.dll":
-                    print("[*] Skipped pzo_native64.dll (pinned)")
+                # Natives are pinned on every OS, see package_release.py; only take CI builds after a real native change.
+                # The Windows DLL is never taken from CI.
+                if target_filename == "pzo_native64.dll" or (target_filename.endswith((".so", ".dylib"))
+                        and os.environ.get("PZO_TAKE_CI_NATIVES") != "1"):
+                    print(f"[*] Skipped {target_filename} (pinned)")
                     continue
 
                 if target_filename.endswith((".dll", ".so", ".dylib")):

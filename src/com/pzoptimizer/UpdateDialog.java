@@ -93,7 +93,7 @@ public class UpdateDialog {
         String installedVersion = PZONative.getInstalledNativeVersion();
         String expectedVersion = UpdateChecker.getExpectedNativeVersion();
 
-        if (filePresent && (expectedVersion.equalsIgnoreCase(installedVersion) || UpdateChecker.isWindowsNativeCurrent(installedVersion))) {
+        if (filePresent && (expectedVersion.equalsIgnoreCase(installedVersion) || UpdateChecker.isNativeCurrent(installedVersion))) {
             return false;
         }
 
@@ -633,29 +633,11 @@ public class UpdateDialog {
             boolean nativeInstalled = PZONative.isNativeFilePresent() || currentNative.exists() || win64Dll.exists();
             boolean hasNewNative = false;
 
-            // Get the matching native library first, if native support is installed or available
+            // Natives are pinned on every OS: take the pinned one, and don't touch one that's already good enough
+            boolean keepNative = UpdateChecker.isNativeCurrent(PZONative.getInstalledNativeVersion());
             List<String> nativeCandidates = new ArrayList<>();
-            if (dllDownloadUrl != null && !dllDownloadUrl.isEmpty() && !dllDownloadUrl.contains("/releases/latest/")) {
-                nativeCandidates.add(dllDownloadUrl);
-            }
-            String resolvedNative = UpdateChecker.resolveNativeDownloadUrl(latestVersion, 2500);
-            if (resolvedNative != null && !nativeCandidates.contains(resolvedNative)) {
-                nativeCandidates.add(resolvedNative);
-            }
-            String directNativeUrl = "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFileName;
-            if (!nativeCandidates.contains(directNativeUrl)) {
-                nativeCandidates.add(directNativeUrl);
-            }
-            String directNativeLowerUrl = "https://github.com/prop11/PZO-Launcher/releases/download/v" + cleanVer.replaceFirst("^[vV]", "") + "/" + nativeFileName;
-            if (!nativeCandidates.contains(directNativeLowerUrl)) {
-                nativeCandidates.add(directNativeLowerUrl);
-            }
-
-            // Windows only ever takes the pinned DLL, and doesn't touch one that's already good enough
-            boolean keepDll = isWin && UpdateChecker.isWindowsNativeCurrent(PZONative.getInstalledNativeVersion());
-            if (isWin) {
-                nativeCandidates.clear();
-                if (!keepDll) nativeCandidates.add(UpdateChecker.getWindowsNativeDownloadUrl());
+            if (!keepNative) {
+                nativeCandidates.add(UpdateChecker.getPinnedNativeDownloadUrl());
             }
 
             for (String tryNative : nativeCandidates) {
@@ -670,7 +652,7 @@ public class UpdateDialog {
             }
 
             // With the native library installed, never update the jar on its own
-            if (nativeInstalled && !hasNewNative && !keepDll) {
+            if (nativeInstalled && !hasNewNative && !keepNative) {
                 if (newNative.exists()) newNative.delete();
                 PZOLogger.error("Failed to download matching native library (" + nativeFileName + ") for version " + latestVersion + ". Aborting update to avoid library mismatch.");
                 showNoticePopup("Update Notice", "Could not download the matching " + nativeFileName + " for version " + latestVersion + " from GitHub Releases.\n\nTo prevent version mismatch errors, the update has been cancelled. Please check your internet connection or update manually.");
