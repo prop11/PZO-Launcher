@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "_doc": [
+    "Rules for the PZO crash diagnoser. The Java engine (Diagnoser.java) and the Discord bot's /diagnose read this same file, so a verdict is the same wherever it is worked out.",
+    "Inputs: 'console' = the last 4 MB of console.txt, 'engine' = pzo_engine.log of the crashed session (pzo_engine.prev.log when read at the next launch), 'hs_err' = each hs_err_pid*.log, only the lines above the first '---------------  P R O C E S S' header (the crashing thread).",
+    "A rule is tried against every line of each input in 'files'. 'pattern' is a regex that must work in both Java and Python (search, not full match). 'flags': 'i' = ignore case. 'tail_lines' limits console/engine to their last N lines.",
+    "'mod_group' is the capture group holding a mod's name. 'kind': 'rewritten_frame' has no pattern: it matches a stack frame (class.method followed by an opening bracket) whose class.method is listed on a '[PZO Rewrites] class: method, method' line of 'engine'.",
+    "The verdict is the matched rule with the highest 'priority'; for that rule the last matching line is the evidence. Other matched rules are listed as 'also seen'. No match = verdict 'unknown'.",
+    "'text': true marks a rule the Discord bot also tries against the text of a message posted in a support ticket, for errors people paste instead of sending a report. The engine ignores it.",
+    "Verdicts: pzo, pzo_possible, mod, install, user, unknown."
+  ],
+  "rules": [
+    {
+      "id": "pzo_native_crash",
+      "verdict": "pzo",
+      "priority": 100,
+      "files": ["hs_err"],
+      "pattern": "^# C\\s+\\[(?:lib)?pzo_native64",
+      "title": "The crash happened inside PZO's native library",
+      "advice": "This is a PZO bug. Please send the report file."
+    },
+    {
+      "id": "pzo_frame_jvm_crash",
+      "verdict": "pzo",
+      "priority": 95,
+      "files": ["hs_err"],
+      "pattern": "^[jJ]\\s.*\\bcom\\.pzoptimizer\\.",
+      "title": "PZO code was running on the thread that crashed",
+      "advice": "This is most likely a PZO bug. Please send the report file."
+    },
+    {
+      "id": "pzo_frame_exception",
+      "verdict": "pzo",
+      "priority": 90,
+      "files": ["console"],
+      "tail_lines": 600,
+      "pattern": "^\\s+(?:at )?com\\.pzoptimizer\\.[\\w.$]+\\(",
+      "title": "An error near the end of the log came from PZO code",
+      "advice": "This is most likely a PZO bug. Please send the report file."
+    },
+    {
+      "id": "gpu_driver_crash",
+      "verdict": "install",
+      "priority": 80,
+      "files": ["hs_err"],
+      "flags": "i",
+      "pattern": "^# C\\s+\\[(nvoglv64|nvwgf2umx|atio6axx|atig6pxx|amdxc64|ig\\w*icd64|libnvidia-glcore|libGLX_nvidia|libgallium)",
+      "title": "The crash happened inside the graphics driver",
+      "advice": "Update the graphics driver, or reinstall it cleanly. If it only crashes with PZO installed, send the report file as well."
+    },
+    {
+      "id": "out_of_memory",
+      "verdict": "user",
+      "priority": 80,
+      "files": ["console", "hs_err"],
+      "pattern": "java\\.lang\\.OutOfMemoryError|Out of Memory Error|insufficient memory for the Java Runtime",
+      "title": "The game ran out of memory",
+      "advice": "Give the game more memory (the -Xmx value in ProjectZomboid64.json), close other programs, or run fewer or lighter mods."
+    },
+    {
+      "id": "fmod_sound_bank",
+      "verdict": "install",
+      "priority": 75,
+      "files": ["console"],
+      "pattern": "getPath\\(\\) != FMOD_OK",
+      "title": "The game could not load its sound files",
+      "advice": "A game file is damaged or from another version. In Steam: right click Project Zomboid, Properties, Installed Files, Verify integrity of game files."
+    },
+    {
+      "id": "pzo_native_not_loadable",
+      "verdict": "install",
+      "priority": 75,
+      "files": ["console", "engine"],
+      "pattern": "UnsatisfiedLinkError.*pzo_native",
+      "title": "PZO's native library could not be loaded",
+      "advice": "The PZO install is incomplete or was blocked by security software. Run the PZO installer again."
+    },
+    {
+      "id": "rewritten_game_method",
+      "kind": "rewritten_frame",
+      "verdict": "pzo_possible",
+      "priority": 70,
+      "files": ["console", "hs_err"],
+      "tail_lines": 600,
+      "title": "The error went through a game method that PZO changes",
+      "advice": "PZO may be involved. Please send the report file so it can be checked."
+    },
+    {
+      "id": "class_rejected",
+      "verdict": "pzo_possible",
+      "priority": 65,
+      "files": ["console"],
+      "pattern": "java\\.lang\\.(?:VerifyError|ClassFormatError|IncompatibleClassChangeError|NoSuchMethodError|NoSuchFieldError)",
+      "title": "A game class did not match what the code using it expected",
+      "advice": "This comes from PZO or a Java mod changing game code, or from a game update that PZO or a mod has not caught up with yet. Check for a PZO update and send the report file."
+    },
+    {
+      "id": "pzopt_wrong_game_revision",
+      "verdict": "mod",
+      "priority": 60,
+      "files": ["console", "engine"],
+      "text": true,
+      "pattern": "pzopt-classes was built for game revision",
+      "title": "The PZ_Optimization mod (pzopt) does not match this game version. That message is from pzopt, not PZO",
+      "advice": "PZ_Optimization is a different mod from PZO and PZO cannot fix it. Turn PZ_Optimization off or get its build for your game version from its own page, and report it to that mod's author."
+    },
+    {
+      "id": "game_native_crash",
+      "verdict": "unknown",
+      "priority": 55,
+      "files": ["hs_err"],
+      "flags": "i",
+      "pattern": "^# C\\s+\\[(ZNetJNI64|PZBullet64|PZBulletNoOpenGL64|PZPopMan64|PZPathFind64|PZClipper64|Lighting64|RakNet64|fmod\\w*|lwjgl\\w*)\\.",
+      "title": "The crash happened inside one of the game's own native libraries",
+      "advice": "Verify the game files in Steam first. If it keeps happening, send the report file."
+    },
+    {
+      "id": "lua_mod_error",
+      "verdict": "mod",
+      "priority": 50,
+      "files": ["console"],
+      "tail_lines": 400,
+      "pattern": "\\| MOD: (.+?)\\s*$",
+      "mod_group": 1,
+      "title": "A mod's Lua code was throwing errors",
+      "advice": "Turn that mod off and try again. If the crash stops, report it to the mod's author."
+    },
+    {
+      "id": "mod_file_error",
+      "verdict": "mod",
+      "priority": 45,
+      "files": ["console"],
+      "tail_lines": 400,
+      "pattern": "(?:ERROR|SEVERE).*[\\\\/]mods[\\\\/]([^\\\\/]+)[\\\\/]",
+      "mod_group": 1,
+      "title": "The last errors in the log point at a mod's files",
+      "advice": "Turn that mod off and try again. If the crash stops, report it to the mod's author."
+    },
+    {
+      "id": "uncaught_exception",
+      "verdict": "unknown",
+      "priority": 30,
+      "files": ["engine"],
+      "pattern": "CRITICAL UNCAUGHT EXCEPTION in thread",
+      "title": "A thread died with an error nobody handled",
+      "advice": "The report file has the details. Send it if you want it looked at."
+    },
+    {
+      "id": "jvm_crash",
+      "verdict": "unknown",
+      "priority": 20,
+      "files": ["hs_err"],
+      "pattern": "^#\\s+(EXCEPTION_\\w+|SIGSEGV|SIGBUS|SIGILL|Internal Error)",
+      "title": "The Java runtime itself crashed",
+      "advice": "The report file has the crash log. Send it if you want it looked at."
+    }
+  ]
+}
