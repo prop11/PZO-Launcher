@@ -32,6 +32,13 @@ public class PZOEntrypoint {
             PZOLogger.warn("[PZO Dev] Dialog preview failed: " + t.getMessage());
         }
 
+        try {
+            CrashWindow.check(CrashFlag.begin());
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZO] Crash check failed: " + t);
+        }
+        StartupTimer.step("crash check (and its window, if shown)");
+
         if (IncompatibleModGuard.isPzOptimizationInstalled()) {
             IncompatibleModGuard.reportAndWarn();
             launchGame(args);
@@ -108,10 +115,7 @@ public class PZOEntrypoint {
         WorldStreamerBooster.startDaemon();
         PZOFastMath.initialize();
         ZombieMathVectorizer.apply();
-        SpatialBufferPool.initialize();
-        HordeSpatialCuller.initialize();
         GenerationalHeapCleaner.startGovernor();
-        AsyncEntityDistanceCache.initialize();
         EngineGLStateGovernor.initialize();
         EngineFramePacer.initialize();
         NativeDirectMemoryPool.initialize();
@@ -127,8 +131,7 @@ public class PZOEntrypoint {
         com.pzoptimizer.multicore.PZOMultiCoreEngine.initialize();
         StartupTimer.step("engine init, first half");
         if (UnstableChannelGuard.isUnstableBuild()) {
-            PZOLogger.success("[PZO Unstable Engine] Phase 3 SIMD AVX2 Batch Horde Spatial Culler & Skeletal LOD Armed");
-            PZOLogger.success("[PZO Unstable Engine] RenderFrustumCuller, ZOcclusionCuller & ModelSkinningGovernor Armed");
+            PZOLogger.success("[PZO Unstable Engine] RenderFrustumCuller & ZOcclusionCuller Armed");
             PZOLogger.success("[PZO Unstable Engine] EnhancedRenderTelemetry Active");
         }
         PowerThrottlingShield.apply();

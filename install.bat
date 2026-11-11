@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v1.9.9)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.0)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -288,7 +288,7 @@ function Download-PZOGitHubJar($targetFile) {
 }
 
 function Download-PZOGitHubDll($targetFile) {
-    # Pinned to the release Smart App Control accepts, same version as UpdateChecker.WINDOWS_NATIVE_VERSION
+    # Pinned to the release Smart App Control accepts, same version as UpdateChecker.NATIVE_VERSION
     $downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/download/V1.9.7/pzo_native64.dll"
     Write-Host "`n[*] Downloading pzo_native64.dll from GitHub Releases..." -ForegroundColor Cyan
     Write-Host "    URL: $downloadUrl" -ForegroundColor Gray
@@ -883,7 +883,7 @@ function Apply-PZOConfiguration {
         pretouch    = -not $Compat.Active
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
-        version     = "1.9.9"
+        version     = "2.0"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress

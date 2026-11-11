@@ -13,10 +13,10 @@ import java.util.regex.Pattern;
 
 /** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "1.9.9";
-    // Smart App Control trusts the DLL per file and a rebuild is a new file, so Windows stays on this release's DLL.
-    // Only bump it when pzo_native.c really changes.
-    public static final String WINDOWS_NATIVE_VERSION = "1.9.7";
+    public static final String CURRENT_VERSION = "2.0";
+    // Every OS stays on this release's native binaries (Smart App Control trusts the DLL per file, and a rebuild for a
+    // version string alone gains nothing). Only bump it when pzo_native.c really changes.
+    public static final String NATIVE_VERSION = "1.9.7";
     private static final String GITHUB_LATEST_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases/latest";
     private static final String GITHUB_ALL_RELEASES_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases";
     private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
@@ -33,122 +33,29 @@ public class UpdateChecker {
         }
     }
 
-    private static boolean isWindowsNative() {
-        return getNativeFileName().endsWith(".dll");
-    }
-
-    /** The native version this engine wants on this OS. Mac and Linux natives still follow the release version. */
+    /** The native version this engine wants. Pinned on every OS, see NATIVE_VERSION. */
     public static String getExpectedNativeVersion() {
-        return isWindowsNative() ? WINDOWS_NATIVE_VERSION : CURRENT_VERSION;
+        return NATIVE_VERSION;
     }
 
-    public static String getWindowsNativeDownloadUrl() {
-        return "https://github.com/prop11/PZO-Launcher/releases/download/V" + WINDOWS_NATIVE_VERSION + "/pzo_native64.dll";
+    public static String getPinnedNativeDownloadUrl() {
+        return "https://github.com/prop11/PZO-Launcher/releases/download/V" + NATIVE_VERSION + "/" + getNativeFileName();
     }
 
-    /** True for the pinned DLL or a newer one, so players already on a 1.9.8 or 1.9.9 DLL don't get prompted. */
-    public static boolean isWindowsNativeCurrent(String installedVersion) {
-        if (!isWindowsNative() || installedVersion == null) return false;
+    /** True for the pinned native or a newer one, so players already on a 1.9.8 or 1.9.9 native don't get prompted. */
+    public static boolean isNativeCurrent(String installedVersion) {
+        if (installedVersion == null) return false;
         String clean = installedVersion.replaceAll("(?i)-unstable|-beta|-alpha|-rc.*", "").trim();
-        return clean.equalsIgnoreCase(WINDOWS_NATIVE_VERSION) || isNewerVersion(clean, WINDOWS_NATIVE_VERSION);
+        return clean.equalsIgnoreCase(NATIVE_VERSION) || isNewerVersion(clean, NATIVE_VERSION);
     }
 
     public static String getDefaultNativeDownloadUrl() {
-        if (isWindowsNative()) return getWindowsNativeDownloadUrl();
-        String nativeFile = getNativeFileName();
-        boolean beta = PZOConfig.isBetaOptIn() || isUnstableIdentifier(CURRENT_VERSION);
-        if (beta) {
-            String cleanVer = CURRENT_VERSION.trim();
-            String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
-            return "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFile;
-        }
-        return "https://github.com/prop11/PZO-Launcher/releases/latest/download/" + nativeFile;
+        return getPinnedNativeDownloadUrl();
     }
 
-    /**
-     * Download URL for the native library matching the version or channel (beta/unstable prereleases included if opted
-     * in).
-     */
+    /** Natives no longer follow the engine version, so every target version gets the pinned binary. */
     public static String resolveNativeDownloadUrl(String targetVersion, int timeoutMs) {
-        if (isWindowsNative()) return getWindowsNativeDownloadUrl();
-        String nativeFileName = getNativeFileName();
-        String cleanVer = targetVersion != null && !targetVersion.isEmpty() ? targetVersion.trim() : CURRENT_VERSION;
-        String vTag = cleanVer.startsWith("v") || cleanVer.startsWith("V") ? cleanVer : "V" + cleanVer;
-        String directFallback = "https://github.com/prop11/PZO-Launcher/releases/download/" + vTag + "/" + nativeFileName;
-
-        boolean betaOptIn = PZOConfig.isBetaOptIn() || isUnstableIdentifier(cleanVer);
-
-        try {
-            String apiUrl = betaOptIn ? GITHUB_ALL_RELEASES_API_URL : GITHUB_LATEST_API_URL;
-            URL url = new URL(apiUrl);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "PZO-UpdateChecker");
-            conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
-            conn.setConnectTimeout(timeoutMs);
-            conn.setReadTimeout(timeoutMs);
-
-            int code = conn.getResponseCode();
-            if (code == 200) {
-                BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = in.readLine()) != null) {
-                    response.append(line);
-                }
-                in.close();
-
-                String json = response.toString().trim();
-                List<String> releases = new ArrayList<>();
-                if (json.startsWith("[")) {
-                    releases = splitJsonArrayObjects(json);
-                } else if (json.startsWith("{")) {
-                    releases.add(json);
-                }
-
-                for (String relJson : releases) {
-                    if (extractJsonBooleanField(relJson, "draft")) continue;
-                    String tag = extractJsonField(relJson, "tag_name");
-                    String name = extractJsonField(relJson, "name");
-                    boolean tagMatches = tag != null && (tag.equalsIgnoreCase(cleanVer) || tag.equalsIgnoreCase(vTag) || tag.equalsIgnoreCase("v" + cleanVer));
-                    boolean nameMatches = name != null && name.contains(cleanVer);
-
-                    if (tagMatches || nameMatches) {
-                        String assetUrl = extractDownloadUrlForAsset(relJson, nativeFileName);
-                        if ((assetUrl == null || assetUrl.isEmpty()) && nativeFileName.endsWith(".dll")) {
-                            assetUrl = extractDownloadUrlForAsset(relJson, "pzo_native64.dll");
-                        }
-                        if (assetUrl != null && !assetUrl.isEmpty()) {
-                            return assetUrl;
-                        }
-                    }
-                }
-
-                for (String relJson : releases) {
-                    if (extractJsonBooleanField(relJson, "draft")) continue;
-                    boolean isPrerelease = extractJsonBooleanField(relJson, "prerelease");
-                    String tag = extractJsonField(relJson, "tag_name");
-                    String name = extractJsonField(relJson, "name");
-                    boolean hasUnstableTag = isUnstableIdentifier(tag) || isUnstableIdentifier(name);
-
-                    if (!betaOptIn && (isPrerelease || hasUnstableTag)) {
-                        continue;
-                    }
-
-                    String assetUrl = extractDownloadUrlForAsset(relJson, nativeFileName);
-                    if ((assetUrl == null || assetUrl.isEmpty()) && nativeFileName.endsWith(".dll")) {
-                        assetUrl = extractDownloadUrlForAsset(relJson, "pzo_native64.dll");
-                    }
-                    if (assetUrl != null && !assetUrl.isEmpty()) {
-                        return assetUrl;
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            PZOLogger.warn("Notice: Could not query GitHub releases API for native library URL: " + t.getMessage());
-        }
-
-        return directFallback;
+        return getPinnedNativeDownloadUrl();
     }
 
     public static class UpdateResult {
@@ -251,10 +158,6 @@ public class UpdateChecker {
             String tagName = extractJsonField(selectedReleaseJson, "tag_name");
             String jarAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, "PZOptimEngine.jar");
             String nativeFileName = getNativeFileName();
-            String nativeAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, nativeFileName);
-            if ((nativeAssetUrl == null || nativeAssetUrl.isEmpty()) && nativeFileName.endsWith(".dll")) {
-                nativeAssetUrl = extractDownloadUrlForAsset(selectedReleaseJson, "pzo_native64.dll");
-            }
 
             String latestVersion = extractVersionNumber(releaseName);
             if (latestVersion == null) {
@@ -277,10 +180,7 @@ public class UpdateChecker {
             boolean hasUpdate = isNewerVersion(latestVersion, CURRENT_VERSION);
             String downloadUrl = (jarAssetUrl != null && !jarAssetUrl.isEmpty()) ? jarAssetUrl : DEFAULT_JAR_DOWNLOAD_URL;
             String defaultNativeUrl = getDefaultNativeDownloadUrl();
-            String nativeUrl = isWindowsNative() ? defaultNativeUrl : (nativeAssetUrl != null && !nativeAssetUrl.isEmpty()) ? nativeAssetUrl :
-                (tagName != null && !tagName.isEmpty() ?
-                    "https://github.com/prop11/PZO-Launcher/releases/download/" + tagName + "/" + nativeFileName :
-                    defaultNativeUrl);
+            String nativeUrl = defaultNativeUrl;
 
             writeStatus(hasUpdate, displayVersion, res.channel, downloadUrl, nativeUrl);
 
@@ -296,6 +196,42 @@ public class UpdateChecker {
             writeStatus(false, CURRENT_VERSION, res.channel, DEFAULT_JAR_DOWNLOAD_URL, getDefaultNativeDownloadUrl());
             return res;
         }
+    }
+
+    /**
+     * Up to five stable releases other than the installed one, newest first, as {tag, published date}. Empty when
+     * GitHub can't be reached. For the downgrader.
+     */
+    public static List<String[]> listStableReleases(int timeoutMs) {
+        List<String[]> out = new ArrayList<>();
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL(GITHUB_ALL_RELEASES_API_URL + "?per_page=30").openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "PZO-UpdateChecker");
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
+            if (conn.getResponseCode() != 200) return out;
+            StringBuilder response = new StringBuilder();
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                String line;
+                while ((line = in.readLine()) != null) response.append(line);
+            }
+            String installed = extractVersionNumber(CURRENT_VERSION);
+            for (String rel : splitJsonArrayObjects(response.toString().trim())) {
+                if (extractJsonBooleanField(rel, "draft") || extractJsonBooleanField(rel, "prerelease")) continue;
+                String tag = extractJsonField(rel, "tag_name");
+                if (tag == null || isUnstableIdentifier(tag)) continue;
+                String ver = extractVersionNumber(tag);
+                if (ver == null || (ver.equals(installed) && !isUnstableIdentifier(CURRENT_VERSION))) continue;
+                String date = extractJsonField(rel, "published_at");
+                out.add(new String[] {tag, date == null || date.length() < 10 ? "" : date.substring(0, 10)});
+                if (out.size() >= 5) break;
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[UpdateChecker] could not list releases: " + t);
+        }
+        return out;
     }
 
     /** Whether a tag or release title looks like an unstable/beta/preview build. */
@@ -395,15 +331,22 @@ public class UpdateChecker {
             int maxLen = Math.max(lParts.length, cParts.length);
 
             for (int i = 0; i < maxLen; i++) {
-                int lNum = i < lParts.length ? Integer.parseInt(lParts[i].replaceAll("\\D+", "")) : 0;
-                int cNum = i < cParts.length ? Integer.parseInt(cParts[i].replaceAll("\\D+", "")) : 0;
+                int lNum = i < lParts.length ? versionPart(lParts[i]) : 0;
+                int cNum = i < cParts.length ? versionPart(cParts[i]) : 0;
                 if (lNum > cNum) return true;
                 if (lNum < cNum) return false;
             }
-            return false;
+            // Same numbers: 2.0 counts as newer than 2.0-alpha, so alpha testers still get the real release
+            return !isUnstableIdentifier(latest) && isUnstableIdentifier(current);
         } catch (Exception e) {
             return false;
         }
+    }
+
+    // Leading digits only: "V1" -> 1, "0-alpha2" -> 0 (stripping every non-digit made that 2)
+    private static int versionPart(String part) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^\\D*(\\d+)").matcher(part);
+        return m.find() ? Integer.parseInt(m.group(1)) : 0;
     }
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel) {

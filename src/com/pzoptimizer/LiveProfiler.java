@@ -668,6 +668,7 @@ public final class LiveProfiler {
                                 "Per frame: update %s ms, chunk streaming %s ms (of which other mods' map-load scripts %s ms), Lua events %s ms, render %s ms, other/waiting %s ms, GC %s ms; render thread present %s ms",
                                 c[1], c[2], c.length > 8 ? c[8] : "?", c[3], c[4], c[5], c[6], c[7]));
                             w.println(MapLoadScriptPacer.summary());
+                            w.println(ShaderPatchHost.summary());
                         }
                         case "C" -> w.println(String.format(Locale.ROOT,
                             "Scene: zombies %s average (%s at most), animals %s average (%s at most), driving %s%% of the time, raining %s%%, Java heap peak %s%% of %s MB",

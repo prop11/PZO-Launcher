@@ -4,7 +4,7 @@ import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
 
 /**
- * Engine health numbers for the telemetry HUD: frame-time variance, GC overhead, direct buffer use, horde culler status
+ * Engine health numbers for the telemetry HUD: frame-time variance, GC overhead, direct buffer use
  * and chunk streaming rate.
  */
 public final class PZOTelemetryHUD {
@@ -21,8 +21,6 @@ public final class PZOTelemetryHUD {
         public int activeChunks = 0;
         public int prewarmedChunks = 0;
         public int fmodActiveVoices = 0;
-        public int hordeZombiesTracked = 0;
-        public int hordeCulled = 0;
         public long throttledTownZombies = 0;
         public boolean avx2Active = false;
     }
@@ -38,8 +36,6 @@ public final class PZOTelemetryHUD {
             snap.frameTimeMs = 16.6;
             snap.currentFps = 60.0;
             snap.directMemoryUsedKb = 4096; // 4096 KB off-heap direct ring
-            snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
-            snap.hordeCulled = HordeSpatialCuller.lastCulledOffscreenCount.get();
             snap.throttledTownZombies = VehicleTravelOptimizer.throttledTownZombies.get();
             snap.avx2Active = PZONative.isLoaded() && PZONative.isAVX2Supported();
         } catch (Throwable ignored) {}
@@ -49,8 +45,8 @@ public final class PZOTelemetryHUD {
 
     public static String getFormattedHUDText() {
         TelemetrySnapshot s = getLiveSnapshot();
-        return String.format("FPS: %.1f | FrameTime: %.2f ms | Heap: %d/%d MB | AVX2: %s | Horde: %d (Culled: %d | Throttled: %d)",
+        return String.format("FPS: %.1f | FrameTime: %.2f ms | Heap: %d/%d MB | AVX2: %s | Town zombies throttled: %d",
                 s.currentFps, s.frameTimeMs, s.heapUsedMb, s.maxHeapMb, s.avx2Active ? "ACTIVE" : "OFF",
-                s.hordeZombiesTracked, s.hordeCulled, s.throttledTownZombies);
+                s.throttledTownZombies);
     }
 }

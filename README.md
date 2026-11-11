@@ -48,35 +48,16 @@ Measured with PZO's in-engine benchmark harness: one launch of stock Project Zom
 
 ## Multi-Core Architecture
 
-Stock Project Zomboid runs almost all spatial math, visibility calculations, and animation updates on a single thread. PZO offloads these calculations to a worker thread pool while keeping game state mutations thread-safe:
+Stock Project Zomboid does nearly all of its per-frame work on one game thread. PZO moves the parts that can safely leave it onto worker threads. Zombie AI, physics and the world update stay on the game thread, because the game's state and its Lua VM are not thread-safe.
 
-```
-                              ┌──────────────────────────────────────────────┐
-                              │      Dedicated P-Core Worker Thread Pool      │
-                              │     (Pinned CPU Performance Core Affinity)    │
-                              └──────┬──────────────┬──────────────┬─────────┘
-                                     │              │              │
-              ┌──────────────────────┴──────┐       │       ┌──────┴──────────────────────┐
-              ▼                             ▼       ▼       ▼                             ▼
-   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
-   │       Pillar 1       │   │       Pillar 2       │   │       Pillar 3       │   │       Pillar 4       │
-   │ MultiCoreChunkStream │   │ MultiCoreHordeGov    │   │ MultiCoreAnimation   │   │ MultiCoreIslandSched │
-   │                      │   │                      │   │                      │   │                      │
-   │ • 1MB Direct NIO Ring│   │ • AVX2 SIMD Partitions│   │ • 64-Bone Frustum    │   │ • 32x32 Spatial      │
-   │ • Immediate Streamer │   │ • Frustum AABB Cull  │   │   Skinning Bypass    │   │   Island Buckets     │
-   │   Queue Wake-Up      │   │ • Parallel FOV Cones │   │ • Distant 75% Frame  │   │ • Guaranteed Kahlua  │
-   │ • Parallel Zlib Infl │   │ • Crowd Flocking Vec │   │   Skip Downsampling  │   │   Lua VM Safety      │
-   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
-```
+### 1. Zombie Bone Math (`BoneBatch`)
+* **Split update**: each zombie's blend weights, body angles and movement are done in place; the bone, twist, model and skin transforms are queued.
+* **Run across cores**: the queue runs on the frame workers (the game thread helps) before rendering, so the frame still draws the current pose.
+* **Self-checking**: sampled results are recomputed on the game thread, and the feature switches itself off for the session if they ever differ.
 
-### 1. Horde Simulation & Spatial Culling (`MultiCoreHordeGovernor`)
-* **Partitioned Sweeps**: Active entities are partitioned into 256-zombie batches across CPU cores.
-* **Native AVX2 Vector Math**: Evaluates entity distances, LOD tiers, camera frustum culling, 90° FOV awareness cones, and crowd repulsion steering vectors in compiled AVX2 SIMD assembly.
-* **Lock-Free Snapshots**: Writes results to atomic snapshot arrays (`SNAPSHOT_DISTANCES`, `SNAPSHOT_TIERS`, `SNAPSHOT_MASK`, `SNAPSHOT_FOV`), giving the main thread instant reads without lock contention.
-
-### 2. Skeletal Animation LOD (`MultiCoreAnimationEngine`)
-* **Frustum Bone Bypass**: Skips all 64 bone matrix transformations for offscreen entities or entities culled outside the camera frustum.
-* **Adaptive Frame Skipping**: Scales bone matrix updates for distant entities (>50 tiles away), cutting animation CPU overhead while maintaining full animation quality for nearby zombies.
+### 2. Zombie Action Variables (`ActionParallel`)
+* **Pre-read on workers**: most of a zombie's action update is reading animation variables. The safe ones are read on the frame workers, then each zombie finishes its update on the game thread in the original order.
+* **Single player only**; zombies that read each other mid-update are left on the stock path.
 
 ### 3. Chunk Streamer Dispatch (`StreamerWake` & `MultiCoreChunkStreamer`)
 * **Immediate Thread Dispatch**: Stock PZ throttles chunk requests on the game thread. PZO unparks and signals the background chunk streamer thread immediately upon enqueue.

@@ -4,7 +4,7 @@
 set -e
 
 echo "================================================================="
-echo " Project Zomboid Build 42 Engine Optimizer (v1.9.9)"
+echo " Project Zomboid Build 42 Engine Optimizer (v2.0)"
 echo " macOS & Linux Installation, Update & Recovery Utility"
 echo "================================================================="
 
@@ -366,7 +366,7 @@ PYEOF
 
     clean_lua_bridge_files
     mkdir -p "$HOME/Zomboid/Lua" "$HOME/Zomboid/mods" "$HOME/Zomboid/db" "$HOME/Zomboid/Server"
-    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"1.9.9"}\n' "$ALLOC_RAM" \
+    printf '{"optimized":true,"ram_gb":%s,"g1gc":true,"pretouch":false,"version":"2.0"}\n' "$ALLOC_RAM" \
         > "$HOME/Zomboid/Lua/pzo_status.json"
 
     resign_bundle
@@ -558,7 +558,8 @@ else
     if [ -z "$DLL_SRC" ] && [ "$IS_PROTON" -eq 1 ]; then
         echo "[*] Downloading pzo_native64.dll from GitHub Releases for Proton..."
         TARGET_DLL="$SCRIPT_DIR/pzo_native64.dll"
-        DLL_URL="https://github.com/prop11/PZO-Launcher/releases/latest/download/pzo_native64.dll"
+        # Pinned like UpdateChecker.NATIVE_VERSION
+        DLL_URL="https://github.com/prop11/PZO-Launcher/releases/download/V1.9.7/pzo_native64.dll"
         if command -v curl >/dev/null 2>&1; then
             curl -fsSL -A "PZO-Installer" "$DLL_URL" -o "$TARGET_DLL" || true
         elif command -v wget >/dev/null 2>&1; then
@@ -591,7 +592,8 @@ else
     if [ -z "$SO_SRC" ] && [ "$IS_PROTON" -eq 0 ]; then
         echo "[*] Downloading libpzo_native64.so from GitHub Releases for Linux..."
         TARGET_SO="$SCRIPT_DIR/libpzo_native64.so"
-        SO_URL="https://github.com/prop11/PZO-Launcher/releases/latest/download/libpzo_native64.so"
+        # Pinned like UpdateChecker.NATIVE_VERSION
+        SO_URL="https://github.com/prop11/PZO-Launcher/releases/download/V1.9.7/libpzo_native64.so"
         if command -v curl >/dev/null 2>&1; then
             curl -fsSL -A "PZO-Installer" "$SO_URL" -o "$TARGET_SO" || true
         elif command -v wget >/dev/null 2>&1; then
@@ -874,7 +876,7 @@ EOF
     mkdir -p "$HOME/Zomboid/Lua"
     PRETOUCH=false
     grep -q "AlwaysPreTouch" "$JSON_FILE" 2>/dev/null && PRETOUCH=true
-    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":$PRETOUCH,\"version\":\"1.9.9\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
+    echo "{\"optimized\":true,\"ram_gb\":$ALLOC_RAM,\"g1gc\":true,\"pretouch\":$PRETOUCH,\"version\":\"2.0\"}" > "$HOME/Zomboid/Lua/pzo_status.json"
     echo "[+] Generated Lua bridge status: $HOME/Zomboid/Lua/pzo_status.json"
 
     # Also sync to the Proton prefixes on every drive and SD card (Steam Deck)

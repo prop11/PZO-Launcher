@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.LongAdder;
  * Vanilla RandStandard.INSTANCE is one CellularAutomatonRNG behind a fair ReentrantLock, so my workers fight over it
  * when they draw random numbers at the same time (chunk parsing, animation, spatial checks). I wrap its Random so:
  * - the main game thread goes straight to the stock generator (one reference compare) and keeps its sequence
- * - PZO's worker threads (PZO-MultiCore-Worker, PZO-ChunkStreamer-Worker, PZO-MultiCoreHordeGovernor) use
+ * - PZO's worker threads (WorkerThread instances, PZO-ChunkStreamer-Worker) use
  *   ThreadLocalRandom with no lock
  * - the wrapper goes back on if world init replaces RandStandard.INSTANCE.rand
  */
@@ -105,9 +105,7 @@ public final class WorkerRandGovernor extends Random {
         if (t == zombie.MainThread.mainThread) return Boolean.FALSE;
         if (t instanceof WorkerThread) return Boolean.TRUE;
         String name = t.getName();
-        return Boolean.valueOf(name != null && (name.startsWith("PZO-MultiCore-Worker-")
-            || name.startsWith("PZO-ChunkStreamer-Worker-")
-            || name.equals("PZO-MultiCoreHordeGovernor")));
+        return Boolean.valueOf(name != null && name.startsWith("PZO-ChunkStreamer-Worker-"));
     });
 
     private static boolean shouldUseWorkerStream() {

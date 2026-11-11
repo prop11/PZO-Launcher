@@ -178,6 +178,17 @@ public class JavaModLoader {
             if (zomboidMods.exists() && zomboidMods.isDirectory()) {
                 searchRoots.add(zomboidMods);
             }
+            // Local Workshop items (Zomboid/Workshop/<item>/Contents/mods), where modders keep what they test and
+            // upload. Each Contents/mods is a root of its own so its children are mod folders, like Zomboid/mods:
+            // a mod.info under <mod>/common or <mod>/42 is then within collectModInfo's reach and a mod that's off
+            // is skipped. Viewpoint installed here was missed and none of its stand-downs happened.
+            File[] items = new File(userHome, "Zomboid" + File.separator + "Workshop").listFiles(File::isDirectory);
+            if (items != null) {
+                for (File item : items) {
+                    File mods = new File(item, "Contents" + File.separator + "mods");
+                    if (mods.isDirectory()) searchRoots.add(mods);
+                }
+            }
         } catch (Throwable ignored) {}
 
         try {

@@ -11,9 +11,15 @@ import shutil
 import zipfile
 import hashlib
 
-# The V1.9.7 release DLL. Smart App Control trusts it per file, so a rebuilt DLL must never ship by accident.
-# When pzo_native.c really changes: build_all.py --rebuild-native, then update this hash and UpdateChecker.WINDOWS_NATIVE_VERSION.
+# The V1.9.7 release natives, on every OS. Smart App Control trusts the DLL per file, and Mac/Linux follow the same
+# rule, so a rebuilt native must never ship by accident. When pzo_native.c really changes: rebuild (build_all.py
+# --rebuild-native, CI for .so/.dylib with PZO_TAKE_CI_NATIVES=1), then update these hashes and UpdateChecker.NATIVE_VERSION.
 PINNED_DLL_SHA256 = "0e9a322c3ba7e7f14bbd2fc9e27ab0f43db7b9586a76b9e338063f4574b08d26"
+PINNED_NATIVE_SHA256 = {
+    "pzo_native64.dll": PINNED_DLL_SHA256,
+    "libpzo_native64.so": "f5333959f6843e3294d3328dc7b638ae074f56ef125ad4f8793da86c6743aa67",
+    "libpzo_native64.dylib": "2f0575aa250d48870a607c89062c02c5e23ed92937dc7038a05b2fee8df25510",
+}
 
 def sha256_file(filepath):
     h = hashlib.sha256()
@@ -88,9 +94,10 @@ def main():
     # Natives come from native/ (CI builds land there), scripts and readmes from the repo root; never from dist/
     search_dirs = [native_dir, root_dir]
 
-    pinned_dll = os.path.join(native_dir, "pzo_native64.dll")
-    if os.path.isfile(pinned_dll) and sha256_file(pinned_dll) != PINNED_DLL_SHA256:
-        sys.exit(f"[!] Refusing to package: native/pzo_native64.dll is not the pinned DLL (sha256 {sha256_file(pinned_dll)})")
+    for nname, want in PINNED_NATIVE_SHA256.items():
+        npath = os.path.join(native_dir, nname)
+        if os.path.isfile(npath) and sha256_file(npath) != want:
+            sys.exit(f"[!] Refusing to package: native/{nname} is not the pinned binary (sha256 {sha256_file(npath)})")
 
     # Standalone binaries and scripts for dist/
     files_to_copy = [

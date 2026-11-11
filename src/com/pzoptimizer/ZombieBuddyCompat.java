@@ -172,6 +172,11 @@ public final class ZombieBuddyCompat {
         writeReport();
     }
 
+    /** Every stand-down so far, as "what: reason" lines, for the settings screen. */
+    static synchronized List<String> standDownLines() {
+        return new ArrayList<>(standDowns);
+    }
+
     private static void logSummary() {
         if (!zombieBuddy) return;
         int classes = targets.size();
