@@ -134,6 +134,14 @@ public final class AsmSupport {
         return names;
     }
 
+    /** Names of the methods whose code differs between two versions of a class (new methods included). */
+    static java.util.Set<String> changedMethodNames(byte[] before, byte[] after) {
+        ClassNode a = new ClassNode(), b = new ClassNode();
+        new ClassReader(before).accept(a, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        new ClassReader(after).accept(b, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return new java.util.TreeSet<>(changedMethods(fingerprints(a), b));
+    }
+
     private static java.util.Set<String> shapeOf(ClassNode node) {
         java.util.Set<String> s = new java.util.HashSet<>();
         for (FieldNode f : node.fields) s.add("F " + f.name + " " + f.desc);

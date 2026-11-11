@@ -13,6 +13,7 @@ public class PZOLogger {
     private static File logFile = null;
     private static PrintWriter logWriter = null;
     private static final Object LOCK = new Object();
+    public static final String PREVIOUS_LOG_NAME = "pzo_engine.prev.log";
 
     static {
         try {
@@ -22,6 +23,13 @@ public class PZOLogger {
                 luaDir.mkdirs();
             }
             logFile = new File(luaDir, "pzo_engine.log");
+            // Keep the last session's log: after a crash it is the one that matters, and this launch overwrites it
+            try {
+                if (logFile.isFile() && logFile.length() > 0) {
+                    java.nio.file.Files.move(logFile.toPath(), new File(luaDir, PREVIOUS_LOG_NAME).toPath(),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (Throwable ignored) {}
             logWriter = new PrintWriter(new FileWriter(logFile, false), true); // auto-flush
         } catch (Exception e) {
             System.err.println("[PZO-LOGGER-ERR] Failed to initialize log file: " + e.getMessage());

@@ -5,7 +5,7 @@ import java.lang.reflect.Method;
 
 /** Dedicated server entry point: applies PZO's server tuning, then hands over to zombie.network.GameServer. */
 public class PZOServerEntrypoint {
-    public static final String SERVER_VERSION = "2.0-alpha";
+    public static final String SERVER_VERSION = "2.0-alpha-r2";
 
     private static volatile boolean initialized = false;
 
@@ -51,7 +51,6 @@ public class PZOServerEntrypoint {
         com.pzoptimizer.WorldStreamerBooster.startDaemon();
         com.pzoptimizer.PZOFastMath.initialize();
         com.pzoptimizer.GenerationalHeapCleaner.startGovernor();
-        com.pzoptimizer.AsyncEntityDistanceCache.initialize();
         com.pzoptimizer.EngineGLStateGovernor.initialize();
         com.pzoptimizer.EngineFramePacer.initialize();
         com.pzoptimizer.NativeDirectMemoryPool.initialize();

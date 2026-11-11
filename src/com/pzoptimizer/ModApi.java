@@ -60,6 +60,23 @@ public final class ModApi {
             case "mapLoadExempt":
                 MapLoadScriptPacer.setExemptPaths(a == null ? "" : a.toString());
                 return Boolean.TRUE;
+            // Shader patches (PZOApi.addShaderPatch and friends); staged until shaderCommit
+            case "shaderPatch": {
+                if (a == null || b == null || !(c instanceof se.krka.kahlua.vm.KahluaTable t)) return Boolean.FALSE;
+                Object find = t.rawget("find"), replace = t.rawget("replace");
+                return Boolean.valueOf(ShaderPatchHost.add(a.toString(), b.toString(),
+                    find == null ? null : find.toString(), replace == null ? null : replace.toString()));
+            }
+            case "shaderOn":
+                return Boolean.valueOf(a != null && ShaderPatchHost.setOn(a.toString(), Boolean.TRUE.equals(b)));
+            case "shaderDefine":
+                if (a == null) return Boolean.FALSE;
+                ShaderPatchHost.define(a.toString(), b == null ? null : luaNumberText(b));
+                return Boolean.TRUE;
+            case "shaderCommit":
+                return Double.valueOf(ShaderPatchHost.commit());
+            case "shaderStatus":
+                return ShaderPatchHost.statusOf(a == null ? null : a.toString());
             default:
                 return Boolean.FALSE;
         }
@@ -72,6 +89,18 @@ public final class ModApi {
         standdowns.clear();
         zombieMarks = false;
         LuaEventPatches.clearModCache();
+        ShaderPatchHost.reset();
+    }
+
+    // Lua numbers arrive as Double; a define has to read as a GLSL float literal ("1.0", not "1")
+    private static String luaNumberText(Object v) {
+        if (v instanceof Double d) {
+            double x = d.doubleValue();
+            if (Double.isNaN(x) || Double.isInfinite(x)) return "0.0";
+            String s = Double.toString(x);
+            return s.contains("E") ? String.format(Locale.ROOT, "%.6f", x) : s;
+        }
+        return v.toString();
     }
 
     private static synchronized void addExemptPath(String path) {

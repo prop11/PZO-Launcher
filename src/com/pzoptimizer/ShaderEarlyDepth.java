@@ -58,7 +58,9 @@ public final class ShaderEarlyDepth {
     @SuppressWarnings("rawtypes")
     public static String load(ShaderUnit unit, String fileName, ArrayList includes) throws Throwable {
         String code = (String) H.LOAD.invokeExact(unit, fileName, includes);
-        return active ? rewrite(fileName, code) : code;
+        if (active) code = rewrite(fileName, code);
+        // Mods' shader patches (PZO Enhancements) share this hook
+        return ShaderPatchHost.apply(unit, fileName, code);
     }
 
     static String rewrite(String fileName, String code) {

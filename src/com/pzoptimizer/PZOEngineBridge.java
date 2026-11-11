@@ -82,18 +82,6 @@ public class PZOEngineBridge {
         return PZONative.isLoaded() && PZONative.isAVX2Supported();
     }
 
-    public static int getHordeZombiesTracked() {
-        return HordeSpatialCuller.lastTrackedZombieCount.get();
-    }
-
-    public static int getHordeCulledOffscreen() {
-        return HordeSpatialCuller.lastCulledOffscreenCount.get();
-    }
-
-    public static long getBoneTransformsSaved() {
-        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
-    }
-
     public static boolean isMultiCoreActive() {
         return com.pzoptimizer.multicore.PZOMultiCoreEngine.isMultiCoreActive();
     }
@@ -104,14 +92,6 @@ public class PZOEngineBridge {
 
     public static long getParallelChunksStreamed() {
         return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelChunksStreamed();
-    }
-
-    public static long getParallelHordeSweeps() {
-        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelHordeSweeps();
-    }
-
-    public static long getParallelSimulatedEntities() {
-        return com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
     }
 
     public static int getDetectedMonitorHz() {
@@ -1145,60 +1125,6 @@ public class PZOEngineBridge {
                                 bindFailed("isAVX2SpatialActive", bindError);
                             }
 
-                            // getHordeZombiesTracked
-                            try {
-                                Object getHordeTrackedFunc = newLuaFunction(
-                                    javaFuncClass.getClassLoader(),
-                                    new Class<?>[]{javaFuncClass},
-                                    (proxy, m, mArgs) -> {
-                                        if ("call".equals(m.getName())) {
-                                            pushObj.invoke(mArgs[0], Double.valueOf(getHordeZombiesTracked()));
-                                            return 1;
-                                        }
-                                        return null;
-                                    }
-                                );
-                                tableRawset.invoke(pzoTable, "getHordeZombiesTracked", getHordeTrackedFunc);
-                            } catch (Throwable bindError) {
-                                bindFailed("getHordeZombiesTracked", bindError);
-                            }
-
-                            // getHordeCulledOffscreen
-                            try {
-                                Object getHordeCulledFunc = newLuaFunction(
-                                    javaFuncClass.getClassLoader(),
-                                    new Class<?>[]{javaFuncClass},
-                                    (proxy, m, mArgs) -> {
-                                        if ("call".equals(m.getName())) {
-                                            pushObj.invoke(mArgs[0], Double.valueOf(getHordeCulledOffscreen()));
-                                            return 1;
-                                        }
-                                        return null;
-                                    }
-                                );
-                                tableRawset.invoke(pzoTable, "getHordeCulledOffscreen", getHordeCulledFunc);
-                            } catch (Throwable bindError) {
-                                bindFailed("getHordeCulledOffscreen", bindError);
-                            }
-
-                            // getBoneTransformsSaved
-                            try {
-                                Object getBonesSavedFunc = newLuaFunction(
-                                    javaFuncClass.getClassLoader(),
-                                    new Class<?>[]{javaFuncClass},
-                                    (proxy, m, mArgs) -> {
-                                        if ("call".equals(m.getName())) {
-                                            pushObj.invoke(mArgs[0], Double.valueOf(getBoneTransformsSaved()));
-                                            return 1;
-                                        }
-                                        return null;
-                                    }
-                                );
-                                tableRawset.invoke(pzoTable, "getBoneTransformsSaved", getBonesSavedFunc);
-                            } catch (Throwable bindError) {
-                                bindFailed("getBoneTransformsSaved", bindError);
-                            }
-
                             // setBetaOptIn
                             try {
                                 Object setBetaFunc = newLuaFunction(
@@ -1428,6 +1354,24 @@ public class PZOEngineBridge {
                                 bindFailed("isViewpointDetected", bindError);
                             }
 
+                            // getCompatStandDowns: the PZO features left out for ZombieBuddy mods, one "what: reason" per line
+                            try {
+                                Object getStandDownsFunc = newLuaFunction(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], String.join("\n", ZombieBuddyCompat.standDownLines()));
+                                            return 1;
+                                        }
+                                        return null;
+                                    }
+                                );
+                                tableRawset.invoke(pzoTable, "getCompatStandDowns", getStandDownsFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getCompatStandDowns", bindError);
+                            }
+
                             // getViewpointStanddownMode
                             try {
                                 Object getViewpointModeFunc = newLuaFunction(
@@ -1639,7 +1583,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.0-alpha\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.0-alpha-r2\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1908,7 +1852,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.0-alpha'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.0-alpha-r2'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +
@@ -2127,6 +2071,7 @@ public class PZOEngineBridge {
                         // Warns on the main menu if the Lua mod is on but its Lua never loaded
                         try {
                             LuaModGuard.showNotice(env, "notloaded");
+                            if (LuaModGuard.takeAutoEnabledNotice()) LuaModGuard.showNotice(env, "autoenabled");
                         } catch (Throwable t) {
                             PZOLogger.warn("[PZO Kahlua Bridge] Lua mod notice: " + t.getMessage());
                         }

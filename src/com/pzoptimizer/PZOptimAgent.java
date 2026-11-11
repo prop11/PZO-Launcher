@@ -201,11 +201,14 @@ public class PZOptimAgent {
                 AsmSupport.REDEFINING.remove();
             }
             if (!fsrRenderScaleHooks || className == null || classfileBuffer == null || !className.startsWith("zombie/")) {
+                RewriteLog.note(className, classfileBuffer, specific);
                 return specific;
             }
             byte[] base = (specific != null) ? specific : classfileBuffer;
             byte[] scaled = applyRenderScaleRedirects(className, base);
-            return (scaled != null) ? scaled : specific;
+            byte[] result = (scaled != null) ? scaled : specific;
+            RewriteLog.note(className, classfileBuffer, result);
+            return result;
         }
 
         private static final String RS = "com/pzoptimizer/WorldRenderScale";

@@ -175,6 +175,33 @@ change events; tell it when your mod changes things in a way the game does not r
 
 Returns `false` for an unknown name or when the Java engine is not running.
 
+### Shaders
+
+Edit a game shader's source while one of your settings is on. PZO applies the edit as the shader is built and
+rebuilds it live when the setting changes. If your text isn't in the shader (a game update changed it) or the result
+doesn't compile on the player's PC, the game's own shader is used and the status says why. Needs the Java engine.
+
+| Function | Effect |
+|---|---|
+| `PZOApi.addShaderPatch(modId, { id, files, find, replace, setting })` | `files`: shader file names, `;` separated (`"water_hq.frag;water.frag"`). `find` has to occur exactly once. The game trims every line and expands `#include` before PZO sees the source, so write `find` without indentation. `setting`: the PZO setting key that switches it. |
+| `PZOApi.addShaderDefine(name, { setting, value })` | `${name}` in a patch's `replace` takes the value of `setting`, through `value(v)` if given. Numbers are sent as GLSL floats (`3` becomes `3.0`). |
+| `PZOApi.getShaderPatchStatus(id)` | `"applied"`, `"waiting"` (not built since), `"off"`, `"nomatch"`, `"compilefailed"`, `"conflict"`, `"unknown"` or `"noengine"`. |
+| `PZOApi.getShaderPatchConflict(id)` | The setting key keeping this patch off, or `nil` (a `"conflict"` with no key means another patch edits the same text). |
+| `PZOApi.addConflict(keyA, keyB)` | The two settings (yours or PZO's) can't be on together. The settings screen won't switch one on while the other is, the "All optimizations" and "Recommended" buttons skip it, and a shader patch on one stays off while the other is on, even if both were saved on. |
+
+Two patches that edit overlapping text in the same shader can't both apply: the one registered first wins and the
+other reports `"conflict"`.
+
+### Settings screen
+
+Add your own tab and cards to PZO's settings screen (client only). With at least one added tab, PZO's own tabs go
+under a foldable "Optimisations" heading and yours under "Enhancements".
+
+| Function | Effect |
+|---|---|
+| `PZOApi.addEnhancementTab({ id, label, textKey })` | A tab under "Enhancements". |
+| `PZOApi.addSettings(cards, defaults)` | Cards use the same fields as PZO's own (`client/MPOptim_SettingsRegistry.lua`, the comment above `S.List`). `defaults` (optional) adds your setting keys and reads the player's saved values back. Text is translated through `UI_MPOptim_Set_<key>`, `UI_MPOptim_SetTip_<key>` and the rest listed there. |
+
 ## Setting keys
 
 The keys `isFeatureActive` and `requestStanddown` take. `PZOApi.getFeatures()` returns the full list for the

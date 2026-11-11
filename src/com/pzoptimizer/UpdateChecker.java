@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 
 /** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "2.0-alpha";
+    public static final String CURRENT_VERSION = "2.0-alpha-r2";
     // Every OS stays on this release's native binaries (Smart App Control trusts the DLL per file, and a rebuild for a
     // version string alone gains nothing). Only bump it when pzo_native.c really changes.
     public static final String NATIVE_VERSION = "1.9.7";
@@ -196,6 +196,42 @@ public class UpdateChecker {
             writeStatus(false, CURRENT_VERSION, res.channel, DEFAULT_JAR_DOWNLOAD_URL, getDefaultNativeDownloadUrl());
             return res;
         }
+    }
+
+    /**
+     * Up to five stable releases other than the installed one, newest first, as {tag, published date}. Empty when
+     * GitHub can't be reached. For the downgrader.
+     */
+    public static List<String[]> listStableReleases(int timeoutMs) {
+        List<String[]> out = new ArrayList<>();
+        try {
+            HttpURLConnection conn = (HttpURLConnection) new URL(GITHUB_ALL_RELEASES_API_URL + "?per_page=30").openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "PZO-UpdateChecker");
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
+            if (conn.getResponseCode() != 200) return out;
+            StringBuilder response = new StringBuilder();
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                String line;
+                while ((line = in.readLine()) != null) response.append(line);
+            }
+            String installed = extractVersionNumber(CURRENT_VERSION);
+            for (String rel : splitJsonArrayObjects(response.toString().trim())) {
+                if (extractJsonBooleanField(rel, "draft") || extractJsonBooleanField(rel, "prerelease")) continue;
+                String tag = extractJsonField(rel, "tag_name");
+                if (tag == null || isUnstableIdentifier(tag)) continue;
+                String ver = extractVersionNumber(tag);
+                if (ver == null || (ver.equals(installed) && !isUnstableIdentifier(CURRENT_VERSION))) continue;
+                String date = extractJsonField(rel, "published_at");
+                out.add(new String[] {tag, date == null || date.length() < 10 ? "" : date.substring(0, 10)});
+                if (out.size() >= 5) break;
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[UpdateChecker] could not list releases: " + t);
+        }
+        return out;
     }
 
     /** Whether a tag or release title looks like an unstable/beta/preview build. */

@@ -17,7 +17,7 @@ public class UpdateDialog {
     private static final String CONFIG_FILE = "pzo_config.json";
 
     // These block startup before the game window exists, so one nobody can see must never hang the launch
-    private static final int DIALOG_AUTO_CLOSE_MS = 60000;
+    static final int DIALOG_AUTO_CLOSE_MS = 60000;
     private static final long DIALOG_PROCESS_TIMEOUT_SEC = 120;
 
     // The PowerShell child rarely gets foreground rights, so Activate() alone often just flashes the taskbar. Attaching
@@ -51,7 +51,7 @@ public class UpdateDialog {
 
     // TopMost keeps it above normal windows, and it's pulled to the front on show and again for 3 s in case Steam's
     // launch window grabs focus back. If nobody answers it closes as Cancel (= skip).
-    private static final String PS_FORM_GUARDS =
+    static final String PS_FORM_GUARDS =
         "try{Add-Type -TypeDefinition $env:PZO_FG_SRC}catch{};" +
         "$f.TopMost=$true;$f.ShowInTaskbar=$true;" +
         "$fg={if(-not $f.ContainsFocus){try{[PzoForeground]::Force($f.Handle)}catch{$f.Activate()}}};" +
@@ -597,7 +597,7 @@ public class UpdateDialog {
         }
     }
 
-    private static void performAutoUpdateAndExit(String latestVersion, String downloadUrl, String dllDownloadUrl) {
+    static void performAutoUpdateAndExit(String latestVersion, String downloadUrl, String dllDownloadUrl) {
         try {
             if (downloadUrl == null || downloadUrl.isEmpty()) {
                 downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
@@ -855,7 +855,7 @@ public class UpdateDialog {
         return false;
     }
 
-    private static void showNoticePopup(String title, String message) {
+    static void showNoticePopup(String title, String message) {
         try {
             String os = System.getProperty("os.name", "").toLowerCase();
             if (os.contains("win")) {
@@ -898,7 +898,11 @@ public class UpdateDialog {
     // The message goes in an environment variable so mod names and paths never get parsed as script. A process that
     // outlives the timeout (AMSI scan, policy block, invisible zenity) is killed and reported as "-1:", which every
     // caller treats as skip.
-    private static String runDialogProcess(ProcessBuilder pb, String text) throws Exception {
+    static String runDialogProcess(ProcessBuilder pb, String text) throws Exception {
+        return runDialogProcess(pb, text, DIALOG_PROCESS_TIMEOUT_SEC);
+    }
+
+    static String runDialogProcess(ProcessBuilder pb, String text, long timeoutSec) throws Exception {
         if (text != null) pb.environment().put("PZO_DIALOG_TEXT", text);
         pb.environment().put("PZO_FG_SRC", PS_FOREGROUND_SRC);
         pb.redirectError(ProcessBuilder.Redirect.DISCARD);
@@ -914,8 +918,8 @@ public class UpdateDialog {
         }, "PZO-DialogReader");
         reader.setDaemon(true);
         reader.start();
-        if (!p.waitFor(DIALOG_PROCESS_TIMEOUT_SEC, TimeUnit.SECONDS)) {
-            PZOLogger.warn("Startup dialog did not close within " + DIALOG_PROCESS_TIMEOUT_SEC + "s; killing it and continuing launch.");
+        if (!p.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+            PZOLogger.warn("Startup dialog did not close within " + timeoutSec + "s; killing it and continuing launch.");
             p.destroyForcibly();
             return "-1:";
         }
@@ -1060,7 +1064,7 @@ public class UpdateDialog {
         return PZOConfig.isVersionIgnored(version);
     }
 
-    private static void setIgnoredVersion(String version) {
+    static void setIgnoredVersion(String version) {
         PZOConfig.setIgnoredVersion(version);
     }
 }

@@ -12,14 +12,11 @@ public final class EnhancedRenderTelemetry {
         public boolean avx2SpatialActive;
         public long drawsCulled;
         public long subterraneanTilesCulled;
-        public long boneTransformsSaved;
+        public long parallelBoneUpdates;
         public long glCallsFiltered;
-        public int hordeZombiesTracked;
-        public int hordeCulledOffscreen;
-        public int hordeHibernating;
         public long throttledTownZombies;
         public long parallelChunksStreamed;
-        public long parallelSimulatedEntities;
+        public long parallelActionUpdates;
         public int multiCoreWorkers;
         public double estimatedCpuMsSaved;
         public double estimatedGpuMsSaved;
@@ -37,23 +34,19 @@ public final class EnhancedRenderTelemetry {
 
         snap.drawsCulled = RenderFrustumCuller.getCulledCount();
         snap.subterraneanTilesCulled = ZOcclusionCuller.getCulledCount();
-        snap.boneTransformsSaved = ModelSkinningGovernor.getSavedCount() + com.pzoptimizer.multicore.PZOMultiCoreEngine.getBonesSaved();
+        snap.parallelBoneUpdates = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelBoneUpdates();
         snap.glCallsFiltered = GLStateOptimizer.getGlCallsFiltered();
-        snap.hordeZombiesTracked = HordeSpatialCuller.lastTrackedZombieCount.get();
-        snap.hordeCulledOffscreen = HordeSpatialCuller.lastCulledOffscreenCount.get();
-        snap.hordeHibernating = HordeSpatialCuller.lastHibernatingCount.get();
         snap.throttledTownZombies = VehicleTravelOptimizer.throttledTownZombies.get();
         snap.parallelChunksStreamed = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelChunksStreamed();
-        snap.parallelSimulatedEntities = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelSimulatedEntities();
+        snap.parallelActionUpdates = com.pzoptimizer.multicore.PZOMultiCoreEngine.getParallelActionUpdates();
         snap.multiCoreWorkers = com.pzoptimizer.multicore.PZOMultiCoreEngine.getWorkerCount();
 
         // Rough cost per thing saved:
         //   ~0.0015 ms CPU per culled draw call + state check
         //   ~0.0035 ms GPU per skipped underground tile
-        //   ~0.0006 ms CPU per 4x4 bone matrix multiply
         //   ~0.0010 ms per redundant GL call (JNI + driver)
         //   ~0.0040 ms CPU per throttled distant zombie AI / pathfind tick
-        snap.estimatedCpuMsSaved = (snap.drawsCulled * 0.0015) + (snap.boneTransformsSaved * 0.0006) + (snap.glCallsFiltered * 0.0010) + (snap.throttledTownZombies * 0.0040);
+        snap.estimatedCpuMsSaved = (snap.drawsCulled * 0.0015) + (snap.glCallsFiltered * 0.0010) + (snap.throttledTownZombies * 0.0040);
         snap.estimatedGpuMsSaved = (snap.drawsCulled * 0.0012) + (snap.subterraneanTilesCulled * 0.0035);
 
         // Against a 16.6 ms (60 FPS) frame
@@ -66,10 +59,10 @@ public final class EnhancedRenderTelemetry {
     public static String toJson() {
         MetricsSnapshot s = getSnapshot();
         return String.format(Locale.US,
-            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"bones_saved\":%d,\"gl_filtered\":%d,\"horde_tracked\":%d,\"horde_culled\":%d,\"horde_hibernating\":%d,\"throttled_town_zombies\":%d,\"parallel_chunks\":%d,\"parallel_simulated\":%d,\"workers\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
-            s.isUnstableActive, s.avx2SpatialActive, s.drawsCulled, s.subterraneanTilesCulled, s.boneTransformsSaved, s.glCallsFiltered,
-            s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating, s.throttledTownZombies,
-            s.parallelChunksStreamed, s.parallelSimulatedEntities, s.multiCoreWorkers,
+            "{\"unstable_active\":%b,\"avx2_spatial\":%b,\"draws_culled\":%d,\"subterranean_culled\":%d,\"gl_filtered\":%d,\"throttled_town_zombies\":%d,\"parallel_chunks\":%d,\"parallel_bone_updates\":%d,\"parallel_action_updates\":%d,\"workers\":%d,\"cpu_saved_ms\":%.2f,\"gpu_saved_ms\":%.2f,\"fps_gain_pct\":%.1f}",
+            s.isUnstableActive, s.avx2SpatialActive, s.drawsCulled, s.subterraneanTilesCulled, s.glCallsFiltered,
+            s.throttledTownZombies,
+            s.parallelChunksStreamed, s.parallelBoneUpdates, s.parallelActionUpdates, s.multiCoreWorkers,
             s.estimatedCpuMsSaved, s.estimatedGpuMsSaved, s.estimatedFpsGainPercent);
     }
 
@@ -81,15 +74,14 @@ public final class EnhancedRenderTelemetry {
 
         StringBuilder sb = new StringBuilder();
         sb.append("#### Enhanced Rendering & Multi-Core Scaling Telemetry (Unstable Channel)\n");
-        sb.append(String.format(Locale.US, "- **P-Core Performance Workers**: %d Threads (Affinity Mask Active)\n", s.multiCoreWorkers));
-        sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks (Zero-Void Multi-Core Streaming)\n", s.parallelChunksStreamed));
-        sb.append(String.format(Locale.US, "- **SIMD AVX2 Spatial Processor**: %s\n", s.avx2SpatialActive ? "ACTIVE (8-wide YMM registers)" : "SCALAR FALLBACK"));
-        sb.append(String.format(Locale.US, "- **Horde Zombies Monitored**: %,d (Offscreen Culled: %,d | Hibernating: %,d)\n",
-            s.hordeZombiesTracked, s.hordeCulledOffscreen, s.hordeHibernating));
+        sb.append(String.format(Locale.US, "- **Frame Workers**: %d threads (game thread helps)\n", s.multiCoreWorkers));
+        sb.append(String.format(Locale.US, "- **Parallel Chunks Streamed**: %,d chunks\n", s.parallelChunksStreamed));
+        sb.append(String.format(Locale.US, "- **Zombie Bone Updates On Workers**: %,d\n", s.parallelBoneUpdates));
+        sb.append(String.format(Locale.US, "- **Zombie Action Updates Pre-Read On Workers**: %,d\n", s.parallelActionUpdates));
+        sb.append(String.format(Locale.US, "- **AVX2 In Native Library**: %s\n", s.avx2SpatialActive ? "available" : "not available"));
         sb.append(String.format(Locale.US, "- **Driving Town Zombies Throttled**: %,d\n", s.throttledTownZombies));
         sb.append(String.format(Locale.US, "- **Screen-Space Draws Culled**: %,d\n", s.drawsCulled));
         sb.append(String.format(Locale.US, "- **Subterranean Z-Tiles Culled**: %,d\n", s.subterraneanTilesCulled));
-        sb.append(String.format(Locale.US, "- **Off-Screen Bone Transforms Bypassed**: %,d\n", s.boneTransformsSaved));
         sb.append(String.format(Locale.US, "- **OpenGL JNI State Calls Filtered**: %,d\n", s.glCallsFiltered));
         sb.append(String.format(Locale.US, "- **Estimated Cumulative CPU Work Saved**: %.2f ms\n", s.estimatedCpuMsSaved));
         sb.append(String.format(Locale.US, "- **Estimated Cumulative GPU Work Saved**: %.2f ms\n", s.estimatedGpuMsSaved));
