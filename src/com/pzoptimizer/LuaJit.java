@@ -47,6 +47,8 @@ public final class LuaJit {
     static final int MAX_DIRECT_DEPTH = 40;
 
     public static volatile boolean active = false;
+    // JVM_LuaDirectCalls: compiled functions call compiled functions straight, without going back to the interpreter
+    public static volatile boolean directCalls = false;
     // Instructions a function runs before it's compiled
     static final int HOT_INSTRUCTIONS = 4000;
 

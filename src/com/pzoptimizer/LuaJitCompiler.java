@@ -533,6 +533,9 @@ final class LuaJitCompiler {
      * frames) and below MAX_DIRECT_DEPTH; everything else goes to handBack untouched.
      */
     private void directLuaCall(int i, int a, int b, int c, Label handBack) {
+        // Read on every call so the setting applies to functions already compiled
+        mv.visitFieldInsn(Opcodes.GETSTATIC, "com/pzoptimizer/LuaJit", "directCalls", "Z");
+        mv.visitJumpInsn(Opcodes.IFEQ, handBack);
         mv.visitVarInsn(Opcodes.ALOAD, X);
         mv.visitTypeInsn(Opcodes.INSTANCEOF, LCLOSURE);
         mv.visitJumpInsn(Opcodes.IFEQ, handBack);

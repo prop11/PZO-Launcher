@@ -412,6 +412,13 @@ public class PZOEngineBridge {
                 ModelLoadFixes.active = value;
             } else if ("JVM_ThreadLocalFastPath".equals(key)) {
                 ThreadLocalFastPath.active = value;
+            } else if ("JVM_LuaCompiler".equals(key)) {
+                // Not JVM_LuaJit: 1.9 shipped that one on, and players' saved files still say true
+                Boolean forced = BenchmarkHarness.luaJitForced;
+                LuaJit.active = forced != null ? forced : value;
+            } else if ("JVM_LuaDirectCalls".equals(key)) {
+                Boolean forced = BenchmarkHarness.luaDirectForced;
+                LuaJit.directCalls = forced != null ? forced : value;
             } else if ("JVM_ChunkTextureKeep".equals(key)) {
                 ChunkTextureKeep.active = value;
             } else if ("JVM_LuaCompileCache".equals(key)) {
