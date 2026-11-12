@@ -190,7 +190,8 @@ public final class FoliageLod {
 
     // Replaces Core.getOptionDoWindSpriteEffects() inside the two layer tests
     public static boolean windOption(Object core) {
-        if (classifyingFar) {
+        // Composite sway (PixelLight) bakes near wind foliage too and moves it in the chunk shader
+        if (classifyingFar || PixelLight.bakeWindFoliage(classifyingObject)) {
             objectsBaked.incrementAndGet();
             return false;
         }
@@ -210,7 +211,7 @@ public final class FoliageLod {
 
     // Replaces IsoObject.getWindRenderEffects() inside the two layer tests
     public static Object windEffects(Object object) {
-        return classifyingFar ? null : ((zombie.iso.IsoObject) object).getWindRenderEffects();
+        return classifyingFar || PixelLight.bakeWindFoliage(object) ? null : ((zombie.iso.IsoObject) object).getWindRenderEffects();
     }
 
     static boolean patchRenderCell(ClassNode node) {
