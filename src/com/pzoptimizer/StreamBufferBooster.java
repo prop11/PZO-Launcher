@@ -18,6 +18,8 @@ public class StreamBufferBooster {
 
             // DNS cache timeout, for multiplayer servers
             System.setProperty("sun.net.inetaddr.ttl", "60");
+            System.setProperty("sun.net.maxDatagramSockets", "1024");
+            System.setProperty("java.net.preferIPv4Stack", "true");
         } catch (Throwable ignored) {}
     }
 }

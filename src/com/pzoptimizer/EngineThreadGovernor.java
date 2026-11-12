@@ -267,6 +267,7 @@ public class EngineThreadGovernor {
             try {
                 target.run();
             } finally {
+                LuaEventPatches.frameEnd();
                 GameThreadQueue.drain();
                 if (BenchmarkHarness.isActive()) {
                     BenchmarkHarness.tick();

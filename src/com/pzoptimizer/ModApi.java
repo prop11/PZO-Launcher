@@ -60,6 +60,10 @@ public final class ModApi {
             case "mapLoadExempt":
                 MapLoadScriptPacer.setExemptPaths(a == null ? "" : a.toString());
                 return Boolean.TRUE;
+            case "luaJitExclude":
+                // The whole list at once: path tokens ("/mods/<folder>/") joined with ;
+                LuaJit.setExcludedPaths(a == null ? java.util.List.of() : java.util.Arrays.asList(a.toString().split(";")));
+                return Boolean.TRUE;
             // Shader patches (PZOApi.addShaderPatch and friends); staged until shaderCommit
             case "shaderPatch": {
                 if (a == null || b == null || !(c instanceof se.krka.kahlua.vm.KahluaTable t)) return Boolean.FALSE;

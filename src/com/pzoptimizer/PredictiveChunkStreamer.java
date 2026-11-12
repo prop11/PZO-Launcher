@@ -21,6 +21,7 @@ public final class PredictiveChunkStreamer {
     private static final float CHUNK_WIDTH = 8.0f;
 
     private static volatile long lastPrewarmClearTime = 0;
+    private static volatile int playerChunkX, playerChunkY;
     private static volatile Boolean isSolidState = null;
 
     public static boolean isStorageFast() {
@@ -81,6 +82,8 @@ public final class PredictiveChunkStreamer {
 
                     int currentChunkX = (int) Math.floor(px / CHUNK_WIDTH);
                     int currentChunkY = (int) Math.floor(py / CHUNK_WIDTH);
+                    playerChunkX = currentChunkX;
+                    playerChunkY = currentChunkY;
                     for (int dx = -1; dx <= 1; dx++) {
                         for (int dy = -1; dy <= 1; dy++) {
                             ChunkRetentionRing.touch(currentChunkX + dx, currentChunkY + dy);
@@ -229,16 +232,25 @@ public final class PredictiveChunkStreamer {
         long key = FastChunkKey.pack(wx, wy);
         ChunkRetentionRing.touch(wx, wy);
 
+        // Chunks inside the loaded area are in memory already, reading their files again helps nothing
+        int half = zombie.iso.IsoChunkMap.chunkGridWidth / 2;
+        if (Math.abs(wx - playerChunkX) < half && Math.abs(wy - playerChunkY) < half) {
+            return;
+        }
+
         if (!PREWARMED_KEYS.add(key)) {
             return;
         }
 
         try {
-            File inFile = zombie.ChunkMapFilenames.instance.getFilename(wx, wy);
-            if (inFile == null) {
-                inFile = zombie.ZomboidFileSystem.instance.getFileInCurrentSave(wx + File.separator + wy + ".bin");
-            }
-            if (inFile != null && inFile.exists()) {
+            // Same path ChunkMapFilenames.getFilename builds. I don't call that from this thread: it adds to a plain
+            // HashSet the game threads use and creates the map/<x> folder for chunks the player may never reach.
+            String world = zombie.core.Core.gameSaveWorld;
+            String cacheDir = zombie.ZomboidFileSystem.instance.getGameModeCacheDir();
+            if (world == null || world.isEmpty() || cacheDir == null) return;
+            File inFile = new File(cacheDir + File.separator + world + File.separator + "map" + File.separator + wx
+                + File.separator + wy + ".bin");
+            if (inFile.exists()) {
                 byte[] buf = PREWARM_IO_BUFFER.get();
                 try (FileInputStream fis = new FileInputStream(inFile)) {
                     fis.read(buf);

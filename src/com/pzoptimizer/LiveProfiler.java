@@ -113,28 +113,28 @@ public final class LiveProfiler {
     private LiveProfiler() {}
 
 
-    /** Before GameWindow.logic() in GameWindow.frameStep. */
+    /** Start of GameWindow.logic(). */
     public static void logicBegin() {
-        if (!on) return;
+        if (!on || inLogic) return;
         inLogic = true;
         logicStart = System.nanoTime();
     }
 
-    /** After GameWindow.logic(). */
+    /** Every return of GameWindow.logic(). */
     public static void logicEnd() {
         if (!on || !inLogic) return;
         inLogic = false;
         logicNs += System.nanoTime() - logicStart;
     }
 
-    /** Before GameWindow.renderInternal() in GameWindow.frameStep. */
+    /** Start of GameWindow.renderInternal(). A render from inside the update stays counted as update. */
     public static void renderBegin() {
-        if (!on) return;
+        if (!on || inLogic || inRender) return;
         inRender = true;
         renderStart = System.nanoTime();
     }
 
-    /** After GameWindow.renderInternal(). */
+    /** Every return of GameWindow.renderInternal(). */
     public static void renderEnd() {
         if (!on || !inRender) return;
         inRender = false;
@@ -776,29 +776,42 @@ public final class LiveProfiler {
 
     // Patches
 
-    /** GameWindow.frameStep: timing calls around logic() and renderInternal(); GameWindow.save: a marker. */
-    static boolean patchGameWindow(ClassNode node) {
-        MethodNode step = AsmSupport.findMethod(node, "frameStep", "()V");
-        if (step == null) return false;
-        int found = 0;
-        for (AbstractInsnNode insn = step.instructions.getFirst(); insn != null; insn = insn.getNext()) {
-            if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKESTATIC && "zombie/GameWindow".equals(mi.owner)
-                    && "()V".equals(mi.desc) && ("logic".equals(mi.name) || "renderInternal".equals(mi.name))) {
-                String kind = "logic".equals(mi.name) ? "logic" : "render";
-                step.instructions.insertBefore(mi, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/LiveProfiler", kind + "Begin", "()V", false));
-                step.instructions.insert(mi, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/LiveProfiler", kind + "End", "()V", false));
-                found++;
+    // The timing sits inside logic() and renderInternal(), not round the calls in frameStep: a mod that drives the frame
+    // itself (Viewpoint's fixed tick calls them from its own loop) left update and render at 0.00 in the report.
+    private static boolean wrapMethod(ClassNode node, String name, String kind) {
+        MethodNode m = AsmSupport.findMethod(node, name, "()V");
+        if (m == null || (m.access & Opcodes.ACC_STATIC) == 0) return false;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() == Opcodes.RETURN) {
+                m.instructions.insertBefore(insn, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/LiveProfiler", kind + "End", "()V", false));
             }
         }
-        if (found != 2) return false;
+        m.instructions.insert(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/LiveProfiler", kind + "Begin", "()V", false));
+        return true;
+    }
+
+    /** GameWindow.logic(): logicBegin / logicEnd. An exception out of it is closed by onFrame. */
+    static boolean patchLogic(ClassNode node) {
+        return wrapMethod(node, "logic", "logic");
+    }
+
+    /** GameWindow.renderInternal(): renderBegin / renderEnd. */
+    static boolean patchRender(ClassNode node) {
+        return wrapMethod(node, "renderInternal", "render");
+    }
+
+    /** GameWindow.save: a marker, so a frame that saved is reported as one. */
+    static boolean patchSave(ClassNode node) {
+        int n = 0;
         for (MethodNode m : node.methods) {
             if ("save".equals(m.name) && (m.access & Opcodes.ACC_STATIC) != 0) {
                 InsnList pre = new InsnList();
                 pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/LiveProfiler", "saveBegin", "()V", false));
                 m.instructions.insert(pre);
+                n++;
             }
         }
-        return true;
+        return n > 0;
     }
 
     /** IsoCell.updateInternal: IsoChunkMap.update() timed as chunk streaming. */

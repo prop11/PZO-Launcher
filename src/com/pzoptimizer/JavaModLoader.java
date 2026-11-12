@@ -659,29 +659,46 @@ public class JavaModLoader {
         if (enabledModsParsed) return ENABLED_MOD_IDS;
         enabledModsParsed = true;
 
+        // Every list the game could load this session counts: the main menu's, each save's own, each hosted server's.
+        // ZombieBuddy loads a save's Java mods when that save loads, so a mod that is only on in a save (Viewpoint)
+        // still patches the game. Reading default.txt alone lost its stand-downs once 2.0 started adding MPOptimizer
+        // to an otherwise empty default.txt: left click dead in Viewpoint again (#41).
         try {
-            String userHome = System.getProperty("user.home");
-            File defaultTxt = new File(userHome, "Zomboid" + File.separator + "mods" + File.separator + "default.txt");
-            if (defaultTxt.exists() && defaultTxt.isFile()) {
-                parseModIdsFromFile(defaultTxt, ENABLED_MOD_IDS);
+            File zomboid = new File(System.getProperty("user.home"), "Zomboid");
+            parseModIdsFromFile(new File(zomboid, "mods" + File.separator + "default.txt"), ENABLED_MOD_IDS);
+            File[] modes = new File(zomboid, "Saves").listFiles(File::isDirectory);
+            if (modes != null) {
+                for (File mode : modes) {
+                    File[] saves = mode.listFiles(File::isDirectory);
+                    if (saves == null) continue;
+                    for (File save : saves) parseModIdsFromFile(new File(save, "mods.txt"), ENABLED_MOD_IDS);
+                }
+            }
+            File[] inis = new File(zomboid, "Server").listFiles((d, n) -> n.toLowerCase().endsWith(".ini"));
+            if (inis != null) {
+                for (File ini : inis) parseServerMods(ini, ENABLED_MOD_IDS);
             }
         } catch (Throwable ignored) {}
 
-        // Only fall back to the latest save if default.txt wasn't found or had no mods on
-        if (ENABLED_MOD_IDS.isEmpty()) {
-            try {
-                String userHome = System.getProperty("user.home");
-                File savesDir = new File(userHome, "Zomboid" + File.separator + "Saves");
-                if (savesDir.exists() && savesDir.isDirectory()) {
-                    File latestModsTxt = findLatestSaveModsTxt(savesDir);
-                    if (latestModsTxt != null) {
-                        parseModIdsFromFile(latestModsTxt, ENABLED_MOD_IDS);
-                    }
-                }
-            } catch (Throwable ignored) {}
-        }
-
         return ENABLED_MOD_IDS;
+    }
+
+    // The Mods=a;b;c line of a server config
+    private static void parseServerMods(File ini, Set<String> destination) {
+        try (BufferedReader br = new BufferedReader(new FileReader(ini, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String t = line.trim();
+                if (!t.regionMatches(true, 0, "Mods=", 0, 5)) continue;
+                for (String id : t.substring(5).split(";")) {
+                    id = id.replace("\\", "").trim();
+                    if (id.isEmpty()) continue;
+                    destination.add(id);
+                    destination.add(id.toLowerCase());
+                }
+                return;
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static void parseModIdsFromFile(File file, Set<String> destination) {
@@ -704,27 +721,6 @@ public class JavaModLoader {
                 }
             }
         } catch (Throwable ignored) {}
-    }
-
-    private static File findLatestSaveModsTxt(File dir) {
-        File[] modes = dir.listFiles();
-        if (modes == null) return null;
-        File newest = null;
-        long newestTime = 0;
-        for (File mode : modes) {
-            if (!mode.isDirectory()) continue;
-            File[] saves = mode.listFiles();
-            if (saves == null) continue;
-            for (File save : saves) {
-                if (!save.isDirectory()) continue;
-                File modsTxt = new File(save, "mods.txt");
-                if (modsTxt.exists() && modsTxt.lastModified() > newestTime) {
-                    newest = modsTxt;
-                    newestTime = modsTxt.lastModified();
-                }
-            }
-        }
-        return newest;
     }
 
     static ModMetadata findModMetadataForJar(File jarFile) {

@@ -21,7 +21,14 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * A square that unloads before its turn is dropped; the event fires again when it loads next time. Buckets whose chunk
  * has unloaded are swept a slice per frame so they don't hold squares in memory. While the world is still loading
- * nothing is queued. If the queue gets old the budget grows so nothing waits for long.
+ * nothing is queued.
+ *
+ * The budget follows the frame: it grows a step each frame while frames stay at their usual length and shrinks when
+ * three in a row run long, so the queue only uses time the frame had spare. If the queue gets old it gets a minimum
+ * anyway so nothing waits for long. While driving, chunks around where the car will be in a moment go first.
+ *
+ * Anything queued within a few tiles of a player on foot runs straight away, whatever the budget says. Mods set up
+ * or replace objects in these handlers, and a late run after the player had already used the object lost items.
  *
  * Exempt: mods that asked through PZOApi.exemptMod, and the ones on the settings screen list (ModApi "mapLoadExempt").
  */
@@ -32,6 +39,15 @@ public final class MapLoadScriptPacer {
     private static final String SQUARE_EVENT = "LoadGridsquare";
     private static final String CHUNK_EVENT = "LoadChunk";
     private static final long BUDGET_NS = 2_000_000L;
+    private static final long MAX_BUDGET_NS = 2 * BUDGET_NS;
+    // The engine's own chunk work keeps frames long on a drive, and that is not the queue's doing, so the budget
+    // never goes under this
+    private static final long MIN_BUDGET_NS = BUDGET_NS / 2;
+    // Frame length over the target that counts as running long, and what I allow on top of the fastest recent frame
+    private static final long OVERSHOOT_NS = 500_000L, FLOOR_SLACK_NS = 500_000L;
+    // A gap this long between frames is a pause or a loading screen
+    private static final long FRAME_GAP_NS = 1_000_000_000L;
+    private static final int FLOOR_FRAMES = 60;
     private static final long AGE_1_NS = 1_000_000_000L, AGE_2_NS = 3_000_000_000L;
     // Squares queued in one frame at or above which that frame drains nothing (about four chunks)
     private static final int ARRIVAL_GATE = 256;
@@ -40,6 +56,10 @@ public final class MapLoadScriptPacer {
     // Buckets checked for an unloaded chunk per drain call
     private static final int SWEEP_SLICE = 32;
     private static final float EXIT_FLUSH_TILES = 24.0f;
+    // On foot nothing queued may sit this close to the player (measured to the chunk's edge)
+    private static final float FOOT_RING_TILES = 12.0f;
+    // Scoring aims at where the vehicle will be after this long, at most this far ahead
+    private static final float LOOKAHEAD_S = 1.5f, LOOKAHEAD_MAX_TILES = 48.0f;
 
     private static final class Item {
         final se.krka.kahlua.integration.LuaCaller caller;
@@ -100,14 +120,27 @@ public final class MapLoadScriptPacer {
     private static boolean lastSquareHasGenerator;
     private static int sweepAt;
     private static final boolean[] wasInVehicle = new boolean[4];
+    private static final boolean[] hasLastPos = new boolean[4];
+    private static final float[] lastPosX = new float[4], lastPosY = new float[4];
+    // Packed, one entry per local player this frame
     private static final float[] playerX = new float[4], playerY = new float[4];
+    private static final float[] aimX = new float[4], aimY = new float[4];
+    private static final boolean[] onFoot = new boolean[4];
     private static int playerCount;
+
+    // Frame pacing
+    private static long budgetNs = BUDGET_NS;
+    private static long lastFrameAt, lastFrameNs;
+    private static long f1, f2, f3;
+    private static long floorA = Long.MAX_VALUE, floorB = Long.MAX_VALUE;
+    private static int floorCount;
+    private static long capNs;
 
     private static final ConcurrentHashMap<se.krka.kahlua.vm.Prototype, Boolean> deferrable = new ConcurrentHashMap<>();
     private static final Set<String> exemptPaths = ConcurrentHashMap.newKeySet();
 
     // Since launch, for the profiler report
-    public static long deferredCalls, ranLater, dropped, swept, gatedFrames, exitFlushes;
+    public static long deferredCalls, ranLater, dropped, swept, gatedFrames, exitFlushes, ranNearFoot;
     public static int peakQueue;
 
     private MapLoadScriptPacer() {}
@@ -211,9 +244,21 @@ public final class MapLoadScriptPacer {
 
     /** After each IsoChunkMap.update (LiveProfiler.chunkUpdate). The budget is per frame, shared by all chunk maps. */
     static void drain() {
+        zombie.iso.IsoWorld world = zombie.iso.IsoWorld.instance;
+        int frame = world != null ? world.getFrameNo() : budgetFrame;
+        boolean newFrame = frame != budgetFrame;
+        long start = System.nanoTime();
+        if (newFrame) {
+            budgetFrame = frame;
+            observeFrame(start);
+            spentNs = 0;
+            // Squares are pooled, so the same object can come back as a different square on a later frame
+            lastSquare = null;
+            countedSquare = null;
+        }
         if (queued == 0) {
             // Keep the vehicle state current, or an exit long after the queue emptied would look new later
-            readPlayers(true, null);
+            readPlayers(newFrame, null);
             return;
         }
         if (!active || !inGame()) {
@@ -222,19 +267,13 @@ public final class MapLoadScriptPacer {
             clear();
             return;
         }
-        zombie.iso.IsoWorld world = zombie.iso.IsoWorld.instance;
         zombie.iso.IsoCell cell = world != null ? world.currentCell : null;
         if (cell == null) return;
-        int frame = world.getFrameNo();
-        boolean newFrame = frame != budgetFrame;
-        if (newFrame) {
-            budgetFrame = frame;
-            spentNs = 0;
-        }
-        long start = System.nanoTime();
         draining = true;
         try {
             readPlayers(newFrame, cell);
+            // Before the chunk-burst check: this one is about correctness, not smoothness
+            footRing(cell);
             sweepStep(cell);
             if (queued == 0) return;
 
@@ -245,7 +284,11 @@ public final class MapLoadScriptPacer {
                 if (newFrame) gatedFrames++;
                 return;
             }
-            long allowed = oldest > AGE_2_NS ? BUDGET_NS * 4 : oldest > AGE_1_NS ? BUDGET_NS * 2 : BUDGET_NS;
+            // What the frame can spare, with a minimum once the queue has waited
+            long allowed = budgetNs;
+            if (oldest > AGE_2_NS) allowed = Math.max(allowed, BUDGET_NS * 4);
+            else if (oldest > AGE_1_NS) allowed = Math.max(allowed, BUDGET_NS);
+            if (allowed <= 0) return;
             boolean out = false;
             while (queued > 0 && !out) {
                 int n = pick();
@@ -275,7 +318,7 @@ public final class MapLoadScriptPacer {
             Item it = tail ? b.tails.poll() : b.squares.poll();
             if (it == null) break;
             queued--;
-            boolean ok = it.thread == lastThread && (tail ? it.arg == live : stillLoaded(cell, (zombie.iso.IsoGridSquare) it.arg));
+            boolean ok = it.thread == lastThread && (tail ? it.arg == live : stillLoaded(cell, (zombie.iso.IsoGridSquare) it.arg, live));
             if (!ok) {
                 dropped++;
                 continue;
@@ -287,7 +330,7 @@ public final class MapLoadScriptPacer {
         return false;
     }
 
-    // The PICK_N best buckets into picks, best first: squared distance to the nearest local player
+    // The PICK_N best buckets into picks, best first: squared distance to the nearest player's aim point
     private static int pick() {
         int count = 0;
         for (int i = 0, size = list.size(); i < size; i++) {
@@ -295,7 +338,7 @@ public final class MapLoadScriptPacer {
             float cx = b.wx * 8 + 4, cy = b.wy * 8 + 4;
             float d = Float.MAX_VALUE;
             for (int p = 0; p < playerCount; p++) {
-                float dx = playerX[p] - cx, dy = playerY[p] - cy;
+                float dx = aimX[p] - cx, dy = aimY[p] - cy;
                 d = Math.min(d, dx * dx + dy * dy);
             }
             b.score = d;
@@ -325,6 +368,61 @@ public final class MapLoadScriptPacer {
         return oldestAt == Long.MAX_VALUE ? 0 : now - oldestAt;
     }
 
+    // The frame that just ended. Moves the budget one step: up while frames keep their usual length, down when the
+    // shortest of the last three ran long (one long frame is the engine's own chunk burst, three are mine).
+    private static void observeFrame(long now) {
+        long frameNs = lastFrameAt == 0 ? 0 : now - lastFrameAt;
+        lastFrameAt = now;
+        if (frameNs <= 0 || frameNs >= FRAME_GAP_NS) {
+            lastFrameNs = 0;
+            f1 = f2 = f3 = 0;
+            return;
+        }
+        lastFrameNs = frameNs;
+        if (floorCount == 0) capNs = readCapNs();
+        // The floor is the frame without my own work, or the queue would raise its own target
+        long own = frameNs - spentNs;
+        if (own < floorA) floorA = own;
+        if (++floorCount >= FLOOR_FRAMES) {
+            floorB = floorA;
+            floorA = Long.MAX_VALUE;
+            floorCount = 0;
+        }
+        f3 = f2;
+        f2 = f1;
+        f1 = frameNs;
+        long typical = f1;
+        if (f2 > 0 && f2 < typical) typical = f2;
+        if (f3 > 0 && f3 < typical) typical = f3;
+
+        // Under a frame cap or vsync every frame is as long as the cap, so the cap is the target there. Without
+        // one it's the fastest frame of the last couple of seconds.
+        long target = capNs;
+        long floor = Math.min(floorA, floorB);
+        if (floor != Long.MAX_VALUE && floor + FLOOR_SLACK_NS > target) target = floor + FLOOR_SLACK_NS;
+        if (typical > target + OVERSHOOT_NS) budgetNs = Math.max(MIN_BUDGET_NS, budgetNs - MAX_BUDGET_NS / 4);
+        else budgetNs = Math.min(MAX_BUDGET_NS, budgetNs + MAX_BUDGET_NS / 8);
+    }
+
+    // Frame length the game holds itself to, 0 if nothing limits it
+    private static long readCapNs() {
+        long cap = 0;
+        try {
+            zombie.core.PerformanceSettings ps = zombie.core.PerformanceSettings.instance;
+            if (ps != null && !ps.isFramerateUncapped()) {
+                int fps = zombie.core.PerformanceSettings.getLockFPS();
+                if (fps > 0) cap = 1_000_000_000L / fps;
+            }
+            zombie.core.Core core = zombie.core.Core.getInstance();
+            if (core != null && core.getOptionVSync()) {
+                int hz = org.lwjglx.opengl.Display.getDisplayMode().getFrequency();
+                if (hz > 0) cap = Math.max(cap, 1_000_000_000L / hz);
+            }
+        } catch (Throwable ignored) {
+        }
+        return cap;
+    }
+
     // Local player positions for scoring, and the step out of a vehicle. Once per frame.
     private static void readPlayers(boolean newFrame, zombie.iso.IsoCell cell) {
         if (!newFrame) return;
@@ -335,30 +433,63 @@ public final class MapLoadScriptPacer {
             zombie.characters.IsoPlayer p = players[i];
             if (p == null) {
                 wasInVehicle[i] = false;
+                hasLastPos[i] = false;
                 continue;
             }
             float px = p.getX(), py = p.getY();
+            boolean inVehicle = p.getVehicle() != null;
+            float ax = px, ay = py;
+            if (inVehicle && hasLastPos[i] && lastFrameNs > 0) {
+                // Tiles per second from the last frame's movement; chunks behind the car are about to unload anyway
+                float k = LOOKAHEAD_S * 1_000_000_000f / lastFrameNs;
+                float lx = (px - lastPosX[i]) * k, ly = (py - lastPosY[i]) * k;
+                float len2 = lx * lx + ly * ly;
+                if (len2 > LOOKAHEAD_MAX_TILES * LOOKAHEAD_MAX_TILES) {
+                    float scale = LOOKAHEAD_MAX_TILES / (float) Math.sqrt(len2);
+                    lx *= scale;
+                    ly *= scale;
+                }
+                ax += lx;
+                ay += ly;
+            }
+            lastPosX[i] = px;
+            lastPosY[i] = py;
+            hasLastPos[i] = true;
             playerX[playerCount] = px;
             playerY[playerCount] = py;
+            aimX[playerCount] = ax;
+            aimY[playerCount] = ay;
+            onFoot[playerCount] = !inVehicle;
             playerCount++;
-            boolean inVehicle = p.getVehicle() != null;
-            if (wasInVehicle[i] && !inVehicle && cell != null) flushNear(cell, px, py);
+            if (wasInVehicle[i] && !inVehicle && cell != null) {
+                flushNear(cell, px, py, EXIT_FLUSH_TILES);
+                exitFlushes++;
+            }
             wasInVehicle[i] = inVehicle;
         }
     }
 
-    // Mods set up objects in LoadGridsquare assuming nobody touched them yet, so what the player can walk to runs now.
-    // One hitch when getting out, the rest stays on the budget.
-    private static void flushNear(zombie.iso.IsoCell cell, float px, float py) {
-        float r2 = EXIT_FLUSH_TILES * EXIT_FLUSH_TILES;
+    // A late handler near a player on foot can undo what the player just did (items put in a container the handler
+    // then replaces). So on foot nothing stays queued within reach. Every call, not once per frame: in split screen
+    // the second player's chunk map loads after the first drain.
+    private static void footRing(zombie.iso.IsoCell cell) {
+        for (int p = 0; p < playerCount && queued > 0; p++) {
+            if (onFoot[p]) ranNearFoot += flushNear(cell, playerX[p], playerY[p], FOOT_RING_TILES);
+        }
+    }
+
+    // Runs every bucket whose chunk comes within the radius, no budget. Returns the calls run.
+    private static long flushNear(zombie.iso.IsoCell cell, float px, float py, float radius) {
+        float r2 = radius * radius;
+        long before = ranLater;
         long t0 = System.nanoTime();
         for (int i = list.size() - 1; i >= 0; i--) {
             if (i >= list.size()) continue;
             Bucket b = list.get(i);
-            float dx = b.wx * 8 + 4 - px, dy = b.wy * 8 + 4 - py;
+            float dx = Math.max(0f, Math.abs(b.wx * 8 + 4 - px) - 4f), dy = Math.max(0f, Math.abs(b.wy * 8 + 4 - py) - 4f);
             if (dx * dx + dy * dy <= r2) drainBucket(cell, b, t0, Long.MAX_VALUE);
         }
-        exitFlushes++;
+        return ranLater - before;
     }
 
     // Buckets left behind by a fast drive sit at the far end of a nearest-first queue, holding squares the engine
@@ -378,8 +509,10 @@ public final class MapLoadScriptPacer {
         sweepAt = stop;
     }
 
-    private static boolean stillLoaded(zombie.iso.IsoCell cell, zombie.iso.IsoGridSquare sq) {
-        if (sq.chunk == null) return false;
+    // The chunk check matters: a pooled square can be loaded again somewhere else while its old entry still waits
+    // here, and it would get the event twice
+    private static boolean stillLoaded(zombie.iso.IsoCell cell, zombie.iso.IsoGridSquare sq, zombie.iso.IsoChunk live) {
+        if (sq.chunk != live) return false;
         return cell.getGridSquare(sq.getX(), sq.getY(), sq.getZ()) == sq;
     }
 
@@ -409,10 +542,16 @@ public final class MapLoadScriptPacer {
         if (file != null) {
             String f = file.replace('\\', '/').toLowerCase(Locale.ROOT);
             ok = (f.contains("/mods/") || f.contains("workshop")) && !f.contains("mpoptimiser")
-                && !ModApi.isExemptPath(f) && !ModApi.isExemptPrototype(lc.prototype) && !onExemptList(f);
+                && !ModApi.isExemptPath(f) && !ModApi.isExemptPrototype(lc.prototype) && !onExemptList(f)
+                && !isLetMeDrive(f);
         }
         deferrable.put(lc.prototype, ok);
         return ok;
+    }
+
+    // Let Me Drive! queues squares itself behind its own dispatcher; queueing that dispatcher too would do it twice
+    private static boolean isLetMeDrive(String path) {
+        return path.contains("/letmedrive/") || path.contains("/3805307651/");
     }
 
     private static boolean onExemptList(String path) {
@@ -450,7 +589,7 @@ public final class MapLoadScriptPacer {
     }
 
     public static String summary() {
-        return String.format(Locale.ROOT, "Mod map-load scripts spread over frames (%s): %d calls queued, %d run later, %d dropped (square unloaded first, %d of them swept), queue peak %d, %d chunk-load frames skipped, %d vehicle-exit flushes",
-            active ? "on" : "off", deferredCalls, ranLater, dropped, swept, peakQueue, gatedFrames, exitFlushes);
+        return String.format(Locale.ROOT, "Mod map-load scripts spread over frames (%s): %d calls queued, %d run later, %d dropped (square unloaded first, %d of them swept), queue peak %d, %d chunk-load frames skipped, %d vehicle-exit flushes, %d run at once near a player on foot, frame budget now %.2f ms",
+            active ? "on" : "off", deferredCalls, ranLater, dropped, swept, peakQueue, gatedFrames, exitFlushes, ranNearFoot, budgetNs / 1e6);
     }
 }

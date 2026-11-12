@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.0)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.0.1)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -27,6 +27,7 @@ $ScriptDir = if ($env:PZO_INSTALLER_DIR) { $env:PZO_INSTALLER_DIR.TrimEnd('\') }
 $JarFileName       = "PZOptimEngine.jar"
 $NativeDllName     = "pzo_native64.dll"
 $TargetFileName    = "ProjectZomboid64.json"
+$LaunchBatName     = "ProjectZomboid64_PZO.bat"
 $BackupFolder      = "Installer_Backups"
 $ZomboidLuaDir     = [System.IO.Path]::Combine($HOME, "Zomboid\Lua")
 $PzoStatusFile     = [System.IO.Path]::Combine($ZomboidLuaDir, "pzo_status.json")
@@ -391,6 +392,7 @@ Write-Host "Project Zomboid directory: $InstallPath" -ForegroundColor Green
 $InstalledJarPath = [System.IO.Path]::Combine($InstallPath, $JarFileName)
 $InstalledDllPath = [System.IO.Path]::Combine($InstallPath, $NativeDllName)
 $TargetFilePath   = [System.IO.Path]::Combine($InstallPath, $TargetFileName)
+$LaunchBatPath    = [System.IO.Path]::Combine($InstallPath, $LaunchBatName)
 $BackupDir        = [System.IO.Path]::Combine($InstallPath, $BackupFolder)
 
 # Locate Source Jar
@@ -753,7 +755,146 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
     return (Format-PZOJson $old) + "`n"
 }
 
-function Apply-PZOConfiguration {
+function Test-PZOJsonHasPzo {
+    if (-not (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue)) { return $false }
+    $raw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
+    return [bool]($raw -and (($raw -match "com/pzoptimizer") -or ($raw -match "pzo_native64") -or ($raw -match "PZOptimEngine\.jar")))
+}
+
+# Puts ProjectZomboid64.json back to stock: the oldest backup without PZO in it, then strip anything PZO left behind
+function Restore-PZOStockJson {
+    $cleanBackup = $null
+    if (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue) {
+        $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
+        foreach ($bf in $bakFiles) {
+            $txt = Get-Content -LiteralPath $bf.FullName -Raw -ErrorAction SilentlyContinue
+            if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64")) {
+                $cleanBackup = $bf
+                break
+            }
+        }
+    }
+
+    if ($cleanBackup) {
+        Copy-Item -Path $cleanBackup.FullName -Destination $TargetFilePath -Force
+        Write-Host "Restored original clean stock backup: $($cleanBackup.Name) -> $TargetFileName" -ForegroundColor Green
+    }
+
+    if (Test-PZOJsonHasPzo) {
+        $jsonRaw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
+        $sanitized = $jsonRaw -replace '"mainClass"\s*:\s*"com/pzoptimizer/PZOEntrypoint"', '"mainClass": "zombie/gameStates/MainScreenState"'
+        $sanitized = $sanitized -replace '\s*"PZOptimEngine\.jar",?', ''
+        $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
+        $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
+        [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "Sanitized $($TargetFileName): Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
+    }
+}
+
+function Format-PZOBatArg([string]$arg) {
+    $arg = $arg.Replace('%', '%%')
+    if ($arg -match '[\s&|<>^()]') { return '"' + $arg + '"' }
+    return $arg
+}
+
+# The stock .bat launchers call java.exe directly and never read ProjectZomboid64.json, so this writes one that runs
+# the same command line the exe builds from the JSON
+function Write-PZOLaunchBat([string]$JsonText) {
+    try {
+        $cfg = $JsonText | ConvertFrom-Json
+    } catch {
+        Write-Host "[ERROR] Could not read the merged config, $LaunchBatName was not written." -ForegroundColor Red
+        return
+    }
+
+    $launchArgs = New-Object System.Collections.ArrayList
+    foreach ($a in @(Split-PZOJoinedArgs $cfg.vmArgs)) { [void]$launchArgs.Add([string]$a) }
+
+    # The exe adds one windows.<version> block: the highest version this Windows meets. Applying two would give the
+    # JVM two collectors and it refuses to start.
+    if ($cfg.windows) {
+        $os = [Environment]::OSVersion.Version
+        $bestVer = $null
+        $bestArgs = $null
+        foreach ($p in $cfg.windows.PSObject.Properties) {
+            $v = $null
+            if (-not [version]::TryParse($p.Name, [ref]$v)) { continue }
+            if ($v -le $os -and ($null -eq $bestVer -or $v -gt $bestVer)) {
+                $bestVer = $v
+                $bestArgs = $p.Value.vmArgs
+            }
+        }
+        foreach ($a in @(Split-PZOJoinedArgs $bestArgs)) {
+            $key = Get-PZOArgKey $a
+            for ($i = $launchArgs.Count - 1; $i -ge 0; $i--) {
+                if ((Get-PZOArgKey $launchArgs[$i]) -ceq $key) { $launchArgs.RemoveAt($i) }
+            }
+            [void]$launchArgs.Add([string]$a)
+        }
+    }
+
+    $classpath = (@($cfg.classpath) | ForEach-Object { [string]$_ }) -join ";"
+    $mainClass = ([string]$cfg.mainClass).Replace('/', '.')
+    $tail = "-cp " + (Format-PZOBatArg $classpath) + " " + $mainClass + " %*"
+
+    $fullLine = (@($launchArgs | ForEach-Object { Format-PZOBatArg $_ }) -join " ")
+    # Same fallback as the stock launcher: if the JVM won't start, try again with its default collector
+    $noGcLine = (@($launchArgs | Where-Object { (Get-PZOArgKey $_) -ne "gc" -and -not (Test-PZOZgcOnlyArg $_) } | ForEach-Object { Format-PZOBatArg $_ }) -join " ")
+
+    $lines = @(
+        "@echo off",
+        "rem Written by the PZO installer from $TargetFileName. Run install.bat again after changing that file.",
+        "setlocal enableextensions",
+        "cd /d `"%~dp0`"",
+        "set _JAVA_OPTIONS=",
+        "",
+        "`".\jre64\bin\java.exe`" $fullLine $tail",
+        "",
+        "if %ERRORLEVEL% NEQ 0 (",
+        "    `".\jre64\bin\java.exe`" $noGcLine $tail",
+        ")",
+        "",
+        "pause"
+    )
+    try {
+        [System.IO.File]::WriteAllText($LaunchBatPath, (($lines -join "`r`n") + "`r`n"), [System.Text.Encoding]::ASCII)
+        Write-Host "[SUCCESS] Wrote alternative launcher: $LaunchBatPath" -ForegroundColor Green
+        Write-Host "    Start the game with $LaunchBatName (or point your shortcut at it) to run with PZO." -ForegroundColor Gray
+        Write-Host "    The stock ProjectZomboid64.bat still launches the unmodded game." -ForegroundColor Gray
+    } catch {
+        Write-Host "[ERROR] Failed writing $LaunchBatPath. Check folder write permissions." -ForegroundColor Red
+    }
+}
+
+function Remove-PZOLaunchBat {
+    if (Test-Path -LiteralPath $LaunchBatPath -ErrorAction SilentlyContinue) {
+        Remove-Item -LiteralPath $LaunchBatPath -Force -ErrorAction SilentlyContinue
+        Write-Host "Removed: $LaunchBatName" -ForegroundColor Green
+    }
+}
+
+function Read-PZOLaunchMode {
+    $hasBat = Test-Path -LiteralPath $LaunchBatPath -ErrorAction SilentlyContinue
+    $default = "1"
+    if ($hasBat -and (Test-PZOJsonHasPzo)) { $default = "3" } elseif ($hasBat) { $default = "2" }
+
+    Write-Host "`nHow do you start Project Zomboid?" -ForegroundColor Cyan
+    Write-Host "1) Normal launch      - Steam or ProjectZomboid64.exe (sets up $TargetFileName)"
+    Write-Host "2) Alternative launch - a .bat file (writes $LaunchBatName, Steam/exe launch stays stock)"
+    Write-Host "3) Both"
+    while ($true) {
+        $c = Read-Host "`nEnter choice (1, 2, or 3, Default: $default)"
+        if ([string]::IsNullOrWhiteSpace($c)) { $c = $default }
+        switch ($c.Trim()) {
+            "1" { return "normal" }
+            "2" { return "alternative" }
+            "3" { return "both" }
+        }
+        Write-Host "Please enter 1, 2 or 3." -ForegroundColor Yellow
+    }
+}
+
+function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
     $TotalRamBytes = 0
     try {
         $TotalRamBytes = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory
@@ -864,12 +1005,24 @@ function Apply-PZOConfiguration {
         $chosenJson = $chosenJson.Replace('"projectzomboid.jar"', '"ZombieBuddy.jar",' + "`n        " + '"projectzomboid.jar"')
     }
 
-    Write-JsonNoBOM $TargetFilePath (Merge-PZOUserSettings $chosenJson $TargetFilePath $Compat.Active)
+    $finalJson = Merge-PZOUserSettings $chosenJson $TargetFilePath $Compat.Active
 
-    if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
-        Write-Host "[SUCCESS] Updated $TargetFileName with PZO Entrypoint & RAM settings." -ForegroundColor Green
+    if ($LaunchMode -ne "alternative") {
+        Write-JsonNoBOM $TargetFilePath $finalJson
+        if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
+            Write-Host "[SUCCESS] Updated $TargetFileName with PZO Entrypoint & RAM settings." -ForegroundColor Green
+        } else {
+            Write-Host "[ERROR] Failed writing to $TargetFilePath. Check folder write permissions." -ForegroundColor Red
+        }
+    } elseif (Test-PZOJsonHasPzo) {
+        Write-Host "Alternative launch only: putting $TargetFileName back to stock." -ForegroundColor Gray
+        Restore-PZOStockJson
+    }
+
+    if ($LaunchMode -ne "normal") {
+        Write-PZOLaunchBat $finalJson
     } else {
-        Write-Host "[ERROR] Failed writing to $TargetFilePath. Check folder write permissions." -ForegroundColor Red
+        Remove-PZOLaunchBat
     }
 
     if (-not (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue)) {
@@ -883,7 +1036,8 @@ function Apply-PZOConfiguration {
         pretouch    = -not $Compat.Active
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
-        version     = "2.0"
+        launch_mode = $LaunchMode
+        version     = "2.0.1"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
@@ -931,8 +1085,9 @@ if (Test-Path $InstalledJarPath) {
                 }
             }
 
-            Write-Host "`nRe-applying optimal configuration to ProjectZomboid64.json..." -ForegroundColor Cyan
-            Apply-PZOConfiguration
+            $launchMode = Read-PZOLaunchMode
+            Write-Host "`nRe-applying optimal configuration..." -ForegroundColor Cyan
+            Apply-PZOConfiguration $launchMode
             Write-Host "`n[SUCCESS] Update complete! Project Zomboid is ready." -ForegroundColor Green
             return
         }
@@ -976,36 +1131,8 @@ if (Test-Path $InstalledJarPath) {
                 }
             }
 
-            # Restore original clean stock backup if available
-            $cleanBackup = $null
-            if (Test-Path -LiteralPath $BackupDir -ErrorAction SilentlyContinue) {
-                $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
-                foreach ($bf in $bakFiles) {
-                    $txt = Get-Content -LiteralPath $bf.FullName -Raw -ErrorAction SilentlyContinue
-                    if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64")) {
-                        $cleanBackup = $bf
-                        break
-                    }
-                }
-            }
-
-            if ($cleanBackup) {
-                Copy-Item -Path $cleanBackup.FullName -Destination $TargetFilePath -Force
-                Write-Host "Restored original clean stock backup: $($cleanBackup.Name) -> $TargetFileName" -ForegroundColor Green
-            }
-
-            # Make sure ProjectZomboid64.json has no orphaned PZO entries left
-            if (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue) {
-                $jsonRaw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
-                if ($jsonRaw -and (($jsonRaw -match "com/pzoptimizer") -or ($jsonRaw -match "pzo_native64") -or ($jsonRaw -match "PZOptimEngine\.jar"))) {
-                    $sanitized = $jsonRaw -replace '"mainClass"\s*:\s*"com/pzoptimizer/PZOEntrypoint"', '"mainClass": "zombie/gameStates/MainScreenState"'
-                    $sanitized = $sanitized -replace '\s*"PZOptimEngine\.jar",?', ''
-                    $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
-                    $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
-                    [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
-                    Write-Host "Sanitized $($TargetFileName): Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
-                }
-            }
+            Restore-PZOStockJson
+            Remove-PZOLaunchBat
 
             # Reset debug-options.ini so vanilla does not thrash chunk FBOs
             $debugOptFile = [System.IO.Path]::Combine($HOME, "Zomboid\debug-options.ini")
@@ -1053,5 +1180,6 @@ if ($SourceDll -and (Test-Path -LiteralPath $SourceDll -ErrorAction SilentlyCont
     }
 }
 
-Apply-PZOConfiguration
+$launchMode = Read-PZOLaunchMode
+Apply-PZOConfiguration $launchMode
 Write-Host "`n[SUCCESS] Installation & optimization complete! You can now start Project Zomboid." -ForegroundColor Cyan
