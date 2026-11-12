@@ -58,6 +58,8 @@ public final class ShaderPatchHost {
     }
 
     private static volatile State committed = new State(Collections.emptyMap(), Collections.emptyMap());
+    // Render thread only, bumped on every shader unit compile
+    static volatile int buildGeneration;
     // Game thread only (Lua)
     private static final Map<String, Patch> staged = new LinkedHashMap<>();
     private static final Map<String, String> stagedDefines = new HashMap<>();
@@ -132,6 +134,14 @@ public final class ShaderPatchHost {
         else stagedDefines.put(name, value);
     }
 
+    /** Whether any mod has shader patches live; hooks that only serve patched shaders return straight away without. */
+    static boolean anyLive() {
+        return anyLive;
+    }
+
+    // Set on each commit, so the per-draw check is one field read
+    private static volatile boolean anyLive;
+
     static String statusOf(String id) {
         if (id == null) return UNKNOWN;
         Patch p = committed.patches.get(id);
@@ -159,6 +169,9 @@ public final class ShaderPatchHost {
             if (!signature(prev, f).equals(signature(next, f))) changedFiles.add(f);
         }
         committed = next;
+        boolean live = false;
+        for (Patch p : next.patches.values()) live |= p.on;
+        anyLive = live;
         for (Patch p : next.patches.values()) {
             if (!p.on || !Collections.disjoint(p.files, changedFiles)) status.remove(p.id);
         }
@@ -202,6 +215,8 @@ public final class ShaderPatchHost {
     // Render thread, from ShaderUnit.compile
 
     static String apply(ShaderUnit unit, String fileName, String code) {
+        // Anything caching uniform locations re-queries after a rebuild; drivers can hand the same program id back
+        buildGeneration++;
         if (code == null || fileName == null) return code;
         String base = baseName(fileName);
         remember(unit, base);
@@ -303,6 +318,11 @@ public final class ShaderPatchHost {
         } catch (Throwable t) {
             return "test compile threw " + t;
         }
+    }
+
+    /** ${NAME} filled from the committed defines, for bake passes. */
+    static String fillCommitted(String text) {
+        return fill(text == null ? "" : text, committed.defines);
     }
 
     private static String fill(String text, Map<String, String> defines) {

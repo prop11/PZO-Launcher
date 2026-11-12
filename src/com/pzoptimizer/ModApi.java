@@ -77,10 +77,26 @@ public final class ModApi {
                 if (a == null) return Boolean.FALSE;
                 ShaderPatchHost.define(a.toString(), b == null ? null : luaNumberText(b));
                 return Boolean.TRUE;
-            case "shaderCommit":
-                return Double.valueOf(ShaderPatchHost.commit());
+            case "shaderCommit": {
+                double n = ShaderPatchHost.commit();
+                BakePass.commit();
+                return Double.valueOf(n);
+            }
+            // Bake passes (PZOApi.addBakePass): staged like shader patches, live on shaderCommit
+            case "bakePass":
+                return Boolean.valueOf(a != null && b != null && BakePass.add(a.toString(), b.toString()));
+            case "bakePassOn":
+                return Boolean.valueOf(a != null && BakePass.setOn(a.toString(), Boolean.TRUE.equals(b)));
+            case "bakeStatus":
+                return BakePass.statusOf(a == null ? null : a.toString());
             case "shaderStatus":
                 return ShaderPatchHost.statusOf(a == null ? null : a.toString());
+            // Live state of the chunk shader effects (per-pixel lighting, sway, fog), shown on their settings cards
+            case "chunkEffects":
+                return PixelLight.stateText() + ";" + PuddleSplash.stateText();
+            // Mods that make those effects stand down: "chunk=A,B;splash=C"
+            case "chunkConflicts":
+                return PixelLight.conflictText();
             default:
                 return Boolean.FALSE;
         }
@@ -94,6 +110,7 @@ public final class ModApi {
         zombieMarks = false;
         LuaEventPatches.clearModCache();
         ShaderPatchHost.reset();
+        BakePass.reset();
     }
 
     // Lua numbers arrive as Double; a define has to read as a GLSL float literal ("1.0", not "1")
