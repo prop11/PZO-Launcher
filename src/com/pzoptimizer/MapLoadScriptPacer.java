@@ -40,6 +40,9 @@ public final class MapLoadScriptPacer {
     private static final String CHUNK_EVENT = "LoadChunk";
     private static final long BUDGET_NS = 2_000_000L;
     private static final long MAX_BUDGET_NS = 2 * BUDGET_NS;
+    // The engine's own chunk work keeps frames long on a drive, and that is not the queue's doing, so the budget
+    // never goes under this
+    private static final long MIN_BUDGET_NS = BUDGET_NS / 2;
     // Frame length over the target that counts as running long, and what I allow on top of the fastest recent frame
     private static final long OVERSHOOT_NS = 500_000L, FLOOR_SLACK_NS = 500_000L;
     // A gap this long between frames is a pause or a loading screen
@@ -249,6 +252,9 @@ public final class MapLoadScriptPacer {
             budgetFrame = frame;
             observeFrame(start);
             spentNs = 0;
+            // Squares are pooled, so the same object can come back as a different square on a later frame
+            lastSquare = null;
+            countedSquare = null;
         }
         if (queued == 0) {
             // Keep the vehicle state current, or an exit long after the queue emptied would look new later
@@ -312,7 +318,7 @@ public final class MapLoadScriptPacer {
             Item it = tail ? b.tails.poll() : b.squares.poll();
             if (it == null) break;
             queued--;
-            boolean ok = it.thread == lastThread && (tail ? it.arg == live : stillLoaded(cell, (zombie.iso.IsoGridSquare) it.arg));
+            boolean ok = it.thread == lastThread && (tail ? it.arg == live : stillLoaded(cell, (zombie.iso.IsoGridSquare) it.arg, live));
             if (!ok) {
                 dropped++;
                 continue;
@@ -394,7 +400,7 @@ public final class MapLoadScriptPacer {
         long target = capNs;
         long floor = Math.min(floorA, floorB);
         if (floor != Long.MAX_VALUE && floor + FLOOR_SLACK_NS > target) target = floor + FLOOR_SLACK_NS;
-        if (typical > target + OVERSHOOT_NS) budgetNs = Math.max(0, budgetNs - MAX_BUDGET_NS / 4);
+        if (typical > target + OVERSHOOT_NS) budgetNs = Math.max(MIN_BUDGET_NS, budgetNs - MAX_BUDGET_NS / 4);
         else budgetNs = Math.min(MAX_BUDGET_NS, budgetNs + MAX_BUDGET_NS / 8);
     }
 
@@ -503,8 +509,10 @@ public final class MapLoadScriptPacer {
         sweepAt = stop;
     }
 
-    private static boolean stillLoaded(zombie.iso.IsoCell cell, zombie.iso.IsoGridSquare sq) {
-        if (sq.chunk == null) return false;
+    // The chunk check matters: a pooled square can be loaded again somewhere else while its old entry still waits
+    // here, and it would get the event twice
+    private static boolean stillLoaded(zombie.iso.IsoCell cell, zombie.iso.IsoGridSquare sq, zombie.iso.IsoChunk live) {
+        if (sq.chunk != live) return false;
         return cell.getGridSquare(sq.getX(), sq.getY(), sq.getZ()) == sq;
     }
 

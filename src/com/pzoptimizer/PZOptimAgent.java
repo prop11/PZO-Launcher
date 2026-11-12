@@ -11,6 +11,42 @@ import java.util.List;
 public class PZOptimAgent {
     private static volatile Instrumentation instrumentationInstance = null;
 
+    // Every class transformSpecific patches. Another agent (ZombieBuddy and its Java mods) can load any of them before
+    // my transformer exists, and a class loaded that early only gets my patch if I retransform it here.
+    private static final java.util.Set<String> EARLY_TARGETS = java.util.Set.of(
+        "se.krka.kahlua.j2se.KahluaTableImpl", "zombie.FileGuidTable", "zombie.FliesSound$ChunkLevelData",
+        "zombie.GameProfiler", "zombie.GameWindow", "zombie.Lua.Event", "zombie.Lua.LuaManager",
+        "zombie.MovingObjectUpdateScheduler", "zombie.MovingObjectUpdateSchedulerUpdateBucket",
+        "zombie.WorldSoundManager", "zombie.buildingRooms.BuildingRoomsEditor", "zombie.characters.IsoGameCharacter",
+        "zombie.characters.IsoPlayer", "zombie.characters.IsoZombie", "zombie.characters.ZombieVocalsManager",
+        "zombie.characters.action.conditions.CharacterVariableCondition", "zombie.characters.animals.IsoAnimal",
+        "zombie.characters.ecs.ECSComponent", "zombie.core.SpriteRenderer", "zombie.core.SpriteRenderer$RingBuffer",
+        "zombie.core.VBO.GLVertexBufferObject", "zombie.core.opengl.RenderThread", "zombie.core.opengl.ShaderUnit",
+        "zombie.core.opengl.VBORenderer", "zombie.core.physics.WorldSimulation",
+        "zombie.core.properties.PropertyContainer", "zombie.core.skinnedmodel.HelperFunctions",
+        "zombie.core.skinnedmodel.advancedanimation.AnimatedModel$AnimatedModelInstanceRenderData",
+        "zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandlePool",
+        "zombie.core.skinnedmodel.animation.AnimationPlayer",
+        "zombie.core.skinnedmodel.model.FileTask_AbstractLoadModel",
+        "zombie.core.skinnedmodel.model.ModelSlotRenderData", "zombie.core.skinnedmodel.model.SkinningBoneHierarchy",
+        "zombie.core.skinnedmodel.population.PopTemplateManager", "zombie.core.textures.Texture",
+        "zombie.core.textures.TextureIDAssetManager", "zombie.entity.GameEntity",
+        "zombie.entity.UsingPlayerUpdateSystem", "zombie.entity.components.spriteconfig.SpriteConfig",
+        "zombie.fileSystem.FileSystemImpl", "zombie.fileSystem.TexturePackDevice", "zombie.gameStates.IngameState",
+        "zombie.iso.ChunkSaveWorker", "zombie.iso.IsoCell", "zombie.iso.IsoChunkLevel", "zombie.iso.IsoChunkMap",
+        "zombie.iso.IsoDepthHelper", "zombie.iso.IsoDirections", "zombie.iso.IsoGridSquare", "zombie.iso.IsoMetaGrid",
+        "zombie.iso.IsoMovingObject", "zombie.iso.IsoPuddles", "zombie.iso.IsoWorld",
+        "zombie.iso.LightingJNI$JNILighting", "zombie.iso.LotHeader", "zombie.iso.PlayerCamera",
+        "zombie.iso.WorldStreamer", "zombie.iso.fboRenderChunk.FBORenderCell",
+        "zombie.iso.fboRenderChunk.FBORenderChunk", "zombie.iso.fboRenderChunk.FBORenderCutaways",
+        "zombie.iso.fboRenderChunk.FBORenderLevels", "zombie.iso.fboRenderChunk.FBORenderLevels$NLevels",
+        "zombie.iso.objects.IsoLightSwitch", "zombie.iso.objects.IsoTree", "zombie.iso.sprite.IsoSprite",
+        "zombie.iso.weather.fx.ParticleRectangle", "zombie.iso.weather.fx.WeatherParticleDrawer",
+        "zombie.pathfind.PolygonalMap2", "zombie.pathfind.nativeCode.PathfindNative",
+        "zombie.pathfind.nativeCode.PathfindNativeThread", "zombie.popman.ZombiePopulationManager",
+        "zombie.scripting.ScriptManager", "zombie.scripting.ScriptParser",
+        "zombie.tileDepth.TileDepthTextures$LoadTask", "zombie.vehicles.BaseVehicle");
+
     public static void premain(String agentArgs, Instrumentation inst) {
         if (instrumentationInstance != null) return;
         instrumentationInstance = inst;
@@ -54,38 +90,7 @@ public class PZOptimAgent {
             if (inst.isRetransformClassesSupported()) {
                 for (Class<?> c : inst.getAllLoadedClasses()) {
                     String name = c.getName();
-                    if ("se.krka.kahlua.j2se.KahluaTableImpl".equals(name) ||
-                        "zombie.core.properties.PropertyContainer".equals(name) ||
-                        "zombie.fileSystem.FileSystemImpl".equals(name) ||
-                        "zombie.characters.IsoPlayer".equals(name) ||
-                        "zombie.core.skinnedmodel.advancedanimation.AnimationVariableHandlePool".equals(name) ||
-                        "zombie.WorldSoundManager".equals(name) ||
-                        "zombie.iso.WorldStreamer".equals(name) ||
-                        "zombie.pathfind.nativeCode.PathfindNative".equals(name) ||
-                        "zombie.iso.ChunkSaveWorker".equals(name) ||
-                        "zombie.characters.IsoGameCharacter".equals(name) ||
-                        "zombie.iso.sprite.IsoSprite".equals(name) ||
-                        "zombie.entity.components.spriteconfig.SpriteConfig".equals(name) ||
-                        "zombie.iso.IsoGridSquare".equals(name) ||
-                        "zombie.iso.IsoChunkMap".equals(name) ||
-                        "zombie.core.skinnedmodel.animation.AnimationPlayer".equals(name) ||
-                        "zombie.pathfind.nativeCode.PathfindNativeThread".equals(name) ||
-                        "zombie.iso.IsoWorld".equals(name) ||
-                        "zombie.MovingObjectUpdateScheduler".equals(name) ||
-                        "zombie.characters.IsoZombie".equals(name) ||
-                        "zombie.FileGuidTable".equals(name) ||
-                        "zombie.characters.animals.IsoAnimal".equals(name) ||
-                        "zombie.iso.fboRenderChunk.FBORenderCell".equals(name) ||
-                        "zombie.fileSystem.TexturePackDevice".equals(name) ||
-                        "zombie.core.physics.WorldSimulation".equals(name) ||
-                        "zombie.GameWindow".equals(name) ||
-                        "zombie.iso.PlayerCamera".equals(name) ||
-                        "zombie.vehicles.BaseVehicle".equals(name) ||
-                        "zombie.iso.IsoChunkLevel".equals(name) ||
-                        "zombie.core.textures.TextureIDAssetManager".equals(name) ||
-                        "zombie.core.SpriteRenderer".equals(name) ||
-                        "zombie.tileDepth.TileDepthTextures$LoadTask".equals(name) ||
-                        "zombie.core.skinnedmodel.model.FileTask_AbstractLoadModel".equals(name)) {
+                    if (EARLY_TARGETS.contains(name)) {
                         try {
                             inst.retransformClasses(c);
                             PZOLogger.success("[PZO Agent] Retransformed early-loaded class: " + name);
@@ -285,7 +290,7 @@ public class PZOptimAgent {
 
         private byte[] transformSpecific(ClassLoader loader, String className, byte[] classfileBuffer) {
             if ("zombie/iso/IsoChunkMap".equals(className) && classfileBuffer != null) {
-                byte[] base = patchIsoChunkMap(classfileBuffer);
+                byte[] base = patchIsoChunkMap(classfileBuffer, loader);
                 byte[] paced = AsmSupport.transform(base != null ? base : classfileBuffer, loader,
                     "IsoChunkMap hand-off pacer", GameThreadPatches::patchChunkMap);
                 if (paced != null) {
@@ -814,10 +819,15 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched GameWindow.save: queued zombie arrivals and travel statistics flushed before saving");
                     gw = sv;
                 }
-                byte[] lp = AsmSupport.transform(gw != null ? gw : classfileBuffer, loader, "GameWindow profiler timing", LiveProfiler::patchGameWindow);
-                if (lp != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched GameWindow.frameStep: update and render timed while the profiler runs");
-                    gw = lp;
+                byte[] lp = AsmSupport.transform(gw != null ? gw : classfileBuffer, loader, "GameWindow profiler update timing", LiveProfiler::patchLogic);
+                if (lp != null) gw = lp;
+                byte[] rp = AsmSupport.transform(gw != null ? gw : classfileBuffer, loader, "GameWindow profiler render timing", LiveProfiler::patchRender);
+                if (rp != null) gw = rp;
+                byte[] sp = AsmSupport.transform(gw != null ? gw : classfileBuffer, loader, "GameWindow profiler save marker", LiveProfiler::patchSave);
+                if (sp != null) gw = sp;
+                if (lp != null || rp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GameWindow: " + (lp != null ? "logic " : "") + (rp != null ? "renderInternal " : "")
+                        + "timed while the profiler runs");
                 }
                 return gw != null ? gw : classfileBuffer;
             }
@@ -1014,100 +1024,13 @@ public class PZOptimAgent {
             return null;
         }
 
-        private byte[] patchIsoChunkMap(byte[] b) {
-            try {
-                int cpCount = ((b[8] & 0xFF) << 8) | (b[9] & 0xFF);
-                int pos = 10;
-
-                int[] tagOffsets = new int[cpCount];
-                int[] tags = new int[cpCount];
-                String[] utf8Strings = new String[cpCount];
-
-                int i = 1;
-                while (i < cpCount) {
-                    tags[i] = b[pos] & 0xFF;
-                    tagOffsets[i] = pos;
-                    pos++;
-                    int tag = tags[i];
-                    if (tag == 1) { // Utf8
-                        int len = ((b[pos] & 0xFF) << 8) | (b[pos + 1] & 0xFF);
-                        pos += 2;
-                        utf8Strings[i] = new String(b, pos, len, java.nio.charset.StandardCharsets.UTF_8);
-                        pos += len;
-                    } else if (tag == 7 || tag == 8 || tag == 16 || tag == 19 || tag == 20) {
-                        pos += 2;
-                    } else if (tag == 9 || tag == 10 || tag == 11 || tag == 12 || tag == 17 || tag == 18) {
-                        pos += 4;
-                    } else if (tag == 3 || tag == 4) {
-                        pos += 4;
-                    } else if (tag == 5 || tag == 6) {
-                        pos += 8;
-                        i++;
-                    } else if (tag == 15) {
-                        pos += 3;
-                    } else {
-                        return null;
-                    }
-                    i++;
-                }
-
-                int chunksSwapARef = -1;
-                int chunkGridWidthRef = -1;
-
-                for (int k = 1; k < cpCount; k++) {
-                    if (tags[k] == 9) { // Fieldref
-                        int p = tagOffsets[k] + 1;
-                        int ntIdx = ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
-                        if (ntIdx > 0 && ntIdx < cpCount && tags[ntIdx] == 12) { // NameAndType
-                            int ntp = tagOffsets[ntIdx] + 1;
-                            int nameIdx = ((b[ntp] & 0xFF) << 8) | (b[ntp + 1] & 0xFF);
-                            int descIdx = ((b[ntp + 2] & 0xFF) << 8) | (b[ntp + 3] & 0xFF);
-                            String name = (nameIdx > 0 && nameIdx < cpCount) ? utf8Strings[nameIdx] : null;
-                            String desc = (descIdx > 0 && descIdx < cpCount) ? utf8Strings[descIdx] : null;
-                            if ("chunksSwapA".equals(name) && desc != null && desc.contains("[Lzombie/iso/IsoChunk;")) {
-                                chunksSwapARef = k;
-                            } else if ("chunkGridWidth".equals(name) && "I".equals(desc)) {
-                                chunkGridWidthRef = k;
-                            }
-                        }
-                    }
-                }
-
-                if (chunksSwapARef == -1 || chunkGridWidthRef == -1) {
-                    return null;
-                }
-
-                byte oldRefHi = (byte) ((chunksSwapARef >> 8) & 0xFF);
-                byte oldRefLo = (byte) (chunksSwapARef & 0xFF);
-
-                byte newRefHi = (byte) ((chunkGridWidthRef >> 8) & 0xFF);
-                byte newRefLo = (byte) (chunkGridWidthRef & 0xFF);
-
-                byte[] copy = b.clone();
-                int patchedSites = 0;
-
-                // Loop reduction in calculateZExtentsForChunkMap (28,561 iterations down to 169)
-                for (int k = pos; k < copy.length - 4; k++) {
-                    if (copy[k] == 0x2A && copy[k + 1] == (byte) 0xB4 &&
-                        copy[k + 2] == oldRefHi && copy[k + 3] == oldRefLo &&
-                        copy[k + 4] == (byte) 0xBE) {
-                        copy[k] = (byte) 0xB2;
-                        copy[k + 1] = newRefHi;
-                        copy[k + 2] = newRefLo;
-                        copy[k + 3] = 0x00;
-                        copy[k + 4] = 0x00;
-                        patchedSites++;
-                    }
-                }
-
-                if (patchedSites > 0) {
-                    PZOLogger.success(String.format("[PZO Agent] Bytecode-patched IsoChunkMap.calculateZExtentsForChunkMap: Reduced 28,561 loop iterations down to 169 (%d sites patched - 99.4%% loop overhead eliminated)", patchedSites));
-                    return copy;
-                }
-            } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] Non-fatal notice during IsoChunkMap bytecode transform: " + t.getMessage());
+        // calculateZExtentsForChunkMap loops chunksSwapA.length squared (169 x 169) to visit a 13 x 13 grid
+        private byte[] patchIsoChunkMap(byte[] b, ClassLoader loader) {
+            byte[] out = AsmSupport.transform(b, loader, "IsoChunkMap level extents loop", GameThreadPatches::patchZExtents);
+            if (out != null) {
+                PZOLogger.success("[PZO Agent] ASM-patched IsoChunkMap.calculateZExtentsForChunkMap: loops the chunk grid width, not the array length");
             }
-            return null;
+            return out;
         }
 
         private byte[] patchSpriteConfig(byte[] b) {

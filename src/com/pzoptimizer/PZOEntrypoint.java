@@ -138,7 +138,6 @@ public class PZOEntrypoint {
         LuaInterpreterAccelerator.apply();
         FastPathCache.normalize("media/textures");
         LogRotationGuard.checkAndRotateLogs();
-        NettyBufferPooler.apply();
         DirectMemoryTuner.initialize();
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();

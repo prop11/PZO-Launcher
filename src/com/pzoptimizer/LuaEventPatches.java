@@ -157,6 +157,14 @@ public final class LuaEventPatches {
         if (depth > 0) depth--;
     }
 
+    /**
+     * Between frames no event is running. An enter that lost its exit (an Error thrown out of trigger) would
+     * otherwise stay counted for the rest of the session, and 64 of those switch every pacer off.
+     */
+    static void frameEnd() {
+        depth = 0;
+    }
+
     public static boolean isModClosure(Object closure) {
         if (!(closure instanceof se.krka.kahlua.vm.LuaClosure lc)) return false;
         if (lc.prototype == null) return false;

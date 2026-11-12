@@ -70,6 +70,7 @@ public final class ActionParallel {
     private static boolean auditStarted;
 
     // Set on the game thread while one queued zombie resumes
+    private static int resumeFailures;
     private static IsoZombie resumingZombie;
     private static Object[] resumingKeys, resumingVals;
     private static int resumingCount;
@@ -182,6 +183,11 @@ public final class ActionParallel {
         if (Thread.currentThread() != gameThread) return;
         ensureAudit();
         collecting = true;
+        // An exception out of the last bucket loop skipped its flush: finish those zombies before queueing more
+        if (!queue.isEmpty()) {
+            flushBucket();
+            collecting = true;
+        }
     }
 
     /** Where stock calls ActionContext.update(): true means stop here and finish after the loop. */
@@ -237,7 +243,8 @@ public final class ActionParallel {
                 try {
                     z.postupdate();
                 } catch (Throwable t) {
-                    PZOLogger.warn("[ActionParallel] deferred postupdate of a zombie threw: " + t);
+                    // A zombie that throws does it every frame
+                    if (++resumeFailures <= 5) PZOLogger.warn("[ActionParallel] deferred postupdate of a zombie threw: " + t);
                 } finally {
                     phases.remove(z);
                 }

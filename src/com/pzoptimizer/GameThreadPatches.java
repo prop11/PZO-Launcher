@@ -470,6 +470,26 @@ public final class GameThreadPatches {
         return 0;
     }
 
+    // IsoChunkMap.calculateZExtentsForChunkMap: "this.chunksSwapA.length" -> chunkGridWidth, in that method only
+    static boolean patchZExtents(ClassNode node) {
+        MethodNode m = AsmSupport.findMethod(node, "calculateZExtentsForChunkMap", "()V");
+        if (m == null) return false;
+        int n = 0;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof VarInsnNode v && v.getOpcode() == Opcodes.ALOAD && v.var == 0
+                    && insn.getNext() instanceof FieldInsnNode f && f.getOpcode() == Opcodes.GETFIELD && "chunksSwapA".equals(f.name)
+                    && f.getNext() != null && f.getNext().getOpcode() == Opcodes.ARRAYLENGTH) {
+                FieldInsnNode width = new FieldInsnNode(Opcodes.GETSTATIC, node.name, "chunkGridWidth", "I");
+                m.instructions.remove(f.getNext());
+                m.instructions.remove(f);
+                m.instructions.set(insn, width);
+                insn = width;
+                n++;
+            }
+        }
+        return n > 0;
+    }
+
     static boolean patchChunkMap(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "updateInternal", "()V");
         if (m == null) return false;
