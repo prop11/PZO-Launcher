@@ -189,6 +189,9 @@ public final class VehicleMotionSmoother {
     public static void beforeRender() {
         restoreRenderState();
         if (!isEnabled() || !resolveHandles()) return;
+        // Viewpoint's 3D view builds its camera from the car and seat pose during render and smooths between its own
+        // 30 Hz ticks. My in-between pose under its fixed tick lags by a random amount each tick, so the view bobs.
+        if (ViewpointStanddownGovernor.isStanddownActive() && ViewpointStanddownGovernor.isOwnViewActive()) return;
 
         IsoWorld world = IsoWorld.instance;
         if (world == null || world.currentCell == null) return;
