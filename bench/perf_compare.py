@@ -53,9 +53,9 @@ STOCK_VM_ARGS = [
     "-XX:-CreateCoredumpOnCrash",
     "-XX:-OmitStackTraceInFastThrow",
     "-XX:+UseZGC",
-    # Loads the agent through PZO's native bridge, as the PZO launch does (plain -javaagent does not survive the
+    # Loads the agent through the JRE's instrument.dll, as the PZO launch does (plain -javaagent does not survive the
     # game launcher). Stock mode then registers only the harness's render thread timer; no game patch is applied
-    "-agentlib:pzo_native64",
+    "-agentlib:instrument=PZOptimEngine.jar",
 ]
 
 

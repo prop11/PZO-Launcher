@@ -14,7 +14,7 @@ import java.util.Set;
  */
 public final class PzoeExtension implements Extension {
     private static final String PUDDLES = "zombie/iso/IsoPuddles", PUDDLES_SHADER = "zombie/iso/PuddlesShader",
-        WEATHER_SHADER = "zombie/iso/weather/WeatherShader";
+        WEATHER_SHADER = "zombie/iso/weather/WeatherShader", RENDER_CELL = "zombie/iso/fboRenderChunk/FBORenderCell";
 
     @Override
     public int apiVersion() {
@@ -55,6 +55,8 @@ public final class PzoeExtension implements Extension {
                 "PuddlesShader.updatePuddlesParams: PZOTime/PZOSplash for patched shaders");
             case WEATHER_SHADER -> logged(AsmSupport.transform(cur, loader, "WeatherShader screen pass uniforms", ScreenPass::patchShader),
                 "WeatherShader: haze and grade uniforms for patched screen shaders");
+            case RENDER_CELL -> logged(AsmSupport.transform(cur, loader, "FBORenderCell roof runoff", RainRunoff::patchCell),
+                "FBORenderCell.renderRainSplashes: roof runoff drops");
             default -> null;
         };
         return own != null ? own : out;
@@ -78,7 +80,11 @@ public final class PzoeExtension implements Extension {
             // Live state of the effects, shown on their settings cards in -debug
             case "chunkEffects":
                 return PixelLight.stateText() + ";" + PuddleSplash.stateText() + ";" + ScreenPass.stateText() + ";"
-                    + GpuTimer.stateText() + ";" + ModelSnow.stateText();
+                    + GpuTimer.stateText() + ";" + ModelSnow.stateText() + ";" + LightBeams.stateText() + ";" + RainRunoff.stateText() + ";" + FogField.stateText();
+            // Roof Runoff has no shader to ask for it: its card sends on/off and the amount (percent)
+            case "runoff":
+                RainRunoff.configure(Boolean.TRUE.equals(a), b instanceof Number n ? n.doubleValue() : 100.0);
+                return Boolean.TRUE;
             // Mods that make those effects stand down: "chunk=A,B;splash=C"
             case "chunkConflicts":
                 return PixelLight.conflictText();

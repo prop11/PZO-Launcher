@@ -14,6 +14,7 @@ public class PZONative {
 
     private static volatile boolean loaded = false;
     private static volatile boolean initialized = false;
+    private static volatile boolean blockedBySac = false;
 
     public static final String OS_NAME;
     public static final boolean IS_WINDOWS;
@@ -41,6 +42,22 @@ public class PZONative {
 
     private static synchronized void loadNativeLibrary() {
         if (loaded) return;
+
+        // Smart App Control can refuse the unsigned DLL with a "Bad Image" (0xc0e90002) box. Once that happened for
+        // this exact file I skip it, so the box shows at most once and the game runs without the native extras
+        File sacDll = null;
+        File sacMarker = null;
+        if (IS_WINDOWS && isSmartAppControlOn()) {
+            sacDll = findNativeFile();
+            if (sacDll != null) {
+                sacMarker = new File(sacDll.getAbsoluteFile().getParentFile(), "pzo_native64.blocked");
+                if (markerMatches(sacMarker, sacDll)) {
+                    blockedBySac = true;
+                    PZOLogger.info("[PZONative] Smart App Control blocked " + NATIVE_LIB_FILENAME + " on an earlier launch; skipped, running in pure JVM safe mode.");
+                    return;
+                }
+            }
+        }
 
         try {
             System.loadLibrary("pzo_native64");
@@ -97,6 +114,18 @@ public class PZONative {
                     }
                 } catch (Throwable ignored) {}
             }
+        }
+
+        if (!loaded && sacMarker != null && sacDll.isFile()) {
+            blockedBySac = true;
+            try {
+                java.nio.file.Files.write(sacMarker.toPath(), dllStamp(sacDll).getBytes());
+            } catch (Throwable ignored) {}
+            PZOLogger.warn("[PZONative] " + NATIVE_LIB_FILENAME + " is present but would not load with Smart App Control on; running in pure JVM safe mode and not trying it again.");
+            return;
+        }
+        if (loaded && sacMarker != null && sacMarker.isFile()) {
+            sacMarker.delete();
         }
 
         if (loaded) {
@@ -472,8 +501,10 @@ public class PZONative {
     }
 
     public static boolean isNativeFilePresent() {
-        if (loaded) return true;
+        return loaded || findNativeFile() != null;
+    }
 
+    private static File findNativeFile() {
         String nativeName = NATIVE_LIB_FILENAME;
         List<File> searchDirs = new ArrayList<>();
         searchDirs.add(new File("."));
@@ -484,22 +515,62 @@ public class PZONative {
             }
         } catch (Throwable ignored) {}
 
-        for (File dir : searchDirs) {
-            if (new File(dir, nativeName).exists()) return true;
-            if (IS_WINDOWS) {
-                if (new File(dir, "win64" + File.separator + nativeName).exists()) return true;
-            } else if (IS_LINUX) {
-                if (new File(dir, "linux64" + File.separator + nativeName).exists()) return true;
-                if (new File(dir, "natives" + File.separator + nativeName).exists()) return true;
-            } else if (IS_MAC) {
-                if (new File(dir, "ProjectZomboid.app/Contents/MacOS/" + nativeName).exists()) return true;
-                if (new File(dir, "ProjectZomboid.app/Contents/Java/" + nativeName).exists()) return true;
-                if (new File(dir, "../MacOS/" + nativeName).exists()) return true;
-                if (new File(dir, "../Java/" + nativeName).exists()) return true;
-            }
+        List<String> subPaths = new ArrayList<>();
+        subPaths.add(nativeName);
+        if (IS_WINDOWS) {
+            subPaths.add("win64" + File.separator + nativeName);
+        } else if (IS_LINUX) {
+            subPaths.add("linux64" + File.separator + nativeName);
+            subPaths.add("natives" + File.separator + nativeName);
+        } else if (IS_MAC) {
+            subPaths.add("ProjectZomboid.app/Contents/MacOS/" + nativeName);
+            subPaths.add("ProjectZomboid.app/Contents/Java/" + nativeName);
+            subPaths.add("../MacOS/" + nativeName);
+            subPaths.add("../Java/" + nativeName);
         }
 
-        return false;
+        for (File dir : searchDirs) {
+            for (String sub : subPaths) {
+                File f = new File(dir, sub);
+                if (f.isFile()) return f;
+            }
+        }
+        return null;
+    }
+
+    /** True when Smart App Control refused the DLL on this PC, now or on an earlier launch. */
+    public static boolean isBlockedBySmartAppControl() {
+        return blockedBySac;
+    }
+
+    // VerifiedAndReputablePolicyState: 0 off, 1 on, 2 evaluation (logs only, blocks nothing)
+    private static boolean isSmartAppControlOn() {
+        if (!IS_WINDOWS) return false;
+        try {
+            Process p = new ProcessBuilder("reg", "query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy",
+                "/v", "VerifiedAndReputablePolicyState").redirectErrorStream(true).start();
+            String out = new String(p.getInputStream().readAllBytes());
+            if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return false;
+            }
+            return out.matches("(?s).*VerifiedAndReputablePolicyState\\s+REG_DWORD\\s+0x0*1\\b.*");
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // The marker holds the DLL's size and date, so a replaced DLL (a signed one, say) gets tried again
+    private static String dllStamp(File dll) {
+        return dll.length() + ":" + dll.lastModified();
+    }
+
+    private static boolean markerMatches(File marker, File dll) {
+        try {
+            return marker.isFile() && new String(java.nio.file.Files.readAllBytes(marker.toPath())).trim().equals(dllStamp(dll));
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     public static String getInstalledNativeVersion() {

@@ -171,14 +171,14 @@ public final class BakePass {
         int depthId = rc.depth.getID(), w = rc.tex.getWidthHW(), h = rc.tex.getHeightHW();
         if (depthId <= 0 || w <= 0 || h <= 0) return;
         zombie.core.textures.IGLFramebufferObject funcs = zombie.core.textures.TextureFBO.getFuncs();
-        int prevProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-        int prevActive = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
-        int prevVao = GL11.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
+        int prevProgram = GlGet.integer(GL20.GL_CURRENT_PROGRAM);
+        int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
+        int prevVao = GlGet.integer(GL30.GL_VERTEX_ARRAY_BINDING);
         GL11.glPushAttrib(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_ENABLE_BIT | GL11.GL_DEPTH_BUFFER_BIT | GL11.GL_VIEWPORT_BIT
             | GL11.GL_SCISSOR_BIT | GL11.GL_STENCIL_BUFFER_BIT);
         funcs.glFramebufferTexture2D(funcs.GL_FRAMEBUFFER(), funcs.GL_DEPTH_ATTACHMENT(), GL11.GL_TEXTURE_2D, 0, 0);
         GL13.glActiveTexture(GL13.GL_TEXTURE6);
-        int prevTex6 = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+        int prevTex6 = GlGet.integer(GL11.GL_TEXTURE_BINDING_2D);
         try {
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, depthId);
             GL11.glDisable(GL11.GL_DEPTH_TEST);

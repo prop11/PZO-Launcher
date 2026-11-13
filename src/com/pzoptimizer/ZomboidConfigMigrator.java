@@ -24,7 +24,18 @@ public final class ZomboidConfigMigrator {
 
     public static final String TARGET_JSON_NAME = "ProjectZomboid64.json";
     public static final String TARGET_MAIN_CLASS = "com/pzoptimizer/PZOEntrypoint";
-    public static final String TARGET_AGENTLIB = "-agentlib:pzo_native64";
+    // On Windows the jar goes in through the JRE's own signed instrument.dll. Smart App Control can block the unsigned
+    // pzo_native64.dll, and as an -agentlib that stops the JVM before PZO runs. PZONative loads the DLL later instead,
+    // where a block only costs the native extras
+    public static final String WINDOWS_AGENTLIB = "-agentlib:instrument=PZOptimEngine.jar";
+    public static final String NATIVE_AGENTLIB = "-agentlib:pzo_native64";
+    public static final String TARGET_AGENTLIB =
+        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? WINDOWS_AGENTLIB : NATIVE_AGENTLIB;
+
+    /** Either way of loading PZO as an agent, so an old one can be swapped for TARGET_AGENTLIB. */
+    public static boolean isPzoAgentArg(String arg) {
+        return arg != null && arg.startsWith("-agent") && (arg.contains("pzo_native64") || arg.contains("PZOptimEngine.jar"));
+    }
 
     private static final String PRE_TOUCH = "-XX:+AlwaysPreTouch";
     private static final String STOCK_MAX_HEAP = "-Xmx3072m";
@@ -148,6 +159,28 @@ public final class ZomboidConfigMigrator {
         return cp;
     }
 
+    private static boolean isZbAgentArg(String arg) {
+        return (arg.startsWith("-agent") && arg.contains("zbNative")) || (arg.startsWith("-javaagent") && arg.contains("ZombieBuddy"));
+    }
+
+    // This JVM's ZombieBuddy agents minus the json's own ones. Anything left came from the command line
+    private static boolean zbFromLaunchOptions(List<String> rawArgs) {
+        List<String> running = new ArrayList<>();
+        try {
+            for (String a : java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments()) {
+                if (a != null && isZbAgentArg(a.trim())) running.add(a.trim());
+            }
+        } catch (Throwable t) {
+            return false;
+        }
+        for (String arg : rawArgs) {
+            for (String tok : splitJoinedArgs(arg)) {
+                if (isZbAgentArg(tok)) running.remove(tok);
+            }
+        }
+        return !running.isEmpty();
+    }
+
     private static List<String> targetVmArgs(List<String> rawArgs, File gameDir) {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         boolean isWin = os.contains("win");
@@ -169,6 +202,14 @@ public final class ZomboidConfigMigrator {
         }
         boolean zbActive = zbLibFound || (zbInArgs && (isWin || gameDir == null));
 
+        // ZombieBuddy put in the Steam launch options (-agentlib:zbNative=policy=allow-all --) reaches the JVM too. ZB
+        // keeps only the first agent's options, and the json's copy loads first, so a copy here would reset its policy
+        // to prompt. Then the json gets none; if the launch option goes away, the next launch puts it back
+        if (zbActive && zbFromLaunchOptions(rawArgs)) {
+            zbActive = false;
+            PZOLogger.info("[ZomboidConfigMigrator] ZombieBuddy comes from the launch options; left out of " + TARGET_JSON_NAME + " so its options win");
+        }
+
         // The user's args minus anything rebuilt below, broken, or outdated
         List<String> user = new ArrayList<>();
         List<String> userLibraryPaths = new ArrayList<>();
@@ -181,7 +222,7 @@ public final class ZomboidConfigMigrator {
                     userLibraryPaths.add(tok.substring("-Djava.library.path=".length()));
                     continue;
                 }
-                if (tok.equals(TARGET_AGENTLIB) || tok.contains("pzo_native64")) continue;
+                if (tok.equals(TARGET_AGENTLIB) || isPzoAgentArg(tok)) continue;
                 // Kept whole: ZombieBuddy's policy and other options are written after the name
                 if (tok.startsWith("-agent") && tok.contains("zbNative")) {
                     if (zbArg == null) zbArg = tok;

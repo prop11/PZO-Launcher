@@ -59,7 +59,7 @@ $Json5OrLess = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-agentlib:instrument=PZOptimEngine.jar",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms2048m",
@@ -103,7 +103,7 @@ $Json6To12 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-agentlib:instrument=PZOptimEngine.jar",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms3072m",
@@ -148,7 +148,7 @@ $Json13To20_G1GC = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-agentlib:instrument=PZOptimEngine.jar",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -193,7 +193,7 @@ $Json13To20_ZGC = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-agentlib:instrument=PZOptimEngine.jar",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -239,7 +239,7 @@ $JsonAbove20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-agentlib:instrument=PZOptimEngine.jar",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms8192m",
@@ -471,6 +471,25 @@ if ($isZombieBuddyActive) {
     Write-Host "`n[+] ZombieBuddy detected! Coexistence mode enabled (preserving -agentlib:zbNative)." -ForegroundColor Green
 }
 
+# ZombieBuddy in the Steam launch options (-agentlib:zbNative=policy=allow-all --) reaches the JVM too. ZB keeps only
+# the first agent's options and the json's copy loads first, so a copy in the json would reset its policy to prompt
+$zbInLaunchOptions = $false
+try {
+    $steamRoot = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -Name "SteamPath" -ErrorAction SilentlyContinue).SteamPath
+    if ($steamRoot) {
+        foreach ($cfg in @(Get-ChildItem -Path ([System.IO.Path]::Combine($steamRoot, "userdata\*\config\localconfig.vdf")) -ErrorAction SilentlyContinue)) {
+            $vdf = Get-Content -LiteralPath $cfg.FullName -Raw -ErrorAction SilentlyContinue
+            if ($vdf -and $vdf -match '"LaunchOptions"\s+"(?:\\"|[^"\r\n])*(zbNative|ZombieBuddy)') {
+                $zbInLaunchOptions = $true
+                break
+            }
+        }
+    }
+} catch {}
+if ($zbInLaunchOptions) {
+    Write-Host "[+] ZombieBuddy is set in the Steam launch options, so it stays out of $TargetFileName and your options (e.g. policy=allow-all) keep working." -ForegroundColor Green
+}
+
 # Check for Zed Better FPS NG conflict / redundancy
 $zbFpsWorkshop = [System.IO.Path]::Combine($InstallPath, "..\..\workshop\content\108600\3793137588")
 $zbFpsMods = [System.IO.Path]::Combine($env:USERPROFILE, "Zomboid\mods\ZBBetterFPSNG")
@@ -605,7 +624,8 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
     if ($null -eq $old -or $null -eq $old.vmArgs) { return $TemplateJson }
 
     $oldArgs = @(Split-PZOJoinedArgs $old.vmArgs | Where-Object {
-        $_ -notmatch 'java\.awt\.headless|pzo_native64|UseCompactObjectHeaders' -and
+        $_ -notmatch 'java\.awt\.headless|pzo_native64|instrument=PZOptimEngine|UseCompactObjectHeaders' -and
+        -not ($zbInLaunchOptions -and $_ -match 'zbNative|ZombieBuddy\.jar') -and
         -not ($CompatActive -and ($_ -eq "-XX:+AlwaysPreTouch" -or $_ -eq "-XX:+UseZGC" -or (Test-PZOZgcOnlyArg $_)))
     })
 
@@ -717,7 +737,7 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
         if ($tplBlock) { foreach ($a in @($tplBlock.Value.vmArgs)) { [void]$blockArgs.Add([string]$a) } }
         if ($oldBlock) {
             foreach ($arg in @(Split-PZOJoinedArgs $oldBlock.Value.vmArgs)) {
-                if ($arg -match 'pzo_native64|zbNative|UseCompactObjectHeaders') { continue }
+                if ($arg -match 'pzo_native64|instrument=PZOptimEngine|zbNative|UseCompactObjectHeaders') { continue }
                 $key = Get-PZOArgKey $arg
                 if ($key -eq "gc") {
                     if (-not $tplBlock -and -not $CompatActive) { [void]$blockArgs.Add($arg) }
@@ -758,7 +778,7 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
 function Test-PZOJsonHasPzo {
     if (-not (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue)) { return $false }
     $raw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
-    return [bool]($raw -and (($raw -match "com/pzoptimizer") -or ($raw -match "pzo_native64") -or ($raw -match "PZOptimEngine\.jar")))
+    return [bool]($raw -and (($raw -match "com/pzoptimizer") -or ($raw -match "pzo_native64") -or ($raw -match "instrument=PZOptimEngine") -or ($raw -match "PZOptimEngine\.jar")))
 }
 
 # Puts ProjectZomboid64.json back to stock: the oldest backup without PZO in it, then strip anything PZO left behind
@@ -768,7 +788,7 @@ function Restore-PZOStockJson {
         $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
         foreach ($bf in $bakFiles) {
             $txt = Get-Content -LiteralPath $bf.FullName -Raw -ErrorAction SilentlyContinue
-            if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64")) {
+            if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64") -and ($txt -notmatch "instrument=PZOptimEngine")) {
                 $cleanBackup = $bf
                 break
             }
@@ -785,6 +805,7 @@ function Restore-PZOStockJson {
         $sanitized = $jsonRaw -replace '"mainClass"\s*:\s*"com/pzoptimizer/PZOEntrypoint"', '"mainClass": "zombie/gameStates/MainScreenState"'
         $sanitized = $sanitized -replace '\s*"PZOptimEngine\.jar",?', ''
         $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
+        $sanitized = $sanitized -replace '\s*"-agentlib:instrument=PZOptimEngine\.jar",?', ''
         $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
         [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
         Write-Host "Sanitized $($TargetFileName): Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
@@ -994,9 +1015,9 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         $UseG1GC = $true
     }
 
-    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside -agentlib:pzo_native64
-    if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
-        $chosenJson = $chosenJson.Replace('"-agentlib:pzo_native64",', '"-agentlib:zbNative",' + "`n        " + '"-agentlib:pzo_native64",')
+    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside the PZO agent
+    if ($isZombieBuddyActive -and -not $zbInLaunchOptions -and ($chosenJson -notmatch "zbNative")) {
+        $chosenJson = $chosenJson.Replace('"-agentlib:instrument=PZOptimEngine.jar",', '"-agentlib:zbNative",' + "`n        " + '"-agentlib:instrument=PZOptimEngine.jar",')
     }
 
     # If ZombieBuddy.jar exists in game directory, preserve it in classpath alongside PZOptimEngine.jar

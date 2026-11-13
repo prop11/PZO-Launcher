@@ -103,7 +103,8 @@ public final class PixelLight {
     private static int locProgram = -1;
     private static long locCheckedNs;
     private static int locA, locB, locC, locLit, locWind, locTex, locAtmos = -1, locFogWind = -1, locClouds = -1, locSnow = -1, locTrail = -1, locTrailInfo = -1, locWindows = -1,
-        locHeight = -1, locSun = -1, locWet = -1;
+        locHeight = -1, locSun = -1, locWet = -1, locBend = -1, locTrailMarks = -1, locBeams = -1, locBeamInfo = -1,
+        locFogField = -1, locFogInfo = -1;
 
     private PixelLight() {}
 
@@ -236,6 +237,10 @@ public final class PixelLight {
             }
             windStrength = cm.getWindIntensity();
             if (sunHeightsOn) sun(cm);
+            LightBeams.frame();
+            FogField.frame();
+            // Morning mist (High fog) is real fog for everything that reads the fog amount
+            fogIntensity = Math.max(fogIntensity, FogField.mist);
         }
     }
 
@@ -781,13 +786,25 @@ public final class PixelLight {
                 locHeight = GL20.glGetUniformLocation(prog, "PZOHeight");
                 locSun = GL20.glGetUniformLocation(prog, "PZOSun");
                 locWet = GL20.glGetUniformLocation(prog, "PZOWet");
+                locBend = GL20.glGetUniformLocation(prog, "PZOBend");
+                locTrailMarks = GL20.glGetUniformLocation(prog, "PZOTrailMarks");
+                locBeams = GL20.glGetUniformLocation(prog, "PZOBeams");
+                locBeamInfo = GL20.glGetUniformLocation(prog, "PZOBeamInfo");
+                locFogField = GL20.glGetUniformLocation(prog, "PZOFogField");
+                locFogInfo = GL20.glGetUniformLocation(prog, "PZOFogInfo");
+                FogField.wanted = locFogField >= 0 && locFogInfo >= 0;
                 sunWanted = locSun >= 0 && locHeight >= 0;
-                TrailMap.chunkWanted = locTrail >= 0;
+                // Footprints and grass share the trail texture but are asked for apart, so neither card gathers for the other
+                TrailMap.chunkWanted = locTrail >= 0 && locTrailMarks >= 0;
+                TrailMap.grassWanted = locTrail >= 0 && locBend >= 0;
+                LightBeams.wanted = locBeams >= 0 && locBeamInfo >= 0;
+                LightBeams.invalidate();
                 windowsWanted = locWindows >= 0;
                 lightShaderReady = locLit >= 0;
                 swayShaderReady = locWind >= 0;
                 // Fog, cloud shadows, snow and trails only read the light map (outdoors flag, light, chunk placement)
-                atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || locTrail >= 0 || locWindows >= 0 || locSun >= 0 || locWet >= 0;
+                atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || locTrail >= 0 || locWindows >= 0 || locSun >= 0 || locWet >= 0
+                    || LightBeams.wanted;
                 snowShaderReady = locSnow >= 0;
                 for (float[] s : sent) java.util.Arrays.fill(s, Float.NaN);
             }
@@ -812,6 +829,8 @@ public final class PixelLight {
                 u4(S_ATMOS, locAtmos, 0f, 0f, 0f, 0f);
                 u4(S_SNOW, locSnow, 0f, 0f, 0f, 0f);
                 u4(S_SUN, locSun, 0f, 0f, 0f, 0f);
+                u4(S_BEND, locBend, 0f, 0f, 0f, 0f);
+                LightBeams.upload(locBeams, locBeamInfo, false, 0f, 0f, 0f, 0f, 0f);
                 return;
             }
             chunkDrawsValid++;
@@ -838,6 +857,17 @@ public final class PixelLight {
                 u4(S_SUN, locSun, sunX, sunY, sunRise, hOk && atmos ? sunVis : 0f);
             }
             u4(S_WET, locWet, atmos ? wetness : 0f, dayLight, rainIntensity, atmos ? 1f : 0f);
+            u4(S_MARKS, locTrailMarks, 1f, 0f, 0f, 0f);
+            u4(S_BEND, locBend, sway ? 1f : 0f, 0f, 0f, 0f);
+            LightBeams.upload(locBeams, locBeamInfo, atmos, info[4], info[5], fogIntensity, rainIntensity, 1f - 0.85f * dayLight);
+            if (locFogField >= 0) {
+                int ft = FogField.texture();
+                GL13.glActiveTexture(GL13.GL_TEXTURE6);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, ft);
+                GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                GL20.glUniform1i(locFogField, 6);
+                u4(S_FOG, locFogInfo, FogField.fieldOx, FogField.fieldOy, ft != 0 ? 1f : 0f, FogField.HEIGHT);
+            }
             // Windows glow from dusk: full below a quarter daylight, none above 0.6
             u4(S_WINDOWS, locWindows, atmos ? Math.max(0f, Math.min(1f, (0.6f - dayLight) / 0.35f)) : 0f, 0f, 0f, atmos ? 1f : 0f);
         } catch (Throwable t) {
@@ -847,8 +877,8 @@ public final class PixelLight {
 
     // Last values sent per uniform; most stay the same from one chunk draw to the next (about 100 draws a frame)
     private static final int S_A = 0, S_B = 1, S_C = 2, S_LIT = 3, S_WIND = 4, S_ATMOS = 5, S_FOGWIND = 6, S_CLOUDS = 7, S_SNOW = 8,
-        S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12;
-    private static final float[][] sent = new float[13][4];
+        S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12, S_BEND = 13, S_MARKS = 14, S_FOG = 15;
+    private static final float[][] sent = new float[16][4];
 
     // PZOLit is a float: only x goes to the GPU for it
     private static void u4(int slot, int loc, float a, float b, float c, float d) {

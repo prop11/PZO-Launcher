@@ -89,6 +89,9 @@ public class UpdateDialog {
      * mismatched or outdated, asks the user to download it.
      */
     public static boolean checkAndPromptNativeMismatch(String dllDownloadUrl) {
+        // A fresh download is the same unsigned file, so Smart App Control would just refuse it again
+        if (PZONative.isBlockedBySmartAppControl()) return false;
+
         boolean filePresent = PZONative.isNativeFilePresent();
         String installedVersion = PZONative.getInstalledNativeVersion();
         String expectedVersion = UpdateChecker.getExpectedNativeVersion();

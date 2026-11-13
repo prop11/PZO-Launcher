@@ -22,6 +22,9 @@ final class GpuTimer {
     private static long sumWorldNs, sumBakeNs, windowStart;
     private static int worldFrames;
     static volatile float worldMs, bakeMsPerSec;
+    // The array overloads: LWJGL's convenience getters wrap a new native segment on every call
+    private static final int[] intOut = new int[1];
+    private static final long[] longOut = new long[1];
 
     private GpuTimer() {}
 
@@ -77,11 +80,21 @@ final class GpuTimer {
         bakePending[i] = true;
     }
 
+    private static boolean available(int query) {
+        GL15.glGetQueryObjectiv(query, GL15.GL_QUERY_RESULT_AVAILABLE, intOut);
+        return intOut[0] != 0;
+    }
+
+    private static long result(int query) {
+        GL33.glGetQueryObjecti64v(query, GL15.GL_QUERY_RESULT, longOut);
+        return longOut[0];
+    }
+
     private static void collect() {
         for (int i = 0; i < RING; i++) {
-            if (!pending[i] || GL15.glGetQueryObjecti(qScreen[i], GL15.GL_QUERY_RESULT_AVAILABLE) == 0) continue;
-            long t0 = GL33.glGetQueryObjecti64(qWorld[i], GL15.GL_QUERY_RESULT);
-            long t1 = GL33.glGetQueryObjecti64(qScreen[i], GL15.GL_QUERY_RESULT);
+            if (!pending[i] || !available(qScreen[i])) continue;
+            long t0 = result(qWorld[i]);
+            long t1 = result(qScreen[i]);
             pending[i] = false;
             if (t1 > t0) {
                 sumWorldNs += t1 - t0;
@@ -89,8 +102,8 @@ final class GpuTimer {
             }
         }
         for (int i = 0; i < BAKE_RING; i++) {
-            if (!bakePending[i] || GL15.glGetQueryObjecti(qBake[i], GL15.GL_QUERY_RESULT_AVAILABLE) == 0) continue;
-            sumBakeNs += GL33.glGetQueryObjecti64(qBake[i], GL15.GL_QUERY_RESULT);
+            if (!bakePending[i] || !available(qBake[i])) continue;
+            sumBakeNs += result(qBake[i]);
             bakePending[i] = false;
         }
         long now = System.nanoTime();
