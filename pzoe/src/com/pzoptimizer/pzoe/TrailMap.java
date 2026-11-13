@@ -1,4 +1,6 @@
-package com.pzoptimizer;
+package com.pzoptimizer.pzoe;
+
+import com.pzoptimizer.PZOLogger;
 
 import java.nio.ByteBuffer;
 import org.lwjgl.opengl.GL11;

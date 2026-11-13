@@ -79,24 +79,35 @@ public final class ModApi {
                 return Boolean.TRUE;
             case "shaderCommit": {
                 double n = ShaderPatchHost.commit();
-                BakePass.commit();
+                Extensions.commit();
                 return Double.valueOf(n);
             }
-            // Bake passes (PZOApi.addBakePass): staged like shader patches, live on shaderCommit
-            case "bakePass":
-                return Boolean.valueOf(a != null && b != null && BakePass.add(a.toString(), b.toString()));
-            case "bakePassOn":
-                return Boolean.valueOf(a != null && BakePass.setOn(a.toString(), Boolean.TRUE.equals(b)));
-            case "bakeStatus":
-                return BakePass.statusOf(a == null ? null : a.toString());
             case "shaderStatus":
                 return ShaderPatchHost.statusOf(a == null ? null : a.toString());
-            // Live state of the chunk shader effects (per-pixel lighting, sway, fog), shown on their settings cards
+            // PZO Enhancements' engine (PZOE.jar): loaded, off, missing, api=<n>, error
+            case "extension":
+                return Extensions.pzoeStatus();
+            // Viewpoint draws its 3D view itself, so shader effects on the game's own drawing don't show there
+            case "viewpoint":
+                if (!ViewpointStanddownGovernor.isViewpointDetected()) return "detected=0;ownView=0";
+                return "detected=1;ownView=" + (ViewpointStanddownGovernor.isOwnViewActive() ? 1 : 0);
+            default: {
+                // Bake passes, chunk effect state and the like live in PZO Enhancements' engine
+                Object r = Extensions.modApi(op, a, b, c);
+                if (r != Extension.UNHANDLED) return r;
+                return defaultFor(op);
+            }
+        }
+    }
+
+    // What the PZOE ops answered before they moved to its jar, so its Lua reads the same "nothing here" without it
+    private static Object defaultFor(String op) {
+        switch (op) {
             case "chunkEffects":
-                return PixelLight.stateText() + ";" + PuddleSplash.stateText();
-            // Mods that make those effects stand down: "chunk=A,B;splash=C"
             case "chunkConflicts":
-                return PixelLight.conflictText();
+                return "";
+            case "bakeStatus":
+                return null;
             default:
                 return Boolean.FALSE;
         }
@@ -110,7 +121,7 @@ public final class ModApi {
         zombieMarks = false;
         LuaEventPatches.clearModCache();
         ShaderPatchHost.reset();
-        BakePass.reset();
+        Extensions.reset();
     }
 
     // Lua numbers arrive as Double; a define has to read as a GLSL float literal ("1.0", not "1")

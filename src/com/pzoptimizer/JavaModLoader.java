@@ -307,7 +307,7 @@ public class JavaModLoader {
     private static void addJar(File f, List<File> result) {
         if (!f.isFile() || !f.getName().toLowerCase().endsWith(".jar")) return;
         if (f.getName().equalsIgnoreCase("PZOptimEngine.jar") || f.getName().equalsIgnoreCase("projectzomboid.jar")
-            || f.getName().equalsIgnoreCase("ZombieBuddy.jar")) {
+            || f.getName().equalsIgnoreCase("ZombieBuddy.jar") || f.getName().equalsIgnoreCase("PZOE.jar")) {
             return;
         }
         if (!result.contains(f)) result.add(f);

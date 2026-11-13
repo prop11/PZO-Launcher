@@ -1,4 +1,10 @@
-package com.pzoptimizer;
+package com.pzoptimizer.pzoe;
+
+import com.pzoptimizer.AsmSupport;
+import com.pzoptimizer.ShaderPatchHost;
+import com.pzoptimizer.PZOLogger;
+import com.pzoptimizer.FoliageLod;
+import com.pzoptimizer.ZombieBuddyCompat;
 
 import com.pzoptimizer.shaded.asm.Opcodes;
 import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
@@ -52,17 +58,22 @@ public final class PixelLight {
     // glValidateProgram right after linking, with every sampler still on unit 0, and a 3D sampler sharing unit 0 with
     // the 2D chunk texture fails it, so the game drops the chunk shader for the rest of the session.
     static final int TILE_COLS = 8, TILE_ROWS = (2 * LEVELS + TILE_COLS - 1) / TILE_COLS;
-    static final int UPLOADS_PER_FRAME = 24;
+    static final int UPLOADS_PER_FRAME = 24, SNOW_ONLY_UPLOADS_PER_FRAME = 6;
     static final long DIRTY_LIGHTING = 32L, DIRTY_REDRAW = 1024L;
 
     public static final AtomicLong columnsUploaded = new AtomicLong();
     public static final AtomicLong lightChangesKept = new AtomicLong();
 
     // Seen by the render thread on the chunk shader
-    static volatile boolean lightShaderReady, swayShaderReady, atmosShaderReady, windowsWanted;
+    static volatile boolean lightShaderReady, swayShaderReady, atmosShaderReady, snowShaderReady, windowsWanted, sunWanted;
+    // Snow on Surfaces only needs the light map while there is snow; without it the card would keep the whole
+    // light map pipeline running all year
+    private static boolean snowing;
+    // Toward the sun in world squares, levels the ray climbs per square, visibility (0 = no sun)
+    static volatile float sunX, sunY = 1f, sunRise = 1f, sunVis;
     // Decided on the main thread; atmos = ground fog / light glow, which only reads the light map
     static volatile boolean deferred, sway, atmos;
-    static volatile float fogIntensity, rainIntensity, dayLight, cloudIntensity, snowCover, cloudOffX, cloudOffY;
+    static volatile float fogIntensity, rainIntensity, dayLight, cloudIntensity, snowCover, cloudOffX, cloudOffY, wetness;
     static volatile Thread mainThread;
     // Render thread: inside the FBO of a chunk that's being baked unlit
     static boolean renderBakingUnlit;
@@ -88,10 +99,11 @@ public final class PixelLight {
     private static final PlayerState[] players = new PlayerState[4];
 
     // Render thread
-    private static final int[] texId = new int[4], texRing = new int[4];
+    private static final int[] texId = new int[4], texRing = new int[4], heightTex = new int[4];
     private static int locProgram = -1;
     private static long locCheckedNs;
-    private static int locA, locB, locC, locLit, locWind, locTex, locAtmos = -1, locFogWind = -1, locClouds = -1, locSnow = -1, locTrail = -1, locTrailInfo = -1, locWindows = -1;
+    private static int locA, locB, locC, locLit, locWind, locTex, locAtmos = -1, locFogWind = -1, locClouds = -1, locSnow = -1, locTrail = -1, locTrailInfo = -1, locWindows = -1,
+        locHeight = -1, locSun = -1, locWet = -1;
 
     private PixelLight() {}
 
@@ -156,6 +168,7 @@ public final class PixelLight {
     private static void globalFrame() {
         long now = System.nanoTime();
         status(now);
+        ModelSnow.frame(now);
         double dt = lastNanos == 0 ? 0 : Math.min(0.1, (now - lastNanos) / 1e9);
         lastNanos = now;
         if (zombie.GameTime.isGamePaused()) dt = 0;
@@ -180,9 +193,25 @@ public final class PixelLight {
             BakePass.rebakeWanted = false;
             invalidateAllChunks(DIRTY_REDRAW);
         }
-        if (atmosShaderReady != atmos) {
-            atmos = atmosShaderReady;
-            if (zombie.core.Core.debug) PZOLogger.info("[PixelLight] ground fog / light glow " + (atmos ? "on" : "off"));
+        if (sunWanted != sunHeightsOn) {
+            sunHeightsOn = sunWanted;
+            // Every column goes up again with its heights
+            if (sunHeightsOn) resetSlots();
+        }
+        if (snowShaderReady) {
+            float sn = zombie.iso.weather.ClimateManager.getInstance().getSnowFracNow();
+            // Gap between on and off so a thin, melting cover doesn't flip the light map every frame
+            if (sn > 0.01f) snowing = true;
+            else if (sn < 0.002f) snowing = false;
+        } else {
+            snowing = false;
+        }
+        boolean wantAtmos = atmosShaderReady || (snowShaderReady && snowing);
+        if (wantAtmos != atmos) {
+            // The light map stopped following changes while nothing used it, so it goes up again from scratch
+            if (wantAtmos && !(deferred || sway)) resetSlots();
+            atmos = wantAtmos;
+            if (zombie.core.Core.debug) PZOLogger.info("[PixelLight] light map effects (fog, glow, clouds, snow...) " + (atmos ? "on" : "off"));
         }
         if (sway || atmos) {
             zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
@@ -191,6 +220,7 @@ public final class PixelLight {
             dayLight = cm.getDayLightStrength();
             cloudIntensity = cm.getCloudIntensity();
             snowCover = cm.getSnowFracNow();
+            wetness = zombie.iso.IsoPuddles.getInstance().getWetGroundFinalValue();
             // The cloud field drifts with the wind, faster when it blows harder; kept small so float noise stays smooth
             double ca = cm.getWindAngleRadians(), speed = (0.5 + 3.0 * cm.getWindIntensity()) * 0.03 * dt;
             cloudOffX = (float) ((cloudOffX + Math.cos(ca) * speed) % 512.0);
@@ -205,7 +235,37 @@ public final class PixelLight {
                 windY = sy / len;
             }
             windStrength = cm.getWindIntensity();
+            if (sunHeightsOn) sun(cm);
         }
+    }
+
+    private static boolean sunHeightsOn;
+
+    // East (+x) at dawn, south (+y) at midday, west at dusk. Longer days put the midday sun higher. Shadows fade in as
+    // the sun clears the horizon and under cloud.
+    private static void sun(zombie.iso.weather.ClimateManager cm) {
+        float t = zombie.GameTime.getInstance().getTimeOfDay();
+        float dawn = 6f, dusk = 20f;
+        zombie.erosion.season.ErosionSeason season = cm.getSeason();
+        if (season != null) {
+            dawn = season.getDawn();
+            dusk = season.getDusk();
+        }
+        float day = Math.max(1f, dusk - dawn);
+        float f = (t - dawn) / day;
+        if (f <= 0f || f >= 1f) {
+            sunVis = 0f;
+            return;
+        }
+        double peak = Math.toRadians(Math.max(25.0, Math.min(65.0, 25.0 + (day - 8.0) * 5.0)));
+        double elev = peak * Math.sin(Math.PI * f);
+        sunX = (float) Math.cos(Math.PI * f);
+        sunY = (float) Math.sin(Math.PI * f);
+        // A level is 2.45 squares tall in the depth metric
+        sunRise = (float) (Math.tan(Math.max(elev, Math.toRadians(4.0))) / 2.45);
+        double deg = Math.toDegrees(elev);
+        float rise = (float) Math.max(0.0, Math.min(1.0, (deg - 2.0) / 8.0));
+        sunVis = rise * rise * (3f - 2f * rise) * (1f - 0.85f * Math.max(0f, Math.min(1f, cloudIntensity)));
     }
 
     private static void resetSlots() {
@@ -260,13 +320,14 @@ public final class PixelLight {
                 int slot = Math.floorMod(c.wy, g) * g + Math.floorMod(c.wx, g);
                 long k = key(c.wx, c.wy);
                 if (ps.slotKey[slot] != k) {
-                    upload(p, ps, c);
+                    upload(p, ps, c, true);
                     ps.slotKey[slot] = k;
                     ps.dirty.remove(c);
                 }
             }
         }
-        int budget = UPLOADS_PER_FRAME;
+        // Snow alone only tints what it covers by the light, so it can follow light changes more slowly
+        int budget = !deferred && !sway && !atmosShaderReady ? SNOW_ONLY_UPLOADS_PER_FRAME : UPLOADS_PER_FRAME;
         java.util.Iterator<IsoChunk> it = ps.dirty.iterator();
         while (budget > 0 && it.hasNext()) {
             IsoChunk c = it.next();
@@ -274,14 +335,14 @@ public final class PixelLight {
             if (c.lightingNeverDone[p]) continue;
             int slot = Math.floorMod(c.wy, g) * g + Math.floorMod(c.wx, g);
             if (ps.slotKey[slot] != key(c.wx, c.wy)) continue;
-            upload(p, ps, c);
+            upload(p, ps, c, false);
             budget--;
         }
         // One column a frame refreshed anyway: catches foliage added or removed and anything a hook missed
         if (budget > 0 && g > 0) {
             int i = ps.roundRobin = (ps.roundRobin + 1) % (g * g);
             IsoChunk c = map.getChunk(i % g, i / g);
-            if (c != null && !c.lightingNeverDone[p]) upload(p, ps, c);
+            if (c != null && !c.lightingNeverDone[p]) upload(p, ps, c, false);
         }
     }
 
@@ -298,7 +359,10 @@ public final class PixelLight {
     static final int FLAG_FOLIAGE = 128, FLAG_OUTDOORS = 64;
     private static final int[][] scratchFlags = new int[LEVELS][64];
 
-    private static void upload(int p, PlayerState ps, IsoChunk c) {
+    // full = every slice (the slot held another chunk). Otherwise only the slices from one level below the chunk to
+    // three above its top: the composite reads no further (tree tops reach about two levels up), and most chunks have
+    // 1-3 of the 24 levels, so a light change costs a handful of uploads instead of 48.
+    private static void upload(int p, PlayerState ps, IsoChunk c, boolean full) {
         boolean wantVeg = sway;
         for (int li = 0; li < LEVELS; li++) {
             int level = BASE_LEVEL + li;
@@ -339,6 +403,7 @@ public final class PixelLight {
                 scratchSet[li][i] = true;
             }
         }
+        ByteBuffer hb = sunHeightsOn ? heights(c) : null;
         ByteBuffer buf = buffers.poll();
         if (buf == null) buf = ByteBuffer.allocateDirect(COLUMN_INTS * 4).order(ByteOrder.LITTLE_ENDIAN);
         buf.clear();
@@ -346,8 +411,96 @@ public final class PixelLight {
         buf.position(0);
         buf.limit(COLUMN_INTS * 4);
         int x0 = 2 * Math.floorMod(c.wx * 8, ps.ring), y0 = 2 * Math.floorMod(c.wy * 8, ps.ring);
-        SpriteRenderer().drawGeneric(new Upload(p, ps.ring, x0, y0, buf));
+        int sFrom = 0, sTo = 2 * LEVELS - 1;
+        if (!full) {
+            sFrom = 2 * Math.max(0, c.minLevel - 1 - BASE_LEVEL);
+            sTo = Math.min(2 * LEVELS - 1, 2 * (c.maxLevel + 3 - BASE_LEVEL) + 1);
+            if (sTo < sFrom) {
+                sFrom = 0;
+                sTo = 2 * LEVELS - 1;
+            }
+        }
+        SpriteRenderer().drawGeneric(new Upload(p, ps.ring, x0, y0, buf, hb, sFrom, sTo));
         columnsUploaded.incrementAndGet();
+    }
+
+    private static final ConcurrentLinkedQueue<ByteBuffer> heightBuffers = new ConcurrentLinkedQueue<>();
+    private static final float[] hContent = new float[64], hOpacity = new float[64], hWallN = new float[64], hWallW = new float[64];
+
+    /**
+     * Sun shadow heights for a chunk column, one RGBA texel per square, in 1/32 levels above level 0: R = top of what
+     * stands on the square (solid things, trees, the floor of upper levels), G = top of a wall on its north edge,
+     * B = on its west edge, A = how much light the content stops (trees let some through). Walls are edges, not
+     * squares, so a shadow starts at the wall line. Below ground nothing casts.
+     */
+    private static ByteBuffer heights(IsoChunk c) {
+        java.util.Arrays.fill(hContent, 0f);
+        java.util.Arrays.fill(hOpacity, 1f);
+        java.util.Arrays.fill(hWallN, 0f);
+        java.util.Arrays.fill(hWallW, 0f);
+        int top = Math.min(c.maxLevel, BASE_LEVEL + LEVELS - 1);
+        for (int z = Math.max(0, c.minLevel); z <= top; z++) {
+            for (int i = 0; i < 64; i++) {
+                IsoGridSquare sq = c.getGridSquare(i & 7, i >> 3, z);
+                if (sq == null) continue;
+                java.util.List<zombie.iso.IsoObject> objects = sq.getObjects();
+                for (int k = 0, n = objects.size(); k < n; k++) {
+                    zombie.iso.IsoObject o = objects.get(k);
+                    if (o == null || o.sprite == null) continue;
+                    zombie.core.properties.PropertyContainer pr = o.getProperties();
+                    if (pr == null) continue;
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.solidfloor)) {
+                        if (z > hContent[i]) {
+                            hContent[i] = z;
+                            hOpacity[i] = 1f;
+                        }
+                        continue;
+                    }
+                    boolean wallSE = o.isWallSE();
+                    boolean nw = pr.has(zombie.iso.SpriteDetails.IsoFlagType.WallNW);
+                    if (!wallSE && (o.sprite.cutN || nw)) hWallN[i] = Math.max(hWallN[i], z + 1f);
+                    if (!wallSE && (o.sprite.cutW || nw)) hWallW[i] = Math.max(hWallW[i], z + 1f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.TallHoppableN)) hWallN[i] = Math.max(hWallN[i], z + 0.9f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.TallHoppableW)) hWallW[i] = Math.max(hWallW[i], z + 0.9f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.HoppableN)) hWallN[i] = Math.max(hWallN[i], z + 0.45f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.HoppableW)) hWallW[i] = Math.max(hWallW[i], z + 0.45f);
+                    if (o.sprite.cutN || o.sprite.cutW || nw) continue;
+                    float h;
+                    float op = 1f;
+                    if (o instanceof zombie.iso.objects.IsoTree) {
+                        h = z + 2.2f;
+                        op = 0.55f;
+                    } else if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.solid) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.solidtrans)) {
+                        h = z + 0.7f;
+                    } else if (z == 0) {
+                        // Bushes, props and the like; on upper levels these are mostly roof pieces, which sit flat
+                        h = 0.3f;
+                        op = 0.7f;
+                    } else {
+                        continue;
+                    }
+                    if (h > hContent[i]) {
+                        hContent[i] = h;
+                        hOpacity[i] = op;
+                    }
+                }
+            }
+        }
+        ByteBuffer b = heightBuffers.poll();
+        if (b == null) b = ByteBuffer.allocateDirect(64 * 4).order(ByteOrder.LITTLE_ENDIAN);
+        b.clear();
+        for (int i = 0; i < 64; i++) {
+            b.put(h32(hContent[i]));
+            b.put(h32(hWallN[i]));
+            b.put(h32(hWallW[i]));
+            b.put((byte) Math.round(hOpacity[i] * 255f));
+        }
+        b.flip();
+        return b;
+    }
+
+    private static byte h32(float levels) {
+        return (byte) Math.max(0, Math.min(255, Math.round(levels * 32f)));
     }
 
     /**
@@ -465,19 +618,34 @@ public final class PixelLight {
             GL13.glActiveTexture(GL13.GL_TEXTURE0);
             texId[player] = id;
             texRing[player] = ring;
+            if (heightTex[player] != 0) GL11.glDeleteTextures(heightTex[player]);
+            int h = GL11.glGenTextures();
+            GL13.glActiveTexture(GL13.GL_TEXTURE4);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, h);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL11.GL_REPEAT);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL11.GL_REPEAT);
+            GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, ring, ring, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
+            GL13.glActiveTexture(GL13.GL_TEXTURE0);
+            heightTex[player] = h;
         }
     }
 
     private static final class Upload extends TextureDraw.GenericDrawer {
-        final int player, ring, x0, y0;
-        final ByteBuffer data;
+        final int player, ring, x0, y0, sFrom, sTo;
+        final ByteBuffer data, heights;
 
-        Upload(int player, int ring, int x0, int y0, ByteBuffer data) {
+        Upload(int player, int ring, int x0, int y0, ByteBuffer data, ByteBuffer heights, int sFrom, int sTo) {
+            this.sFrom = sFrom;
+            this.sTo = sTo;
             this.player = player;
             this.ring = ring;
             this.x0 = x0;
             this.y0 = y0;
             this.data = data;
+            this.heights = heights;
         }
 
         @Override
@@ -486,20 +654,30 @@ public final class PixelLight {
             GL13.glActiveTexture(GL13.GL_TEXTURE7);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, texId[player]);
             GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
-            uploadSlices(x0, y0, ring, data);
+            uploadSlices(x0, y0, ring, data, sFrom, sTo);
+            if (heights != null && heightTex[player] != 0) {
+                GL13.glActiveTexture(GL13.GL_TEXTURE4);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, heightTex[player]);
+                GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, x0 / 2, y0 / 2, 8, 8, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, heights);
+            }
             GL13.glActiveTexture(GL13.GL_TEXTURE0);
         }
 
         @Override
         public void postRender() {
             buffers.offer(data);
+            if (heights != null) heightBuffers.offer(heights);
         }
     }
 
     /** One packed column (see pack) into its 2 * LEVELS slices of the bound atlas; slice s is tile (s % 8, s / 8). */
     static void uploadSlices(int x0, int y0, int ring, ByteBuffer data) {
+        uploadSlices(x0, y0, ring, data, 0, 2 * LEVELS - 1);
+    }
+
+    static void uploadSlices(int x0, int y0, int ring, ByteBuffer data, int sFrom, int sTo) {
         int tile = 2 * ring, sliceBytes = 16 * 16 * 4;
-        for (int s = 0; s < 2 * LEVELS; s++) {
+        for (int s = sFrom; s <= sTo; s++) {
             data.limit((s + 1) * sliceBytes);
             data.position(s * sliceBytes);
             GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, (s % TILE_COLS) * tile + x0, (s / TILE_COLS) * tile + y0, 16, 16,
@@ -579,6 +757,7 @@ public final class PixelLight {
             // Without a mod's shader patch (no PZO Enhancements) there's nothing to feed
             if (!ShaderPatchHost.anyLive()) return;
             chunkDraws++;
+            GpuTimer.chunkDraw();
             int prog = shader.getID();
             long nowNs = System.nanoTime();
             // Re-checked on program change and 4 times a second anyway: a rebuild can hand back the same program id,
@@ -599,12 +778,17 @@ public final class PixelLight {
                 locTrail = GL20.glGetUniformLocation(prog, "PZOTrail");
                 locTrailInfo = GL20.glGetUniformLocation(prog, "PZOTrailInfo");
                 locWindows = GL20.glGetUniformLocation(prog, "PZOWindows");
+                locHeight = GL20.glGetUniformLocation(prog, "PZOHeight");
+                locSun = GL20.glGetUniformLocation(prog, "PZOSun");
+                locWet = GL20.glGetUniformLocation(prog, "PZOWet");
+                sunWanted = locSun >= 0 && locHeight >= 0;
                 TrailMap.chunkWanted = locTrail >= 0;
                 windowsWanted = locWindows >= 0;
                 lightShaderReady = locLit >= 0;
                 swayShaderReady = locWind >= 0;
                 // Fog, cloud shadows, snow and trails only read the light map (outdoors flag, light, chunk placement)
-                atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || locSnow >= 0 || locTrail >= 0 || locWindows >= 0;
+                atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || locTrail >= 0 || locWindows >= 0 || locSun >= 0 || locWet >= 0;
+                snowShaderReady = locSnow >= 0;
                 for (float[] s : sent) java.util.Arrays.fill(s, Float.NaN);
             }
             if (locC < 0) return;
@@ -626,6 +810,8 @@ public final class PixelLight {
                 u4(S_C, locC, 1f, 0f, 1f, 0f);
                 u4(S_LIT, locLit, 0f, 0f, 0f, 0f);
                 u4(S_ATMOS, locAtmos, 0f, 0f, 0f, 0f);
+                u4(S_SNOW, locSnow, 0f, 0f, 0f, 0f);
+                u4(S_SUN, locSun, 0f, 0f, 0f, 0f);
                 return;
             }
             chunkDrawsValid++;
@@ -641,6 +827,17 @@ public final class PixelLight {
             u4(S_FOGWIND, locFogWind, windX, windY, windStrength, clock);
             u4(S_CLOUDS, locClouds, atmos ? cloudIntensity : 0f, dayLight, cloudOffX, cloudOffY);
             u4(S_SNOW, locSnow, atmos ? snowCover : 0f, 0f, 0f, 0f);
+            if (locSun >= 0) {
+                boolean hOk = locHeight >= 0 && heightTex[p] != 0 && sunHeightsOn;
+                if (hOk) {
+                    GL13.glActiveTexture(GL13.GL_TEXTURE4);
+                    GL11.glBindTexture(GL11.GL_TEXTURE_2D, heightTex[p]);
+                    GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                    GL20.glUniform1i(locHeight, 4);
+                }
+                u4(S_SUN, locSun, sunX, sunY, sunRise, hOk && atmos ? sunVis : 0f);
+            }
+            u4(S_WET, locWet, atmos ? wetness : 0f, dayLight, rainIntensity, atmos ? 1f : 0f);
             // Windows glow from dusk: full below a quarter daylight, none above 0.6
             u4(S_WINDOWS, locWindows, atmos ? Math.max(0f, Math.min(1f, (0.6f - dayLight) / 0.35f)) : 0f, 0f, 0f, atmos ? 1f : 0f);
         } catch (Throwable t) {
@@ -650,8 +847,8 @@ public final class PixelLight {
 
     // Last values sent per uniform; most stay the same from one chunk draw to the next (about 100 draws a frame)
     private static final int S_A = 0, S_B = 1, S_C = 2, S_LIT = 3, S_WIND = 4, S_ATMOS = 5, S_FOGWIND = 6, S_CLOUDS = 7, S_SNOW = 8,
-        S_TRAIL = 9, S_WINDOWS = 10;
-    private static final float[][] sent = new float[11][4];
+        S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12;
+    private static final float[][] sent = new float[13][4];
 
     // PZOLit is a float: only x goes to the GPU for it
     private static void u4(int slot, int loc, float a, float b, float c, float d) {
@@ -681,22 +878,23 @@ public final class PixelLight {
 
     /**
      * Which mods keep the chunk effects (lighting, sway, fog) and the footstep splashes from working, as
-     * "chunk=ModA,ModB;splash=ModC", from ZombieBuddyCompat's stand-downs. Empty values when nothing stands down.
+     * "chunk=ModA,ModB;splash=ModC;haze=", from ZombieBuddyCompat's stand-downs. Empty values when nothing stands down.
      */
     static String conflictText() {
-        java.util.Set<String> chunk = new java.util.TreeSet<>(), splash = new java.util.TreeSet<>();
+        java.util.Set<String> chunk = new java.util.TreeSet<>(), splash = new java.util.TreeSet<>(), haze = new java.util.TreeSet<>();
         for (String line : ZombieBuddyCompat.standDownLines()) {
             boolean isChunk = false;
             for (String h : CHUNK_HOOKS) if (line.startsWith("PixelLight " + h + ":")) isChunk = true;
             boolean isSplash = line.startsWith("PuddlesShader splash uniforms:") || line.startsWith("IsoPuddles chunk texture record");
-            if (!isChunk && !isSplash) continue;
+            boolean isHaze = line.startsWith("WeatherShader screen pass uniforms:");
+            if (!isChunk && !isSplash && !isHaze) continue;
             // "...: also patched by ModA (Class.method), ModB (Class.method)"
             int at = line.indexOf("also patched by ");
             if (at < 0) continue;
             java.util.regex.Matcher m = CONFLICT_MOD.matcher(line.substring(at + "also patched by ".length()));
-            while (m.find()) (isChunk ? chunk : splash).add(m.group(1).trim());
+            while (m.find()) (isChunk ? chunk : isSplash ? splash : haze).add(m.group(1).trim());
         }
-        return "chunk=" + String.join(",", chunk) + ";splash=" + String.join(",", splash);
+        return "chunk=" + String.join(",", chunk) + ";splash=" + String.join(",", splash) + ";haze=" + String.join(",", haze);
     }
 
     static String drawErrorText() {
@@ -741,7 +939,7 @@ public final class PixelLight {
     }
 
     static boolean patch(ClassNode node) {
-        String self = "com/pzoptimizer/PixelLight";
+        String self = "com/pzoptimizer/pzoe/PixelLight";
         int changes = 0;
         for (MethodNode m : node.methods) {
             for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {

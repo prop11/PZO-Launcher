@@ -30,7 +30,7 @@ import zombie.core.opengl.ShaderUnit;
  */
 public final class ShaderPatchHost {
 
-    static final String OFF = "off", WAITING = "waiting", APPLIED = "applied", NO_MATCH = "nomatch",
+    public static final String OFF = "off", WAITING = "waiting", APPLIED = "applied", NO_MATCH = "nomatch",
         COMPILE_FAILED = "compilefailed", CONFLICT = "conflict", UNKNOWN = "unknown";
 
     private static final class Patch {
@@ -134,8 +134,20 @@ public final class ShaderPatchHost {
         else stagedDefines.put(name, value);
     }
 
+    /**
+     * Whether a committed, switched-on patch puts s into a shader (a uniform name, say). For engine code that serves
+     * many programs at once and can't ask each one; cheap enough for once a second, not per draw.
+     */
+    public static boolean liveTextContains(String s) {
+        if (!anyLive || s == null) return false;
+        for (Patch p : committed.patches.values()) {
+            if (p.on && p.replace != null && p.replace.contains(s)) return true;
+        }
+        return false;
+    }
+
     /** Whether any mod has shader patches live; hooks that only serve patched shaders return straight away without. */
-    static boolean anyLive() {
+    public static boolean anyLive() {
         return anyLive;
     }
 
@@ -151,7 +163,7 @@ public final class ShaderPatchHost {
     }
 
     /** Makes the staged patches live and flags the programs whose source changes. Returns how many were flagged. */
-    static int commit() {
+    public static int commit() {
         Map<String, Patch> copy = new LinkedHashMap<>();
         for (Patch p : staged.values()) {
             Patch c = new Patch(p.id, p.files, p.find, p.replace);
@@ -321,7 +333,7 @@ public final class ShaderPatchHost {
     }
 
     /** ${NAME} filled from the committed defines, for bake passes. */
-    static String fillCommitted(String text) {
+    public static String fillCommitted(String text) {
         return fill(text == null ? "" : text, committed.defines);
     }
 
