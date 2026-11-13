@@ -36,6 +36,7 @@ public class PZOptimAgent {
         "zombie.iso.ChunkSaveWorker", "zombie.iso.IsoCell", "zombie.iso.IsoChunkLevel", "zombie.iso.IsoChunkMap",
         "zombie.iso.IsoDepthHelper", "zombie.iso.IsoDirections", "zombie.iso.IsoGridSquare", "zombie.iso.IsoMetaGrid",
         "zombie.iso.IsoMovingObject", "zombie.iso.IsoPuddles", "zombie.iso.IsoWorld", "zombie.iso.PuddlesShader",
+        "zombie.iso.weather.WeatherShader",
         "zombie.iso.LightingJNI$JNILighting", "zombie.iso.LotHeader", "zombie.iso.PlayerCamera",
         "zombie.iso.WorldStreamer", "zombie.iso.fboRenderChunk.FBORenderCell",
         "zombie.iso.fboRenderChunk.FBORenderChunk", "zombie.iso.fboRenderChunk.FBORenderCutaways",
@@ -84,13 +85,15 @@ public class PZOptimAgent {
         try {
             // Load this before the transformer exists, since it calls into it for every class
             ClassSightings.note("");
+            // PZO Enhancements' engine goes in before the transformer, so its patches see every game class load
+            Extensions.load(inst);
             inst.addTransformer(new EngineTransformer(IncompatibleModGuard.clearance()), true);
             PZOLogger.success("[PZO Agent] Bytecode Transformer registered successfully");
 
             if (inst.isRetransformClassesSupported()) {
                 for (Class<?> c : inst.getAllLoadedClasses()) {
                     String name = c.getName();
-                    if (EARLY_TARGETS.contains(name)) {
+                    if (EARLY_TARGETS.contains(name) || Extensions.earlyTargets().contains(name)) {
                         try {
                             inst.retransformClasses(c);
                             PZOLogger.success("[PZO Agent] Retransformed early-loaded class: " + name);
@@ -205,12 +208,8 @@ public class PZOptimAgent {
             } finally {
                 AsmSupport.REDEFINING.remove();
             }
-            try {
-                byte[] pl = PixelLight.postTransform(loader, className, specific != null ? specific : classfileBuffer);
-                if (pl != null) specific = pl;
-            } catch (Throwable t) {
-                PZOLogger.warn("[PZO Agent] PixelLight post-pass on " + className + ": " + t);
-            }
+            byte[] ext = Extensions.postTransform(loader, className, specific != null ? specific : classfileBuffer);
+            if (ext != null) specific = ext;
             if (!fsrRenderScaleHooks || className == null || classfileBuffer == null || !className.startsWith("zombie/")) {
                 RewriteLog.note(className, classfileBuffer, specific);
                 return specific;
@@ -785,19 +784,11 @@ public class PZOptimAgent {
             }
             if ("zombie/iso/IsoPuddles".equals(className) && classfileBuffer != null) {
                 // Non-short-circuit: one missing target shouldn't cost the other its patch
-                byte[] ip = AsmSupport.transform(classfileBuffer, loader, "IsoPuddles chunk texture record + splash frame",
-                    n -> PuddleRedraw.patchPuddles(n) | PuddleSplash.patchPuddles(n));
+                byte[] ip = AsmSupport.transform(classfileBuffer, loader, "IsoPuddles chunk texture record", PuddleRedraw::patchPuddles);
                 if (ip != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched IsoPuddles: bake records + puddle splash frame hook");
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoPuddles: bake records");
                 }
                 return ip;
-            }
-            if ("zombie/iso/PuddlesShader".equals(className) && classfileBuffer != null) {
-                byte[] ps = AsmSupport.transform(classfileBuffer, loader, "PuddlesShader splash uniforms", PuddleSplash::patchShader);
-                if (ps != null) {
-                    PZOLogger.success("[PZO Agent] ASM-patched PuddlesShader.updatePuddlesParams: PZOTime/PZOSplash for patched shaders");
-                }
-                return ps;
             }
             if ("zombie/fileSystem/TexturePackDevice".equals(className) && classfileBuffer != null) {
                 return patchTexturePackDevice(classfileBuffer);

@@ -212,7 +212,7 @@ public final class LuaModGuard {
 
     // <library>/steamapps/workshop/content/108600 for every Steam library I can find: the one above the game folder
     // (any depth, so the macOS .app layout works too), every library in libraryfolders.vdf, and Steam's usual homes
-    private static Set<File> workshopItemDirs() {
+    static Set<File> workshopItemDirs() {
         Set<File> steamapps = new LinkedHashSet<>();
         for (File gameDir : IncompatibleModGuard.candidateGameDirs()) {
             for (File f = gameDir; f != null; f = f.getParentFile()) {

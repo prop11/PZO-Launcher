@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Implementation-Title: PZO Enhancements engine
+PZO-Extension-Class: com.pzoptimizer.pzoe.PzoeExtension
+PZO-Extension-Api: 1

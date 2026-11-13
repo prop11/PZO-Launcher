@@ -199,3 +199,6 @@ bench/
 # Vendored ASM (BSD), relocated at build time
 !third_party/asm/*.jar
 third_party/asm/pzo-asm-shaded.jar
+
+# PZO Enhancements engine build output (the jar ships inside the PZOE Workshop mod)
+pzoe/bin/

@@ -173,7 +173,7 @@ public final class ZombieBuddyCompat {
     }
 
     /** Every stand-down so far, as "what: reason" lines, for the settings screen. */
-    static synchronized List<String> standDownLines() {
+    public static synchronized List<String> standDownLines() {
         return new ArrayList<>(standDowns);
     }
 

@@ -1,4 +1,7 @@
-package com.pzoptimizer;
+package com.pzoptimizer.pzoe;
+
+import com.pzoptimizer.ShaderPatchHost;
+import com.pzoptimizer.PZOLogger;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -190,6 +193,7 @@ public final class BakePass {
             float scale = rc.highRes ? 2f : 1f;
             int min = rc.getMinLevel(), top = rc.getTopLevel();
             float topOffset = 192f * (top - min + 1) + zombie.iso.fboRenderChunk.FBORenderLevels.extraHeightForJumboTrees(min, top);
+            int timer = GpuTimer.bakeBegin();
             for (int i = 0; i < programs.length; i++) {
                 if (programs[i] == 0) continue;
                 GL20.glUseProgram(programs[i]);
@@ -198,6 +202,7 @@ public final class BakePass {
                 if (locChunk[i] >= 0) GL20.glUniform4f(locChunk[i], rc.chunk.wx * 8, rc.chunk.wy * 8, min, topOffset);
                 GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
             }
+            GpuTimer.bakeEnd(timer);
             passesRun++;
         } finally {
             GL30.glBindVertexArray(prevVao);

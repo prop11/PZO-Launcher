@@ -138,7 +138,7 @@ public final class FoliageLod {
     }
 
     /** Re-bakes every loaded chunk, for a setting whose answer changes what goes into the chunk texture. */
-    static void invalidateAllLoaded() {
+    public static void invalidateAllLoaded() {
         try {
             zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance == null || zombie.iso.IsoWorld.instance.currentCell == null ? null
                 : zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
@@ -188,10 +188,18 @@ public final class FoliageLod {
         classifyingFar = far != null && far;
     }
 
+    // Set by PZO Enhancements' engine: composite sway bakes near wind foliage too and moves it in the chunk shader.
+    // Null without it.
+    public static volatile java.util.function.Predicate<Object> bakeWindFoliage;
+
+    private static boolean extensionBakes(Object object) {
+        java.util.function.Predicate<Object> p = bakeWindFoliage;
+        return p != null && p.test(object);
+    }
+
     // Replaces Core.getOptionDoWindSpriteEffects() inside the two layer tests
     public static boolean windOption(Object core) {
-        // Composite sway (PixelLight) bakes near wind foliage too and moves it in the chunk shader
-        if (classifyingFar || PixelLight.bakeWindFoliage(classifyingObject)) {
+        if (classifyingFar || extensionBakes(classifyingObject)) {
             objectsBaked.incrementAndGet();
             return false;
         }
@@ -211,7 +219,7 @@ public final class FoliageLod {
 
     // Replaces IsoObject.getWindRenderEffects() inside the two layer tests
     public static Object windEffects(Object object) {
-        return classifyingFar || PixelLight.bakeWindFoliage(object) ? null : ((zombie.iso.IsoObject) object).getWindRenderEffects();
+        return classifyingFar || extensionBakes(object) ? null : ((zombie.iso.IsoObject) object).getWindRenderEffects();
     }
 
     static boolean patchRenderCell(ClassNode node) {

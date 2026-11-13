@@ -1,4 +1,8 @@
-package com.pzoptimizer;
+package com.pzoptimizer.pzoe;
+
+import com.pzoptimizer.AsmSupport;
+import com.pzoptimizer.ShaderPatchHost;
+import com.pzoptimizer.PZOLogger;
 
 import com.pzoptimizer.shaded.asm.Opcodes;
 import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
@@ -32,6 +36,10 @@ import zombie.iso.IsoWorld;
  *   uniform vec4 PZOSplash[32];     xy = splash point in the same space as calculateFragCoord() * WOffset.zw,
  *                                   z = age in seconds, w = strength 0..1
  *   uniform float PZOSplashCount;
+ *   uniform vec4 PZOLights[16];     xy = the light's ground point in the PZOSplash space, z = its height in screen
+ *                                   pixels, w = brightness
+ *   uniform vec4 PZOLightCol[16];   rgb = colour
+ *   uniform float PZOLightCount;    lights on the level being drawn
  *
  * Game thread (start of IsoPuddles.clearThreadData, once a frame): every character within 30 tiles of a local player
  * that has walked a stride since its last step, on an outdoor ground-level square while the ground is wet or
@@ -72,8 +80,15 @@ public final class PuddleSplash {
     private static volatile float[] published = {0f, 0f};
     private static volatile long splashUploadNanos;
 
+    // Lights for puddle reflections, game thread gathers, render thread places them per level:
+    // [count, then x, y, level, height (levels), r, g, b, brightness per light]
+    static final int MAX_LIGHTS = 16;
+    private static volatile float[] lights = {0f};
+    private static volatile long lightsAskedNanos;
+    private static final float[] lightBest = new float[MAX_LIGHTS * 9];
+
     // Render thread
-    private static final int[] locations = new int[6];
+    private static final int[] locations = new int[9];
 
     // The trail map on unit 5 (the game uses 0-3 here), its size, and the world square at the puddle shader's screen
     // origin for this level: screen x = (x - y) * 64, y = (x + y - 6z) * 32 for the ground of level z
@@ -124,6 +139,8 @@ public final class PuddleSplash {
                 reportedSplashes = s;
                 reportedUploads = u;
             }
+            if (now - lightsAskedNanos < 1_000_000_000L) gatherLights();
+            else if (lights.length > 1) lights = new float[] {0f};
             boolean trails = TrailMap.active();
             if (!gather) ringUsed = 0;
             if (!gather && !trails) {
@@ -140,6 +157,123 @@ public final class PuddleSplash {
         } catch (Throwable t) {
             // Never let this break the frame; worst case no splashes
         }
+    }
+
+    /**
+     * Outdoor lights near the players for puddle reflections: the cell's lamppost list (street and porch lamps, fires,
+     * fireplaces, burning people, lightbars) plus vehicle headlights. Lights inside buildings never reach a puddle.
+     * Street lamps hang about a level up, fires and headlights sit low.
+     */
+    private static void gatherLights() {
+        zombie.iso.IsoCell cell = IsoWorld.instance == null ? null : IsoWorld.instance.currentCell;
+        if (cell == null) return;
+        IsoPlayer[] players = IsoPlayer.players;
+        int n = 0;
+        java.util.Stack<zombie.iso.IsoLightSource> list = cell.getLamppostPositions();
+        for (int i = 0, size = list.size(); i < size; i++) {
+            zombie.iso.IsoLightSource l;
+            try {
+                l = list.get(i);
+            } catch (ArrayIndexOutOfBoundsException e) {
+                break;
+            }
+            if (l == null || !l.active || l.localToBuilding != null || l.radius <= 0) continue;
+            float x = l.x + 0.5f, y = l.y + 0.5f;
+            float d = distSq(x, y, players);
+            if (d < 0) continue;
+            IsoGridSquare sq = cell.getGridSquare(l.x, l.y, l.z);
+            if (l.hydroPowered && (sq == null || !(sq.hasGridPower() || sq.haveElectricity()))) continue;
+            float height = sq != null && (sq.getFire() != null || sq.hasFireObject()) ? 0.25f : 0.9f;
+            n = offerLight(n, x, y, l.z, height, l.r, l.g, l.b, Math.min(1f, 0.3f + l.radius / 12f), d);
+        }
+        org.joml.Vector3f p = wheelPos;
+        for (zombie.vehicles.BaseVehicle v : cell.getVehicles()) {
+            if (!v.hasHeadlights() || !v.getHeadlightsOn()) continue;
+            float d = distSq(v.getX(), v.getY(), players);
+            if (d < 0) continue;
+            zombie.scripting.objects.VehicleScript script = v.getScript();
+            if (script == null) continue;
+            org.joml.Vector3f ext = script.getExtents(), com = script.getCenterOfMassOffset();
+            for (int side = -1; side <= 1; side += 2) {
+                v.getWorldPos(side * ext.x * 0.35f, 0f, com.z + ext.z * 0.5f, p);
+                n = offerLight(n, p.x, p.y, v.getZ(), 0.15f, 1f, 0.95f, 0.8f, 0.8f, d);
+            }
+        }
+        float[] out = new float[1 + n * 8];
+        out[0] = n;
+        for (int i = 0; i < n; i++) System.arraycopy(lightBest, i * 9, out, 1 + i * 8, 8);
+        lights = out;
+    }
+
+    private static float distSq(float x, float y, IsoPlayer[] players) {
+        float best = -1f;
+        for (IsoPlayer pl : players) {
+            if (pl == null) continue;
+            float dx = pl.getX() - x, dy = pl.getY() - y, d = dx * dx + dy * dy;
+            if (d < RANGE_SQ && (best < 0 || d < best)) best = d;
+        }
+        return best;
+    }
+
+    // Keeps the nearest MAX_LIGHTS; slot layout x, y, level, height, r, g, b, brightness, distance
+    private static int offerLight(int n, float x, float y, float z, float h, float r, float g, float b, float bright, float d) {
+        int at;
+        if (n < MAX_LIGHTS) {
+            at = n++;
+        } else {
+            at = -1;
+            float far = d;
+            for (int i = 0; i < MAX_LIGHTS; i++) {
+                if (lightBest[i * 9 + 8] > far) {
+                    far = lightBest[i * 9 + 8];
+                    at = i;
+                }
+            }
+            if (at < 0) return n;
+        }
+        int o = at * 9;
+        lightBest[o] = x;
+        lightBest[o + 1] = y;
+        lightBest[o + 2] = (float) Math.floor(z);
+        lightBest[o + 3] = h;
+        lightBest[o + 4] = r;
+        lightBest[o + 5] = g;
+        lightBest[o + 6] = b;
+        lightBest[o + 7] = bright;
+        lightBest[o + 8] = d;
+        return n;
+    }
+
+    private static final FloatBuffer lightBuf = ByteBuffer.allocateDirect(MAX_LIGHTS * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private static final FloatBuffer lightColBuf = ByteBuffer.allocateDirect(MAX_LIGHTS * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+
+    // Render thread, puddle program bound: the lights on level z, placed like the splash points
+    private static void uploadLights(int[] loc, int z) {
+        lightsAskedNanos = System.nanoTime();
+        float[] snap = lights;
+        org.joml.Vector4f off = IsoPuddles.getInstance().getShaderOffset();
+        float levelPx = IsoUtils.YToScreen(0f, 0f, 0f, 0) - IsoUtils.YToScreen(0f, 0f, 1f, 0);
+        lightBuf.clear();
+        lightColBuf.clear();
+        int count = 0, n = (int) snap[0];
+        for (int i = 0; i < n && count < MAX_LIGHTS; i++) {
+            int at = 1 + i * 8;
+            if ((int) snap[at + 2] != z) continue;
+            float wx = snap[at] - 3f * z, wy = snap[at + 1] - 3f * z;
+            lightBuf.put(IsoUtils.XToScreen(wx, wy, 0f, 0) - off.x);
+            lightBuf.put(IsoUtils.YToScreen(wx, wy, 0f, 0) - off.y);
+            lightBuf.put(snap[at + 3] * levelPx);
+            lightBuf.put(snap[at + 7]);
+            lightColBuf.put(snap[at + 4]).put(snap[at + 5]).put(snap[at + 6]).put(1f);
+            count++;
+        }
+        if (count > 0) {
+            lightBuf.flip();
+            lightColBuf.flip();
+            GL20.glUniform4fv(loc[6], lightBuf);
+            if (loc[7] >= 0) GL20.glUniform4fv(loc[7], lightColBuf);
+        }
+        if (loc[8] >= 0) GL20.glUniform1f(loc[8], count);
     }
 
     private static void gather(float dt, boolean splashAsked) {
@@ -367,9 +501,13 @@ public final class PuddleSplash {
                 loc[3] = GL20.glGetUniformLocation(prog, "PZOTrail");
                 loc[4] = GL20.glGetUniformLocation(prog, "PZOTrailInfo");
                 loc[5] = GL20.glGetUniformLocation(prog, "PZOTrailOrigin");
+                loc[6] = GL20.glGetUniformLocation(prog, "PZOLights");
+                loc[7] = GL20.glGetUniformLocation(prog, "PZOLightCol");
+                loc[8] = GL20.glGetUniformLocation(prog, "PZOLightCount");
                 TrailMap.puddleWanted = loc[3] >= 0;
             }
             if (loc[3] >= 0) trailUniforms(loc, z);
+            if (loc[6] >= 0) uploadLights(loc, z);
             if (loc[0] < 0 && loc[1] < 0) return;
             float[] snap = published;
             if (loc[0] >= 0) GL20.glUniform1f(loc[0], snap[0]);
@@ -410,7 +548,7 @@ public final class PuddleSplash {
             call.add(new VarInsnNode(Opcodes.ALOAD, 0));
             call.add(new VarInsnNode(Opcodes.ILOAD, 1));
             call.add(new VarInsnNode(Opcodes.ILOAD, 2));
-            call.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/PuddleSplash", "upload",
+            call.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/pzoe/PuddleSplash", "upload",
                 "(Lzombie/core/opengl/Shader;II)V", false));
             m.instructions.insertBefore(insn, call);
             returns++;
@@ -421,7 +559,7 @@ public final class PuddleSplash {
     static boolean patchPuddles(ClassNode node) {
         MethodNode m = AsmSupport.findMethod(node, "clearThreadData", "()V");
         if (m == null) return false;
-        AsmSupport.prependCall(m, "com/pzoptimizer/PuddleSplash", "frame", "(Lzombie/iso/IsoPuddles;)V");
+        AsmSupport.prependCall(m, "com/pzoptimizer/pzoe/PuddleSplash", "frame", "(Lzombie/iso/IsoPuddles;)V");
         return true;
     }
 }
