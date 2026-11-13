@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 
 /** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "2.0.3";
+    public static final String CURRENT_VERSION = "2.0.3.5";
     // Every OS stays on this release's native binaries (Smart App Control trusts the DLL per file, and a rebuild for a
     // version string alone gains nothing). Only bump it when pzo_native.c really changes.
     public static final String NATIVE_VERSION = "1.9.7";
