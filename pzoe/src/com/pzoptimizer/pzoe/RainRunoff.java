@@ -53,7 +53,7 @@ import zombie.iso.sprite.IsoSprite;
  *
  * Main thread only. Switched on and off from the card through PZOApi (modApi "runoff").
  */
-final class RainRunoff {
+public final class RainRunoff {
 
     static volatile boolean on;
     static volatile float amount = 1f;

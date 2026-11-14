@@ -226,21 +226,29 @@ public final class TrailMap {
         }
     }
 
-    // One instance per stamp: centre and long axis, short axis, value (3 vec4 each)
+    // One instance per stamp: centre and long axis, short axis, value (3 vec4 each). Marks are only a texel or two
+    // wide, so the quad gets a texel and a half of margin and the edge is worked out in texels: no stair steps.
     private static final String VERTEX_STAMP = "#version 140\n"
-        + "uniform vec4 uStamps[" + (BATCH * 3) + "];\nuniform vec2 uSize;\nout vec2 vLocal;\nout vec4 vValue;\n"
+        + "uniform vec4 uStamps[" + (BATCH * 3) + "];\nuniform vec2 uSize;\nout vec2 vLocal;\nout vec2 vPix;\nout vec2 vShape;\nout vec4 vValue;\n"
         + "void main()\n{\n"
         + "    vec2 c[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));\n"
-        + "    vLocal = c[gl_VertexID];\n"
         + "    vec4 a = uStamps[gl_InstanceID * 3];\n"
         + "    vec2 v = uStamps[gl_InstanceID * 3 + 1].xy;\n"
         + "    vValue = uStamps[gl_InstanceID * 3 + 2];\n"
-        + "    vec2 p = a.xy + a.zw * vLocal.x + v * vLocal.y;\n"
+        + "    float L = max(length(a.zw), 0.001), W = max(length(v), 0.001);\n"
+        + "    vShape = vec2(L, W);\n"
+        + "    vPix = c[gl_VertexID] * vec2(L + 1.5, W + 1.5);\n"
+        + "    vLocal = vPix / vShape;\n"
+        + "    vec2 p = a.xy + a.zw / L * vPix.x + v / W * vPix.y;\n"
         + "    gl_Position = vec4(p / uSize * 2.0 - 1.0, 0.0, 1.0);\n}\n";
-    // Soft-edged oval for the marks, a cone for grass (A) so it has a slope everywhere
-    private static final String FRAGMENT_STAMP = "#version 140\nin vec2 vLocal;\nin vec4 vValue;\nout vec4 fragColor;\n"
+    // Marks are capsules (flat middle, round ends), so a rut stamped in pieces joins up into one even band; grass (A)
+    // keeps its cone so it has a slope everywhere
+    private static final String FRAGMENT_STAMP = "#version 140\nin vec2 vLocal;\nin vec2 vPix;\nin vec2 vShape;\nin vec4 vValue;\nout vec4 fragColor;\n"
         + "void main()\n{\n    float e = dot(vLocal, vLocal);\n"
-        + "    fragColor = vec4(vValue.rgb * (1.0 - smoothstep(0.55, 1.0, e)), vValue.a * clamp(1.0 - sqrt(e), 0.0, 1.0));\n}\n";
+        + "    float core = max(vShape.x - vShape.y, 0.0);\n"
+        + "    float d = length(vec2(max(abs(vPix.x) - core, 0.0), vPix.y));\n"
+        + "    float m = 1.0 - smoothstep(vShape.y * 0.5 - 0.5, vShape.y + 0.75, d);\n"
+        + "    fragColor = vec4(vValue.rgb * m, vValue.a * clamp(1.0 - sqrt(e), 0.0, 1.0));\n}\n";
     private static final String VERTEX_FULL = "#version 130\nvoid main()\n{\n"
         + "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
         + "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n}\n";

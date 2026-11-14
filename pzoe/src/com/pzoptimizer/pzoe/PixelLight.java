@@ -475,12 +475,18 @@ public final class PixelLight {
                     if (o instanceof zombie.iso.objects.IsoTree) {
                         h = z + 2.2f;
                         op = 0.55f;
+                    } else if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.vegitation) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.FloorOverlay)
+                        || pr.has(zombie.iso.SpriteDetails.IsoFlagType.attachedFloor)) {
+                        // Grass, plants and ground clutter: counted as blocks they covered open ground in square shadows
+                        continue;
                     } else if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.solid) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.solidtrans)) {
                         h = z + 0.7f;
-                    } else if (z == 0) {
-                        // Bushes, props and the like; on upper levels these are mostly roof pieces, which sit flat
-                        h = 0.3f;
-                        op = 0.7f;
+                    } else if (z == 0 && (pr.has(zombie.iso.SpriteDetails.IsoFlagType.container) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.bed)
+                        || pr.has(zombie.iso.SpriteDetails.IsoFlagType.tableN) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.tableW)
+                        || pr.has(zombie.iso.SpriteDetails.IsoFlagType.pushable) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.blocksight))) {
+                        // Low furniture and props; on upper levels these are mostly roof pieces, which sit flat
+                        h = 0.4f;
+                        op = 0.8f;
                     } else {
                         continue;
                     }

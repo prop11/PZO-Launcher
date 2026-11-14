@@ -106,7 +106,7 @@ public final class ModelSnow {
         if (cell == null) return;
         zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
         boolean snowing = cm.isSnowing();
-        float intensity = snowing ? Math.max(0.15f, cm.getPrecipitationIntensity()) : 0f;
+        float intensity = snowing ? Math.max(0.3f, cm.getPrecipitationIntensity()) : 0f;
         float ground = cm.getSnowFracNow();
         float temp = cm.getTemperature();
         lastIntensity = intensity;
@@ -187,8 +187,14 @@ public final class ModelSnow {
             return;
         }
         float a = s[0];
-        if (out && snowing) a += dt * intensity / (zombie ? 150f : 200f);
+        if (out && snowing) a += dt * intensity / (zombie ? 60f : 90f);
         else if (!out) a -= dt / 40f;
+        // Zombies seen before the ground snow value settled (just after a load) would stay clean for good, so out in
+        // it they ease up to what they'd have arrived with
+        if (zombie && out && temp <= 1f) {
+            float target = ground * (0.55f + 0.4f * spread(c));
+            if (a < target) a += (target - a) * Math.min(1f, dt / 15f);
+        }
         else if (temp > 1f) a -= dt * temp / 600f;
         // Running and fighting shake some off
         if (!zombie && a > 0f && c.isRunning()) a -= dt / 300f;
@@ -235,7 +241,12 @@ public final class ModelSnow {
             return;
         }
         float a = s[0];
-        if (out && snowing && speed < 5f) a += dt * intensity / 400f;
+        if (out && snowing && speed < 5f) a += dt * intensity / 240f;
+        // Same catch-up as zombies for a car standing cold and parked out in it
+        if (out && speed < 1f && !engine && temp <= 1f) {
+            float target = ground * (0.85f + 0.15f * spread(v));
+            if (a < target) a += (target - a) * Math.min(1f, dt / 15f);
+        }
         // Blown off at speed: about 15 s at 60 km/h
         if (speed > 25f) a -= dt * (speed - 25f) / 500f;
         if (!out) a -= dt / 180f;
