@@ -55,7 +55,7 @@ public final class LiveProfiler {
         final Object prototype;
         final String event, where;
         String mod;
-        long frameNs, windowNs, recordNs, slowNs, calls;
+        long frameNs, windowNs, recordNs, slowNs, calls, recCalls;
         boolean touched;
         // PZO's own Lua (profiler screen and overlay included) is left out of the mod lists, recording keeps it busy
         boolean self;
@@ -239,6 +239,7 @@ public final class LiveProfiler {
         }
         h.frameNs += dt;
         h.calls++;
+        if (recording) h.recCalls++;
         return h;
     }
 
@@ -453,6 +454,7 @@ public final class LiveProfiler {
         for (Handler h : handlers.values()) {
             h.recordNs = 0;
             h.slowNs = 0;
+            h.recCalls = 0;
         }
         reportReady = false;
         lastExport = null;
@@ -611,7 +613,7 @@ public final class LiveProfiler {
             double[] a = byMod.computeIfAbsent(h.mod, k -> new double[3]);
             a[0] += h.recordNs;
             a[1] += h.slowNs;
-            a[2] += h.calls;
+            a[2] += h.recCalls;
             Handler t = topOf.get(h.mod);
             if (t == null || h.recordNs > t.recordNs) topOf.put(h.mod, h);
         }
@@ -625,8 +627,29 @@ public final class LiveProfiler {
                 .append(fmt(slowFrameMs > 0 ? 100.0 * a[1] / 1e6 / slowFrameMs : 0)).append('\t').append((long) a[2]).append('\t')
                 .append(clean(t == null ? "" : t.event + " " + shortWhere(t.where))).append('\n');
         }
+        // Each mod's costliest handlers, so a mod row (and "@game" above all) can be opened up in the report
+        HashMap<String, List<Handler>> handlersOf = new HashMap<>();
+        for (Handler h : handlers.values()) {
+            if (h.recordNs == 0 || h.self) continue;
+            handlersOf.computeIfAbsent(h.mod, k -> new ArrayList<>()).add(h);
+        }
+        for (Map.Entry<String, double[]> e : mods) {
+            List<Handler> list = handlersOf.get(e.getKey());
+            if (list == null) continue;
+            list.sort((a, b) -> Long.compare(b.recordNs, a.recordNs));
+            int keep = Math.min(list.size(), "@game".equals(e.getKey()) ? GAME_HANDLERS_KEPT : MOD_HANDLERS_KEPT);
+            for (int i = 0; i < keep; i++) {
+                Handler h = list.get(i);
+                sb.append("H\t").append(clean(h.mod)).append('\t').append(clean(h.event)).append('\t')
+                    .append(clean(scriptOf(h.where))).append('\t').append(fmt(h.recordNs / 1e6 / f)).append('\t')
+                    .append(fmt(slowFrameMs > 0 ? 100.0 * h.slowNs / 1e6 / slowFrameMs : 0)).append('\t').append(h.recCalls)
+                    .append('\n');
+            }
+        }
         return sb.toString();
     }
+
+    private static final int GAME_HANDLERS_KEPT = 15, MOD_HANDLERS_KEPT = 5;
 
     // Total length of the frames counted as the slowest 1%
     private static double slowFrameTimeMs() {
@@ -652,12 +675,26 @@ public final class LiveProfiler {
                 w.println("Hardware: " + HardwareProbe.getSummary());
                 w.println();
                 boolean modsHeading = false;
+                String handlerMod = null;
                 for (String line : report.split("\n")) {
                     String[] c = line.split("\t", -1);
                     if ("M".equals(c[0]) && !modsHeading) {
                         modsHeading = true;
                         w.println();
                         w.println("Lua event cost by mod (@game = the game's own scripts):");
+                    }
+                    if ("H".equals(c[0]) && c.length > 6) {
+                        if (handlerMod == null) {
+                            w.println();
+                            w.println("Costliest scripts in each mod (event, script:function):");
+                        }
+                        if (!c[1].equals(handlerMod)) {
+                            handlerMod = c[1];
+                            w.println("  " + handlerMod);
+                        }
+                        w.println(String.format(Locale.ROOT, "    %-22s %-60s %8s ms/frame  %6s%% of slowest 1%%  %10s calls",
+                            c[2], c[3], c[4], c[5], c[6]));
+                        continue;
                     }
                     switch (c[0]) {
                         case "S" -> w.println(String.format(Locale.ROOT,
@@ -760,6 +797,12 @@ public final class LiveProfiler {
     private static String shortWhere(String where) {
         int slash = where.lastIndexOf('/');
         return slash >= 0 ? where.substring(slash + 1) : where;
+    }
+
+    // Path from media/lua/ on (client/ISUI/ISInventoryPane.lua:render), so the file can be found in the game or mod
+    static String scriptOf(String where) {
+        int m = where.lastIndexOf("media/lua/");
+        return m >= 0 ? where.substring(m + 10) : shortWhere(where);
     }
 
     private static String clean(String s) {
