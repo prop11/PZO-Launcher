@@ -22,6 +22,11 @@ public class UpdateChecker {
     private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)+)");
 
+    /** Windows ships no native library any more (WinApi covers it); macOS/Linux still need theirs as the agent bridge. */
+    public static boolean shipsNativeLibrary() {
+        return !System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
     public static String getNativeFileName() {
         String os = System.getProperty("os.name", "").toLowerCase();
         if (os.contains("win")) {

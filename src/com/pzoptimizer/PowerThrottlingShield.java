@@ -22,9 +22,7 @@ public class PowerThrottlingShield {
 
     private static void applyWindowsQoS() {
         try {
-            if (PZONative.isLoaded()) {
-                PZONative.bindCallingThreadToPCores();
-            }
+            PZONative.bindCallingThreadToPCores();
 
             System.setProperty("sun.awt.keepWorkingSetOnMinimize", "true");
             System.setProperty("sun.awt.erasebackgroundonresize", "false");

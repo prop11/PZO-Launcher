@@ -55,7 +55,7 @@ public final class CpuTopologyGovernor {
 
         if (phys <= 0) {
             int avail = Runtime.getRuntime().availableProcessors();
-            int nativePCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : avail;
+            int nativePCores = PZONative.hasOsAccess() ? PZONative.performanceCores() : avail;
             phys = Math.max(2, nativePCores);
             hybrid = (nativePCores > 0 && nativePCores < avail);
         }
@@ -79,7 +79,7 @@ public final class CpuTopologyGovernor {
         if (IS_HYBRID_CPU && PHYSICAL_CORES > 9) {
             return Math.min(11, PHYSICAL_CORES - 1);
         }
-        int base = PZONative.isLoaded() ? PZONative.getPerformanceCores() : PHYSICAL_CORES;
+        int base = PZONative.hasOsAccess() ? PZONative.performanceCores() : PHYSICAL_CORES;
         return Math.max(2, Math.min(base, 12));
     }
 

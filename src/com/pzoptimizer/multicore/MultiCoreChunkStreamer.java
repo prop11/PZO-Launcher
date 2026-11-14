@@ -71,7 +71,7 @@ public final class MultiCoreChunkStreamer {
     public static synchronized void initialize() {
         if (initialized.get()) return;
 
-        int pCores = PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
+        int pCores = PZONative.hasOsAccess() ? PZONative.performanceCores() : Runtime.getRuntime().availableProcessors();
         workerCount = PZONative.isLowCoreCpu()
             ? Math.max(1, Runtime.getRuntime().availableProcessors() - 2)
             : Math.max(2, Math.min(pCores, 12));

@@ -21,15 +21,15 @@ public class EngineThreadGovernor {
         governorsOn = true;
 
         try {
-            if (PZONative.isLoaded() && PZOConfig.isPowerShieldEnabled()) {
-                PZONative.setHighPrecisionTimer(true); // 0.5 ms timer resolution
-                PZONative.disablePowerThrottling(); // opt out of Windows 11 EcoQoS
+            if (PZONative.hasOsAccess() && PZOConfig.isPowerShieldEnabled()) {
+                PZONative.lockTimerResolution(true); // 0.5 ms timer resolution
+                PZONative.exemptFromPowerThrottling(); // opt out of Windows 11 EcoQoS
                 if (PZONative.isLowCoreCpu()) {
-                    PZONative.setProcessPriority(0);
+                    PZONative.setPriorityLevel(0);
                     PZOLogger.info("[EngineThreadGovernor] Low core count CPU: process left at NORMAL_PRIORITY_CLASS, working set not locked");
                 } else {
-                    PZONative.lockProcessWorkingSet();
-                    PZONative.setProcessPriority(2); // HIGH_PRIORITY_CLASS
+                    PZONative.lockWorkingSet();
+                    PZONative.setPriorityLevel(2); // HIGH_PRIORITY_CLASS
                     PZOLogger.success("[EngineThreadGovernor] Process working set locked and set to HIGH_PRIORITY_CLASS");
                 }
             }
@@ -127,10 +127,10 @@ public class EngineThreadGovernor {
                 Method queueMethod = renderThreadClass.getMethod("queueInvokeOnRenderContext", Runnable.class);
                 queueMethod.invoke(null, (Runnable) () -> {
                     try {
-                        if (PZONative.isLoaded()) {
+                        if (PZONative.hasOsAccess()) {
                             try {
                                 boolean lowCore = PZONative.isLowCoreCpu();
-                                PZONative.optimizeCallingThread(2, true, lowCore ? "" : "Games");
+                                PZONative.tuneCallingThread(2, true, lowCore ? "" : "Games");
                                 PZOLogger.success("[EngineThreadGovernor] RenderThread successfully optimized: Priority HIGHEST | " + (lowCore ? "MMCSS skipped (low core count)" : "MMCSS Games") + " | P-Core Affinity");
                             } catch (Throwable t) {
                                 PZOLogger.warn("[EngineThreadGovernor] RenderThread native optimization notice: " + t.getMessage());
@@ -159,10 +159,10 @@ public class EngineThreadGovernor {
                 Method queueMethod = mainThreadClass.getMethod("queueInvokeOnMainThread", Runnable.class);
                 queueMethod.invoke(null, (Runnable) () -> {
                     try {
-                        if (PZONative.isLoaded()) {
+                        if (PZONative.hasOsAccess()) {
                             try {
                                 boolean lowCore = PZONative.isLowCoreCpu();
-                                PZONative.optimizeCallingThread(1, true, lowCore ? "" : "Games");
+                                PZONative.tuneCallingThread(1, true, lowCore ? "" : "Games");
                                 PZOLogger.success("[EngineThreadGovernor] MainThread successfully optimized: Priority ABOVE_NORMAL | " + (lowCore ? "MMCSS skipped (low core count)" : "MMCSS Games") + " | P-Core Affinity");
                             } catch (Throwable t) {
                                 PZOLogger.warn("[EngineThreadGovernor] MainThread native optimization notice: " + t.getMessage());

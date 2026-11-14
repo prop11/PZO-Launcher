@@ -89,8 +89,7 @@ public class UpdateDialog {
      * mismatched or outdated, asks the user to download it.
      */
     public static boolean checkAndPromptNativeMismatch(String dllDownloadUrl) {
-        // A fresh download is the same unsigned file, so Smart App Control would just refuse it again
-        if (PZONative.isBlockedBySmartAppControl()) return false;
+        if (!UpdateChecker.shipsNativeLibrary() || PZONative.isSkippedByFlag()) return false;
 
         boolean filePresent = PZONative.isNativeFilePresent();
         String installedVersion = PZONative.getInstalledNativeVersion();
@@ -154,7 +153,6 @@ public class UpdateDialog {
 
     private static String showNativeMismatchDialog(String installedVersion, String expectedVersion) {
         String os = System.getProperty("os.name", "").toLowerCase();
-        if (os.contains("win")) return showWindowsNativeMismatchDialog(installedVersion, expectedVersion);
         if (os.contains("mac")) return showMacNativeMismatchDialog(installedVersion, expectedVersion);
         return showLinuxNativeMismatchDialog(installedVersion, expectedVersion);
     }
@@ -179,10 +177,11 @@ public class UpdateDialog {
         if (all || flags.contains("-pzo_updatebox")) {
             devResult("update", showUpdateDialog(sample + "-devpreview"));
         }
-        if (all || flags.contains("-pzo_nativebox")) {
+        boolean nativeBoxes = UpdateChecker.shipsNativeLibrary();
+        if (nativeBoxes && (all || flags.contains("-pzo_nativebox"))) {
             devResult("native mismatch", showNativeMismatchDialog("0.0.0-devpreview", sample));
         }
-        if (all || flags.contains("-pzo_nativemissingbox")) {
+        if (nativeBoxes && (all || flags.contains("-pzo_nativemissingbox"))) {
             devResult("native missing", showNativeMismatchDialog("Not Installed (Missing)", sample));
         }
         if (all || flags.contains("-pzo_javamodbox")) {
@@ -303,65 +302,6 @@ public class UpdateDialog {
             return "SKIP";
         } catch (Throwable ignored) {}
 
-        return "SKIP";
-    }
-
-    private static String showWindowsNativeMismatchDialog(String installedVersion, String expectedVersion) {
-        try {
-            String nativeFileName = PZONative.NATIVE_LIB_FILENAME;
-            boolean isMissing = !PZONative.isNativeFilePresent() || installedVersion.contains("Missing") || installedVersion.contains("Not Installed");
-            String formTitle = isMissing ? "Project Zomboid Optimiser - Native Library Setup" : "Project Zomboid Optimiser - Native Library Update Required";
-            String titleText = isMissing ? "[!] Native Governor Library Missing" : "[!] Native Governor Library Mismatch Detected";
-            String btnText = isMissing ? "Install Now" : "Update Now";
-            String descText = isMissing
-                ? String.format("No %s was detected in your game folder." +
-                    "$nl$nlInstalling this native companion library unlocks 0.5ms timer locking, AVX2 SIMD culling, and kernel thread optimization." +
-                    "$nl$nlStatus: %s$nlRequired for PZO Engine: v%s", nativeFileName, installedVersion, expectedVersion)
-                : String.format("An outdated or mismatched %s was detected in your game folder." +
-                    "$nl$nlInstalled DLL: %s$nlRequired for PZO Engine: v%s", nativeFileName, installedVersion, expectedVersion);
-
-            String psCode = String.format(
-                "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
-                "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing');" +
-                "$nl=[Environment]::NewLine;" +
-                "$f=New-Object Windows.Forms.Form;" +
-                "$f.Text='%s';" +
-                "$f.Size=New-Object Drawing.Size(530,280);" +
-                "$f.StartPosition='CenterScreen';" +
-                "$f.FormBorderStyle='FixedDialog';" +
-                "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + PS_FORM_GUARDS +
-                "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);" +
-                "$f.ForeColor=[Drawing.Color]::White;" +
-                "$t=New-Object Windows.Forms.Label;" +
-                "$t.Text='%s';" +
-                "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
-                "$t.ForeColor=[Drawing.Color]::FromArgb(255,185,50);" +
-                "$t.Location=New-Object Drawing.Point(20,15);$t.Size=New-Object Drawing.Size(480,25);$f.Controls.Add($t);" +
-                "$i=New-Object Windows.Forms.Label;" +
-                "$i.Text=('%s');" +
-                "$i.Font=New-Object Drawing.Font('Segoe UI',9.5);$i.ForeColor=[Drawing.Color]::FromArgb(220,220,220);" +
-                "$i.Location=New-Object Drawing.Point(20,48);$i.Size=New-Object Drawing.Size(480,95);$f.Controls.Add($i);" +
-                "$cb=New-Object Windows.Forms.CheckBox;" +
-                "$cb.Text='Don''t remind me again for this version';" +
-                "$cb.Font=New-Object Drawing.Font('Segoe UI',9);$cb.ForeColor=[Drawing.Color]::FromArgb(170,170,170);" +
-                "$cb.Location=New-Object Drawing.Point(23,155);$cb.Size=New-Object Drawing.Size(350,25);$f.Controls.Add($cb);" +
-                "$bu=New-Object Windows.Forms.Button;$bu.Text='%s';" +
-                "$bu.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold);$bu.BackColor=[Drawing.Color]::FromArgb(40,167,69);$bu.ForeColor=[Drawing.Color]::White;$bu.FlatStyle='Flat';" +
-                "$bu.Location=New-Object Drawing.Point(375,190);$bu.Size=New-Object Drawing.Size(125,32);$bu.DialogResult=[Windows.Forms.DialogResult]::Yes;$f.Controls.Add($bu);" +
-                "$bs=New-Object Windows.Forms.Button;$bs.Text='Skip / Launch Game';" +
-                "$bs.Font=New-Object Drawing.Font('Segoe UI',9);$bs.BackColor=[Drawing.Color]::FromArgb(65,65,65);$bs.ForeColor=[Drawing.Color]::White;$bs.FlatStyle='Flat';" +
-                "$bs.Location=New-Object Drawing.Point(225,190);$bs.Size=New-Object Drawing.Size(140,32);$bs.DialogResult=[Windows.Forms.DialogResult]::No;$f.Controls.Add($bs);" +
-                "$f.AcceptButton=$bu;$r=$f.ShowDialog();" +
-                "if($r -eq [Windows.Forms.DialogResult]::Yes){Write-Output 'UPDATE'}else{if($cb.Checked){Write-Output 'SKIP_IGNORE'}else{Write-Output 'SKIP'}}",
-                formTitle, titleText, descText.replace("'", "''"), btnText
-            );
-
-            String out = runDialogProcess(new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode), null);
-            if (out.endsWith(":UPDATE")) return "UPDATE";
-            if (out.endsWith(":SKIP_IGNORE")) return "SKIP_IGNORE";
-        } catch (Throwable t) {
-            PZOLogger.error("Windows native update dialog error: " + t.getMessage(), t);
-        }
         return "SKIP";
     }
 
@@ -504,58 +444,12 @@ public class UpdateDialog {
 
             String os = System.getProperty("os.name", "").toLowerCase();
             long pid = ProcessHandle.current().pid();
-            File win64Dll = new File(gameDir, "win64" + File.separator + nativeFileName);
 
             File currentJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
             File newJson = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME + ".new");
             boolean hasNewJson = ZomboidConfigMigrator.prepareStagedUpdate(gameDir) && newJson.exists();
 
-            if (os.contains("win")) {
-                String psJsonUpdate = hasNewJson ? String.format(
-                    "if (Test-Path -LiteralPath '%s') { " +
-                    "    for ($i=0; $i -lt 30; $i++) { " +
-                    "        try { Move-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
-                    "        catch { Start-Sleep -Milliseconds 200; } " +
-                    "    } " +
-                    "}; ",
-                    newJson.getAbsolutePath().replace("'", "''"),
-                    newJson.getAbsolutePath().replace("'", "''"),
-                    currentJson.getAbsolutePath().replace("'", "''")
-                ) : "";
-
-                String psUpdater = String.format(
-                    "$proc = Get-Process -Id %d -ErrorAction SilentlyContinue; " +
-                    "if ($proc) { $proc.WaitForExit(15000); }; " +
-                    "Start-Sleep -Milliseconds 500; " +
-                    "if (Test-Path -LiteralPath '%s') { " +
-                    "    if (Test-Path -LiteralPath '%s') { " +
-                    "        for ($i=0; $i -lt 30; $i++) { " +
-                    "            try { Copy-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
-                    "            catch { Start-Sleep -Milliseconds 200; } " +
-                    "        } " +
-                    "    }; " +
-                    "    for ($i=0; $i -lt 30; $i++) { " +
-                    "        try { Move-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
-                    "        catch { Start-Sleep -Milliseconds 200; } " +
-                    "    } " +
-                    "}; " +
-                    "%s" +
-                    "$nl=[Environment]::NewLine; " +
-                    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); " +
-                    "[Windows.Forms.MessageBox]::Show(('Native Governor (%s) and configuration have been successfully updated to v%s!' + $nl + $nl + 'Please restart Project Zomboid to apply native optimizations.'), 'Setup Complete', [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Information)",
-                    pid,
-                    newNative.getAbsolutePath().replace("'", "''"),
-                    win64Dll.getParentFile().getAbsolutePath().replace("'", "''"),
-                    newNative.getAbsolutePath().replace("'", "''"),
-                    win64Dll.getAbsolutePath().replace("'", "''"),
-                    newNative.getAbsolutePath().replace("'", "''"),
-                    currentNative.getAbsolutePath().replace("'", "''"),
-                    psJsonUpdate,
-                    nativeFileName,
-                    targetVersion
-                );
-                new ProcessBuilder("powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", psUpdater).start();
-            } else if (os.contains("mac")) {
+            if (os.contains("mac")) {
                 String macJsonUpdate = hasNewJson ? String.format(
                     " && (test -f \"%s\" && mv -f \"%s\" \"%s\" || true)",
                     newJson.getAbsolutePath(), newJson.getAbsolutePath(), currentJson.getAbsolutePath()
@@ -632,12 +526,12 @@ public class UpdateDialog {
 
             File currentNative = new File(gameDir, nativeFileName);
             File newNative = new File(gameDir, nativeFileName + ".new");
-            File win64Dll = new File(gameDir, "win64" + File.separator + nativeFileName);
-            boolean nativeInstalled = PZONative.isNativeFilePresent() || currentNative.exists() || win64Dll.exists();
+            boolean shipsNative = UpdateChecker.shipsNativeLibrary();
+            boolean nativeInstalled = shipsNative && (PZONative.isNativeFilePresent() || currentNative.exists());
             boolean hasNewNative = false;
 
-            // Natives are pinned on every OS: take the pinned one, and don't touch one that's already good enough
-            boolean keepNative = UpdateChecker.isNativeCurrent(PZONative.getInstalledNativeVersion());
+            // Natives are pinned on macOS/Linux: take the pinned one, and don't touch one that's already good enough
+            boolean keepNative = !shipsNative || PZONative.isSkippedByFlag() || UpdateChecker.isNativeCurrent(PZONative.getInstalledNativeVersion());
             List<String> nativeCandidates = new ArrayList<>();
             if (!keepNative) {
                 nativeCandidates.add(UpdateChecker.getPinnedNativeDownloadUrl());
@@ -709,28 +603,15 @@ public class UpdateDialog {
                     currentJson.getAbsolutePath().replace("'", "''")
                 ) : "";
 
-                String psDllUpdate = hasNewNative ? String.format(
-                    "if (Test-Path -LiteralPath '%s') { " +
-                    "    if (Test-Path -LiteralPath '%s') { " +
-                    "        for ($i=0; $i -lt 30; $i++) { " +
-                    "            try { Copy-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
-                    "            catch { Start-Sleep -Milliseconds 200; } " +
-                    "        } " +
-                    "    }; " +
-                    "    for ($i=0; $i -lt 30; $i++) { " +
-                    "        try { Move-Item -LiteralPath '%s' -Destination '%s' -Force -ErrorAction Stop; break; } " +
-                    "        catch { Start-Sleep -Milliseconds 200; } " +
-                    "    } " +
-                    "}; ",
-                    newNative.getAbsolutePath().replace("'", "''"),
-                    win64Dll.getParentFile().getAbsolutePath().replace("'", "''"),
-                    newNative.getAbsolutePath().replace("'", "''"),
-                    win64Dll.getAbsolutePath().replace("'", "''"),
-                    newNative.getAbsolutePath().replace("'", "''"),
-                    currentNative.getAbsolutePath().replace("'", "''")
-                ) : "";
+                // pzo_native64.dll is no longer used on Windows; remove it (and the old Smart App Control marker) now
+                // that the game has let go of it
+                String psDllCleanup = String.format(
+                    "Remove-Item -LiteralPath '%s','%s','%s' -Force -ErrorAction SilentlyContinue; ",
+                    new File(gameDir, "pzo_native64.dll").getAbsolutePath().replace("'", "''"),
+                    new File(gameDir, "pzo_native64.blocked").getAbsolutePath().replace("'", "''"),
+                    new File(gameDir, "win64" + File.separator + "pzo_native64.dll").getAbsolutePath().replace("'", "''"));
 
-                String msgTitle = hasNewNative ? "PZO Engine & Native Governor have been updated to v%s!" : "PZO Engine has been updated to v%s!";
+                String msgTitle = "PZO Engine has been updated to v%s!";
                 String psUpdater = String.format(
                     "$proc = Get-Process -Id %d -ErrorAction SilentlyContinue; " +
                     "if ($proc) { $proc.WaitForExit(15000); }; " +
@@ -750,7 +631,7 @@ public class UpdateDialog {
                     newJar.getAbsolutePath().replace("'", "''"),
                     newJar.getAbsolutePath().replace("'", "''"),
                     currentJar.getAbsolutePath().replace("'", "''"),
-                    psDllUpdate,
+                    psDllCleanup,
                     psJsonUpdate,
                     latestVersion
                 );

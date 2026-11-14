@@ -24,10 +24,12 @@ public final class ZomboidConfigMigrator {
 
     public static final String TARGET_JSON_NAME = "ProjectZomboid64.json";
     public static final String TARGET_MAIN_CLASS = "com/pzoptimizer/PZOEntrypoint";
-    // On Windows the jar goes in through the JRE's own signed instrument.dll. Smart App Control can block the unsigned
-    // pzo_native64.dll, and as an -agentlib that stops the JVM before PZO runs. PZONative loads the DLL later instead,
-    // where a block only costs the native extras
-    public static final String WINDOWS_AGENTLIB = "-agentlib:instrument=PZOptimEngine.jar";
+    // Windows has no agent arg: PZOEntrypoint loads the agent itself (AgentSelfLoader), and this flag only keeps the
+    // JVM from warning about it. Smart App Control can block the unsigned pzo_native64.dll, and as an -agentlib that
+    // stops the JVM before PZO runs; -agentlib:instrument / -javaagent can't load through ProjectZomboid64.exe at all
+    // (instrument.dll needs jli.dll, which isn't on the exe's DLL path). PZONative loads the DLL later, where a block
+    // only costs the native extras
+    public static final String WINDOWS_AGENTLIB = "-XX:+EnableDynamicAgentLoading";
     public static final String NATIVE_AGENTLIB = "-agentlib:pzo_native64";
     public static final String TARGET_AGENTLIB =
         System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win") ? WINDOWS_AGENTLIB : NATIVE_AGENTLIB;
