@@ -40,12 +40,23 @@ import zombie.iso.IsoWorld;
  *                                   pixels, w = brightness
  *   uniform vec4 PZOLightCol[16];   rgb = colour
  *   uniform float PZOLightCount;    lights on the level being drawn
+ *   uniform vec4 PZOStream[48];     wakes, 2 per path segment: (end a xy, end b xy) in the PZOSplash space, then
+ *                                   (age at a, age at b, half width in squares, strength)
+ *   uniform float PZOStreamCount;   segments on the level being drawn
  *
  * Game thread (start of IsoPuddles.clearThreadData, once a frame): every character within 30 tiles of a local player
  * that has walked a stride since its last step, on an outdoor ground-level square while the ground is wet or
  * puddled at all, leaves a splash point at its feet, left and right foot in turn.
  * The newest 32 still alive are published. Render thread (end of PuddlesShader.updatePuddlesParams): the points on
  * the level being drawn are turned into screen space with the render camera, so they stay put on the ground.
+ *
+ * Wakes (the stream idea is from fmac's Atmospherics): vehicles and players moving through standing water leave a path
+ * of points, one every STREAM_STEP seconds, plus a live end where they are now. Each piece of path spreads ripples out
+ * to both sides from where it was when it was laid, so behind a car the rings open into a V. Only gathered while the
+ * puddle shader declares PZOStream. Vehicles go first, then players, until the 24 segments are used.
+ *
+ * Grass underfoot: every character and moving vehicle near player 0 presses the grass it stands in (TrailMap's A
+ * channel) while the chunk shader asks for it.
  */
 public final class PuddleSplash {
 
@@ -68,7 +79,7 @@ public final class PuddleSplash {
     // Game thread
     private static final float[] ring = new float[MAX * 5]; // x, y, z, birth, strength
     private static int ringNext, ringUsed;
-    private static final WeakHashMap<IsoGameCharacter, float[]> walkers = new WeakHashMap<>(); // lastX, lastY, travelled, foot
+    private static final WeakHashMap<IsoGameCharacter, float[]> walkers = new WeakHashMap<>(); // lastX, lastY, travelled, foot, wet steps, grass time
     private static int lastFrame = Integer.MIN_VALUE;
     private static long lastNanos;
     private static double clock;
@@ -88,13 +99,13 @@ public final class PuddleSplash {
     private static final float[] lightBest = new float[MAX_LIGHTS * 9];
 
     // Render thread
-    private static final int[] locations = new int[9];
+    private static final int[] locations = new int[11];
 
     // The trail map on unit 5 (the game uses 0-3 here), its size, and the world square at the puddle shader's screen
     // origin for this level: screen x = (x - y) * 64, y = (x + y - 6z) * 32 for the ground of level z
     private static void trailUniforms(int[] loc, int z) {
         int tex = TrailMap.texture(), ringTexels = TrailMap.ringTexels();
-        int prevActive = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
         GL13.glActiveTexture(GL13.GL_TEXTURE5);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex);
         GL13.glActiveTexture(prevActive);
@@ -276,6 +287,33 @@ public final class PuddleSplash {
         if (loc[8] >= 0) GL20.glUniform1f(loc[8], count);
     }
 
+    private static final FloatBuffer streamBuf = ByteBuffer.allocateDirect(PuddleSplash.MAX_STREAMS * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+
+    // Render thread, puddle program bound: the wake segments on level z, placed like the splash points
+    private static void uploadStreams(int[] loc, int z) {
+        streamUploadNanos = System.nanoTime();
+        float[] snap = streams;
+        int n = (int) snap[0], count = 0;
+        if (n > 0) {
+            org.joml.Vector4f off = IsoPuddles.getInstance().getShaderOffset();
+            streamBuf.clear();
+            for (int i = 0; i < n; i++) {
+                int at = 1 + i * 9;
+                if ((int) snap[at + 4] != z) continue;
+                float ax = snap[at] - 3f * z, ay = snap[at + 1] - 3f * z, bx = snap[at + 2] - 3f * z, by = snap[at + 3] - 3f * z;
+                streamBuf.put(IsoUtils.XToScreen(ax, ay, 0f, 0) - off.x).put(IsoUtils.YToScreen(ax, ay, 0f, 0) - off.y);
+                streamBuf.put(IsoUtils.XToScreen(bx, by, 0f, 0) - off.x).put(IsoUtils.YToScreen(bx, by, 0f, 0) - off.y);
+                streamBuf.put(snap[at + 5]).put(snap[at + 6]).put(snap[at + 7]).put(snap[at + 8]);
+                count++;
+            }
+            if (count > 0) {
+                streamBuf.flip();
+                GL20.glUniform4fv(loc[9], streamBuf);
+            }
+        }
+        if (loc[10] >= 0) GL20.glUniform1f(loc[10], count);
+    }
+
     private static void gather(float dt, boolean splashAsked) {
         IsoPlayer[] players = IsoPlayer.players;
         if (IsoWorld.instance == null || IsoWorld.instance.currentCell == null) return;
@@ -329,6 +367,20 @@ public final class PuddleSplash {
         if (first) wheels.put(v, st = new float[n * 5]);
         float kmh = Math.abs(v.getCurrentSpeedKmHour());
         zombie.iso.IsoCell cell = IsoWorld.instance.currentCell;
+        if (kmh >= 1f && (TrailMap.grassWanted || streamsAsked)) {
+            org.joml.Vector3f ext = script.getExtents();
+            if (TrailMap.grassWanted && v.getZ() < 1f && TrailMap.inGrassRange(v.getX(), v.getY())) {
+                org.joml.Vector3f fwd = v.getForwardVector(wheelPos);
+                TrailMap.stampGrass(v.getX(), v.getY(), fwd.x, fwd.z, ext.z * 0.5f + 0.35f, ext.x * 0.5f + 0.35f);
+            }
+            if (streamsAsked) {
+                IsoGridSquare vsq = cell.getGridSquare((int) Math.floor(v.getX()), (int) Math.floor(v.getY()), (int) Math.floor(v.getZ()));
+                if (vsq != null) {
+                    path(vehiclePaths, v, v.getX(), v.getY(), v.getZ(), standingWater(vsq), ext.x * 0.5f,
+                        Math.min(1f, 0.35f + kmh / 50f));
+                }
+            }
+        }
         for (int i = 0; i < n; i++) {
             zombie.scripting.objects.VehicleScript.Wheel wh = script.getWheel(i);
             if (wh == null) continue;
@@ -389,8 +441,8 @@ public final class PuddleSplash {
         float x = chr.getX(), y = chr.getY();
         float[] st = walkers.get(chr);
         if (st == null) {
-            // lastX, lastY, travelled, foot, wet steps left
-            walkers.put(chr, new float[] {x, y, 0f, 0f, 0f});
+            // lastX, lastY, travelled, foot, wet steps left, last grass press
+            walkers.put(chr, new float[] {x, y, 0f, 0f, 0f, -100f});
             return;
         }
         float mx = x - st[0], my = y - st[1];
@@ -401,6 +453,11 @@ public final class PuddleSplash {
             // Teleport, vehicle exit, sync snap
             st[2] = 0f;
             return;
+        }
+        if (TrailMap.grassWanted) grass(chr, x, y, mx, my, d, st);
+        if (streamsAsked && chr instanceof IsoPlayer && dt > 0f && d / dt > 0.6f) {
+            IsoGridSquare wsq = chr.getCurrentSquare();
+            if (wsq != null) path(walkerPaths, chr, x, y, chr.getZ(), standingWater(wsq), 0.12f, 0.55f);
         }
         if (d < 0.0005f) {
             // Standing still: the first step after it splashes a little sooner
@@ -436,6 +493,104 @@ public final class PuddleSplash {
         }
     }
 
+    /**
+     * Grass pressed where a character stands: every frame while it moves, every 0.15 s while it stands, so the grass
+     * stays down under it and springs back once it walks off. Oval along the way it walks, a bit wider than the body.
+     */
+    private static void grass(IsoGameCharacter chr, float x, float y, float mx, float my, float d, float[] st) {
+        if (chr.getZ() >= 1f || chr.getVehicle() != null || chr.isDead() || !TrailMap.inGrassRange(x, y)) return;
+        double since = clock - st[5];
+        if (d < 0.02f && since >= 0 && since < 0.15) return;
+        st[5] = (float) clock;
+        TrailMap.stampGrass(x, y, mx, my, 0.8f, 0.65f);
+    }
+
+    // Standing water to make a wake in: rain-soaked ground alone has none
+    private static boolean standingWater(IsoGridSquare sq) {
+        return sq.z <= 0 && sq.isOutside() && IsoPuddles.getInstance().getPuddlesSizeFinalValue() > 0.02f;
+    }
+
+    static final int MAX_STREAMS = 24, STREAM_POINTS = 10, HEAD = 9, PT = 5;
+    static final float STREAM_LIFE = 1.8f, STREAM_STEP = 0.2f;
+    private static final WeakHashMap<Object, float[]> vehiclePaths = new WeakHashMap<>(), walkerPaths = new WeakHashMap<>();
+    private static volatile long streamUploadNanos;
+    private static boolean streamsAsked;
+    // Published: [count, then ax, ay, bx, by, level, age a, age b, half width, strength per segment]
+    private static volatile float[] streams = {0f};
+
+    /**
+     * Where a mover is now, and a point on its path every STREAM_STEP seconds. Path layout: count, newest index,
+     * current x, y, level, time, half width, strength, wet; then x, y, level, time, wet per point.
+     */
+    private static void path(WeakHashMap<Object, float[]> paths, Object mover, float x, float y, float z, boolean wet, float halfW, float strength) {
+        float[] p = paths.get(mover);
+        if (p == null) paths.put(mover, p = new float[HEAD + STREAM_POINTS * PT]);
+        float now = (float) clock;
+        p[2] = x;
+        p[3] = y;
+        p[4] = (float) Math.floor(z);
+        p[5] = now;
+        p[6] = halfW;
+        p[7] = strength;
+        p[8] = wet ? 1f : 0f;
+        int n = (int) p[0], head = (int) p[1];
+        float since = n == 0 ? 1e9f : now - p[HEAD + head * PT + 3];
+        if (n > 0 && since >= 0f && since < STREAM_STEP) return;
+        head = n == 0 ? 0 : (head + 1) % STREAM_POINTS;
+        int o = HEAD + head * PT;
+        p[o] = x;
+        p[o + 1] = y;
+        p[o + 2] = p[4];
+        p[o + 3] = now;
+        p[o + 4] = p[8];
+        p[1] = head;
+        if (n < STREAM_POINTS) p[0] = n + 1;
+    }
+
+    private static int segments(WeakHashMap<Object, float[]> paths, float[] out, int count, float now) {
+        java.util.Iterator<float[]> it = paths.values().iterator();
+        while (it.hasNext()) {
+            float[] p = it.next();
+            float seen = now - p[5];
+            // Gone quiet (parked, out of range, unloaded) or across the clock wrap: nothing left to show
+            if (seen < 0f || seen > STREAM_LIFE) {
+                it.remove();
+                continue;
+            }
+            int n = (int) p[0], head = (int) p[1];
+            // Newest first: the live end, then back along the path while it's young enough
+            float bx = p[2], by = p[3], bz = p[4], bAge = seen, bWet = p[8];
+            for (int k = 0; k < n && count < MAX_STREAMS; k++) {
+                int o = HEAD + Math.floorMod(head - k, STREAM_POINTS) * PT;
+                float aAge = now - p[o + 3];
+                if (aAge < 0f || aAge > STREAM_LIFE) break;
+                float ax = p[o], ay = p[o + 1];
+                if (bWet > 0.5f && p[o + 4] > 0.5f && p[o + 2] == bz && (ax != bx || ay != by)) {
+                    int at = 1 + count * 9;
+                    out[at] = ax;
+                    out[at + 1] = ay;
+                    out[at + 2] = bx;
+                    out[at + 3] = by;
+                    out[at + 4] = bz;
+                    out[at + 5] = aAge;
+                    out[at + 6] = bAge;
+                    out[at + 7] = p[6];
+                    out[at + 8] = p[7];
+                    count++;
+                }
+                bx = ax;
+                by = ay;
+                bz = p[o + 2];
+                bAge = aAge;
+                bWet = p[o + 4];
+            }
+            if (count >= MAX_STREAMS) break;
+        }
+        return count;
+    }
+
+    private static final float[] streamScratch = new float[1 + MAX_STREAMS * 9];
+
     private static void add(float x, float y, float z, float strength) {
         int at = ringNext * 5;
         ring[at] = x;
@@ -450,6 +605,19 @@ public final class PuddleSplash {
 
     private static void publish() {
         float now = (float) clock;
+        streamsAsked = System.nanoTime() - streamUploadNanos < 1_000_000_000L;
+        if (streamsAsked) {
+            int c = segments(vehiclePaths, streamScratch, 0, now);
+            c = segments(walkerPaths, streamScratch, c, now);
+            float[] out = new float[1 + c * 9];
+            System.arraycopy(streamScratch, 1, out, 1, c * 9);
+            out[0] = c;
+            streams = out;
+        } else {
+            if (streams.length > 1) streams = new float[] {0f};
+            vehiclePaths.clear();
+            walkerPaths.clear();
+        }
         int alive = 0;
         for (int i = 0; i < ringUsed; i++) {
             float age = now - ring[i * 5 + 3];
@@ -476,7 +644,8 @@ public final class PuddleSplash {
     static String stateText() {
         boolean asked = System.nanoTime() - splashUploadNanos < 1_000_000_000L;
         return "splashShader=" + (asked ? 1 : 0) + ";splashes=" + splashes.get() + ";splashDraws=" + uploadsWithPoints.get()
-            + ";walkers=" + walkersSeen + ";puddleDraws=" + uploadCalls + ";locTime=" + locations[0] + ";locSplash=" + locations[1];
+            + ";walkers=" + walkersSeen + ";puddleDraws=" + uploadCalls + ";locTime=" + locations[0] + ";locSplash=" + locations[1]
+            + ";streams=" + (int) streams[0] + ";locStream=" + locations[9];
     }
 
     private static volatile long uploadCalls;
@@ -504,10 +673,13 @@ public final class PuddleSplash {
                 loc[6] = GL20.glGetUniformLocation(prog, "PZOLights");
                 loc[7] = GL20.glGetUniformLocation(prog, "PZOLightCol");
                 loc[8] = GL20.glGetUniformLocation(prog, "PZOLightCount");
+                loc[9] = GL20.glGetUniformLocation(prog, "PZOStream");
+                loc[10] = GL20.glGetUniformLocation(prog, "PZOStreamCount");
                 TrailMap.puddleWanted = loc[3] >= 0;
             }
             if (loc[3] >= 0) trailUniforms(loc, z);
             if (loc[6] >= 0) uploadLights(loc, z);
+            if (loc[9] >= 0) uploadStreams(loc, z);
             if (loc[0] < 0 && loc[1] < 0) return;
             float[] snap = published;
             if (loc[0] >= 0) GL20.glUniform1f(loc[0], snap[0]);

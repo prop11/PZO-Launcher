@@ -7,13 +7,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JNI bridge to pzo_native64.dll / libpzo_native64.so / libpzo_native64.dylib: OS scheduling, timer resolution, power
- * throttling exemption and the AVX2 batch helpers.
+ * OS scheduling, timer resolution, power throttling exemption and hardware info. On macOS/Linux through the JNI library
+ * (libpzo_native64.dylib / .so, which is also the agent bridge there); on Windows through WinApi, since Windows no
+ * longer ships pzo_native64.dll.
  */
 public class PZONative {
 
     private static volatile boolean loaded = false;
     private static volatile boolean initialized = false;
+    private static volatile boolean skippedByFlag = false;
+    // Win32 calls through the foreign function API when the DLL isn't loaded; null when unavailable
+    private static volatile OsApi os;
 
     public static final String OS_NAME;
     public static final boolean IS_WINDOWS;
@@ -42,6 +46,21 @@ public class PZONative {
     private static synchronized void loadNativeLibrary() {
         if (loaded) return;
 
+        // No native library on Windows: WinApi makes the same OS calls from Java, and Smart App Control kept blocking
+        // the unsigned DLL anyway. Native A* (the one thing Java can't do) is macOS/Linux only now
+        if (IS_WINDOWS) {
+            startWithoutDll();
+            return;
+        }
+
+        // -Dpzo.nodll=true: skip the JNI side of the native library, for testing the fallback
+        if (Boolean.getBoolean("pzo.nodll")) {
+            skippedByFlag = true;
+            PZOLogger.info("[PZONative] -Dpzo.nodll set: not loading " + NATIVE_LIB_FILENAME + ".");
+            startWithoutDll();
+            return;
+        }
+
         try {
             System.loadLibrary("pzo_native64");
             loaded = true;
@@ -56,9 +75,7 @@ public class PZONative {
                 if (jarFile.isFile() && jarFile.getParentFile() != null) {
                     File p = jarFile.getParentFile();
                     candidatePaths.add(new File(p, NATIVE_LIB_FILENAME).getAbsolutePath());
-                    if (IS_WINDOWS) {
-                        candidatePaths.add(new File(p, "win64" + File.separator + NATIVE_LIB_FILENAME).getAbsolutePath());
-                    } else if (IS_LINUX) {
+                    if (IS_LINUX) {
                         candidatePaths.add(new File(p, "linux64" + File.separator + NATIVE_LIB_FILENAME).getAbsolutePath());
                         candidatePaths.add(new File(p, "natives" + File.separator + NATIVE_LIB_FILENAME).getAbsolutePath());
                     } else if (IS_MAC) {
@@ -68,10 +85,7 @@ public class PZONative {
                 }
             } catch (Throwable ignored) {}
 
-            if (IS_WINDOWS) {
-                candidatePaths.add("win64" + File.separator + NATIVE_LIB_FILENAME);
-                candidatePaths.add("K:/SteamLibrary/steamapps/common/ProjectZomboid/" + NATIVE_LIB_FILENAME);
-            } else if (IS_LINUX) {
+            if (IS_LINUX) {
                 candidatePaths.add("linux64" + File.separator + NATIVE_LIB_FILENAME);
                 candidatePaths.add("natives" + File.separator + NATIVE_LIB_FILENAME);
                 String home = System.getProperty("user.home", "");
@@ -109,27 +123,62 @@ public class PZONative {
                 PZOLogger.warn("[PZONative] initNative failed: " + t.getMessage());
             }
         } else {
+            startWithoutDll();
+        }
+    }
+
+    private static void startWithoutDll() {
+        os = loadOsApi();
+        if (os != null) {
+            PZOLogger.info("[PZONative] Using the Windows API from Java (timer, power throttling, MMCSS, priority, P-cores, drive check).");
+            applyKernelGovernors();
+        } else {
+            Boolean avx2 = jvmAvx2();
+            if (avx2 != null) CompatMode.noteNativeAvx2(avx2);
             String osLabel = IS_WINDOWS ? "Windows" : (IS_MAC ? "macOS" : "Linux");
-            PZOLogger.info("[PZONative] Native companion library (" + NATIVE_LIB_FILENAME + ") not found on " + osLabel + "; operating in pure JVM safe mode.");
+            PZOLogger.info("[PZONative] Native companion library (" + NATIVE_LIB_FILENAME + ") not loaded on " + osLabel + "; operating in pure JVM safe mode.");
+        }
+    }
+
+    // WinApi is built for Java 22, so it's only touched on a JRE that can load it
+    private static OsApi loadOsApi() {
+        if (!IS_WINDOWS || Runtime.version().feature() < 22 || Boolean.getBoolean("pzo.noffm")) return null;
+        try {
+            return (OsApi) Class.forName("com.pzoptimizer.WinApi").getDeclaredConstructor().newInstance();
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZONative] Windows API fallback unavailable: " + t);
+            return null;
+        }
+    }
+
+    /** What the JIT found: UseAVX 2 or more means the CPU and OS both handle AVX2. Null when unknown or not x86. */
+    private static Boolean jvmAvx2() {
+        String arch = System.getProperty("os.arch", "").toLowerCase();
+        if (!arch.equals("amd64") && !arch.equals("x86_64")) return null;
+        try {
+            com.sun.management.HotSpotDiagnosticMXBean bean =
+                java.lang.management.ManagementFactory.getPlatformMXBean(com.sun.management.HotSpotDiagnosticMXBean.class);
+            return Integer.parseInt(bean.getVMOption("UseAVX").getValue()) >= 2;
+        } catch (Throwable t) {
+            return null;
         }
     }
 
     private static void applyKernelGovernors() {
-        if (!initialized) return;
+        if (!hasOsAccess()) return;
 
         try {
-            boolean avx2 = false;
-            try { avx2 = isAVX2Supported(); } catch (Throwable ignored) {}
+            boolean avx2 = hasAvx2();
             CompatMode.noteNativeAvx2(avx2);
             boolean compat = CompatMode.isActive();
 
             // The JAVA tab's CPU power shield switch, read at launch
             boolean shield = PZOConfig.isPowerShieldEnabled();
             boolean powerShield = false;
-            if (shield) try { powerShield = disablePowerThrottling(); } catch (Throwable ignored) {}
+            if (shield) powerShield = exemptFromPowerThrottling();
 
             boolean timerLock = false;
-            if (shield) try { timerLock = setHighPrecisionTimer(true); } catch (Throwable ignored) {}
+            if (shield) timerLock = lockTimerResolution(true);
 
             boolean lowCore = isLowCoreCpu();
             boolean mmcss = false;
@@ -138,30 +187,25 @@ public class PZONative {
             if (!shield) {
                 PZOLogger.info("[PZONative] CPU power shield switched off in the JAVA tab: timer, power throttling, MMCSS and priority left as stock.");
             } else if (!lowCore && !compat) {
-                try { mmcss = setMMCSSProfile("Games"); } catch (Throwable ignored) {}
-                try { prio = setProcessPriority(1); } catch (Throwable ignored) {}
-                try { wsLock = lockProcessWorkingSet(); } catch (Throwable ignored) {}
+                mmcss = joinMmcss("Games");
+                prio = setPriorityLevel(1);
+                wsLock = lockWorkingSet();
             } else {
                 PZOLogger.info("[PZONative] " + (compat ? "Compatibility mode" : "Low core count CPU")
                     + ": skipping MMCSS, raised process priority and working set lock.");
             }
 
-            int physCores = 0;
-            try { physCores = getPhysicalCores(); } catch (Throwable ignored) {}
-            int pCores = 0;
-            try { pCores = getPerformanceCores(); } catch (Throwable ignored) {}
-            int logProc = 0;
-            try { logProc = getLogicalProcessors(); } catch (Throwable ignored) {}
-            long pCoreMask = 0;
-            try { pCoreMask = getPerformanceCoreMask(); } catch (Throwable ignored) {}
-            int timerRes100ns = 0;
-            try { timerRes100ns = getTimerResolution100ns(); } catch (Throwable ignored) {}
+            int physCores = physicalCores();
+            int pCores = performanceCores();
+            int logProc = logicalProcessors();
+            long pCoreMask = performanceCoreMask();
+            int timerRes100ns = timerResolution100ns();
 
             double timerMs = timerRes100ns / 10000.0;
 
             PZOLogger.success(String.format(
-                "[PZONative] Hardware Governor Active: CPU [%d Physical | %d P-Cores | %d Threads] Mask: 0x%X",
-                physCores, pCores, logProc, pCoreMask
+                "[PZONative] Hardware Governor Active (%s): CPU [%d Physical | %d P-Cores | %d Threads] Mask: 0x%X",
+                osAccessRoute(), physCores, pCores, logProc, pCoreMask
             ));
             PZOLogger.success(String.format(
                 "[PZONative] Kernel QoS Active: Timer: %.2fms (Status: %s) | PowerThrottling Disabled: %s | MMCSS: %s | RAM WorkingSet Locked: %s | AVX2: %s",
@@ -176,8 +220,126 @@ public class PZONative {
         }
     }
 
+    /** The DLL itself is loaded. The decompressor, AVX2 batches and native A* need it; the OS calls below don't. */
     public static boolean isLoaded() {
         return loaded && initialized;
+    }
+
+    /** The OS tuning and hardware calls work, through the DLL or the Java fallback. */
+    public static boolean hasOsAccess() {
+        return isLoaded() || os != null;
+    }
+
+    /** "DLL", "Java" (Windows API from Java) or "none". */
+    public static String osAccessRoute() {
+        return isLoaded() ? "DLL" : os != null ? "Java" : "none";
+    }
+
+    // The wrappers below use the DLL when it's loaded, else the Java fallback, else a plain default
+
+    public static boolean lockTimerResolution(boolean enable) {
+        try {
+            if (isLoaded()) return setHighPrecisionTimer(enable);
+            return os != null && os.setTimerResolution(enable);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** In 100 ns units; 156250 (15.6 ms, the Windows default) when unknown. */
+    public static int timerResolution100ns() {
+        try {
+            if (isLoaded()) return getTimerResolution100ns();
+            if (os != null) return os.timerResolution100ns();
+        } catch (Throwable ignored) {}
+        return 156250;
+    }
+
+    public static boolean exemptFromPowerThrottling() {
+        try {
+            if (isLoaded()) return disablePowerThrottling();
+            return os != null && os.disablePowerThrottling();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean joinMmcss(String profile) {
+        try {
+            if (isLoaded()) return setMMCSSProfile(profile);
+            return os != null && os.setMmcss(profile);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 0 normal, 1 above normal, 2 high. */
+    public static boolean setPriorityLevel(int level) {
+        try {
+            if (isLoaded()) return setProcessPriority(level);
+            return os != null && os.setPriorityClass(level);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean lockWorkingSet() {
+        try {
+            if (isLoaded()) return lockProcessWorkingSet();
+            return os != null && os.lockWorkingSet();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean tuneCallingThread(int priorityLevel, boolean bindPCores, String mmcssProfile) {
+        try {
+            if (isLoaded()) return optimizeCallingThread(priorityLevel, bindPCores, mmcssProfile);
+            return os != null && os.optimizeCallingThread(priorityLevel, bindPCores, mmcssProfile);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static int physicalCores() {
+        try {
+            if (isLoaded()) return getPhysicalCores();
+            if (os != null) return os.physicalCores();
+        } catch (Throwable ignored) {}
+        return Runtime.getRuntime().availableProcessors();
+    }
+
+    /** Cores in the fastest efficiency class; all cores on a CPU without E-cores. */
+    public static int performanceCores() {
+        try {
+            if (isLoaded()) return getPerformanceCores();
+            if (os != null) return os.performanceCores();
+        } catch (Throwable ignored) {}
+        return Runtime.getRuntime().availableProcessors();
+    }
+
+    public static int logicalProcessors() {
+        try {
+            if (isLoaded()) return getLogicalProcessors();
+            if (os != null) return os.logicalProcessors();
+        } catch (Throwable ignored) {}
+        return Runtime.getRuntime().availableProcessors();
+    }
+
+    public static long performanceCoreMask() {
+        try {
+            if (isLoaded()) return getPerformanceCoreMask();
+            if (os != null) return os.performanceCoreMask();
+        } catch (Throwable ignored) {}
+        return 0L;
+    }
+
+    public static boolean hasAvx2() {
+        try {
+            if (isLoaded()) return isAVX2Supported();
+        } catch (Throwable ignored) {}
+        Boolean jvm = jvmAvx2();
+        return jvm != null && jvm;
     }
 
     /**
@@ -189,9 +351,9 @@ public class PZONative {
     }
 
     public static boolean bindCallingThreadToPCores() {
-        if (!isLoaded()) return false;
         try {
-            return bindThreadToPerformanceCores();
+            if (isLoaded()) return bindThreadToPerformanceCores();
+            return os != null && os.bindCallingThreadToPCores();
         } catch (Throwable t) {
             return false;
         }
@@ -463,17 +625,20 @@ public class PZONative {
     }
 
     public static boolean isSolidStateDrive(String path) {
-        if (!isLoaded() || path == null) return true;
+        if (path == null) return true;
         try {
-            return isDriveSSDNative(path);
+            if (isLoaded()) return isDriveSSDNative(path);
+            return os == null || os.isSolidStateDrive(path);
         } catch (Throwable t) {
             return true;
         }
     }
 
     public static boolean isNativeFilePresent() {
-        if (loaded) return true;
+        return loaded || findNativeFile() != null;
+    }
 
+    private static File findNativeFile() {
         String nativeName = NATIVE_LIB_FILENAME;
         List<File> searchDirs = new ArrayList<>();
         searchDirs.add(new File("."));
@@ -484,22 +649,32 @@ public class PZONative {
             }
         } catch (Throwable ignored) {}
 
-        for (File dir : searchDirs) {
-            if (new File(dir, nativeName).exists()) return true;
-            if (IS_WINDOWS) {
-                if (new File(dir, "win64" + File.separator + nativeName).exists()) return true;
-            } else if (IS_LINUX) {
-                if (new File(dir, "linux64" + File.separator + nativeName).exists()) return true;
-                if (new File(dir, "natives" + File.separator + nativeName).exists()) return true;
-            } else if (IS_MAC) {
-                if (new File(dir, "ProjectZomboid.app/Contents/MacOS/" + nativeName).exists()) return true;
-                if (new File(dir, "ProjectZomboid.app/Contents/Java/" + nativeName).exists()) return true;
-                if (new File(dir, "../MacOS/" + nativeName).exists()) return true;
-                if (new File(dir, "../Java/" + nativeName).exists()) return true;
-            }
+        List<String> subPaths = new ArrayList<>();
+        subPaths.add(nativeName);
+        if (IS_WINDOWS) {
+            subPaths.add("win64" + File.separator + nativeName);
+        } else if (IS_LINUX) {
+            subPaths.add("linux64" + File.separator + nativeName);
+            subPaths.add("natives" + File.separator + nativeName);
+        } else if (IS_MAC) {
+            subPaths.add("ProjectZomboid.app/Contents/MacOS/" + nativeName);
+            subPaths.add("ProjectZomboid.app/Contents/Java/" + nativeName);
+            subPaths.add("../MacOS/" + nativeName);
+            subPaths.add("../Java/" + nativeName);
         }
 
-        return false;
+        for (File dir : searchDirs) {
+            for (String sub : subPaths) {
+                File f = new File(dir, sub);
+                if (f.isFile()) return f;
+            }
+        }
+        return null;
+    }
+
+    /** True when -Dpzo.nodll kept the DLL from loading. */
+    public static boolean isSkippedByFlag() {
+        return skippedByFlag;
     }
 
     public static String getInstalledNativeVersion() {

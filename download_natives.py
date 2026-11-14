@@ -161,8 +161,8 @@ def download_artifacts_for_run(token, run_id, root_dir):
                 extracted_bytes = zf.read(item)
                 target_filename = os.path.basename(item)
 
-                # Natives are pinned on every OS, see package_release.py; only take CI builds after a real native change.
-                # The Windows DLL is never taken from CI.
+                # Natives are pinned, see package_release.py; only take CI builds after a real native change.
+                # Windows ships no native library.
                 if target_filename == "pzo_native64.dll" or (target_filename.endswith((".so", ".dylib"))
                         and os.environ.get("PZO_TAKE_CI_NATIVES") != "1"):
                     print(f"[*] Skipped {target_filename} (pinned)")
@@ -257,7 +257,7 @@ def check_binary_versions(root_dir):
     print("\n================================================================================")
     print(" Native Binary Versions in native/")
     print("================================================================================")
-    for fname in ["pzo_native64.dll", "libpzo_native64.so", "libpzo_native64.dylib"]:
+    for fname in ["libpzo_native64.so", "libpzo_native64.dylib"]:
         p = os.path.join(native_dir, fname)
         if os.path.isfile(p):
             with open(p, "rb") as f:

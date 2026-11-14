@@ -7,6 +7,9 @@ import java.lang.reflect.Method;
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
+        // Windows: the agent isn't in the json any more, so load it before anything touches a game class
+        AgentSelfLoader.loadIfNeeded();
+
         // AWT/Swing has to be allowed for the pre-menu dialogs
         try {
             System.setProperty("java.awt.headless", "false");
@@ -83,9 +86,9 @@ public class PZOEntrypoint {
         boolean isNative = false;
         double timerMs = 15.6;
         try {
-            isNative = PZONative.isLoaded();
+            isNative = PZONative.hasOsAccess();
             if (isNative) {
-                timerMs = PZONative.getTimerResolution100ns() / 10000.0;
+                timerMs = PZONative.timerResolution100ns() / 10000.0;
             }
         } catch (Throwable ignored) {}
 

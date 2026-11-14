@@ -90,10 +90,14 @@ public final class GCLauncherOptimizer {
                     changed = true;
                     continue; // drop the bad flag
                 }
+                if (ZomboidConfigMigrator.isPzoAgentArg(s) && !s.equals(ZomboidConfigMigrator.TARGET_AGENTLIB)) {
+                    changed = true;
+                    continue; // the old agent; TARGET_AGENTLIB goes back in below
+                }
                 List<String> tokens = ZomboidConfigMigrator.splitJoinedArgs(s);
                 if (tokens.size() > 1) {
                     for (String tok : tokens) {
-                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !vmArgs.contains(tok)) {
+                        if (!tok.isEmpty() && !tok.contains("UseCompactObjectHeaders") && !ZomboidConfigMigrator.isPzoAgentArg(tok) && !vmArgs.contains(tok)) {
                             vmArgs.add(tok);
                         }
                     }

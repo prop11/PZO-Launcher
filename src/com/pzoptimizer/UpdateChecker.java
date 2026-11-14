@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 
 /** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "2.0.3.5";
+    public static final String CURRENT_VERSION = "2.1";
     // Every OS stays on this release's native binaries (Smart App Control trusts the DLL per file, and a rebuild for a
     // version string alone gains nothing). Only bump it when pzo_native.c really changes.
     public static final String NATIVE_VERSION = "1.9.7";
@@ -21,6 +21,11 @@ public class UpdateChecker {
     private static final String GITHUB_ALL_RELEASES_API_URL = "https://api.github.com/repos/prop11/PZO-Launcher/releases";
     private static final String DEFAULT_JAR_DOWNLOAD_URL = "https://github.com/prop11/PZO-Launcher/releases/latest/download/PZOptimEngine.jar";
     private static final Pattern VERSION_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)+)");
+
+    /** Windows ships no native library any more (WinApi covers it); macOS/Linux still need theirs as the agent bridge. */
+    public static boolean shipsNativeLibrary() {
+        return !System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
 
     public static String getNativeFileName() {
         String os = System.getProperty("os.name", "").toLowerCase();

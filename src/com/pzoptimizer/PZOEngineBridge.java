@@ -63,19 +63,19 @@ public class PZOEngineBridge {
     }
 
     public static boolean isNativeGovernorActive() {
-        return PZONative.isLoaded();
+        return PZONative.hasOsAccess();
     }
 
     public static int getPerformanceCores() {
-        return PZONative.isLoaded() ? PZONative.getPerformanceCores() : Runtime.getRuntime().availableProcessors();
+        return PZONative.performanceCores();
     }
 
     public static double getTimerResolutionMs() {
-        return PZONative.isLoaded() ? (PZONative.getTimerResolution100ns() / 10000.0) : 15.6;
+        return PZONative.timerResolution100ns() / 10000.0;
     }
 
     public static boolean isAVX2Active() {
-        return PZONative.isLoaded() && PZONative.isAVX2Supported();
+        return PZONative.hasAvx2();
     }
 
     public static boolean isAVX2SpatialActive() {
@@ -1590,7 +1590,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.0.3.5\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.1\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1859,7 +1859,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.0.3.5'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.1'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

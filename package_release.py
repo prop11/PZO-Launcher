@@ -11,12 +11,10 @@ import shutil
 import zipfile
 import hashlib
 
-# The V1.9.7 release natives, on every OS. Smart App Control trusts the DLL per file, and Mac/Linux follow the same
-# rule, so a rebuilt native must never ship by accident. When pzo_native.c really changes: rebuild (build_all.py
-# --rebuild-native, CI for .so/.dylib with PZO_TAKE_CI_NATIVES=1), then update these hashes and UpdateChecker.NATIVE_VERSION.
-PINNED_DLL_SHA256 = "0e9a322c3ba7e7f14bbd2fc9e27ab0f43db7b9586a76b9e338063f4574b08d26"
+# The V1.9.7 release natives for macOS/Linux (Windows ships none: WinApi makes those calls from Java). A rebuilt native
+# must never ship by accident. When pzo_native.c really changes: rebuild in CI and take it with PZO_TAKE_CI_NATIVES=1,
+# then update these hashes and UpdateChecker.NATIVE_VERSION.
 PINNED_NATIVE_SHA256 = {
-    "pzo_native64.dll": PINNED_DLL_SHA256,
     "libpzo_native64.so": "f5333959f6843e3294d3328dc7b638ae074f56ef125ad4f8793da86c6743aa67",
     "libpzo_native64.dylib": "2f0575aa250d48870a607c89062c02c5e23ed92937dc7038a05b2fee8df25510",
 }
@@ -28,7 +26,7 @@ def sha256_file(filepath):
             h.update(chunk)
     return h.hexdigest()
 
-# Direct lookups only: a recursive walk of the repo found a stale dist/pzo_native64.dll before native/ and shipped it
+# Direct lookups only: a recursive walk of the repo once found a stale native in dist/ before native/ and shipped it
 def find_file(fname, search_roots):
     for root_dir in search_roots:
         direct = os.path.join(root_dir, fname)
@@ -38,6 +36,8 @@ def find_file(fname, search_roots):
 
 # PZO targets Java 17 (build_all.py --release 17); a class built for a newer Java than the game's JRE fails to load (issue #48)
 MAX_CLASS_MAJOR = 61
+# Built from src-ffm with --release 22 and only loaded by PZONative on Java 22+
+NEWER_CLASS_ALLOWED = ("com/pzoptimizer/WinApi.class", "com/pzoptimizer/WinApi$")
 
 def create_jar(bin_dir, manifest_file, out_jar):
     too_new = []
@@ -46,8 +46,9 @@ def create_jar(bin_dir, manifest_file, out_jar):
             if file.endswith(".class"):
                 with open(os.path.join(root, file), "rb") as f:
                     header = f.read(8)
-                if len(header) == 8 and int.from_bytes(header[6:8], "big") > MAX_CLASS_MAJOR:
-                    too_new.append(os.path.relpath(os.path.join(root, file), bin_dir))
+                rel = os.path.relpath(os.path.join(root, file), bin_dir).replace("\\", "/")
+                if len(header) == 8 and int.from_bytes(header[6:8], "big") > MAX_CLASS_MAJOR and not rel.startswith(NEWER_CLASS_ALLOWED):
+                    too_new.append(rel)
     if too_new:
         sys.exit(f"[!] Refusing to build {os.path.basename(out_jar)}: classes newer than Java 17 (rebuild with build_all.py): {too_new}")
     with zipfile.ZipFile(out_jar, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -101,7 +102,6 @@ def main():
 
     # Standalone binaries and scripts for dist/
     files_to_copy = [
-        "pzo_native64.dll",
         "libpzo_native64.so",
         "libpzo_native64.dylib",
         "install.bat",
@@ -136,7 +136,7 @@ def main():
 
     win_zip = os.path.join(dist_dir, "PZO-Optimizer-Windows.zip")
     with zipfile.ZipFile(win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["install.bat", "downgrade.bat", "PZOptimEngine.jar", "pzo_native64.dll", "README.md", "README_DOWNGRADE.md"]:
+        for f in ["install.bat", "downgrade.bat", "PZOptimEngine.jar", "README.md", "README_DOWNGRADE.md"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
                 add_file_to_archive(zf, fp, f)
@@ -144,7 +144,7 @@ def main():
 
     mac_linux_zip = os.path.join(dist_dir, "PZO_Optimizer_macOS_Linux.zip")
     with zipfile.ZipFile(mac_linux_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["pzo_optimizer.sh", "pzo_downgrade.sh", "pzo_optimizer.command", "pzo_downgrade.command", "PZOptimEngine.jar", "README.md", "README_DOWNGRADE.md", "pzo_native64.dll", "libpzo_native64.so", "libpzo_native64.dylib"]:
+        for f in ["pzo_optimizer.sh", "pzo_downgrade.sh", "pzo_optimizer.command", "pzo_downgrade.command", "PZOptimEngine.jar", "README.md", "README_DOWNGRADE.md", "libpzo_native64.so", "libpzo_native64.dylib"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
                 add_file_to_archive(zf, fp, f)
@@ -160,7 +160,7 @@ def main():
 
     srv_win_zip = os.path.join(dist_dir, "PZO-Server-Windows.zip")
     with zipfile.ZipFile(srv_win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["PZOServerEngine.jar", "README_SERVER.md", "pzo_native64.dll"]:
+        for f in ["PZOServerEngine.jar", "README_SERVER.md"]:
             fp = os.path.join(dist_dir, f)
             if os.path.isfile(fp):
                 add_file_to_archive(zf, fp, f)

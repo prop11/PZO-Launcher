@@ -341,7 +341,7 @@ public final class ScreenPass {
     private static void bloom(int[] loc, TextureDraw texd) {
         if (loc[5] < 0) {
             if (!mipTextures.isEmpty()) {
-                int bound = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+                int bound = GlGet.integer(GL11.GL_TEXTURE_BINDING_2D);
                 for (int id : mipTextures) {
                     GL11.glBindTexture(GL11.GL_TEXTURE_2D, id);
                     GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
@@ -356,7 +356,7 @@ public final class ScreenPass {
         Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
         boolean live = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.worldTex != 0;
         if (live) {
-            int prevActive = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+            int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
             GL13.glActiveTexture(GL13.GL_TEXTURE3);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, fl.worldTex);
             if (mipTextures.add(fl.worldTex)) {

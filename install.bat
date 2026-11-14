@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.0.3.5)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.1)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -59,7 +59,7 @@ $Json5OrLess = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms2048m",
@@ -103,7 +103,7 @@ $Json6To12 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms3072m",
@@ -148,7 +148,7 @@ $Json13To20_G1GC = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -193,7 +193,7 @@ $Json13To20_ZGC = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms4096m",
@@ -239,7 +239,7 @@ $JsonAbove20 = @"
         "projectzomboid.jar"
     ],
     "vmArgs": [
-        "-agentlib:pzo_native64",
+        "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
         "-Xms8192m",
@@ -288,25 +288,19 @@ function Download-PZOGitHubJar($targetFile) {
     return $false
 }
 
-function Download-PZOGitHubDll($targetFile) {
-    # Pinned to the release Smart App Control accepts, same version as UpdateChecker.NATIVE_VERSION
-    $downloadUrl = "https://github.com/prop11/PZO-Launcher/releases/download/V1.9.7/pzo_native64.dll"
-    Write-Host "`n[*] Downloading pzo_native64.dll from GitHub Releases..." -ForegroundColor Cyan
-    Write-Host "    URL: $downloadUrl" -ForegroundColor Gray
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-        $webClient = New-Object System.Net.WebClient
-        $webClient.Headers.Add("User-Agent", "PZO-Installer")
-        $webClient.DownloadFile($downloadUrl, $targetFile)
-        if (Test-Path -LiteralPath $targetFile -ErrorAction SilentlyContinue) {
-            $sizeKB = [Math]::Round((Get-Item -LiteralPath $targetFile).Length / 1KB, 1)
-            Write-Host "    [SUCCESS] Downloaded pzo_native64.dll ($sizeKB KB)" -ForegroundColor Green
-            return $true
+# Windows no longer uses pzo_native64.dll (PZO makes the same Windows calls from Java), so any old copy goes
+function Remove-PZOOldNative {
+    $old = @(
+        $InstalledDllPath,
+        [System.IO.Path]::Combine($InstallPath, "win64\$NativeDllName"),
+        [System.IO.Path]::Combine($InstallPath, "pzo_native64.blocked")
+    )
+    foreach ($f in $old) {
+        if ($f -and (Test-Path -LiteralPath $f -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+            Write-Host "Removed old native file: $f" -ForegroundColor Gray
         }
-    } catch {
-        Write-Host "    [WARNING] Download error: $($_.Exception.Message)" -ForegroundColor Yellow
     }
-    return $false
 }
 
 function Get-PZInstallPath {
@@ -424,36 +418,6 @@ if ($SourceJar) {
     }
 }
 
-# Locate Source Native DLL (pzo_native64.dll)
-$candidateDllPaths = [System.Collections.Generic.List[string]]::new()
-if ($ScriptDir) {
-    $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, $NativeDllName))
-    $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, "dist\$NativeDllName"))
-    $candidateDllPaths.Add([System.IO.Path]::Combine($ScriptDir, "native\$NativeDllName"))
-}
-if ($PWD -and $PWD.Path) {
-    $candidateDllPaths.Add([System.IO.Path]::Combine($PWD.Path, $NativeDllName))
-    $candidateDllPaths.Add([System.IO.Path]::Combine($PWD.Path, "dist\$NativeDllName"))
-    $candidateDllPaths.Add([System.IO.Path]::Combine($PWD.Path, "native\$NativeDllName"))
-}
-
-$SourceDll = $null
-foreach ($dp in $candidateDllPaths) {
-    if ($dp -and (Test-Path -LiteralPath $dp -ErrorAction SilentlyContinue)) {
-        $SourceDll = $dp
-        break
-    }
-}
-if ($SourceDll) {
-    Write-Host "Using local native governor: $SourceDll" -ForegroundColor Gray
-} else {
-    Write-Host "`n[Notice] '$NativeDllName' not found locally next to install.bat." -ForegroundColor Yellow
-    $dllDownloadTarget = [System.IO.Path]::Combine($ScriptDir, $NativeDllName)
-    if (Download-PZOGitHubDll $dllDownloadTarget) {
-        $SourceDll = $dllDownloadTarget
-    }
-}
-
 # ZombieBuddy coexistence
 $zbNativeDll = [System.IO.Path]::Combine($InstallPath, "zbNative.dll")
 $zbNativeWin64 = [System.IO.Path]::Combine($InstallPath, "win64\zbNative.dll")
@@ -469,6 +433,25 @@ if (Test-Path -LiteralPath $TargetFilePath) {
 $isZombieBuddyActive = $hasZbInJson -or (Test-Path -LiteralPath $zbNativeDll) -or (Test-Path -LiteralPath $zbNativeWin64)
 if ($isZombieBuddyActive) {
     Write-Host "`n[+] ZombieBuddy detected! Coexistence mode enabled (preserving -agentlib:zbNative)." -ForegroundColor Green
+}
+
+# ZombieBuddy in the Steam launch options (-agentlib:zbNative=policy=allow-all --) reaches the JVM too. ZB keeps only
+# the first agent's options and the json's copy loads first, so a copy in the json would reset its policy to prompt
+$zbInLaunchOptions = $false
+try {
+    $steamRoot = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -Name "SteamPath" -ErrorAction SilentlyContinue).SteamPath
+    if ($steamRoot) {
+        foreach ($cfg in @(Get-ChildItem -Path ([System.IO.Path]::Combine($steamRoot, "userdata\*\config\localconfig.vdf")) -ErrorAction SilentlyContinue)) {
+            $vdf = Get-Content -LiteralPath $cfg.FullName -Raw -ErrorAction SilentlyContinue
+            if ($vdf -and $vdf -match '"LaunchOptions"\s+"(?:\\"|[^"\r\n])*(zbNative|ZombieBuddy)') {
+                $zbInLaunchOptions = $true
+                break
+            }
+        }
+    }
+} catch {}
+if ($zbInLaunchOptions) {
+    Write-Host "[+] ZombieBuddy is set in the Steam launch options, so it stays out of $TargetFileName and your options (e.g. policy=allow-all) keep working." -ForegroundColor Green
 }
 
 # Check for Zed Better FPS NG conflict / redundancy
@@ -605,7 +588,8 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
     if ($null -eq $old -or $null -eq $old.vmArgs) { return $TemplateJson }
 
     $oldArgs = @(Split-PZOJoinedArgs $old.vmArgs | Where-Object {
-        $_ -notmatch 'java\.awt\.headless|pzo_native64|UseCompactObjectHeaders' -and
+        $_ -notmatch 'java\.awt\.headless|pzo_native64|instrument=PZOptimEngine|UseCompactObjectHeaders' -and
+        -not ($zbInLaunchOptions -and $_ -match 'zbNative|ZombieBuddy\.jar') -and
         -not ($CompatActive -and ($_ -eq "-XX:+AlwaysPreTouch" -or $_ -eq "-XX:+UseZGC" -or (Test-PZOZgcOnlyArg $_)))
     })
 
@@ -717,7 +701,7 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
         if ($tplBlock) { foreach ($a in @($tplBlock.Value.vmArgs)) { [void]$blockArgs.Add([string]$a) } }
         if ($oldBlock) {
             foreach ($arg in @(Split-PZOJoinedArgs $oldBlock.Value.vmArgs)) {
-                if ($arg -match 'pzo_native64|zbNative|UseCompactObjectHeaders') { continue }
+                if ($arg -match 'pzo_native64|instrument=PZOptimEngine|zbNative|UseCompactObjectHeaders') { continue }
                 $key = Get-PZOArgKey $arg
                 if ($key -eq "gc") {
                     if (-not $tplBlock -and -not $CompatActive) { [void]$blockArgs.Add($arg) }
@@ -758,7 +742,7 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
 function Test-PZOJsonHasPzo {
     if (-not (Test-Path -LiteralPath $TargetFilePath -ErrorAction SilentlyContinue)) { return $false }
     $raw = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
-    return [bool]($raw -and (($raw -match "com/pzoptimizer") -or ($raw -match "pzo_native64") -or ($raw -match "PZOptimEngine\.jar")))
+    return [bool]($raw -and (($raw -match "com/pzoptimizer") -or ($raw -match "pzo_native64") -or ($raw -match "instrument=PZOptimEngine") -or ($raw -match "PZOptimEngine\.jar")))
 }
 
 # Puts ProjectZomboid64.json back to stock: the oldest backup without PZO in it, then strip anything PZO left behind
@@ -768,7 +752,7 @@ function Restore-PZOStockJson {
         $bakFiles = Get-ChildItem -LiteralPath $BackupDir -Filter "$($TargetFileName)_*.bak" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime
         foreach ($bf in $bakFiles) {
             $txt = Get-Content -LiteralPath $bf.FullName -Raw -ErrorAction SilentlyContinue
-            if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64")) {
+            if ($txt -and ($txt -notmatch "com/pzoptimizer") -and ($txt -notmatch "pzo_native64") -and ($txt -notmatch "instrument=PZOptimEngine")) {
                 $cleanBackup = $bf
                 break
             }
@@ -785,6 +769,8 @@ function Restore-PZOStockJson {
         $sanitized = $jsonRaw -replace '"mainClass"\s*:\s*"com/pzoptimizer/PZOEntrypoint"', '"mainClass": "zombie/gameStates/MainScreenState"'
         $sanitized = $sanitized -replace '\s*"PZOptimEngine\.jar",?', ''
         $sanitized = $sanitized -replace '\s*"-agentlib:pzo_native64",?', ''
+        $sanitized = $sanitized -replace '\s*"-agentlib:instrument=PZOptimEngine\.jar",?', ''
+        $sanitized = $sanitized -replace '\s*"-XX:\+EnableDynamicAgentLoading",?', ''
         $sanitized = $sanitized -replace ',\s*\]', "`n    ]"
         [System.IO.File]::WriteAllText($TargetFilePath, $sanitized, (New-Object System.Text.UTF8Encoding($false)))
         Write-Host "Sanitized $($TargetFileName): Restored vanilla mainClass and removed PZO agents." -ForegroundColor Green
@@ -994,9 +980,9 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         $UseG1GC = $true
     }
 
-    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside -agentlib:pzo_native64
-    if ($isZombieBuddyActive -and ($chosenJson -notmatch "zbNative")) {
-        $chosenJson = $chosenJson.Replace('"-agentlib:pzo_native64",', '"-agentlib:zbNative",' + "`n        " + '"-agentlib:pzo_native64",')
+    # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside the PZO agent
+    if ($isZombieBuddyActive -and -not $zbInLaunchOptions -and ($chosenJson -notmatch "zbNative")) {
+        $chosenJson = $chosenJson.Replace('"-XX:+EnableDynamicAgentLoading",', '"-agentlib:zbNative",' + "`n        " + '"-XX:+EnableDynamicAgentLoading",')
     }
 
     # If ZombieBuddy.jar exists in game directory, preserve it in classpath alongside PZOptimEngine.jar
@@ -1037,7 +1023,7 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
         launch_mode = $LaunchMode
-        version     = "2.0.3.5"
+        version     = "2.1"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
@@ -1069,21 +1055,7 @@ if (Test-Path $InstalledJarPath) {
                 return
             }
 
-            Write-Host "`nUpdating Native Governor ($NativeDllName)..." -ForegroundColor Cyan
-            $dllUpdated = Download-PZOGitHubDll $InstalledDllPath
-            if (-not $dllUpdated -and $SourceDll -and (Test-Path -LiteralPath $SourceDll)) {
-                Copy-Item -LiteralPath $SourceDll -Destination $InstalledDllPath -Force
-                Write-Host "    [SUCCESS] Updated from local file: $NativeDllName -> $InstalledDllPath" -ForegroundColor Green
-                $dllUpdated = $true
-            }
-            $win64Dir = [System.IO.Path]::Combine($InstallPath, "win64")
-            if (Test-Path -LiteralPath $win64Dir) {
-                $InstalledWin64Dll = [System.IO.Path]::Combine($win64Dir, $NativeDllName)
-                if (Test-Path -LiteralPath $InstalledDllPath) {
-                    Copy-Item -LiteralPath $InstalledDllPath -Destination $InstalledWin64Dll -Force
-                    Write-Host "    [SUCCESS] Mirrored Native Governor -> $InstalledWin64Dll" -ForegroundColor Green
-                }
-            }
+            Remove-PZOOldNative
 
             $launchMode = Read-PZOLaunchMode
             Write-Host "`nRe-applying optimal configuration..." -ForegroundColor Cyan
@@ -1099,15 +1071,7 @@ if (Test-Path $InstalledJarPath) {
                 Write-Host "Removed: $JarFileName" -ForegroundColor Green
             }
 
-            if (Test-Path $InstalledDllPath) {
-                Remove-Item -Path $InstalledDllPath -Force
-                Write-Host "Removed: $NativeDllName" -ForegroundColor Green
-            }
-            $win64DllPath = [System.IO.Path]::Combine($InstallPath, "win64\$NativeDllName")
-            if (Test-Path -LiteralPath $win64DllPath) {
-                Remove-Item -LiteralPath $win64DllPath -Force
-                Write-Host "Removed: win64\$NativeDllName" -ForegroundColor Green
-            }
+            Remove-PZOOldNative
 
             # Purge all pzo_* bridge, telemetry, log and status files from ~/Zomboid/Lua/
             if (Test-Path -LiteralPath $ZomboidLuaDir -ErrorAction SilentlyContinue) {
@@ -1169,16 +1133,7 @@ if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyCont
     return
 }
 
-if ($SourceDll -and (Test-Path -LiteralPath $SourceDll -ErrorAction SilentlyContinue)) {
-    Copy-Item -LiteralPath $SourceDll -Destination $InstalledDllPath -Force
-    Write-Host "Installed Native Governor: $NativeDllName -> $InstallPath" -ForegroundColor Green
-    $win64Dir = [System.IO.Path]::Combine($InstallPath, "win64")
-    if (Test-Path -LiteralPath $win64Dir) {
-        $InstalledWin64Dll = [System.IO.Path]::Combine($win64Dir, $NativeDllName)
-        Copy-Item -LiteralPath $SourceDll -Destination $InstalledWin64Dll -Force
-        Write-Host "Mirrored Native Governor -> $InstalledWin64Dll" -ForegroundColor Green
-    }
-}
+Remove-PZOOldNative
 
 $launchMode = Read-PZOLaunchMode
 Apply-PZOConfiguration $launchMode
