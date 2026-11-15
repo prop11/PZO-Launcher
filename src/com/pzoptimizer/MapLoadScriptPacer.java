@@ -1,6 +1,5 @@
 package com.pzoptimizer;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
@@ -11,24 +10,31 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Other mods' LoadGridsquare handlers run once per square as the map streams in, all inside the frame that loaded the
  * chunk. With a lot of mods that's most of the "chunk streaming" time while driving (17 of 18 ms per frame in one
- * player's recording, about 30 mods). Here their calls go into a queue and run after the chunk update under a time
- * budget, squares nearest a player first. The game's own handlers and PZO's run straight away as before.
+ * player's recording, about 30 mods). Here their calls are held back and run after the chunk update under a time
+ * budget, chunks nearest a player first. The game's own handlers and PZO's run straight away as before.
  *
- * A frame that just loaded a burst of chunks runs nothing from the queue, since the engine's own chunk work is already
- * on it. A mod's LoadChunk handlers wait behind that chunk's queued squares, so they still see squares first like in
- * vanilla. Squares with a generator are never queued (Generator Hose credits the offline hours in its handler, and the
- * generator's first update would beat it). Getting out of a vehicle runs everything queued near that player at once.
+ * One job per chunk: the squares in load order and the mod handlers seen for them, each with the range of squares it
+ * was called for, plus the chunk's LoadChunk handlers, which run once the squares are done (so they still see squares
+ * first like in vanilla). A job is run square by square, every handler for a square before the next square, the same
+ * order as vanilla. Memory follows the loaded chunks, not the number of calls.
  *
- * A square that unloads before its turn is dropped; the event fires again when it loads next time. Buckets whose chunk
- * has unloaded are swept a slice per frame so they don't hold squares in memory. While the world is still loading
- * nothing is queued.
+ * A frame that just loaded a burst of chunks runs nothing, since the engine's own chunk work is already on it. Squares
+ * with a generator are never held back (Generator Hose credits the offline hours in its handler, and the generator's
+ * first update would beat it). Getting out of a vehicle runs everything held near that player at once, and on foot
+ * nothing is held within a few tiles of the player (mods set up or replace objects in these handlers, and a late run
+ * after the player had already used the object lost items).
+ *
+ * A job whose chunk has unloaded is dropped; the events fire again when it loads next time. While the world is still
+ * loading nothing is held back.
+ *
+ * Draining runs after each chunk map update and again at the end of every main loop iteration if that didn't happen
+ * (the game skips the chunk map update with no living player). Calls are only held back while draining keeps up, and
+ * never past MAX_SQUARES squares, so a drain that stops can't fill the heap (the old per-call queue once reached 75M
+ * entries and ran a 32 GB heap out).
  *
  * The budget follows the frame: it grows a step each frame while frames stay at their usual length and shrinks when
- * three in a row run long, so the queue only uses time the frame had spare. If the queue gets old it gets a minimum
- * anyway so nothing waits for long. While driving, chunks around where the car will be in a moment go first.
- *
- * Anything queued within a few tiles of a player on foot runs straight away, whatever the budget says. Mods set up
- * or replace objects in these handlers, and a late run after the player had already used the object lost items.
+ * three in a row run long, so draining only uses time the frame had spare. If a job gets old it gets a minimum anyway
+ * so nothing waits for long. While driving, chunks around where the car will be in a moment go first.
  *
  * Exempt: mods that asked through PZOApi.exemptMod, and the ones on the settings screen list (ModApi "mapLoadExempt").
  */
@@ -40,8 +46,8 @@ public final class MapLoadScriptPacer {
     private static final String CHUNK_EVENT = "LoadChunk";
     private static final long BUDGET_NS = 2_000_000L;
     private static final long MAX_BUDGET_NS = 2 * BUDGET_NS;
-    // The engine's own chunk work keeps frames long on a drive, and that is not the queue's doing, so the budget
-    // never goes under this
+    // The engine's own chunk work keeps frames long on a drive, and that is not my doing, so the budget never goes
+    // under this
     private static final long MIN_BUDGET_NS = BUDGET_NS / 2;
     // Frame length over the target that counts as running long, and what I allow on top of the fastest recent frame
     private static final long OVERSHOOT_NS = 500_000L, FLOOR_SLACK_NS = 500_000L;
@@ -49,67 +55,88 @@ public final class MapLoadScriptPacer {
     private static final long FRAME_GAP_NS = 1_000_000_000L;
     private static final int FLOOR_FRAMES = 60;
     private static final long AGE_1_NS = 1_000_000_000L, AGE_2_NS = 3_000_000_000L;
-    // Squares queued in one frame at or above which that frame drains nothing (about four chunks)
+    // Squares held back in one frame at or above which that frame drains nothing (about four chunks)
     private static final int ARRIVAL_GATE = 256;
-    // Buckets scored per pick; the drain works through these before scoring again
+    // Jobs scored per pick; the drain works through these before scoring again
     private static final int PICK_N = 16;
-    // Buckets checked for an unloaded chunk per drain call
-    private static final int SWEEP_SLICE = 32;
     private static final float EXIT_FLUSH_TILES = 24.0f;
-    // On foot nothing queued may sit this close to the player (measured to the chunk's edge)
+    // On foot nothing held back may sit this close to the player (measured to the chunk's edge)
     private static final float FOOT_RING_TILES = 12.0f;
     // Scoring aims at where the vehicle will be after this long, at most this far ahead
     private static final float LOOKAHEAD_S = 1.5f, LOOKAHEAD_MAX_TILES = 48.0f;
+    // Nothing is held back unless a drain ran this many world frames ago or less
+    private static final int DRAIN_STALE_FRAMES = 30;
+    // A 17x17 grid of loaded chunks holds far fewer; past this something is wrong and calls run straight away
+    private static final int MAX_SQUARES = 150_000;
 
-    private static final class Item {
+    private static final class Handler {
         final se.krka.kahlua.integration.LuaCaller caller;
         final se.krka.kahlua.vm.KahluaThread thread;
         final Object closure;
-        final Object arg;
-        final long queuedAt;
+        // Squares (by index in the job) this handler was called for
+        final int from;
+        int until;
 
-        Item(se.krka.kahlua.integration.LuaCaller caller, se.krka.kahlua.vm.KahluaThread thread, Object closure,
-             Object arg, long queuedAt) {
+        Handler(se.krka.kahlua.integration.LuaCaller caller, se.krka.kahlua.vm.KahluaThread thread, Object closure, int from) {
             this.caller = caller;
             this.thread = thread;
             this.closure = closure;
-            this.arg = arg;
-            this.queuedAt = queuedAt;
+            this.from = from;
+            this.until = from;
         }
     }
 
-    // One per chunk (8x8 squares). LoadChunk calls go in tails and run only once the squares are done.
-    private static final class Bucket {
+    private static final class Job {
         final long key;
         final int wx, wy;
-        final ArrayDeque<Item> squares = new ArrayDeque<>();
-        final ArrayDeque<Item> tails = new ArrayDeque<>();
+        final zombie.iso.IsoChunk chunk;
+        final long queuedAt;
+        final ArrayList<zombie.iso.IsoGridSquare> squares = new ArrayList<>();
+        final ArrayList<Handler> handlers = new ArrayList<>();
+        final ArrayList<Handler> tails = new ArrayList<>();
+        // Where the drain is: next square, next handler for it, next tail
+        int sq, h, t;
+        boolean sqOk;
+        // Handler most likely to come next in defer (handlers arrive in the same order for every square)
+        int hint;
+        // Calls held back in this job, and calls run or skipped so far
+        int calls, done;
         int idx;
         float score;
 
-        Bucket(long key, int wx, int wy) {
+        Job(long key, int wx, int wy, zombie.iso.IsoChunk chunk, long queuedAt) {
             this.key = key;
             this.wx = wx;
             this.wy = wy;
+            this.chunk = chunk;
+            this.queuedAt = queuedAt;
         }
 
-        int size() {
-            return squares.size() + tails.size();
+        int remaining() {
+            return Math.max(0, calls - done);
         }
 
-        long headQueuedAt() {
-            Item s = squares.peek();
-            if (s != null) return s.queuedAt;
-            Item t = tails.peek();
-            return t != null ? t.queuedAt : Long.MAX_VALUE;
+        Handler handlerFor(Object closure) {
+            int n = handlers.size();
+            for (int k = 0; k < n; k++) {
+                int i = hint + k;
+                if (i >= n) i -= n;
+                Handler c = handlers.get(i);
+                if (c.closure == closure) {
+                    hint = i + 1 < n ? i + 1 : 0;
+                    return c;
+                }
+            }
+            return null;
         }
     }
 
-    // Game thread only. The list is unordered (swap-remove), each bucket knows its slot.
-    private static final Map<Long, Bucket> byKey = new HashMap<>();
-    private static final ArrayList<Bucket> list = new ArrayList<>();
-    private static final Bucket[] picks = new Bucket[PICK_N];
-    private static int queued;
+    // Game thread only. The list is unordered (swap-remove), each job knows its slot.
+    private static final Map<Long, Job> byKey = new HashMap<>();
+    private static final ArrayList<Job> list = new ArrayList<>();
+    private static final Job[] picks = new Job[PICK_N];
+    // Calls and squares held back right now
+    private static int queued, squaresHeld;
     private static se.krka.kahlua.vm.KahluaThread lastThread;
     private static boolean draining;
     private static int budgetFrame = Integer.MIN_VALUE;
@@ -118,7 +145,8 @@ public final class MapLoadScriptPacer {
     private static int arrivals;
     private static Object lastSquare, countedSquare;
     private static boolean lastSquareHasGenerator;
-    private static int sweepAt;
+    private static int lastDrainFrame = Integer.MIN_VALUE;
+    private static boolean drainEverRan, warnedStale, warnedFull, warnedLoop;
     private static final boolean[] wasInVehicle = new boolean[4];
     private static final boolean[] hasLastPos = new boolean[4];
     private static final float[] lastPosX = new float[4], lastPosY = new float[4];
@@ -141,7 +169,8 @@ public final class MapLoadScriptPacer {
 
     // Since launch, for the profiler report
     public static long deferredCalls, ranLater, dropped, swept, gatedFrames, exitFlushes, ranNearFoot;
-    public static int peakQueue;
+    public static long refusedStale, refusedFull, loopDrains;
+    public static int peakQueue, peakSquares;
 
     private MapLoadScriptPacer() {}
 
@@ -149,27 +178,50 @@ public final class MapLoadScriptPacer {
         return ((long) wx << 32) | (wy & 0xFFFFFFFFL);
     }
 
-    /** From LuaEventPatches.call: true when the call was queued instead of run. */
+    /** From LuaEventPatches.call: true when the call was held back instead of run. */
     static boolean defer(se.krka.kahlua.integration.LuaCaller caller, se.krka.kahlua.vm.KahluaThread thread, Object closure,
                          String event, Object[] params) {
         if (!active || draining || params == null || params.length < 1) return false;
         if (SQUARE_EVENT.equals(event)) {
             if (!(params[0] instanceof zombie.iso.IsoGridSquare sq)) return false;
             if (!inGame() || !isDeferrable(closure) || hasGenerator(sq)) return false;
+            zombie.iso.IsoChunk chunk = sq.chunk;
+            if (chunk == null || !drainAlive()) return false;
             checkThread(thread);
             int wx = sq.getX() >> 3, wy = sq.getY() >> 3;
             long key = keyOf(wx, wy);
-            Bucket b = byKey.get(key);
-            if (b == null) b = addBucket(key, wx, wy);
-            b.squares.add(new Item(caller, thread, closure, sq, System.nanoTime()));
+            Job j = byKey.get(key);
+            if (j != null && j.chunk != chunk) {
+                // Left over from an earlier load of this spot
+                dropJob(j);
+                j = null;
+            }
+            int last = j == null ? -1 : j.squares.size() - 1;
+            boolean newSquare = j == null || j.squares.get(last) != sq;
+            if (newSquare && !roomForSquare()) return false;
+            if (j == null) j = addJob(key, wx, wy, chunk);
+            if (newSquare) {
+                j.squares.add(sq);
+                squaresHeld++;
+                if (squaresHeld > peakSquares) peakSquares = squaresHeld;
+                last = j.squares.size() - 1;
+            }
+            Handler h = j.handlerFor(closure);
+            if (h == null) {
+                j.handlers.add(new Handler(caller, thread, closure, last));
+            } else {
+                h.until = last;
+            }
+            j.calls++;
             noteArrival(sq);
         } else if (CHUNK_EVENT.equals(event)) {
             if (!(params[0] instanceof zombie.iso.IsoChunk ch)) return false;
             if (!inGame() || !isDeferrable(closure)) return false;
-            // Only behind squares still waiting; with none queued it runs now, same order as vanilla
-            Bucket b = byKey.get(keyOf(ch.wx, ch.wy));
-            if (b == null || b.squares.isEmpty() || thread != lastThread) return false;
-            b.tails.add(new Item(caller, thread, closure, ch, System.nanoTime()));
+            // Only behind squares still waiting; with none it runs now, same order as vanilla
+            Job j = byKey.get(keyOf(ch.wx, ch.wy));
+            if (j == null || j.chunk != ch || j.sq >= j.squares.size() || thread != lastThread) return false;
+            j.tails.add(new Handler(caller, thread, closure, 0));
+            j.calls++;
         } else {
             return false;
         }
@@ -177,6 +229,34 @@ public final class MapLoadScriptPacer {
         deferredCalls++;
         if (queued > peakQueue) peakQueue = queued;
         return true;
+    }
+
+    // Draining gone quiet: run handlers straight away and let go of what's held
+    private static boolean drainAlive() {
+        zombie.iso.IsoWorld world = zombie.iso.IsoWorld.instance;
+        if (world == null) return false;
+        int since = world.getFrameNo() - lastDrainFrame;
+        if (drainEverRan && since >= 0 && since <= DRAIN_STALE_FRAMES) return true;
+        refusedStale++;
+        if (queued > 0) {
+            dropped += queued;
+            clear();
+        }
+        if (!warnedStale && drainEverRan) {
+            warnedStale = true;
+            PZOLogger.warn("[MapLoadScriptPacer] not drained for " + since + " frames, mod map-load scripts run straight away until it drains again");
+        }
+        return false;
+    }
+
+    private static boolean roomForSquare() {
+        if (squaresHeld < MAX_SQUARES) return true;
+        refusedFull++;
+        if (!warnedFull) {
+            warnedFull = true;
+            PZOLogger.warn("[MapLoadScriptPacer] " + MAX_SQUARES + " squares held, mod map-load scripts run straight away until it shrinks");
+        }
+        return false;
     }
 
     // defer runs once per handler per square, so the answer is kept for the square in hand
@@ -210,43 +290,65 @@ public final class MapLoadScriptPacer {
         }
     }
 
-    private static Bucket addBucket(long key, int wx, int wy) {
-        Bucket b = new Bucket(key, wx, wy);
-        b.idx = list.size();
-        list.add(b);
-        byKey.put(key, b);
-        return b;
+    private static Job addJob(long key, int wx, int wy, zombie.iso.IsoChunk chunk) {
+        Job j = new Job(key, wx, wy, chunk, System.nanoTime());
+        j.idx = list.size();
+        list.add(j);
+        byKey.put(key, j);
+        return j;
     }
 
-    private static void removeBucket(Bucket b) {
-        if (b.idx < 0) return;
+    private static void removeJob(Job j) {
+        if (j.idx < 0) return;
         int lastIdx = list.size() - 1;
-        Bucket last = list.get(lastIdx);
-        list.set(b.idx, last);
-        last.idx = b.idx;
+        Job last = list.get(lastIdx);
+        list.set(j.idx, last);
+        last.idx = j.idx;
         list.remove(lastIdx);
-        byKey.remove(b.key);
-        b.idx = -1;
+        byKey.remove(j.key);
+        j.idx = -1;
+        squaresHeld = Math.max(0, squaresHeld - (j.squares.size() - j.sq));
     }
 
-    private static void dropBucket(Bucket b) {
-        int n = b.size();
-        queued -= n;
+    private static void dropJob(Job j) {
+        int n = j.remaining();
+        queued = Math.max(0, queued - n);
         dropped += n;
-        b.squares.clear();
-        b.tails.clear();
-        removeBucket(b);
+        removeJob(j);
     }
 
-    private static zombie.iso.IsoChunk loadedChunk(zombie.iso.IsoCell cell, Bucket b) {
-        return cell.getChunkForGridSquare(b.wx * 8, b.wy * 8, 0);
+    private static zombie.iso.IsoChunk loadedChunk(zombie.iso.IsoCell cell, Job j) {
+        return cell.getChunkForGridSquare(j.wx * 8, j.wy * 8, 0);
     }
 
-    /** After each IsoChunkMap.update (LiveProfiler.chunkUpdate). The budget is per frame, shared by all chunk maps. */
+    /**
+     * End of every main loop iteration (EngineThreadGovernor's main thread hook). Drains if the chunk map hook didn't
+     * this world frame, which is every frame with no living player.
+     */
+    static void loopEnd() {
+        if (!active && queued == 0) return;
+        zombie.iso.IsoWorld world = zombie.iso.IsoWorld.instance;
+        if (world == null || world.getFrameNo() == lastDrainFrame) return;
+        if (queued > 0) loopDrains++;
+        try {
+            drain();
+        } catch (Throwable t) {
+            if (!warnedLoop) {
+                warnedLoop = true;
+                PZOLogger.warn("[MapLoadScriptPacer] main loop drain failed: " + t);
+            }
+        }
+    }
+
+    /** After each IsoChunkMap.update (LiveProfiler.chunkUpdate), and from loopEnd. The budget is per frame. */
     static void drain() {
+        // A held handler that makes a chunk map update would land back here
+        if (draining) return;
         zombie.iso.IsoWorld world = zombie.iso.IsoWorld.instance;
         int frame = world != null ? world.getFrameNo() : budgetFrame;
         boolean newFrame = frame != budgetFrame;
+        lastDrainFrame = frame;
+        drainEverRan = true;
         long start = System.nanoTime();
         if (newFrame) {
             budgetFrame = frame;
@@ -272,19 +374,19 @@ public final class MapLoadScriptPacer {
         draining = true;
         try {
             readPlayers(newFrame, cell);
+            if (newFrame) sweep(cell);
             // Before the chunk-burst check: this one is about correctness, not smoothness
             footRing(cell);
-            sweepStep(cell);
             if (queued == 0) return;
 
             long oldest = oldestAge(start);
-            // The frame that loaded a burst of chunks already carries the engine's chunk work. Only a queue that has
+            // The frame that loaded a burst of chunks already carries the engine's chunk work. Only a job that has
             // waited a long time still runs on it.
             if (frame == arrivalFrame && arrivals >= ARRIVAL_GATE && oldest <= AGE_2_NS) {
                 if (newFrame) gatedFrames++;
                 return;
             }
-            // What the frame can spare, with a minimum once the queue has waited
+            // What the frame can spare, with a minimum once a job has waited
             long allowed = budgetNs;
             if (oldest > AGE_2_NS) allowed = Math.max(allowed, BUDGET_NS * 4);
             else if (oldest > AGE_1_NS) allowed = Math.max(allowed, BUDGET_NS);
@@ -294,8 +396,7 @@ public final class MapLoadScriptPacer {
                 int n = pick();
                 if (n == 0) break;
                 for (int i = 0; i < n && !out; i++) {
-                    // A handler of an earlier pick can't queue (draining), but a bucket may already be gone
-                    if (picks[i].idx >= 0) out = drainBucket(cell, picks[i], start, allowed);
+                    if (picks[i].idx >= 0) out = drainJob(cell, picks[i], start, allowed);
                 }
                 for (int i = 0; i < n; i++) picks[i] = null;
             }
@@ -306,42 +407,73 @@ public final class MapLoadScriptPacer {
     }
 
     // Returns true when the budget ran out
-    private static boolean drainBucket(zombie.iso.IsoCell cell, Bucket b, long start, long allowed) {
-        zombie.iso.IsoChunk live = loadedChunk(cell, b);
-        if (live == null) {
-            dropBucket(b);
+    private static boolean drainJob(zombie.iso.IsoCell cell, Job j, long start, long allowed) {
+        zombie.iso.IsoChunk live = loadedChunk(cell, j);
+        if (live == null || live != j.chunk) {
+            dropJob(j);
             return false;
         }
-        while (true) {
+        Object[] params = new Object[1];
+        int nSquares = j.squares.size();
+        while (j.sq < nSquares) {
+            zombie.iso.IsoGridSquare sq = j.squares.get(j.sq);
+            if (j.h == 0) j.sqOk = stillLoaded(cell, sq, live);
+            int nHandlers = j.handlers.size();
+            while (j.h < nHandlers) {
+                Handler h = j.handlers.get(j.h);
+                if (j.sq < h.from || j.sq > h.until) {
+                    j.h++;
+                    continue;
+                }
+                if (allowed != Long.MAX_VALUE && spentNs + (System.nanoTime() - start) >= allowed) return true;
+                j.h++;
+                j.done++;
+                queued = Math.max(0, queued - 1);
+                if (!j.sqOk || h.thread != lastThread) {
+                    dropped++;
+                    continue;
+                }
+                params[0] = sq;
+                run(h, params, SQUARE_EVENT);
+                ranLater++;
+            }
+            j.squares.set(j.sq, null);
+            j.sq++;
+            j.h = 0;
+            squaresHeld = Math.max(0, squaresHeld - 1);
+        }
+        while (j.t < j.tails.size()) {
             if (allowed != Long.MAX_VALUE && spentNs + (System.nanoTime() - start) >= allowed) return true;
-            boolean tail = b.squares.isEmpty();
-            Item it = tail ? b.tails.poll() : b.squares.poll();
-            if (it == null) break;
-            queued--;
-            boolean ok = it.thread == lastThread && (tail ? it.arg == live : stillLoaded(cell, (zombie.iso.IsoGridSquare) it.arg, live));
-            if (!ok) {
+            Handler h = j.tails.get(j.t++);
+            j.done++;
+            queued = Math.max(0, queued - 1);
+            if (h.thread != lastThread) {
                 dropped++;
                 continue;
             }
-            run(it, tail ? CHUNK_EVENT : SQUARE_EVENT);
+            params[0] = live;
+            run(h, params, CHUNK_EVENT);
             ranLater++;
         }
-        removeBucket(b);
+        // Whatever the counts say, this job is finished
+        queued = Math.max(0, queued - j.remaining());
+        j.done = j.calls;
+        removeJob(j);
         return false;
     }
 
-    // The PICK_N best buckets into picks, best first: squared distance to the nearest player's aim point
+    // The PICK_N best jobs into picks, best first: squared distance to the nearest player's aim point
     private static int pick() {
         int count = 0;
         for (int i = 0, size = list.size(); i < size; i++) {
-            Bucket b = list.get(i);
-            float cx = b.wx * 8 + 4, cy = b.wy * 8 + 4;
+            Job j = list.get(i);
+            float cx = j.wx * 8 + 4, cy = j.wy * 8 + 4;
             float d = Float.MAX_VALUE;
             for (int p = 0; p < playerCount; p++) {
                 float dx = aimX[p] - cx, dy = aimY[p] - cy;
                 d = Math.min(d, dx * dx + dy * dy);
             }
-            b.score = d;
+            j.score = d;
             int k;
             if (count < PICK_N) {
                 k = count++;
@@ -354,7 +486,7 @@ public final class MapLoadScriptPacer {
                 picks[k] = picks[k - 1];
                 k--;
             }
-            picks[k] = b;
+            picks[k] = j;
         }
         return count;
     }
@@ -362,10 +494,22 @@ public final class MapLoadScriptPacer {
     private static long oldestAge(long now) {
         long oldestAt = Long.MAX_VALUE;
         for (int i = 0, size = list.size(); i < size; i++) {
-            long t = list.get(i).headQueuedAt();
+            long t = list.get(i).queuedAt;
             if (t < oldestAt) oldestAt = t;
         }
         return oldestAt == Long.MAX_VALUE ? 0 : now - oldestAt;
+    }
+
+    // Jobs are few (one per loaded chunk at most), so every one is checked each frame
+    private static void sweep(zombie.iso.IsoCell cell) {
+        for (int i = list.size() - 1; i >= 0; i--) {
+            if (i >= list.size()) continue;
+            Job j = list.get(i);
+            if (loadedChunk(cell, j) != j.chunk) {
+                swept += j.remaining();
+                dropJob(j);
+            }
+        }
     }
 
     // The frame that just ended. Moves the budget one step: up while frames keep their usual length, down when the
@@ -380,7 +524,7 @@ public final class MapLoadScriptPacer {
         }
         lastFrameNs = frameNs;
         if (floorCount == 0) capNs = readCapNs();
-        // The floor is the frame without my own work, or the queue would raise its own target
+        // The floor is the frame without my own work, or draining would raise its own target
         long own = frameNs - spentNs;
         if (own < floorA) floorA = own;
         if (++floorCount >= FLOOR_FRAMES) {
@@ -470,7 +614,7 @@ public final class MapLoadScriptPacer {
     }
 
     // A late handler near a player on foot can undo what the player just did (items put in a container the handler
-    // then replaces). So on foot nothing stays queued within reach. Every call, not once per frame: in split screen
+    // then replaces). So on foot nothing stays held within reach. Every call, not once per frame: in split screen
     // the second player's chunk map loads after the first drain.
     private static void footRing(zombie.iso.IsoCell cell) {
         for (int p = 0; p < playerCount && queued > 0; p++) {
@@ -478,51 +622,33 @@ public final class MapLoadScriptPacer {
         }
     }
 
-    // Runs every bucket whose chunk comes within the radius, no budget. Returns the calls run.
+    // Runs every job whose chunk comes within the radius, no budget. Returns the calls run.
     private static long flushNear(zombie.iso.IsoCell cell, float px, float py, float radius) {
         float r2 = radius * radius;
         long before = ranLater;
         long t0 = System.nanoTime();
         for (int i = list.size() - 1; i >= 0; i--) {
             if (i >= list.size()) continue;
-            Bucket b = list.get(i);
-            float dx = Math.max(0f, Math.abs(b.wx * 8 + 4 - px) - 4f), dy = Math.max(0f, Math.abs(b.wy * 8 + 4 - py) - 4f);
-            if (dx * dx + dy * dy <= r2) drainBucket(cell, b, t0, Long.MAX_VALUE);
+            Job j = list.get(i);
+            float dx = Math.max(0f, Math.abs(j.wx * 8 + 4 - px) - 4f), dy = Math.max(0f, Math.abs(j.wy * 8 + 4 - py) - 4f);
+            if (dx * dx + dy * dy <= r2) drainJob(cell, j, t0, Long.MAX_VALUE);
         }
         return ranLater - before;
-    }
-
-    // Buckets left behind by a fast drive sit at the far end of a nearest-first queue, holding squares the engine
-    // has already unloaded. A slice per call, walking down the list (removal swaps from the end).
-    private static void sweepStep(zombie.iso.IsoCell cell) {
-        if (list.isEmpty()) return;
-        if (sweepAt <= 0 || sweepAt > list.size()) sweepAt = list.size();
-        int stop = Math.max(0, sweepAt - SWEEP_SLICE);
-        for (int i = sweepAt - 1; i >= stop; i--) {
-            if (i >= list.size()) continue;
-            Bucket b = list.get(i);
-            if (loadedChunk(cell, b) == null) {
-                swept += b.size();
-                dropBucket(b);
-            }
-        }
-        sweepAt = stop;
     }
 
     // The chunk check matters: a pooled square can be loaded again somewhere else while its old entry still waits
     // here, and it would get the event twice
     private static boolean stillLoaded(zombie.iso.IsoCell cell, zombie.iso.IsoGridSquare sq, zombie.iso.IsoChunk live) {
-        if (sq.chunk != live) return false;
+        if (sq == null || sq.chunk != live) return false;
         return cell.getGridSquare(sq.getX(), sq.getY(), sq.getZ()) == sq;
     }
 
-    private static void run(Item it, String event) {
-        Object[] params = {it.arg};
+    private static void run(Handler h, Object[] params, String event) {
         LuaEventPatches.enter(event);
         try {
-            LuaEventPatches.call(it.caller, it.thread, it.closure, params);
+            LuaEventPatches.call(h.caller, h.thread, h.closure, params);
         } catch (Throwable t) {
-            PZOLogger.warn("[MapLoadScriptPacer] queued " + event + " handler failed: " + t);
+            PZOLogger.warn("[MapLoadScriptPacer] held " + event + " handler failed: " + t);
         } finally {
             LuaEventPatches.exit();
         }
@@ -549,7 +675,7 @@ public final class MapLoadScriptPacer {
         return ok;
     }
 
-    // Let Me Drive! queues squares itself behind its own dispatcher; queueing that dispatcher too would do it twice
+    // Let Me Drive! queues squares itself behind its own dispatcher; holding that dispatcher back too would do it twice
     private static boolean isLetMeDrive(String path) {
         return path.contains("/letmedrive/") || path.contains("/3805307651/");
     }
@@ -582,14 +708,15 @@ public final class MapLoadScriptPacer {
         byKey.clear();
         list.clear();
         queued = 0;
-        sweepAt = 0;
+        squaresHeld = 0;
         lastSquare = null;
         countedSquare = null;
         for (int i = 0; i < PICK_N; i++) picks[i] = null;
     }
 
     public static String summary() {
-        return String.format(Locale.ROOT, "Mod map-load scripts spread over frames (%s): %d calls queued, %d run later, %d dropped (square unloaded first, %d of them swept), queue peak %d, %d chunk-load frames skipped, %d vehicle-exit flushes, %d run at once near a player on foot, frame budget now %.2f ms",
-            active ? "on" : "off", deferredCalls, ranLater, dropped, swept, peakQueue, gatedFrames, exitFlushes, ranNearFoot, budgetNs / 1e6);
+        return String.format(Locale.ROOT, "Mod map-load scripts spread over frames (%s): %d calls held back, %d run later, %d dropped (square unloaded first, %d of them swept), peak %d calls / %d squares held, %d chunk-load frames skipped, %d vehicle-exit flushes, %d run at once near a player on foot, %d drains from the main loop, %d run at once (not draining), %d run at once (too many squares held), frame budget now %.2f ms",
+            active ? "on" : "off", deferredCalls, ranLater, dropped, swept, peakQueue, peakSquares, gatedFrames, exitFlushes,
+            ranNearFoot, loopDrains, refusedStale, refusedFull, budgetNs / 1e6);
     }
 }
