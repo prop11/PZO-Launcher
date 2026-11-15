@@ -432,6 +432,8 @@ public class PZOEngineBridge {
             } else if ("JVM_LuaCompileCache".equals(key)) {
                 // Lua files load before the Lua settings do, so this lives in pzo_config.json for next launch
                 PZOConfig.setLuaCompileCacheEnabled(value);
+            } else if ("JVM_RemoteCompatList".equals(key)) {
+                RemoteCompatList.setEnabled(value);
             } else if ("JVM_FastLoad".equals(key)) {
                 PZOConfig.setFastLoadEnabled(value);
             } else if ("JVM_LaptopFastGpu".equals(key)) {

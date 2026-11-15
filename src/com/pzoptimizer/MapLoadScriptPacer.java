@@ -669,15 +669,20 @@ public final class MapLoadScriptPacer {
             String f = file.replace('\\', '/').toLowerCase(Locale.ROOT);
             ok = (f.contains("/mods/") || f.contains("workshop")) && !f.contains("mpoptimiser")
                 && !ModApi.isExemptPath(f) && !ModApi.isExemptPrototype(lc.prototype) && !onExemptList(f)
-                && !isLetMeDrive(f);
+                && !isLetMeDrive(f) && !RemoteCompatList.isMapLoadExempt(f);
         }
         deferrable.put(lc.prototype, ok);
         return ok;
     }
 
     // Let Me Drive! queues squares itself behind its own dispatcher; holding that dispatcher back too would do it twice
+    static final String[] LET_ME_DRIVE_PATHS = {"/letmedrive/", "/3805307651/"};
+
     private static boolean isLetMeDrive(String path) {
-        return path.contains("/letmedrive/") || path.contains("/3805307651/");
+        for (String p : LET_ME_DRIVE_PATHS) {
+            if (path.contains(p)) return true;
+        }
+        return false;
     }
 
     private static boolean onExemptList(String path) {

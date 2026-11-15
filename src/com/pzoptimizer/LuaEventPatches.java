@@ -205,19 +205,24 @@ public final class LuaEventPatches {
     // - Aviation Core (and the UH-1B on top of it) steps helicopter physics and controls from OnTick, so paced ticks
     //   made the controls sluggish above 60 FPS.
     // - Horse Mod drives riding animations per tick; pacing broke them.
+    // - damnlib (KI5 cars) queues a seat Z lift from OnPlayerUpdate, applies it in OnTick and puts it back every tick
+    //   from OnTickEvenPaused. Paced, the lift only lands on some frames, so the seated player hops up and down
+    //   (Viewpoint's first-person eye follows it).
     // - Let Me Drive! replaces the Events tables and registers one dispatcher per event that runs every other mod's
     //   handlers. Pacing that dispatcher would pace all of them as one, the mods above included, and queueing its
     //   LoadGridsquare one would queue every square twice. It does its own spreading, so I leave its dispatchers alone.
     // Workshop IDs cover Workshop installs whatever the folder is called, folder names cover local copies.
-    private static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife",
+    // RemoteCompatList adds more from compat.json on GitHub between releases.
+    static final String[] EXEMPT_MOD_PATHS = {"/reallimbs/", "/projectalife",
         "/3783444342/", "/aviationcore/", "/3409723807/", "/uh-1bhelicopter/",
-        "/3661336777/", "/mods/horse/", "/letmedrive/", "/3805307651/"};
+        "/3661336777/", "/mods/horse/", "/letmedrive/", "/3805307651/",
+        "/3171167894/", "/damnlib"};
 
     private static boolean isExemptMod(String path) {
         for (String p : EXEMPT_MOD_PATHS) {
             if (path.contains(p)) return true;
         }
-        return false;
+        return RemoteCompatList.isPacedExempt(path);
     }
 
     /** True when this call should be skipped to keep the handler at 60 Hz on average. */

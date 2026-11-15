@@ -25,6 +25,8 @@ public final class PZOConfig {
     private static volatile boolean persistentSpriteVbo = true;
     private static volatile boolean depthMapParallel = true;
     private static volatile boolean animImportCache = true;
+    // Extra mod exemptions from compat.json on GitHub (RemoteCompatList)
+    private static volatile boolean remoteCompatList = true;
     // Off only for running the Java engine without the Lua mod on purpose, see LuaModGuard
     private static volatile boolean requireLuaMod = true;
     // Set once the Lua mod has been seen on, or turned on by LuaModGuard, so a player who turns it off is left alone
@@ -74,6 +76,7 @@ public final class PZOConfig {
                 persistentSpriteVbo = !(content.contains("\"persistent_sprite_vbo\":false") || content.contains("\"persistent_sprite_vbo\": false"));
                 depthMapParallel = !(content.contains("\"depth_map_parallel\":false") || content.contains("\"depth_map_parallel\": false"));
                 animImportCache = !(content.contains("\"anim_import_cache\":false") || content.contains("\"anim_import_cache\": false"));
+                remoteCompatList = !(content.contains("\"remote_compat_list\":false") || content.contains("\"remote_compat_list\": false"));
                 requireLuaMod = !(content.contains("\"require_lua_mod\":false") || content.contains("\"require_lua_mod\": false"));
                 luaModAutoEnableDone = content.contains("\"lua_mod_auto_enable_done\":true") || content.contains("\"lua_mod_auto_enable_done\": true");
                 crashWindow = !(content.contains("\"crash_window\":false") || content.contains("\"crash_window\": false"));
@@ -91,11 +94,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"lua_mod_auto_enable_done\":%b,\"crash_window\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"remote_compat_list\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"lua_mod_auto_enable_done\":%b,\"crash_window\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, persistentSpriteVbo, requireLuaMod, luaModAutoEnableDone, crashWindow, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, remoteCompatList, persistentSpriteVbo, requireLuaMod, luaModAutoEnableDone, crashWindow, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -224,6 +227,20 @@ public final class PZOConfig {
         powerShieldEnabled = enabled;
         save();
         PZOLogger.info("[PZO Config] CPU power shield set to: " + enabled + " (applies on next launch)");
+    }
+
+    /** Online mod compatibility list (PZO System tab). Read at launch, before the Lua mod's settings exist. */
+    public static boolean isRemoteCompatListEnabled() {
+        load();
+        return remoteCompatList;
+    }
+
+    public static synchronized void setRemoteCompatListEnabled(boolean enabled) {
+        load();
+        if (remoteCompatList == enabled) return;
+        remoteCompatList = enabled;
+        save();
+        PZOLogger.info("[PZO Config] Online mod compatibility list set to: " + enabled);
     }
 
     /** Lua compile cache. Read at launch, before the Lua mod's settings exist. */

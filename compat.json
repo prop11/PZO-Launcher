@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "_about": "Extra mods PZO leaves alone, on top of the lists built into the jar. Each entry is a piece of the mod's script path: its Workshop ID as /<id>/ and its folder name as /<folder> for local copies. pacedExempt = OnTick, OnPlayerUpdate and OnZombieUpdate run every frame. mapLoadExempt = LoadGridsquare handlers run straight away. The entries below are already built in, so they change nothing; they show the format.",
+  "pacedExempt": [
+    "/3171167894/",
+    "/damnlib",
+    "/reallimbs/",
+    "/3661336777/",
+    "/mods/horse/"
+  ],
+  "mapLoadExempt": [
+    "/3805307651/",
+    "/letmedrive/"
+  ]
+}
