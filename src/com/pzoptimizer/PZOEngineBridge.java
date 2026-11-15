@@ -14,6 +14,14 @@ public class PZOEngineBridge {
     // Lua state that has the globals but not yet the main menu Lua (bound from the LuaManager.init hook)
     private static volatile Object globalsEnv = null;
     private static volatile int cachedRamGb = 0;
+    // Lua pushes every option again on each reload and options apply, so I only log a value when it changes
+    private static final java.util.Map<String, Object> loggedOptions = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void logOptionIfChanged(String kind, String key, Object value) {
+        if (!value.equals(loggedOptions.put(key, value))) {
+            PZOLogger.info("[PZO Bridge] " + kind + ": " + key + " = " + value);
+        }
+    }
 
     public static boolean isEnginePresent() {
         return true;
@@ -441,7 +449,7 @@ public class PZOEngineBridge {
                 // Animations import at boot, before the Lua settings arrive, so this is for next launch
                 PZOConfig.setAnimImportCacheEnabled(value);
             }
-            PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
+            logOptionIfChanged("setJvmOption", key, value);
         } catch (Throwable ignored) {}
     }
 
@@ -464,7 +472,7 @@ public class PZOEngineBridge {
             } else if ("JVM_CompatMode".equals(key)) {
                 PZOConfig.setCompatMode(value == 1 ? "on" : value == 2 ? "off" : "auto");
             }
-            PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
+            logOptionIfChanged("setJvmIntOption", key, value);
         } catch (Throwable ignored) {}
     }
 
