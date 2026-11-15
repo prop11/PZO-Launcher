@@ -14,6 +14,14 @@ public class PZOEngineBridge {
     // Lua state that has the globals but not yet the main menu Lua (bound from the LuaManager.init hook)
     private static volatile Object globalsEnv = null;
     private static volatile int cachedRamGb = 0;
+    // Lua pushes every option again on each reload and options apply, so I only log a value when it changes
+    private static final java.util.Map<String, Object> loggedOptions = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void logOptionIfChanged(String kind, String key, Object value) {
+        if (!value.equals(loggedOptions.put(key, value))) {
+            PZOLogger.info("[PZO Bridge] " + kind + ": " + key + " = " + value);
+        }
+    }
 
     public static boolean isEnginePresent() {
         return true;
@@ -424,6 +432,8 @@ public class PZOEngineBridge {
             } else if ("JVM_LuaCompileCache".equals(key)) {
                 // Lua files load before the Lua settings do, so this lives in pzo_config.json for next launch
                 PZOConfig.setLuaCompileCacheEnabled(value);
+            } else if ("JVM_RemoteCompatList".equals(key)) {
+                RemoteCompatList.setEnabled(value);
             } else if ("JVM_FastLoad".equals(key)) {
                 PZOConfig.setFastLoadEnabled(value);
             } else if ("JVM_LaptopFastGpu".equals(key)) {
@@ -441,7 +451,7 @@ public class PZOEngineBridge {
                 // Animations import at boot, before the Lua settings arrive, so this is for next launch
                 PZOConfig.setAnimImportCacheEnabled(value);
             }
-            PZOLogger.info("[PZO Bridge] setJvmOption: " + key + " = " + value);
+            logOptionIfChanged("setJvmOption", key, value);
         } catch (Throwable ignored) {}
     }
 
@@ -464,7 +474,7 @@ public class PZOEngineBridge {
             } else if ("JVM_CompatMode".equals(key)) {
                 PZOConfig.setCompatMode(value == 1 ? "on" : value == 2 ? "off" : "auto");
             }
-            PZOLogger.info("[PZO Bridge] setJvmIntOption: " + key + " = " + value);
+            logOptionIfChanged("setJvmIntOption", key, value);
         } catch (Throwable ignored) {}
     }
 
@@ -1590,7 +1600,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.1.1\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.2\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1859,7 +1869,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.1.1'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.2'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +
