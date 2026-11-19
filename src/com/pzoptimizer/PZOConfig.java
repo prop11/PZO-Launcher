@@ -25,6 +25,8 @@ public final class PZOConfig {
     private static volatile boolean persistentSpriteVbo = true;
     private static volatile boolean depthMapParallel = true;
     private static volatile boolean animImportCache = true;
+    // Shaders compile from the main menu on, before the Lua settings arrive
+    private static volatile boolean shaderCache = true;
     // Extra mod exemptions from compat.json on GitHub (RemoteCompatList)
     private static volatile boolean remoteCompatList = true;
     // Off only for running the Java engine without the Lua mod on purpose, see LuaModGuard
@@ -76,6 +78,7 @@ public final class PZOConfig {
                 persistentSpriteVbo = !(content.contains("\"persistent_sprite_vbo\":false") || content.contains("\"persistent_sprite_vbo\": false"));
                 depthMapParallel = !(content.contains("\"depth_map_parallel\":false") || content.contains("\"depth_map_parallel\": false"));
                 animImportCache = !(content.contains("\"anim_import_cache\":false") || content.contains("\"anim_import_cache\": false"));
+                shaderCache = !(content.contains("\"shader_cache\":false") || content.contains("\"shader_cache\": false"));
                 remoteCompatList = !(content.contains("\"remote_compat_list\":false") || content.contains("\"remote_compat_list\": false"));
                 requireLuaMod = !(content.contains("\"require_lua_mod\":false") || content.contains("\"require_lua_mod\": false"));
                 luaModAutoEnableDone = content.contains("\"lua_mod_auto_enable_done\":true") || content.contains("\"lua_mod_auto_enable_done\": true");
@@ -94,11 +97,11 @@ public final class PZOConfig {
     public static synchronized void save() {
         try {
             File cfg = getConfigFile();
-            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"remote_compat_list\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"lua_mod_auto_enable_done\":%b,\"crash_window\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
+            String json = String.format("{\"beta_opt_in\":%b,\"ignored_version\":\"%s\",\"isolate_conflicting_fps_mods\":%b,\"multithreading_notice_ack_version\":\"%s\",\"viewpoint_standdown_mode\":\"%s\",\"java_mods_enabled\":%b,\"fsr_enabled\":%b,\"power_shield\":%b,\"lua_compile_cache\":%b,\"fast_load\":%b,\"gpu_pref_written\":%b,\"texture_handoff\":%b,\"depth_map_parallel\":%b,\"anim_import_cache\":%b,\"shader_cache\":%b,\"remote_compat_list\":%b,\"persistent_sprite_vbo\":%b,\"require_lua_mod\":%b,\"lua_mod_auto_enable_done\":%b,\"crash_window\":%b,\"hardware_override\":\"%s\",\"compat_mode\":\"%s\",\"approved_java_mods\":\"%s\",\"blocked_java_mods\":\"%s\"}",
                 betaOptIn, ignoredVersion != null ? ignoredVersion : "", isolateConflictingFpsMods,
                 multithreadingNoticeAckVersion != null ? multithreadingNoticeAckVersion : "",
                 viewpointStanddownMode != null ? viewpointStanddownMode : "AUTO",
-                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, remoteCompatList, persistentSpriteVbo, requireLuaMod, luaModAutoEnableDone, crashWindow, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
+                javaModsEnabled, fsrEnabled, powerShieldEnabled, luaCompileCache, fastLoad, gpuPrefWritten, textureHandoff, depthMapParallel, animImportCache, shaderCache, remoteCompatList, persistentSpriteVbo, requireLuaMod, luaModAutoEnableDone, crashWindow, hardwareOverride.replace("\"", "").replace("\\", ""), compatMode, String.join(",", approvedJavaMods), String.join(",", blockedJavaMods));
             Files.writeString(cfg.toPath(), json);
         } catch (Throwable ignored) {}
     }
@@ -347,6 +350,19 @@ public final class PZOConfig {
         animImportCache = enabled;
         save();
         PZOLogger.info("[PZO Config] Imported animation cache set to: " + enabled + " (applies on next launch)");
+    }
+
+    public static boolean isShaderCacheEnabled() {
+        load();
+        return shaderCache;
+    }
+
+    public static synchronized void setShaderCacheEnabled(boolean enabled) {
+        load();
+        if (shaderCache == enabled) return;
+        shaderCache = enabled;
+        save();
+        PZOLogger.info("[PZO Config] Shader cache set to: " + enabled + " (applies on next launch)");
     }
 
     public static boolean isGpuPrefWritten() {

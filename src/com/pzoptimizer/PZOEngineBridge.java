@@ -450,6 +450,18 @@ public class PZOEngineBridge {
             } else if ("JVM_AnimImportCache".equals(key)) {
                 // Animations import at boot, before the Lua settings arrive, so this is for next launch
                 PZOConfig.setAnimImportCacheEnabled(value);
+            } else if ("JVM_ShaderCache".equals(key)) {
+                // The main menu's shaders compile before the Lua settings arrive, so turning it on waits for next launch
+                ShaderCache.active = value && ShaderCache.active;
+                PZOConfig.setShaderCacheEnabled(value);
+            } else if ("JVM_ModelShadersAhead".equals(key)) {
+                ModelShadersAhead.active = value;
+            } else if ("JVM_FishNoiseCache".equals(key)) {
+                FishNoiseCache.active = value;
+            } else if ("JVM_CullScoreMemo".equals(key)) {
+                CullScoreMemo.active = value;
+            } else if ("JVM_HotPathTrims".equals(key)) {
+                HotPathTrims.active = value;
             }
             logOptionIfChanged("setJvmOption", key, value);
         } catch (Throwable ignored) {}
