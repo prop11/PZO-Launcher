@@ -39,18 +39,26 @@ public final class AsmSupport {
             ClassNode node = new ClassNode();
             new ClassReader(classfile).accept(node, ClassReader.EXPAND_FRAMES);
             int fields = node.fields.size(), methods = node.methods.size(), interfaces = node.interfaces.size();
-            java.util.Set<String> shapeBefore = ZombieBuddyCompat.keepClassShape(node.name) ? shapeOf(node) : null;
-            Map<String, Integer> bodiesBefore = ZombieBuddyCompat.hasTargets(node.name) ? fingerprints(node) : null;
+            boolean zbTargets = ZombieBuddyCompat.hasTargets(node.name);
+            java.util.Set<String> shapeBefore = zbTargets ? shapeOf(node) : null;
+            boolean keepShape = ZombieBuddyCompat.keepClassShape(node.name);
+            Map<String, Integer> bodiesBefore = zbTargets ? fingerprints(node) : null;
             if (!t.apply(node)) {
                 PZOLogger.warn("[AsmSupport] " + what + ": target code not found, class left unchanged");
                 return null;
             }
             if (bodiesBefore != null) {
                 // A ZombieBuddy mod's advice or replacement of one of these methods was written against the stock body
-                String mods = ZombieBuddyCompat.conflict(node.name, changedMethods(bodiesBefore, node));
+                String mods = ZombieBuddyCompat.conflict(node.name, changedMethods(bodiesBefore, node), what);
                 if (mods != null) {
-                    ZombieBuddyCompat.recordStandDown(what, "also patched by " + mods);
-                    return null;
+                    if (REDEFINING.get() != null && !shapeBefore.equals(shapeOf(node))) {
+                        // The mod loaded after this class: a retransform can't take my members back out, so the patch stays
+                        ZombieBuddyCompat.recordStandDown(what + " (kept)", "also patched by " + mods
+                            + ", which loaded after it; it adds members, which can't be removed mid-session");
+                    } else {
+                        ZombieBuddyCompat.recordStandDown(what, "also patched by " + mods);
+                        return null;
+                    }
                 }
             }
             if (hasDuplicateMembers(node)) {
@@ -59,7 +67,7 @@ public final class AsmSupport {
                 PZOLogger.warn("[AsmSupport] " + what + ": class already carries this patch, left as is");
                 return null;
             }
-            if (shapeBefore != null && !shapeBefore.equals(shapeOf(node))) {
+            if (keepShape && shapeBefore != null && !shapeBefore.equals(shapeOf(node))) {
                 ZombieBuddyCompat.recordStandDown(what, "adds or renames members of a class a ZombieBuddy mod patches");
                 return null;
             }

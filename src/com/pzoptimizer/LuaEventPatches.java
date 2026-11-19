@@ -287,6 +287,22 @@ public final class LuaEventPatches {
                             Object[] params) {
         String event = depth > 0 && depth <= eventStack.length ? eventStack[depth - 1] : "?";
 
+        // A loaded ZombieBuddy mod hooks Event.trigger too (Viewpoint; pacing broke its left click, #41): every
+        // callback runs as stock, only the profiler still times it
+        if (ZombieBuddyCompat.eventTriggerShared) {
+            if (LiveProfiler.on) {
+                long t0 = LiveProfiler.luaBegin();
+                try {
+                    caller.protectedCallVoid(thread, closure, params);
+                } finally {
+                    LiveProfiler.luaEnd(closure, event, t0);
+                }
+            } else {
+                caller.protectedCallVoid(thread, closure, params);
+            }
+            return;
+        }
+
         // Mod LoadGridsquare handlers: queued and run after the chunk update under a time budget
         if (MapLoadScriptPacer.defer(caller, thread, closure, event, params)) return;
 

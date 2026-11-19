@@ -54,7 +54,15 @@ public final class ZomboidConfigMigrator {
         "-XX:+UseNUMA",
     };
 
-    // ZGC-only tuning, dropped with ZGC in compatibility mode
+    // Anything that picks a collector. The game picks one per Windows version (G1 on 6.1, ZGC from 10.0.17134), and two
+    // in one launch stop the JVM starting, so every one of them goes and pickGc's choice goes in once at the top level
+    private static final String[] GC_SELECTORS = {"-XX:+UseZGC", "-XX:+UseG1GC", "-XX:+UseShenandoahGC", "-XX:+UseParallelGC",
+        "-XX:+UseSerialGC", "-XX:+UseEpsilonGC"};
+    // Older PZO versions added it with G1; such a small target makes G1 collect far too often
+    private static final String OLD_G1_PAUSE = "-XX:MaxGCPauseMillis=16";
+    static final double SHENANDOAH_MIN_RAM_GB = 15.0; // "16 GB" PCs report a bit under 16
+
+    // ZGC-only tuning; PZO never picks ZGC any more
     private static final String[] ZGC_ONLY_PREFIXES = {"-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZAllocationSpikeTolerance",
         "-XX:ZCollectionInterval", "-XX:+ZUncommit", "-XX:-ZUncommit", "-XX:ZUncommitDelay", "-XX:SoftMaxHeapSize"};
 
@@ -111,6 +119,7 @@ public final class ZomboidConfigMigrator {
             buildTarget(target, jsonFile.getParentFile());
             return !Objects.equals(current.get("mainClass"), target.get("mainClass"))
                 || !Objects.equals(strings(current.get("classpath")), strings(target.get("classpath")))
+                || !Objects.equals(JsonMini.format(osBlocks(current)), JsonMini.format(osBlocks(target)))
                 // JVM arg order doesn't matter, so don't rewrite a hand-edited order
                 || !new LinkedHashSet<>(strings(current.get("vmArgs"))).equals(new LinkedHashSet<>(strings(target.get("vmArgs"))));
         } catch (Throwable t) {
@@ -147,6 +156,90 @@ public final class ZomboidConfigMigrator {
         root.put("mainClass", TARGET_MAIN_CLASS);
         root.put("classpath", targetClasspath(strings(root.get("classpath"))));
         root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir));
+        stripGcFromOsBlocks(root);
+    }
+
+    private static final String[] OS_BLOCKS = {"windows", "linux", "macos", "osx"};
+
+    private static Map<String, Object> osBlocks(Map<String, Object> root) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        for (String k : OS_BLOCKS) {
+            if (root.containsKey(k)) out.put(k, root.get(k));
+        }
+        return out;
+    }
+
+    // The per-OS-version blocks ("windows": {"10.0.17134": {"vmArgs": ["-XX:+UseZGC"]}}) are added to the top-level args
+    // by the launcher, so their collector would clash with the one pickGc puts at the top. A version left with no args
+    // goes, and so does a block left empty: a file with no "windows" block is known to start, empty lists aren't
+    @SuppressWarnings("unchecked")
+    private static void stripGcFromOsBlocks(Map<String, Object> root) {
+        for (String k : OS_BLOCKS) {
+            if (!(root.get(k) instanceof Map)) continue;
+            Map<String, Object> block = (Map<String, Object>) root.get(k);
+            block.entrySet().removeIf(e -> {
+                if (!(e.getValue() instanceof Map)) return false;
+                Map<String, Object> verMap = (Map<String, Object>) e.getValue();
+                if (!(verMap.get("vmArgs") instanceof List)) return false;
+                List<String> kept = new ArrayList<>();
+                for (String a : strings(verMap.get("vmArgs"))) {
+                    if (!isGcArg(a)) kept.add(a);
+                }
+                if (kept.isEmpty()) verMap.remove("vmArgs");
+                else verMap.put("vmArgs", kept);
+                return verMap.isEmpty();
+            });
+            if (block.isEmpty()) root.remove(k);
+        }
+    }
+
+    private static boolean isGcArg(String arg) {
+        for (String g : GC_SELECTORS) {
+            if (arg.equals(g)) return true;
+        }
+        return arg.startsWith("-XX:ShenandoahGCMode=") || arg.equals(OLD_G1_PAUSE) || isZgcOnly(arg);
+    }
+
+    private static volatile List<String> pickedGc;
+
+    /**
+     * G1 below 16 GB of RAM, when the RAM is unknown and in compatibility mode; generational Shenandoah from 16 GB, if
+     * this JVM has it (Java 25+, where generational mode is no longer experimental, and not an Oracle build, which
+     * leaves Shenandoah out). The migrator runs in the game's own JVM, so that's the one the next launch uses.
+     */
+    static List<String> pickGc() {
+        List<String> gc = pickedGc;
+        if (gc != null) return gc;
+        double ram = CompatMode.totalRamGb();
+        String why;
+        if (CompatMode.isActive()) {
+            gc = List.of("-XX:+UseG1GC");
+            why = "compatibility mode";
+        } else if (ram < SHENANDOAH_MIN_RAM_GB) {
+            gc = List.of("-XX:+UseG1GC");
+            why = ram > 0 ? String.format(Locale.ROOT, "%.1f GB RAM", ram) : "RAM unknown";
+        } else if (!hasGenerationalShenandoah()) {
+            gc = List.of("-XX:+UseG1GC");
+            why = "this Java has no generational Shenandoah";
+        } else {
+            gc = List.of("-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational");
+            why = String.format(Locale.ROOT, "%.1f GB RAM", ram);
+        }
+        PZOLogger.info("[ZomboidConfigMigrator] Garbage collector for the next launch: " + String.join(" ", gc) + " (" + why + ")");
+        pickedGc = gc;
+        return gc;
+    }
+
+    private static boolean hasGenerationalShenandoah() {
+        try {
+            if (Runtime.version().feature() < 25) return false;
+            com.sun.management.HotSpotDiagnosticMXBean hs =
+                java.lang.management.ManagementFactory.getPlatformMXBean(com.sun.management.HotSpotDiagnosticMXBean.class);
+            hs.getVMOption("ShenandoahGCMode"); // throws when the VM was built without Shenandoah
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     // ".", then PZOptimEngine.jar, ahead of the game's jar
@@ -232,8 +325,8 @@ public final class ZomboidConfigMigrator {
                 }
                 if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
                 if (compat && tok.equals(PRE_TOUCH)) continue;
-                if (compat && isZgcOnly(tok)) continue;
-                user.add(compat && tok.equals("-XX:+UseZGC") ? "-XX:+UseG1GC" : tok);
+                if (isGcArg(tok)) continue; // pickGc's choice goes in below
+                user.add(tok);
             }
         }
 
@@ -279,6 +372,7 @@ public final class ZomboidConfigMigrator {
             if (!args.contains(pf)) args.add(pf);
         }
         if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
+        args.addAll(pickGc());
         return args;
     }
 

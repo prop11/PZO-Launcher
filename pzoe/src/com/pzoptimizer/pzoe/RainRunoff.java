@@ -670,7 +670,8 @@ public final class RainRunoff {
 
     static String stateText() {
         return "runoff=" + (on ? 1 : 0) + ";runoffEdges=" + edges.size() + ";runoffDrops=" + active.size() + ";runoffWater="
-            + Math.round(runoff * 100);
+            + Math.round(runoff * 100) + ";runoffRain=" + Math.round(rainAtScan * 100) + ";runoffScanned=" + scanned.size()
+            + ";runoffEmitted=" + emitted + ";runoffObservers=" + observerCount + (problem != null ? ";runoffProblem=" + problem : "");
     }
 
     // Bytecode: a call at every return of FBORenderCell.renderRainSplashes(int player, int z)

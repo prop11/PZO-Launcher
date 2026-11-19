@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * B42 launches with ZGC. On 4-8 core CPUs its concurrent threads fight PZO's chunk and simulation workers and cause
- * stutter, so there I switch ProjectZomboid64.json to G1 with low pause targets and leave the cores to the workers.
+ * Launch arg cleanup in ProjectZomboid64.json: drops bad and outdated args and makes sure the PZO agent is in. The
+ * garbage collector is picked by ZomboidConfigMigrator (one place, so the two never fight over the file).
  */
 public final class GCLauncherOptimizer {
 
@@ -36,7 +36,6 @@ public final class GCLauncherOptimizer {
     public static synchronized void tuneLauncherGcIfBeneficial() {
         if (!active) return;
         try {
-            int cores = Runtime.getRuntime().availableProcessors();
             File gameDir = new File(System.getProperty("user.dir", "."));
             File jsonFile = new File(gameDir, JSON_FILENAME);
 
@@ -61,27 +60,6 @@ public final class GCLauncherOptimizer {
             List<?> rawList = (List<?>) vmObj;
             List<String> vmArgs = new ArrayList<>();
             boolean changed = false;
-            double totalRamGb = 16.0;
-            try {
-                java.lang.management.OperatingSystemMXBean osBean = java.lang.management.ManagementFactory.getOperatingSystemMXBean();
-                java.lang.reflect.Method m = null;
-                try {
-                    m = osBean.getClass().getMethod("getTotalMemorySize");
-                } catch (NoSuchMethodException e) {
-                    try {
-                        m = osBean.getClass().getMethod("getTotalPhysicalMemorySize");
-                    } catch (NoSuchMethodException ignored) {}
-                }
-                if (m != null) {
-                    m.setAccessible(true);
-                    Object val = m.invoke(osBean);
-                    if (val instanceof Number) {
-                        totalRamGb = ((Number) val).doubleValue() / (1024.0 * 1024.0 * 1024.0);
-                    }
-                }
-            } catch (Throwable ignored) {}
-
-            boolean wantG1 = cores <= 8 || totalRamGb < 20.0 || CompatMode.isActive();
 
             for (Object item : rawList) {
                 if (item == null) continue;
@@ -102,16 +80,6 @@ public final class GCLauncherOptimizer {
                         }
                     }
                     changed = true;
-                    continue;
-                }
-                if (wantG1 && "-XX:+UseZGC".equals(s)) {
-                    changed = true;
-                    if (!vmArgs.contains("-XX:+UseG1GC")) {
-                        vmArgs.add("-XX:+UseG1GC");
-                    }
-                    if (!vmArgs.contains("-XX:MaxGCPauseMillis=16")) {
-                        vmArgs.add("-XX:MaxGCPauseMillis=16");
-                    }
                     continue;
                 }
                 if (!vmArgs.contains(s)) {
@@ -153,13 +121,6 @@ public final class GCLauncherOptimizer {
                                     verChanged = true;
                                     continue;
                                 }
-                                if (wantG1 && "-XX:+UseZGC".equals(vs)) {
-                                    verChanged = true;
-                                    if (!verArgs.contains("-XX:+UseG1GC")) {
-                                        verArgs.add("-XX:+UseG1GC");
-                                    }
-                                    continue;
-                                }
                                 verArgs.add(vs);
                             }
                             if (verChanged) {
@@ -180,7 +141,7 @@ public final class GCLauncherOptimizer {
                 String formatted = ZomboidConfigMigrator.JsonMini.format(root);
                 Files.writeString(jsonFile.toPath(), formatted, StandardCharsets.UTF_8);
                 tunedApplied = true;
-                PZOLogger.success("[GCLauncherOptimizer] Auto-tuned launcher JVM args (Enforced G1GC on " + String.format("%.1f", totalRamGb) + "GB RAM / " + cores + "-core system)");
+                PZOLogger.success("[GCLauncherOptimizer] Cleaned up launcher JVM args");
             }
         } catch (Throwable t) {
             PZOLogger.info("[GCLauncherOptimizer] GC auto-tune notice: " + t.getMessage());

@@ -46,6 +46,8 @@ public final class BakePass {
     private static volatile int version;
     /** Set when the live passes change; the main thread re-bakes the loaded chunks once. */
     static volatile boolean rebakeWanted;
+    /** A re-bake nobody flipped a card for (new measurements, the season): spread over frames instead. */
+    static volatile boolean rebakeSoon;
     private static final ConcurrentHashMap<String, String> status = new ConcurrentHashMap<>();
 
     // Render thread

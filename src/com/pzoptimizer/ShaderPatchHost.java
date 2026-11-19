@@ -313,15 +313,29 @@ public final class ShaderPatchHost {
 
     // Compiles the patched source on its own and returns the driver's log on failure, null when it compiled. Every
     // unit compiles standalone in this game (ShaderUnit.combineShaderSources is never set).
+    // The test compile doubled every patched compile (the chunk shader is ~100 KB, so a card flip cost two long
+    // compiles on the render thread). Sources this driver already compiled fine are remembered, in memory and in
+    // pzo_shader_ok.txt next to the log, keyed by renderer, driver version and source, so they skip straight to the
+    // game's own compile. Failures are never remembered: they're rare and get tested again.
+    private static final Set<String> compiledOk = ConcurrentHashMap.newKeySet();
+    private static volatile String driverKey;
+    private static java.io.File okFile;
+    private static boolean okLoaded;
+
     private static String testCompile(ShaderUnit unit, String src) {
         try {
             int type = unit.getType() == ShaderUnit.Type.Vert ? 0x8B31 : 0x8B30;
+            String key = verdictKey(type, src);
+            if (key != null && compiledOk.contains(key)) return null;
             int s = org.lwjgl.opengl.GL20.glCreateShader(type);
             if (s == 0) return null;
             try {
                 org.lwjgl.opengl.GL20.glShaderSource(s, src);
                 org.lwjgl.opengl.GL20.glCompileShader(s);
-                if (org.lwjgl.opengl.GL20.glGetShaderi(s, 0x8B81) != 0) return null;
+                if (org.lwjgl.opengl.GL20.glGetShaderi(s, 0x8B81) != 0) {
+                    if (key != null && compiledOk.add(key)) saveVerdict(key);
+                    return null;
+                }
                 String log = org.lwjgl.opengl.GL20.glGetShaderInfoLog(s, 4096);
                 return log == null || log.isEmpty() ? "compile failed" : log;
             } finally {
@@ -329,6 +343,54 @@ public final class ShaderPatchHost {
             }
         } catch (Throwable t) {
             return "test compile threw " + t;
+        }
+    }
+
+    // Render thread (GL context current)
+    private static String verdictKey(int type, String src) {
+        try {
+            if (driverKey == null) {
+                driverKey = org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_RENDERER) + "|"
+                    + org.lwjgl.opengl.GL11.glGetString(org.lwjgl.opengl.GL11.GL_VERSION);
+                loadVerdicts();
+            }
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            md.update(driverKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            md.update((byte) (type & 0xFF));
+            md.update(src.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(md.digest());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void loadVerdicts() {
+        if (okLoaded) return;
+        okLoaded = true;
+        try {
+            okFile = new java.io.File(System.getProperty("user.home"), "Zomboid" + java.io.File.separator + "Lua" + java.io.File.separator + "pzo_shader_ok.txt");
+            if (!okFile.isFile()) return;
+            List<String> lines = java.nio.file.Files.readAllLines(okFile.toPath());
+            // Old entries from other shader versions pile up; start over past a few thousand
+            if (lines.size() > 4000) {
+                java.nio.file.Files.delete(okFile.toPath());
+                return;
+            }
+            for (String l : lines) {
+                String t = l.trim();
+                if (t.length() == 64) compiledOk.add(t);
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[ShaderPatch] couldn't read compile verdicts: " + t);
+        }
+    }
+
+    private static void saveVerdict(String key) {
+        if (okFile == null) return;
+        try {
+            java.nio.file.Files.writeString(okFile.toPath(), key + "\n", java.nio.charset.StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (Throwable ignored) {
         }
     }
 

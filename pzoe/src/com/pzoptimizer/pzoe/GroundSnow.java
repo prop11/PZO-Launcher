@@ -28,6 +28,8 @@ public final class GroundSnow {
 
     // Main thread writes, render thread reads
     static volatile float depth, fresh;
+    // 0..1, how fast it's melting now: the ground round the patches shows wet
+    static volatile float melt;
     // Set by the render thread when the chunk shader asks for ground snow
     static volatile boolean shaderReady;
     // From the card (percent of the normal build-up speed)
@@ -54,6 +56,7 @@ public final class GroundSnow {
         zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
         if (gt == null || cm == null || !active()) {
             lastHours = -1;
+            melt = 0f;
             return;
         }
         double hours = gt.getWorldAgeHours();
@@ -104,6 +107,7 @@ public final class GroundSnow {
             melt += m * 0.2f + m * 0.8f * cm.getDayLightStrength();
         }
         if (!cm.getPrecipitationIsSnow() && intensity > 0f) melt += intensity;
+        GroundSnow.melt = clamp(melt * 0.8f, 0f, 1f);
         if (melt > 0f) {
             d -= h * melt / 7.5f;
             f = Math.max(0f, f - h * melt);
