@@ -655,6 +655,23 @@ public class JavaModLoader {
     private static final Set<String> ENABLED_MOD_IDS = new HashSet<>();
     private static volatile boolean enabledModsParsed = false;
 
+    private static Set<String> menuModIds;
+
+    /**
+     * The main menu's mod list (mods/default.txt) only: what ZombieBuddy loads at startup. Mods named only in a save
+     * or server config load later, if at all; ZombieBuddyCompat sees those as they load.
+     */
+    static synchronized Set<String> getMenuModIds() {
+        if (menuModIds != null) return menuModIds;
+        Set<String> ids = new java.util.HashSet<>();
+        try {
+            File zomboid = new File(System.getProperty("user.home"), "Zomboid");
+            parseModIdsFromFile(new File(zomboid, "mods" + File.separator + "default.txt"), ids);
+        } catch (Throwable ignored) {}
+        menuModIds = ids;
+        return ids;
+    }
+
     static synchronized Set<String> getEnabledModIds() {
         if (enabledModsParsed) return ENABLED_MOD_IDS;
         enabledModsParsed = true;

@@ -364,6 +364,11 @@ public final class WorldRenderScale {
 
     public static void glLinkProgram(int program) {
         GL20C.glLinkProgram(program);
+        programRelinked(program);
+    }
+
+    /** A program got new contents without glLinkProgram (ShaderCache loads a stored binary). */
+    static void programRelinked(int program) {
         if (program >= 0 && program < uniformLocCache.length) {
             uniformLocCache[program] = -2;
             uniformLastSet[program] = -1.0f;

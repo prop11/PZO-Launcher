@@ -14,7 +14,9 @@ public class PZOptimAgent {
     // Every class transformSpecific patches. Another agent (ZombieBuddy and its Java mods) can load any of them before
     // my transformer exists, and a class loaded that early only gets my patch if I retransform it here.
     private static final java.util.Set<String> EARLY_TARGETS = java.util.Set.of(
-        "se.krka.kahlua.j2se.KahluaTableImpl", "zombie.FileGuidTable", "zombie.FliesSound$ChunkLevelData",
+        "se.krka.kahlua.j2se.KahluaTableImpl", "zombie.FileGuidTable", "zombie.ai.StateMachine",
+        "zombie.characters.Stats", "zombie.core.opengl.ShaderProgram", "zombie.core.skinnedmodel.model.Model",
+        "zombie.gameStates.GameLoadingState", "zombie.iso.FishSchoolManager", "zombie.iso.IsoWorld$CompScoreToPlayer", "zombie.FliesSound$ChunkLevelData",
         "zombie.GameProfiler", "zombie.GameWindow", "zombie.Lua.Event", "zombie.Lua.LuaManager",
         "zombie.MovingObjectUpdateScheduler", "zombie.MovingObjectUpdateSchedulerUpdateBucket",
         "zombie.WorldSoundManager", "zombie.buildingRooms.BuildingRoomsEditor", "zombie.characters.IsoGameCharacter",
@@ -127,6 +129,23 @@ public class PZOptimAgent {
         StartupTimer.step("Java mod scan");
     }
 
+    /**
+     * For a class that got loaded in the middle of another class's patch (ASM's frame computation loads it), which the
+     * transformer never sees, so it runs stock. A body-only patch can still go in with a retransform.
+     */
+    public static boolean retransformLate(Class<?> c) {
+        Instrumentation inst = instrumentationInstance;
+        if (inst == null || c == null || !inst.isModifiableClass(c)) return false;
+        try {
+            inst.retransformClasses(c);
+            PZOLogger.info("[PZO Agent] Retransformed late: " + c.getName());
+            return true;
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZO Agent] Late retransform of " + c.getName() + " failed: " + t);
+            return false;
+        }
+    }
+
     public static void agentmain(String agentArgs, Instrumentation inst) {
         premain(agentArgs, inst);
     }
@@ -200,6 +219,7 @@ public class PZOptimAgent {
             if (className != null && classBeingRedefined == null && !className.startsWith("zombie/")
                     && !className.startsWith("com/pzoptimizer/")) {
                 ClassSightings.note(className, loader);
+                ZombieBuddyCompat.noteClassLoad(className);
             }
             AsmSupport.REDEFINING.set(classBeingRedefined);
             byte[] specific;
@@ -315,7 +335,65 @@ public class PZOptimAgent {
                 if (su != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched ShaderUnit: puddle early depth hook installed (GL 4.2 / ARB_conservative_depth)");
                 }
+                byte[] sc = AsmSupport.transform(su != null ? su : classfileBuffer, loader, "ShaderUnit shader cache", ShaderCache::patchShaderUnit);
+                if (sc != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ShaderUnit.compile: shader compile held for the program cache");
+                    return sc;
+                }
                 return su;
+            }
+            if ("zombie/core/opengl/ShaderProgram".equals(className) && classfileBuffer != null) {
+                byte[] sp = AsmSupport.transform(classfileBuffer, loader, "ShaderProgram shader cache", ShaderCache::patchShaderProgram);
+                if (sp != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched ShaderProgram.compile: linked programs kept on disk between launches");
+                }
+                return sp;
+            }
+            if ("zombie/core/skinnedmodel/model/Model".equals(className) && classfileBuffer != null) {
+                byte[] md = AsmSupport.transform(classfileBuffer, loader, "Model.CreateShader made ahead", ModelShadersAhead::patchModel);
+                if (md != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched Model.CreateShader: shaders made ahead are taken without waiting for the render thread");
+                }
+                return md;
+            }
+            if ("zombie/gameStates/GameLoadingState".equals(className) && classfileBuffer != null) {
+                byte[] gl = AsmSupport.transform(classfileBuffer, loader, "GameLoadingState shader bar", n -> {
+                    boolean done = ModelShadersAhead.patchLoadingDone(n);
+                    boolean bar = ShaderCacheBar.patchBeforeEndFrameUI(n, "render", "()V");
+                    return done || bar;
+                });
+                if (gl != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched GameLoadingState: model shaders made ahead once loaded, progress bar armed");
+                }
+                return gl;
+            }
+            if ("zombie/iso/FishSchoolManager".equals(className) && classfileBuffer != null) {
+                byte[] fs = AsmSupport.transform(classfileBuffer, loader, "FishSchoolManager.addSoundNoise", FishNoiseCache::patchFishSchoolManager);
+                if (fs != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched FishSchoolManager.addSoundNoise: fish points a noise scares listed per tile");
+                }
+                return fs;
+            }
+            if ("zombie/iso/IsoWorld$CompScoreToPlayer".equals(className) && classfileBuffer != null) {
+                byte[] cs = AsmSupport.transform(classfileBuffer, loader, "CompScoreToPlayer score memo", CullScoreMemo::patchComparator);
+                if (cs != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoWorld.CompScoreToPlayer: each zombie's cull score worked out once per sort");
+                }
+                return cs;
+            }
+            if ("zombie/characters/Stats".equals(className) && classfileBuffer != null) {
+                byte[] st = AsmSupport.transform(classfileBuffer, loader, "Stats.get no boxing", HotPathTrims::patchStats);
+                if (st != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched Stats.get: no boxed default per read");
+                }
+                return st;
+            }
+            if ("zombie/ai/StateMachine".equals(className) && classfileBuffer != null) {
+                byte[] sm = AsmSupport.transform(classfileBuffer, loader, "StateMachine minimum level loop", HotPathTrims::patchStateMachine);
+                if (sm != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched StateMachine.getMinimumSimulationLevel: no iterator per call");
+                }
+                return sm;
             }
             if ("zombie/iso/sprite/IsoSprite".equals(className) && classfileBuffer != null) {
                 byte[] sp = AsmSupport.transform(classfileBuffer, loader, "IsoSprite translucent bake", TranslucentBake::patchSprite);
@@ -656,6 +734,12 @@ public class PZOptimAgent {
                 if (is != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched IngameState: chunk grid moves timed while the profiler runs");
                 }
+                byte[] bar = AsmSupport.transform(is != null ? is : classfileBuffer, loader, "IngameState shader bar",
+                    n -> ShaderCacheBar.patchBeforeEndFrameUI(n, "renderFrameUI", "()V"));
+                if (bar != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IngameState.renderFrameUI: shader cache progress bar armed");
+                    return bar;
+                }
                 return is;
             }
             if ("zombie/core/textures/TextureIDAssetManager".equals(className) && classfileBuffer != null) {
@@ -863,7 +947,13 @@ public class PZOptimAgent {
                 return classfileBuffer;
             }
             if ("zombie/iso/IsoWorld".equals(className) && classfileBuffer != null) {
-                return patchIsoWorld(classfileBuffer);
+                byte[] iw = patchIsoWorld(classfileBuffer);
+                byte[] cm = AsmSupport.transform(iw != null ? iw : classfileBuffer, loader, "IsoWorld cull score memo", CullScoreMemo::patchSceneCull);
+                if (cm != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoWorld.sceneCullZombies: cull score memo cleared per cull");
+                    return cm;
+                }
+                return iw;
             }
             if ("zombie/core/skinnedmodel/animation/AnimationPlayer".equals(className) && classfileBuffer != null) {
                 byte[] ap = patchAnimationPlayer(classfileBuffer);
@@ -871,7 +961,13 @@ public class PZOptimAgent {
                     AnimationThreadingPatches::patchAnimationPlayer);
                 if (bb != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched AnimationPlayer: zombie bone math queued for the frame workers");
-                    return bb;
+                    ap = bb;
+                }
+                byte[] rb = AsmSupport.transform(ap != null ? ap : classfileBuffer, loader, "AnimationPlayer.isBoneReparented loop",
+                    HotPathTrims::patchAnimationPlayer);
+                if (rb != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched AnimationPlayer.isBoneReparented: plain loop, no lambda per call");
+                    return rb;
                 }
                 return ap;
             }

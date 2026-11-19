@@ -450,6 +450,18 @@ public class PZOEngineBridge {
             } else if ("JVM_AnimImportCache".equals(key)) {
                 // Animations import at boot, before the Lua settings arrive, so this is for next launch
                 PZOConfig.setAnimImportCacheEnabled(value);
+            } else if ("JVM_ShaderCache".equals(key)) {
+                // The main menu's shaders compile before the Lua settings arrive, so turning it on waits for next launch
+                ShaderCache.active = value && ShaderCache.active;
+                PZOConfig.setShaderCacheEnabled(value);
+            } else if ("JVM_ModelShadersAhead".equals(key)) {
+                ModelShadersAhead.active = value;
+            } else if ("JVM_FishNoiseCache".equals(key)) {
+                FishNoiseCache.active = value;
+            } else if ("JVM_CullScoreMemo".equals(key)) {
+                CullScoreMemo.active = value;
+            } else if ("JVM_HotPathTrims".equals(key)) {
+                HotPathTrims.active = value;
             }
             logOptionIfChanged("setJvmOption", key, value);
         } catch (Throwable ignored) {}
@@ -1600,7 +1612,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.2\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.3\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1869,7 +1881,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.2'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.3'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

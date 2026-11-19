@@ -39,6 +39,9 @@ public final class PzoeExtension implements Extension {
         s.add(PUDDLES.replace('/', '.'));
         s.add(PUDDLES_SHADER.replace('/', '.'));
         s.add(WEATHER_SHADER.replace('/', '.'));
+        s.add(GroundSnow.SNOW_RENDER.replace('/', '.'));
+        s.add(Precipitation.WEATHER_FX.replace('/', '.'));
+        s.add(NaturalGround.SPRITE.replace('/', '.'));
         return s;
     }
 
@@ -57,6 +60,12 @@ public final class PzoeExtension implements Extension {
                 "WeatherShader: haze and grade uniforms for patched screen shaders");
             case RENDER_CELL -> logged(AsmSupport.transform(cur, loader, "FBORenderCell roof runoff", RainRunoff::patchCell),
                 "FBORenderCell.renderRainSplashes: roof runoff drops");
+            case GroundSnow.SNOW_RENDER -> logged(AsmSupport.transform(cur, loader, "FBORenderSnow tiles", GroundSnow::patchRenderSnow),
+                "FBORenderSnow.RenderSnow: vanilla snow tiles off while Better Ground Snow draws");
+            case Precipitation.WEATHER_FX -> logged(AsmSupport.transform(cur, loader, "IsoWeatherFX precipitation", Precipitation::patchWeatherFx),
+                "IsoWeatherFX: rain and snow particles replaced by the GPU pass while Better Rain and Snow is on");
+            case NaturalGround.SPRITE -> logged(AsmSupport.transform(cur, loader, "IsoSprite natural ground", NaturalGround::patchSprite),
+                "IsoSprite.startTileDepthShader: Natural Ground uniforms on floor pieces");
             default -> null;
         };
         return own != null ? own : out;
@@ -80,10 +89,32 @@ public final class PzoeExtension implements Extension {
             // Live state of the effects, shown on their settings cards in -debug
             case "chunkEffects":
                 return PixelLight.stateText() + ";" + PuddleSplash.stateText() + ";" + ScreenPass.stateText() + ";"
-                    + GpuTimer.stateText() + ";" + ModelSnow.stateText() + ";" + LightBeams.stateText() + ";" + RainRunoff.stateText() + ";" + FogField.stateText();
+                    + GpuTimer.stateText() + ";" + ModelSnow.stateText() + ";" + LightBeams.stateText() + ";" + RainRunoff.stateText() + ";" + FogField.stateText() + ";" + GroundSnow.stateText() + ";" + Precipitation.stateText() + ";" + NaturalGround.stateText() + ";" + SkyCache.stateText();
+            // Per-Pixel Lighting card: the lighting code is always in the chunk shader, this says whether to use it
+            case "pixelLight":
+                PixelLight.lightWanted = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            // One of the chunk shader's card strengths (index into PZOTune0..2, value)
+            case "tune":
+                if (a instanceof Number i && b instanceof Number v && i.intValue() >= 0 && i.intValue() < PixelLight.tune.length) {
+                    PixelLight.tune[i.intValue()] = v.floatValue();
+                }
+                return Boolean.TRUE;
+            // Texels a square for the world-space sun shadow cache
+            case "skyDetail":
+                SkyCache.detail = a instanceof Number n ? Math.max(2, Math.min(8, n.intValue())) : 8;
+                return Boolean.TRUE;
             // Roof Runoff has no shader to ask for it: its card sends on/off and the amount (percent)
             case "runoff":
                 RainRunoff.configure(Boolean.TRUE.equals(a), b instanceof Number n ? n.doubleValue() : 100.0);
+                return Boolean.TRUE;
+            // Better Ground Snow: build-up speed in percent (the shader itself says the card is on)
+            case "groundSnow":
+                GroundSnow.configure(a instanceof Number n ? n.doubleValue() : 100.0);
+                return Boolean.TRUE;
+            // Better Rain and Snow: on, quality 1-3, amount percent
+            case "precip":
+                Precipitation.configure(Boolean.TRUE.equals(a), b instanceof Number n ? n.intValue() : 2, c instanceof Number m ? m.doubleValue() : 100.0);
                 return Boolean.TRUE;
             // Mods that make those effects stand down: "chunk=A,B;splash=C"
             case "chunkConflicts":
@@ -96,6 +127,7 @@ public final class PzoeExtension implements Extension {
     @Override
     public void commit() {
         BakePass.commit();
+        NaturalGround.commit();
     }
 
     @Override

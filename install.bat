@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.2)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.3)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -521,6 +521,49 @@ function Test-PZOZgcOnlyArg([string]$arg) {
     return $arg -match '^-XX:[+-]?(ZGenerational|ZAllocationSpikeTolerance|ZCollectionInterval|ZUncommit|ZUncommitDelay|SoftMaxHeapSize)\b'
 }
 
+# Anything that picks or tunes a collector. The installer (and PZO's own config check at launch) picks the collector,
+# so these never carry over from the old file. MaxGCPauseMillis=16 came from older PZO versions.
+function Test-PZOGcArg([string]$arg) {
+    return (Get-PZOArgKey $arg) -eq "gc" -or (Test-PZOZgcOnlyArg $arg) -or $arg -match '^-XX:ShenandoahGCMode=' -or $arg -eq "-XX:MaxGCPauseMillis=16"
+}
+
+# Whether the game's own Java starts with generational Shenandoah (Java 25+, and not a build that leaves it out)
+function Test-PZOShenandoah {
+    $java = [System.IO.Path]::Combine($InstallPath, "jre64\bin\java.exe")
+    if (-not (Test-Path -LiteralPath $java -ErrorAction SilentlyContinue)) { return $false }
+    try {
+        $out = [System.IO.Path]::GetTempFileName()
+        $err = [System.IO.Path]::GetTempFileName()
+        $p = Start-Process -FilePath $java -ArgumentList "-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational", "-version" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        Remove-Item -LiteralPath $out, $err -Force -ErrorAction SilentlyContinue
+        return $p.ExitCode -eq 0
+    } catch {
+        return $false
+    }
+}
+
+# Puts exactly one collector into a template: all GC args out of vmArgs and the version blocks, the chosen ones in
+function Set-PZOTemplateGc([string]$TemplateJson, [string[]]$GcArgs) {
+    $tpl = $TemplateJson | ConvertFrom-Json
+    $vm = New-Object System.Collections.ArrayList
+    foreach ($a in @($tpl.vmArgs)) { if (-not (Test-PZOGcArg $a)) { [void]$vm.Add([string]$a) } }
+    foreach ($g in $GcArgs) { [void]$vm.Add($g) }
+    $tpl | Add-Member -NotePropertyName "vmArgs" -NotePropertyValue $vm -Force
+    if ($tpl.PSObject.Properties["windows"]) {
+        $windows = New-Object PSObject
+        foreach ($p in $tpl.windows.PSObject.Properties) {
+            $kept = @(@($p.Value.vmArgs) | Where-Object { -not (Test-PZOGcArg $_) })
+            if ($kept.Count -gt 0) { $windows | Add-Member -NotePropertyName $p.Name -NotePropertyValue ([pscustomobject]@{ vmArgs = $kept }) -Force }
+        }
+        if (@($windows.PSObject.Properties).Count -gt 0) {
+            $tpl | Add-Member -NotePropertyName "windows" -NotePropertyValue $windows -Force
+        } else {
+            $tpl.PSObject.Properties.Remove("windows")
+        }
+    }
+    return (Format-PZOJson $tpl) + "`n"
+}
+
 function Get-PZOHeapMb([string]$arg) {
     if ($arg -notmatch '^-Xm[sx](\d+)([gGmMkK]?)$') { return -1 }
     $n = [double]$Matches[1]
@@ -590,11 +633,12 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
     $oldArgs = @(Split-PZOJoinedArgs $old.vmArgs | Where-Object {
         $_ -notmatch 'java\.awt\.headless|pzo_native64|instrument=PZOptimEngine|UseCompactObjectHeaders' -and
         -not ($zbInLaunchOptions -and $_ -match 'zbNative|ZombieBuddy\.jar') -and
-        -not ($CompatActive -and ($_ -eq "-XX:+AlwaysPreTouch" -or $_ -eq "-XX:+UseZGC" -or (Test-PZOZgcOnlyArg $_)))
+        -not ($CompatActive -and $_ -eq "-XX:+AlwaysPreTouch") -and
+        -not (Test-PZOGcArg $_)
     })
 
-    # ZGC is what the game ships and the template picks it by hardware, so only another collector counts as a choice
-    $userGc = @($oldArgs | Where-Object { (Get-PZOArgKey $_) -eq "gc" -and $_ -ne "-XX:+UseZGC" }) | Select-Object -First 1
+    # The template's collector always wins (PZO's config check at launch would replace any other anyway)
+    $userGc = $null
 
     $merged = New-Object System.Collections.ArrayList
     foreach ($a in @($tpl.vmArgs)) {
@@ -702,6 +746,7 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
         if ($oldBlock) {
             foreach ($arg in @(Split-PZOJoinedArgs $oldBlock.Value.vmArgs)) {
                 if ($arg -match 'pzo_native64|instrument=PZOptimEngine|zbNative|UseCompactObjectHeaders') { continue }
+                if (Test-PZOGcArg $arg) { continue }
                 $key = Get-PZOArgKey $arg
                 if ($key -eq "gc") {
                     if (-not $tplBlock -and -not $CompatActive) { [void]$blockArgs.Add($arg) }
@@ -920,51 +965,22 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         Write-Host "Backed up original $TargetFileName -> $BackupFolder" -ForegroundColor Gray
     }
 
-    # Minimum system RAM required for ZGC (Java 17 without compressed OOPs requires >= 20GB system RAM
-    # to avoid pre-touch virtual memory commit failure and immediate JVM exit on startup).
-    $ZgcMinRamThresholdGB = 20
-
-    $UseG1GC = $true
     $chosenJson = ""
     if ($TotalRamGB -le 5) {
-        Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m | G1GC)" -ForegroundColor Green
-        Write-Host "    [!] Low RAM detected ($TotalRamGB GB): Enforcing G1GC with Compressed OOPs (ZGC disabled to prevent OOM)." -ForegroundColor Cyan
+        Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m)" -ForegroundColor Green
         $chosenJson = $Json5OrLess
-        $UseG1GC = $true
     }
-    elseif ($TotalRamGB -ge 6 -and $TotalRamGB -le 12) {
-        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m | G1GC)" -ForegroundColor Green
-        Write-Host "    [!] RAM ($TotalRamGB GB) is below ZGC safety threshold ($($ZgcMinRamThresholdGB) GB)." -ForegroundColor Yellow
-        Write-Host "    [+] Falling back to G1GC (-XX:+UseG1GC) for launch stability and lower memory overhead." -ForegroundColor Green
+    elseif ($TotalRamGB -le 12) {
+        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m)" -ForegroundColor Green
         $chosenJson = $Json6To12
-        $UseG1GC = $true
     }
-    elseif ($TotalRamGB -ge 13 -and $TotalRamGB -le 20) {
+    elseif ($TotalRamGB -le 20) {
         Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 4096m - 8192m)" -ForegroundColor Green
-        if ($TotalRamGB -lt $ZgcMinRamThresholdGB -or ($FreeRamGB -gt 0 -and $FreeRamGB -lt 10)) {
-            Write-Host "    [!] System RAM ($TotalRamGB GB, Free: $FreeRamGB GB) is below ZGC safety threshold ($($ZgcMinRamThresholdGB) GB)." -ForegroundColor Yellow
-            Write-Host "    [+] Falling back to G1GC (-XX:+UseG1GC) with Compressed OOPs to prevent JVM launch crashes." -ForegroundColor Green
-            $chosenJson = $Json13To20_G1GC
-            $UseG1GC = $true
-        } else {
-            Write-Host "    [+] Adequate RAM detected ($TotalRamGB GB) -> Applying ZGC profile." -ForegroundColor Green
-            $chosenJson = $Json13To20_ZGC
-            $UseG1GC = $false
-        }
+        $chosenJson = $Json13To20_G1GC
     }
     else {
-        # > 20 GB RAM
         Write-Host "Applying profile: > 20 GB RAM (Heap: 8192m - 16384m)" -ForegroundColor Green
-        if ($FreeRamGB -gt 0 -and $FreeRamGB -lt 12) {
-            Write-Host "    [!] Available free RAM is constrained ($FreeRamGB GB free). Falling back to G1GC to prevent PreTouch commit failure." -ForegroundColor Yellow
-            $chosenJson = $JsonAbove20 -replace "-XX:\+UseZGC", "-XX:+UseG1GC"
-            $chosenJson = $chosenJson -replace "-XX:ZAllocationSpikeTolerance=5", "-XX:InitiatingHeapOccupancyPercent=45"
-            $UseG1GC = $true
-        } else {
-            Write-Host "    [+] Abundant RAM detected ($TotalRamGB GB >= $($ZgcMinRamThresholdGB) GB) -> Applying ZGC ultra-low latency profile." -ForegroundColor Green
-            $chosenJson = $JsonAbove20
-            $UseG1GC = $false
-        }
+        $chosenJson = $JsonAbove20
     }
 
     # Compatibility mode: no heap pre-touch (it commits the whole starting heap before the game starts), a 1 GB
@@ -975,10 +991,23 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         $chosenJson = $chosenJson -replace ',\s*"-XX:\+AlwaysPreTouch"', ''
         $chosenJson = $chosenJson -replace '"-XX:\+AlwaysPreTouch",\s*', ''
         $chosenJson = $chosenJson -replace '"-Xms\d+m"', '"-Xms1024m"'
-        $chosenJson = $chosenJson -replace '"-XX:\+UseZGC"', '"-XX:+UseG1GC"'
-        $chosenJson = $chosenJson -replace ',\s*"-XX:ZAllocationSpikeTolerance=\d+"', ''
-        $UseG1GC = $true
     }
+
+    # Same choice as ZomboidConfigMigrator.pickGc: G1 below 16 GB (they report a bit under 16) and in compatibility
+    # mode, generational Shenandoah from 16 GB if the game's Java has it. One collector only: two stop the JVM starting
+    $GcArgs = @("-XX:+UseG1GC")
+    if ($Compat.Active) {
+        Write-Host "    [+] Garbage collector: G1 (compatibility mode)" -ForegroundColor Green
+    } elseif (($TotalRamBytes / 1GB) -lt 15) {
+        Write-Host "    [+] Garbage collector: G1 (under 16 GB RAM)" -ForegroundColor Green
+    } elseif (Test-PZOShenandoah) {
+        $GcArgs = @("-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational")
+        Write-Host "    [+] Garbage collector: generational Shenandoah" -ForegroundColor Green
+    } else {
+        Write-Host "    [+] Garbage collector: G1 (the game's Java has no generational Shenandoah)" -ForegroundColor Green
+    }
+    $UseG1GC = ($GcArgs[0] -eq "-XX:+UseG1GC")
+    $chosenJson = Set-PZOTemplateGc $chosenJson $GcArgs
 
     # If ZombieBuddy is active, preserve -agentlib:zbNative seamlessly in top-level vmArgs alongside the PZO agent
     if ($isZombieBuddyActive -and -not $zbInLaunchOptions -and ($chosenJson -notmatch "zbNative")) {
@@ -1023,7 +1052,7 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
         launch_mode = $LaunchMode
-        version     = "2.2"
+        version     = "2.3"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress

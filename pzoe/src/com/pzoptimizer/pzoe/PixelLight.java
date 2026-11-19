@@ -58,7 +58,7 @@ public final class PixelLight {
     // glValidateProgram right after linking, with every sampler still on unit 0, and a 3D sampler sharing unit 0 with
     // the 2D chunk texture fails it, so the game drops the chunk shader for the rest of the session.
     static final int TILE_COLS = 8, TILE_ROWS = (2 * LEVELS + TILE_COLS - 1) / TILE_COLS;
-    static final int UPLOADS_PER_FRAME = 24, SNOW_ONLY_UPLOADS_PER_FRAME = 6;
+    static final int UPLOADS_PER_FRAME = 24, SNOW_ONLY_UPLOADS_PER_FRAME = 6, STALE_UPLOADS_PER_FRAME = 12;
     static final long DIRTY_LIGHTING = 32L, DIRTY_REDRAW = 1024L;
 
     public static final AtomicLong columnsUploaded = new AtomicLong();
@@ -68,18 +68,32 @@ public final class PixelLight {
     static volatile boolean lightShaderReady, swayShaderReady, atmosShaderReady, snowShaderReady, windowsWanted, sunWanted;
     // Snow on Surfaces only needs the light map while there is snow; without it the card would keep the whole
     // light map pipeline running all year
-    private static boolean snowing;
+    private static boolean snowing, groundSnowWas;
     // Toward the sun in world squares, levels the ray climbs per square, visibility (0 = no sun)
     static volatile float sunX, sunY = 1f, sunRise = 1f, sunVis;
     // Decided on the main thread; atmos = ground fog / light glow, which only reads the light map
     static volatile boolean deferred, sway, atmos;
+    // The Per-Pixel Lighting card (Lua sends it). The lighting code stays in the chunk shader either way, behind
+    // PZOLit, so flipping the card never recompiles anything.
+    static volatile boolean lightWanted;
+    // Card strengths for PZOTune0..2 (Lua sends them on change); uniforms so a slider never recompiles the shader
+    static final float[] tune = new float[12];
+    // Lighting just went off: new bakes are vanilla, but chunks still holding an unlit bake keep their light from
+    // here until the re-bake queue reaches them, so nothing shows fullbright while the world converts
+    static volatile boolean draining;
+    private static long drainEndNs;
+    // Next update uploads every stale column at once (lighting just went on with an out-of-date light map)
+    private static boolean catchUpAll;
     static volatile float fogIntensity, rainIntensity, dayLight, cloudIntensity, snowCover, cloudOffX, cloudOffY, wetness;
     static volatile Thread mainThread;
     // Render thread: inside the FBO of a chunk that's being baked unlit
     static boolean renderBakingUnlit;
 
     // Main thread writes per frame, render thread reads
-    static volatile float windX = 1f, windY = 0f, windStrength, clock;
+    // How much leaf the trees carry this month, 0..1: their sun shadows thin out to bare branches in winter
+    static volatile float leafDensity = 1f;
+    private static final float[] MONTH_LEAF = {0.2f, 0.2f, 0.25f, 0.55f, 0.9f, 1f, 1f, 1f, 0.95f, 0.75f, 0.4f, 0.2f};
+    static volatile float windX = 1f, windY = 0f, windStrength, clock, worldWindX = 1f, worldWindY;
     private static long lastNanos;
     private static int lastFrame = Integer.MIN_VALUE;
 
@@ -92,6 +106,9 @@ public final class PixelLight {
     private static final class PlayerState {
         int grid, ring;
         long[] slotKey;
+        // Slot holds the right chunk but its column is out of date (heights or plant flags newly wanted, or the light
+        // map wasn't followed while nothing read it). Caught up nearest first within a budget.
+        boolean[] stale;
         final Set<IsoChunk> dirty = ConcurrentHashMap.newKeySet();
         int roundRobin;
     }
@@ -104,7 +121,8 @@ public final class PixelLight {
     private static long locCheckedNs;
     private static int locA, locB, locC, locLit, locWind, locTex, locAtmos = -1, locFogWind = -1, locClouds = -1, locSnow = -1, locTrail = -1, locTrailInfo = -1, locWindows = -1,
         locHeight = -1, locSun = -1, locWet = -1, locBend = -1, locTrailMarks = -1, locBeams = -1, locBeamInfo = -1,
-        locFogField = -1, locFogInfo = -1;
+        locFogField = -1, locFogInfo = -1, locGSnow = -1, locGSnow2 = -1, locSky = -1, locSunCache = -1, locSunCacheInfo = -1,
+        locCloudCache = -1, locCloudInfo = -1, locFogCache = -1, locFogCacheInfo = -1, locSnowCache = -1, locSnowCacheInfo = -1, locTune0 = -1, locTune1 = -1, locTune2 = -1;
 
     private PixelLight() {}
 
@@ -121,14 +139,16 @@ public final class PixelLight {
 
     /** Replaces FBORenderLevels.invalidateLevel(z, flags) inside LightingJNI's per-square light update. */
     public static void lightInvalidate(FBORenderLevels renderLevels, int z, long flags) {
-        if (flags == DIRTY_LIGHTING && deferred) {
+        // A chunk still waiting in the re-bake queue may hold a lit bake: let the game re-bake that level now, which
+        // also converts it
+        if (flags == DIRTY_LIGHTING && deferred && !RebakeQueue.contains(renderLevels.getChunk())) {
             lightChangesKept.incrementAndGet();
             PlayerState ps = players[renderLevels.getPlayerIndex()];
             if (ps != null) ps.dirty.add(renderLevels.getChunk());
             return;
         }
         // Without per-pixel lighting the light map still feeds fog and window glow, so it follows light changes too
-        if (flags == DIRTY_LIGHTING && atmos) {
+        if (flags == DIRTY_LIGHTING && (atmos || deferred || draining)) {
             PlayerState ps = players[renderLevels.getPlayerIndex()];
             if (ps != null) ps.dirty.add(renderLevels.getChunk());
         }
@@ -159,7 +179,7 @@ public final class PixelLight {
                 lastFrame = f;
                 globalFrame();
             }
-            if (!(deferred || sway || atmos)) return;
+            if (!(deferred || sway || atmos || draining)) return;
             update(playerIndex);
         } catch (Throwable t) {
             PZOLogger.warn("[PixelLight] frame: " + t);
@@ -168,6 +188,7 @@ public final class PixelLight {
 
     private static void globalFrame() {
         long now = System.nanoTime();
+        flashing = Storm.flashing();
         status(now);
         ModelSnow.frame(now);
         double dt = lastNanos == 0 ? 0 : Math.min(0.1, (now - lastNanos) / 1e9);
@@ -176,41 +197,70 @@ public final class PixelLight {
         float c = clock + (float) dt;
         clock = c > 4096f ? c - 4096f : c;
 
-        boolean wantDeferred = lightShaderReady && !zombie.debug.DebugOptions.instance.fboRenderChunk.combinedFbo.getValue();
+        boolean wantDeferred = lightShaderReady && lightWanted && !zombie.debug.DebugOptions.instance.fboRenderChunk.combinedFbo.getValue();
         boolean wantSway = swayShaderReady && zombie.core.Core.getInstance().getOptionDoWindSpriteEffects();
         if (wantDeferred != deferred) {
+            // The light map stopped following changes while nothing used it: every column goes up again this frame,
+            // before the chunks re-bake unlit
+            if (wantDeferred && !(sway || atmos || draining)) {
+                markStale();
+                catchUpAll = true;
+            }
             deferred = wantDeferred;
+            draining = !wantDeferred;
+            drainEndNs = 0L;
             if (zombie.core.Core.debug) PZOLogger.info("[PixelLight] per-pixel lighting " + (wantDeferred ? "on" : "off") + ", re-baking loaded chunks");
-            invalidateAllChunks(DIRTY_LIGHTING | DIRTY_REDRAW);
-            resetSlots();
+            RebakeQueue.now(DIRTY_LIGHTING | DIRTY_REDRAW);
         }
         if (wantSway != sway) {
             sway = wantSway;
             if (zombie.core.Core.debug) PZOLogger.info("[PixelLight] composite sway " + (wantSway ? "on" : "off") + ", re-baking loaded chunks");
-            FoliageLod.invalidateAllLoaded();
-            resetSlots();
+            RebakeQueue.now(zombie.iso.fboRenderChunk.FBORenderChunk.DIRTY_TREES);
+            // Plant flags ride in the light map
+            markStale();
         }
         if (BakePass.rebakeWanted) {
             BakePass.rebakeWanted = false;
-            invalidateAllChunks(DIRTY_REDRAW);
+            RebakeQueue.now(DIRTY_REDRAW);
+        }
+        if (BakePass.rebakeSoon) {
+            BakePass.rebakeSoon = false;
+            RebakeQueue.addAll(DIRTY_REDRAW);
         }
         if (sunWanted != sunHeightsOn) {
             sunHeightsOn = sunWanted;
             // Every column goes up again with its heights
-            if (sunHeightsOn) resetSlots();
+            if (sunHeightsOn) markStale();
         }
-        if (snowShaderReady) {
-            float sn = zombie.iso.weather.ClimateManager.getInstance().getSnowFracNow();
+        GroundSnow.frame();
+        NaturalGround.frame();
+        leafDensity = MONTH_LEAF[Math.floorMod(zombie.GameTime.getInstance().getMonth(), 12)];
+        if (GroundSnow.active() != groundSnowWas) {
+            groundSnowWas = GroundSnow.active();
+            // Vanilla's snow tiles are baked into the chunks: re-bake so they go (or come back)
+            RebakeQueue.now(DIRTY_REDRAW);
+        }
+        RebakeQueue.drain();
+        if (draining && RebakeQueue.isEmpty()) {
+            // A couple of seconds more for chunks invalidated off screen that bake as they come into view
+            if (drainEndNs == 0L) drainEndNs = now + 2_000_000_000L;
+            else if (now > drainEndNs) draining = false;
+        }
+        if (snowShaderReady || GroundSnow.active()) {
+            zombie.iso.weather.ClimateManager scm = zombie.iso.weather.ClimateManager.getInstance();
+            // Ground snow starts before vanilla's hourly snow shows any, so it counts the moment snow falls
+            float sn = Math.max(scm.getSnowFracNow(), GroundSnow.active() ? GroundSnow.depth : 0f);
+            if (GroundSnow.active() && scm.getPrecipitationIsSnow() && scm.getPrecipitationIntensity() > 0.02f) sn = Math.max(sn, 0.02f);
             // Gap between on and off so a thin, melting cover doesn't flip the light map every frame
             if (sn > 0.01f) snowing = true;
             else if (sn < 0.002f) snowing = false;
         } else {
             snowing = false;
         }
-        boolean wantAtmos = atmosShaderReady || (snowShaderReady && snowing);
+        boolean wantAtmos = atmosShaderReady || ((snowShaderReady || GroundSnow.active()) && snowing);
         if (wantAtmos != atmos) {
             // The light map stopped following changes while nothing used it, so it goes up again from scratch
-            if (wantAtmos && !(deferred || sway)) resetSlots();
+            if (wantAtmos && !(deferred || sway || draining)) markStale();
             atmos = wantAtmos;
             if (zombie.core.Core.debug) PZOLogger.info("[PixelLight] light map effects (fog, glow, clouds, snow...) " + (atmos ? "on" : "off"));
         }
@@ -220,7 +270,8 @@ public final class PixelLight {
             rainIntensity = cm.getRainIntensity();
             dayLight = cm.getDayLightStrength();
             cloudIntensity = cm.getCloudIntensity();
-            snowCover = cm.getSnowFracNow();
+            // Snow on Surfaces follows the ground snow's smooth depth when that card is on
+            snowCover = GroundSnow.active() ? Math.min(1f, GroundSnow.depth) : cm.getSnowFracNow();
             wetness = zombie.iso.IsoPuddles.getInstance().getWetGroundFinalValue();
             // The cloud field drifts with the wind, faster when it blows harder; kept small so float noise stays smooth
             double ca = cm.getWindAngleRadians(), speed = (0.5 + 3.0 * cm.getWindIntensity()) * 0.03 * dt;
@@ -229,6 +280,8 @@ public final class PixelLight {
             float a = cm.getWindAngleRadians();
             // World wind vector to screen: x - y across, (x + y) / 2 down
             float wx = (float) Math.cos(a), wy = (float) Math.sin(a);
+            worldWindX = wx;
+            worldWindY = wy;
             float sx = wx - wy, sy = (wx + wy) * 0.5f;
             float len = (float) Math.sqrt(sx * sx + sy * sy);
             if (len > 1e-4f) {
@@ -237,6 +290,12 @@ public final class PixelLight {
             }
             windStrength = cm.getWindIntensity();
             if (sunHeightsOn) sun(cm);
+            else sunVis = 0f;
+            // Fog drift as the chunk shader had it: screen wind back to the ground, carried with the clock
+            float fwx = windY + 0.5f * windX, fwy = windY - 0.5f * windX, fk = clock * (0.15f + 0.6f * windStrength);
+            float weather = Math.max(fogIntensity, rainIntensity * 0.5f) + 0.12f * (1f - dayLight);
+            SkyCache.frame(sunHeightsOn && sunVis > 0f, sunX, sunY, sunRise, leafDensity, atmos ? cloudIntensity : 0f, cloudOffX, cloudOffY, clock,
+                atmos && weather > 0.001f, fwx * fk, fwy * fk, atmos && GroundSnow.active() && GroundSnow.depth > 0.001f);
             LightBeams.frame();
             FogField.frame();
             // Morning mist (High fog) is real fog for everything that reads the fog amount
@@ -270,31 +329,66 @@ public final class PixelLight {
         sunRise = (float) (Math.tan(Math.max(elev, Math.toRadians(4.0))) / 2.45);
         double deg = Math.toDegrees(elev);
         float rise = (float) Math.max(0.0, Math.min(1.0, (deg - 2.0) / 8.0));
-        sunVis = rise * rise * (3f - 2f * rise) * (1f - 0.85f * Math.max(0f, Math.min(1f, cloudIntensity)));
+        // Overcast or rain/snow means no direct sun at all. A leftover 15% here showed as faint square patches in snow.
+        float clear = 1f - smooth(0.3f, 0.7f, cloudIntensity);
+        float dry = 1f - smooth(0.02f, 0.15f, cm.getPrecipitationIntensity());
+        sunVis = rise * rise * (3f - 2f * rise) * clear * dry;
     }
 
-    private static void resetSlots() {
+    private static float smooth(float a, float b, float x) {
+        float t = Math.max(0f, Math.min(1f, (x - a) / (b - a)));
+        return t * t * (3f - 2f * t);
+    }
+
+    // Render thread: the light map of a player, for passes outside the chunk shader (falling rain and snow)
+    static int lightTexture(int p) {
+        return p >= 0 && p < 4 ? texId[p] : 0;
+    }
+
+    static int lightRing(int p) {
+        return p >= 0 && p < 4 ? texRing[p] : 0;
+    }
+
+    // Main thread reads it to tell SkyCache a player's height map exists; GL ids are just ints
+    static int heightTexture(int p) {
+        return p >= 0 && p < 4 ? heightTex[p] : 0;
+    }
+
+    // Every column goes up again, nearest first within a budget. Slots keep their chunk, so the composite carries on
+    // with the old column meanwhile instead of the whole screen dropping its effects for a frame.
+    private static void markStale() {
         for (PlayerState ps : players) {
-            if (ps == null) continue;
-            if (ps.slotKey != null) java.util.Arrays.fill(ps.slotKey, Long.MIN_VALUE);
-            ps.dirty.clear();
+            if (ps == null || ps.stale == null) continue;
+            java.util.Arrays.fill(ps.stale, true);
         }
     }
 
-    private static void invalidateAllChunks(long flags) {
-        zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
-        if (cell == null) return;
-        for (int p = 0; p < 4; p++) {
-            IsoChunkMap map = cell.getChunkMap(p);
-            if (map == null) continue;
-            int n = IsoChunkMap.chunkGridWidth;
-            for (int y = 0; y < n; y++) {
-                for (int x = 0; x < n; x++) {
-                    IsoChunk c = map.getChunk(x, y);
-                    if (c != null) c.invalidateRenderChunkLevels(flags);
-                }
-            }
-        }
+    /** Main thread: this chunk's column is in the light map and up to date for player p (safe to bake it unlit). */
+    static boolean columnCurrent(int p, IsoChunk c) {
+        PlayerState ps = p >= 0 && p < 4 ? players[p] : null;
+        if (ps == null || ps.slotKey == null || ps.grid <= 0) return true;
+        int slot = Math.floorMod(c.wy, ps.grid) * ps.grid + Math.floorMod(c.wx, ps.grid);
+        return ps.slotKey[slot] == key(c.wx, c.wy) && !ps.stale[slot];
+    }
+
+    // Grid positions of a chunk map ordered by distance from its middle (the player), cached per grid size
+    private static int[] spiral = new int[0];
+    private static int spiralGrid = -1;
+
+    static int[] spiralOrder(int g) {
+        if (g == spiralGrid) return spiral;
+        Integer[] idx = new Integer[g * g];
+        for (int i = 0; i < idx.length; i++) idx[i] = i;
+        float mid = (g - 1) * 0.5f;
+        java.util.Arrays.sort(idx, (a, b) -> {
+            float ax = a % g - mid, ay = a / g - mid, bx = b % g - mid, by = b / g - mid;
+            return Float.compare(ax * ax + ay * ay, bx * bx + by * by);
+        });
+        int[] out = new int[idx.length];
+        for (int i = 0; i < out.length; i++) out[i] = idx[i];
+        spiral = out;
+        spiralGrid = g;
+        return out;
     }
 
     private static long key(int wx, int wy) {
@@ -313,26 +407,40 @@ public final class PixelLight {
             ps.grid = g;
             ps.ring = g * 8;
             ps.slotKey = new long[g * g];
+            ps.stale = new boolean[g * g];
             java.util.Arrays.fill(ps.slotKey, Long.MIN_VALUE);
             ps.dirty.clear();
             SpriteRenderer().drawGeneric(new CreateTexture(p, ps.ring));
         }
-        // New or reloaded chunks go up at once (they're about to be drawn); light changes within a budget
-        for (int y = 0; y < g; y++) {
-            for (int x = 0; x < g; x++) {
-                IsoChunk c = map.getChunk(x, y);
-                if (c == null || c.lightingNeverDone[p]) continue;
-                int slot = Math.floorMod(c.wy, g) * g + Math.floorMod(c.wx, g);
-                long k = key(c.wx, c.wy);
-                if (ps.slotKey[slot] != k) {
-                    upload(p, ps, c, true);
-                    ps.slotKey[slot] = k;
-                    ps.dirty.remove(c);
-                }
+        // New or reloaded chunks go up at once (they're about to be drawn); stale columns and light changes within a
+        // budget, nearest first
+        int[] order = spiralOrder(g);
+        int catchUp = catchUpAll ? Integer.MAX_VALUE : STALE_UPLOADS_PER_FRAME;
+        for (int idx : order) {
+            IsoChunk c = map.getChunk(idx % g, idx / g);
+            if (c == null || c.lightingNeverDone[p]) continue;
+            int slot = Math.floorMod(c.wy, g) * g + Math.floorMod(c.wx, g);
+            long k = key(c.wx, c.wy);
+            if (ps.slotKey[slot] != k) {
+                upload(p, ps, c, true);
+                ps.slotKey[slot] = k;
+                ps.stale[slot] = false;
+                ps.dirty.remove(c);
+            } else if (ps.stale[slot] && catchUp > 0) {
+                upload(p, ps, c, true);
+                ps.stale[slot] = false;
+                ps.dirty.remove(c);
+                catchUp--;
             }
         }
+        if (p == lastPlayerIndex()) catchUpAll = false;
         // Snow alone only tints what it covers by the light, so it can follow light changes more slowly
-        int budget = !deferred && !sway && !atmosShaderReady ? SNOW_ONLY_UPLOADS_PER_FRAME : UPLOADS_PER_FRAME;
+        int budget = !deferred && !draining && !sway && !atmosShaderReady ? SNOW_ONLY_UPLOADS_PER_FRAME : UPLOADS_PER_FRAME;
+        // A lightning flash lights every outdoor square for a moment. The light map can't take all of that in one
+        // frame, so a few columns at a time caught the flash and stayed bright after it: squares lighting up like day
+        // and dropping back. The game's weather shader already flashes the whole screen, so light changes wait in the
+        // dirty set until the flash is over (PZO's bake budget holds lighting re-bakes the same way).
+        if (flashing) budget = 0;
         java.util.Iterator<IsoChunk> it = ps.dirty.iterator();
         while (budget > 0 && it.hasNext()) {
             IsoChunk c = it.next();
@@ -349,6 +457,53 @@ public final class PixelLight {
             IsoChunk c = map.getChunk(i % g, i / g);
             if (c != null && !c.lightingNeverDone[p]) upload(p, ps, c, false);
         }
+    }
+
+    // Main thread, once a frame: a lightning flash is on for some player
+    private static boolean flashing;
+
+    // ThunderStorm's per-player flash state (private in the game), read the way PZO's ChunkBakeBudget does
+    private static final class Storm {
+        private static final java.lang.invoke.VarHandle INFOS, STATE;
+        static {
+            java.lang.invoke.VarHandle infos = null, state = null;
+            try {
+                java.lang.invoke.MethodHandles.Lookup l = java.lang.invoke.MethodHandles.lookup();
+                Class<?> storm = Class.forName("zombie.iso.weather.ThunderStorm");
+                Class<?> info = Class.forName("zombie.iso.weather.ThunderStorm$PlayerLightningInfo");
+                Class<?> stateType = Class.forName("zombie.iso.weather.ThunderStorm$LightningState");
+                infos = java.lang.invoke.MethodHandles.privateLookupIn(storm, l).findVarHandle(storm, "lightningInfos", info.arrayType());
+                state = java.lang.invoke.MethodHandles.privateLookupIn(info, l).findVarHandle(info, "lightningState", stateType);
+            } catch (Throwable t) {
+                PZOLogger.warn("[PixelLight] lightning state not readable, flashes may light squares: " + t);
+            }
+            INFOS = infos;
+            STATE = state;
+        }
+
+        static boolean flashing() {
+            try {
+                if (STATE == null) return false;
+                zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+                Object storm = cm == null ? null : cm.getThunderStorm();
+                if (storm == null) return false;
+                Object[] infos = (Object[]) INFOS.get(storm);
+                if (infos == null) return false;
+                for (Object info : infos) {
+                    if (info != null && ((Enum<?>) STATE.get(info)).ordinal() != 0) return true;
+                }
+            } catch (Throwable ignored) {
+            }
+            return false;
+        }
+    }
+
+    // Highest player index with a chunk map, so a catch-up for everyone ends after the last of them
+    private static int lastPlayerIndex() {
+        zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
+        if (cell == null) return 0;
+        for (int p = 3; p > 0; p--) if (cell.getChunkMap(p) != null && zombie.characters.IsoPlayer.players[p] != null) return p;
+        return 0;
     }
 
     private static zombie.core.SpriteRenderer SpriteRenderer() {
@@ -394,6 +549,7 @@ public final class PixelLight {
                     flags[i] = 0;
                 }
             }
+            if (level >= c.minLevel && level <= c.maxLevel) weld(c, level, p, vals);
             if (windowsWanted && level >= c.minLevel && level <= c.maxLevel) windowFlags(c, level, flags);
         }
         // Below the lowest level that has anything: the floor light of the level above
@@ -429,25 +585,112 @@ public final class PixelLight {
         columnsUploaded.incrementAndGet();
     }
 
+    // Main thread scratch for weld: the level's squares with a 1-square border (10x10), and the unwelded corners
+    private static final IsoGridSquare[] weldSq = new IsoGridSquare[100];
+    private static final int[] weldOrig = new int[64 * 8];
+
+    /**
+     * The game gives every square its own 4 corner lights, and neighbours often disagree on a corner they share
+     * (under a roof edge, next to a lamp's falloff), so each square's light stops at its edge: blocky steps. I average
+     * each shared corner over the squares around it that no wall, window or door frame separates, so light runs
+     * smoothly across open floor and still stops at walls. Squares outside the chunk are read too; both chunks
+     * work out the same average, so chunk borders don't seam.
+     */
+    private static void weld(IsoChunk c, int z, int p, int[] vals) {
+        zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
+        if (cell == null) return;
+        int ox = c.wx * 8, oy = c.wy * 8;
+        for (int yy = 0; yy < 10; yy++) {
+            for (int xx = 0; xx < 10; xx++) {
+                int lx = xx - 1, ly = yy - 1;
+                IsoGridSquare sq = lx >= 0 && lx < 8 && ly >= 0 && ly < 8 ? c.getGridSquare(lx, ly, z) : cell.getGridSquare(ox + lx, oy + ly, z);
+                weldSq[yy * 10 + xx] = sq != null && sq.lighting[p] != null ? sq : null;
+            }
+        }
+        System.arraycopy(vals, 0, weldOrig, 0, 64 * 8);
+        for (int i = 0; i < 64; i++) {
+            int sx = i & 7, sy = i >> 3;
+            IsoGridSquare self = weldSq[(sy + 1) * 10 + sx + 1];
+            if (self == null) continue;
+            for (int k = 0; k < 4; k++) {
+                // Corner order (x,y), (x+1,y), (x+1,y+1), (x,y+1)
+                int dx = k == 1 || k == 2 ? 1 : 0, dy = k >= 2 ? 1 : 0;
+                for (int o = 0; o < 8; o += 4) {
+                    int col = weldOrig[i * 8 + o + k];
+                    int r = col & 0xFF, g = (col >> 8) & 0xFF, b = (col >> 16) & 0xFF, n = 1;
+                    for (int qy = dy - 1; qy <= dy; qy++) {
+                        for (int qx = dx - 1; qx <= dx; qx++) {
+                            if (qx == 0 && qy == 0) continue;
+                            IsoGridSquare nb = weldSq[(sy + 1 + qy) * 10 + sx + 1 + qx];
+                            if (nb == null || !connected(self, sx, sy, qx, qy)) continue;
+                            int vx = dx - qx, vy = dy - qy;
+                            int kc = vy == 0 ? vx : 3 - vx;
+                            int nx = sx + qx, ny = sy + qy;
+                            int v = nx >= 0 && nx < 8 && ny >= 0 && ny < 8 ? weldOrig[(ny * 8 + nx) * 8 + o + kc] : nb.getVertLight(o + kc, p);
+                            r += v & 0xFF;
+                            g += (v >> 8) & 0xFF;
+                            b += (v >> 16) & 0xFF;
+                            n++;
+                        }
+                    }
+                    if (n > 1) vals[i * 8 + o + k] = (col & 0xFF000000) | ((b / n) << 16) | ((g / n) << 8) | (r / n);
+                }
+            }
+        }
+    }
+
+    // Square at offset (qx, qy) from (sx, sy), both in weldSq, reachable without crossing a wall edge
+    private static boolean connected(IsoGridSquare self, int sx, int sy, int qx, int qy) {
+        IsoGridSquare nb = weldSq[(sy + 1 + qy) * 10 + sx + 1 + qx];
+        if (qx == 0 || qy == 0) return !edgeBlocked(self, nb, qx, qy);
+        IsoGridSquare h = weldSq[(sy + 1) * 10 + sx + 1 + qx], v = weldSq[(sy + 1 + qy) * 10 + sx + 1];
+        return (h != null && !edgeBlocked(self, h, qx, 0) && !edgeBlocked(h, nb, 0, qy))
+            || (v != null && !edgeBlocked(self, v, 0, qy) && !edgeBlocked(v, nb, qx, 0));
+    }
+
+    // The square with the larger x owns the west edge between them, larger y the north edge
+    private static boolean edgeBlocked(IsoGridSquare a, IsoGridSquare b, int dx, int dy) {
+        if (dx != 0) return wallEdge(dx > 0 ? b : a, false);
+        return wallEdge(dy > 0 ? b : a, true);
+    }
+
+    private static boolean wallEdge(IsoGridSquare sq, boolean north) {
+        zombie.core.properties.PropertyContainer pr = sq.getProperties();
+        if (pr == null) return false;
+        if (north) return pr.has(zombie.iso.SpriteDetails.IsoFlagType.collideN) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.WindowN)
+            || pr.has(zombie.iso.SpriteDetails.IsoFlagType.DoorWallN) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.doorN);
+        return pr.has(zombie.iso.SpriteDetails.IsoFlagType.collideW) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.WindowW)
+            || pr.has(zombie.iso.SpriteDetails.IsoFlagType.DoorWallW) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.doorW);
+    }
+
     private static final ConcurrentLinkedQueue<ByteBuffer> heightBuffers = new ConcurrentLinkedQueue<>();
-    private static final float[] hContent = new float[64], hOpacity = new float[64], hWallN = new float[64], hWallW = new float[64];
+    private static final float[] hContent = new float[64], hOpacity = new float[64], hWallN = new float[64], hWallW = new float[64],
+        hSeeN = new float[64], hSeeW = new float[64];
+    private static final boolean[] hSnowGround = new boolean[64], hRoad = new boolean[64];
 
     /**
      * Sun shadow heights for a chunk column, one RGBA texel per square, in 1/32 levels above level 0: R = top of what
      * stands on the square (solid things, trees, the floor of upper levels), G = top of a wall on its north edge,
-     * B = on its west edge, A = how much light the content stops (trees let some through). Walls are edges, not
-     * squares, so a shadow starts at the wall line. Below ground nothing casts.
+     * B = on its west edge, A = how much light the content stops (trees let some through; floors are 1, props just
+     * under 1 so the shader rounds their footprint). Walls are edges, not squares, so a shadow starts at the wall line.
+     * G and B keep heights in even steps; an odd value means the edge is see-through (chain-link, railings, hoppable
+     * fences). Below ground nothing casts.
      */
     private static ByteBuffer heights(IsoChunk c) {
         java.util.Arrays.fill(hContent, 0f);
         java.util.Arrays.fill(hOpacity, 1f);
         java.util.Arrays.fill(hWallN, 0f);
         java.util.Arrays.fill(hWallW, 0f);
+        java.util.Arrays.fill(hSeeN, 0f);
+        java.util.Arrays.fill(hSeeW, 0f);
+        java.util.Arrays.fill(hSnowGround, false);
+        java.util.Arrays.fill(hRoad, false);
         int top = Math.min(c.maxLevel, BASE_LEVEL + LEVELS - 1);
         for (int z = Math.max(0, c.minLevel); z <= top; z++) {
             for (int i = 0; i < 64; i++) {
                 IsoGridSquare sq = c.getGridSquare(i & 7, i >> 3, z);
                 if (sq == null) continue;
+                if (z == 0) snowFlags(sq, i);
                 java.util.List<zombie.iso.IsoObject> objects = sq.getObjects();
                 for (int k = 0, n = objects.size(); k < n; k++) {
                     zombie.iso.IsoObject o = objects.get(k);
@@ -463,12 +706,17 @@ public final class PixelLight {
                     }
                     boolean wallSE = o.isWallSE();
                     boolean nw = pr.has(zombie.iso.SpriteDetails.IsoFlagType.WallNW);
-                    if (!wallSE && (o.sprite.cutN || nw)) hWallN[i] = Math.max(hWallN[i], z + 1f);
-                    if (!wallSE && (o.sprite.cutW || nw)) hWallW[i] = Math.max(hWallW[i], z + 1f);
-                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.TallHoppableN)) hWallN[i] = Math.max(hWallN[i], z + 0.9f);
-                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.TallHoppableW)) hWallW[i] = Math.max(hWallW[i], z + 0.9f);
-                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.HoppableN)) hWallN[i] = Math.max(hWallN[i], z + 0.45f);
-                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.HoppableW)) hWallW[i] = Math.max(hWallW[i], z + 0.45f);
+                    // Windows are transparentN/W too, but the wall around them still blocks most of the sun
+                    boolean window = pr.has(zombie.iso.SpriteDetails.IsoFlagType.WindowN) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.WindowW);
+                    boolean seeN = !window && pr.has(zombie.iso.SpriteDetails.IsoFlagType.transparentN);
+                    boolean seeW = !window && pr.has(zombie.iso.SpriteDetails.IsoFlagType.transparentW);
+                    float[] wn = seeN ? hSeeN : hWallN, ww = seeW ? hSeeW : hWallW;
+                    if (!wallSE && (o.sprite.cutN || nw)) wn[i] = Math.max(wn[i], z + 1f);
+                    if (!wallSE && (o.sprite.cutW || nw)) ww[i] = Math.max(ww[i], z + 1f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.TallHoppableN)) hSeeN[i] = Math.max(hSeeN[i], z + 0.9f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.TallHoppableW)) hSeeW[i] = Math.max(hSeeW[i], z + 0.9f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.HoppableN)) hSeeN[i] = Math.max(hSeeN[i], z + 0.45f);
+                    if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.HoppableW)) hSeeW[i] = Math.max(hSeeW[i], z + 0.45f);
                     if (o.sprite.cutN || o.sprite.cutW || nw) continue;
                     float h;
                     float op = 1f;
@@ -481,6 +729,7 @@ public final class PixelLight {
                         continue;
                     } else if (pr.has(zombie.iso.SpriteDetails.IsoFlagType.solid) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.solidtrans)) {
                         h = z + 0.7f;
+                        op = 0.97f;
                     } else if (z == 0 && (pr.has(zombie.iso.SpriteDetails.IsoFlagType.container) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.bed)
                         || pr.has(zombie.iso.SpriteDetails.IsoFlagType.tableN) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.tableW)
                         || pr.has(zombie.iso.SpriteDetails.IsoFlagType.pushable) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.blocksight))) {
@@ -501,13 +750,33 @@ public final class PixelLight {
         if (b == null) b = ByteBuffer.allocateDirect(64 * 4).order(ByteOrder.LITTLE_ENDIAN);
         b.clear();
         for (int i = 0; i < 64; i++) {
-            b.put(h32(hContent[i]));
-            b.put(h32(hWallN[i]));
-            b.put(h32(hWallW[i]));
-            b.put((byte) Math.round(hOpacity[i] * 255f));
+            b.put((byte) ((Math.round(Math.max(0f, Math.min(7.9f, hContent[i])) * 16f) * 2) | (hSnowGround[i] ? 1 : 0)));
+            b.put(wall(hWallN[i], hSeeN[i]));
+            b.put(wall(hWallW[i], hSeeW[i]));
+            b.put((byte) ((Math.round(hOpacity[i] * 127f) * 2) | (hRoad[i] ? 1 : 0)));
         }
         b.flip();
         return b;
+    }
+
+    // Ground level squares that hold snow by vanilla's own rule (outdoors, solid floor, not in a room, not water),
+    // and which of them are road
+    private static void snowFlags(IsoGridSquare sq, int i) {
+        zombie.core.properties.PropertyContainer pr = sq.getProperties();
+        if (pr == null || sq.room != null || !pr.has(zombie.iso.SpriteDetails.IsoFlagType.exterior)
+            || !pr.has(zombie.iso.SpriteDetails.IsoFlagType.solidfloor) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.water)) return;
+        if (sq.getWater() != null && sq.getWater().isValid()) return;
+        hSnowGround[i] = true;
+        zombie.iso.IsoObject floor = sq.getFloor();
+        String name = floor == null || floor.sprite == null ? null : floor.sprite.getName();
+        hRoad[i] = name != null && (name.contains("blends_street") || name.contains("floors_exterior_street"));
+    }
+
+    // Solid wins unless the see-through part stands taller
+    private static byte wall(float solid, float see) {
+        boolean seeThrough = see > solid;
+        int even = Math.max(0, Math.min(127, Math.round(Math.max(solid, see) * 16f))) * 2;
+        return (byte) (even | (seeThrough ? 1 : 0));
     }
 
     private static byte h32(float levels) {
@@ -707,6 +976,14 @@ public final class PixelLight {
 
     /** Start of FBORenderChunk.beginRenderThread(clear). */
     public static void bakeBegin(FBORenderChunk chunk, boolean clear) {
+        // Natural Ground reads a few texture pages back before the floors are drawn
+        if (clear) {
+            try {
+                NaturalGround.renderThread();
+            } catch (Throwable t) {
+                if (drawError == null) drawError = "natural ground: " + t;
+            }
+        }
         Boolean m = modeAtBake.get(chunk);
         boolean unlit = m != null && m;
         renderBakingUnlit = unlit;
@@ -734,7 +1011,7 @@ public final class PixelLight {
 
     /** End of FBORenderChunk.renderInWorldMainThread(): what the composite needs to place this chunk's pixels. */
     public static void composited(FBORenderChunk rc) {
-        if (!(deferred || sway || atmos) || rc.chunk == null || rc.depth == null) return;
+        if (!(deferred || sway || atmos || draining) || rc.chunk == null || rc.depth == null) return;
         try {
             int p = rc.getRenderLevels().getPlayerIndex();
             PlayerState ps = players[p];
@@ -798,8 +1075,28 @@ public final class PixelLight {
                 locBeamInfo = GL20.glGetUniformLocation(prog, "PZOBeamInfo");
                 locFogField = GL20.glGetUniformLocation(prog, "PZOFogField");
                 locFogInfo = GL20.glGetUniformLocation(prog, "PZOFogInfo");
+                locGSnow = GL20.glGetUniformLocation(prog, "PZOGroundSnow");
+                locGSnow2 = GL20.glGetUniformLocation(prog, "PZOGroundSnow2");
+                locSky = GL20.glGetUniformLocation(prog, "PZOSky");
+                locSunCache = GL20.glGetUniformLocation(prog, "PZOSunCache");
+                locSunCacheInfo = GL20.glGetUniformLocation(prog, "PZOSunCacheInfo");
+                locCloudCache = GL20.glGetUniformLocation(prog, "PZOCloudCache");
+                locCloudInfo = GL20.glGetUniformLocation(prog, "PZOCloudInfo");
+                SkyCache.sunWanted = locSunCache >= 0 && locSunCacheInfo >= 0;
+                SkyCache.cloudWanted = locCloudCache >= 0 && locCloudInfo >= 0;
+                locFogCache = GL20.glGetUniformLocation(prog, "PZOFogCache");
+                locFogCacheInfo = GL20.glGetUniformLocation(prog, "PZOFogCacheInfo");
+                SkyCache.fogWanted = locFogCache >= 0 && locFogCacheInfo >= 0;
+                locTune0 = GL20.glGetUniformLocation(prog, "PZOTune0");
+                locTune1 = GL20.glGetUniformLocation(prog, "PZOTune1");
+                locTune2 = GL20.glGetUniformLocation(prog, "PZOTune2");
+                locSnowCache = GL20.glGetUniformLocation(prog, "PZOSnowCache");
+                locSnowCacheInfo = GL20.glGetUniformLocation(prog, "PZOSnowCacheInfo");
+                SkyCache.snowWanted = locSnowCache >= 0 && locSnowCacheInfo >= 0;
+                GroundSnow.shaderReady = locGSnow >= 0;
                 FogField.wanted = locFogField >= 0 && locFogInfo >= 0;
-                sunWanted = locSun >= 0 && locHeight >= 0;
+                // The height map feeds sun shadows and ground snow (its flags and walls for drifts)
+                sunWanted = (locHeight >= 0 && (locSun >= 0 || locGSnow >= 0)) || SkyCache.sunWanted;
                 // Footprints and grass share the trail texture but are asked for apart, so neither card gathers for the other
                 TrailMap.chunkWanted = locTrail >= 0 && locTrailMarks >= 0;
                 TrailMap.grassWanted = locTrail >= 0 && locBend >= 0;
@@ -815,6 +1112,10 @@ public final class PixelLight {
                 for (float[] s : sent) java.util.Arrays.fill(s, Float.NaN);
             }
             if (locC < 0) return;
+            float[] k = tune;
+            u4(S_TUNE0, locTune0, k[0], k[1], k[2], k[3]);
+            u4(S_TUNE1, locTune1, k[4], k[5], k[6], k[7]);
+            u4(S_TUNE2, locTune2, k[8], k[9], k[10], k[11]);
             // Every draw, never cached: the game re-assigns sampler units when it rebuilds a program, which can keep
             // its id, and the light sampler has to stay on unit 7, away from DIFFUSE and DEPTH
             if (locTex >= 0) GL20.glUniform1i(locTex, 7);
@@ -834,7 +1135,12 @@ public final class PixelLight {
                 u4(S_LIT, locLit, 0f, 0f, 0f, 0f);
                 u4(S_ATMOS, locAtmos, 0f, 0f, 0f, 0f);
                 u4(S_SNOW, locSnow, 0f, 0f, 0f, 0f);
+                u4(S_GSNOW, locGSnow, 0f, 0f, 0f, 0f);
                 u4(S_SUN, locSun, 0f, 0f, 0f, 0f);
+                u4(S_SUNCACHE, locSunCacheInfo, 1f, 1f, 0f, SkyCache.LEVELS);
+                u4(S_CLOUDCACHE, locCloudInfo, 1f, 1f, 0f, 0f);
+                u4(S_FOGCACHE, locFogCacheInfo, 1f, 1f, 0f, 0f);
+                u4(S_SNOWCACHE, locSnowCacheInfo, 1f, 0f, 0f, 0f);
                 u4(S_BEND, locBend, 0f, 0f, 0f, 0f);
                 LightBeams.upload(locBeams, locBeamInfo, false, 0f, 0f, 0f, 0f, 0f);
                 return;
@@ -846,22 +1152,63 @@ public final class PixelLight {
             u4(S_A, locA, info[0], info[1], info[2], info[3]);
             u4(S_B, locB, info[4], info[5], info[6], 0f);
             u4(S_C, locC, info[8], BASE_LEVEL, LEVELS, 1f);
-            u4(S_LIT, locLit, deferred && Boolean.TRUE.equals(unlitByDepth.get(texd.tex1)) ? 1f : 0f, 0f, 0f, 0f);
+            u4(S_LIT, locLit, (deferred || draining) && Boolean.TRUE.equals(unlitByDepth.get(texd.tex1)) ? 1f : 0f, 0f, 0f, 0f);
             u4(S_WIND, locWind, windX, windY, sway ? windStrength : 0f, clock);
             u4(S_ATMOS, locAtmos, atmos ? fogIntensity : 0f, rainIntensity, dayLight, atmos ? 1f : 0f);
             u4(S_FOGWIND, locFogWind, windX, windY, windStrength, clock);
             u4(S_CLOUDS, locClouds, atmos ? cloudIntensity : 0f, dayLight, cloudOffX, cloudOffY);
             u4(S_SNOW, locSnow, atmos ? snowCover : 0f, 0f, 0f, 0f);
-            if (locSun >= 0) {
-                boolean hOk = locHeight >= 0 && heightTex[p] != 0 && sunHeightsOn;
-                if (hOk) {
-                    GL13.glActiveTexture(GL13.GL_TEXTURE4);
-                    GL11.glBindTexture(GL11.GL_TEXTURE_2D, heightTex[p]);
-                    GL13.glActiveTexture(GL13.GL_TEXTURE0);
-                    GL20.glUniform1i(locHeight, 4);
-                }
-                u4(S_SUN, locSun, sunX, sunY, sunRise, hOk && atmos ? sunVis : 0f);
+            boolean hOk = (locHeight >= 0 || SkyCache.sunWanted) && heightTex[p] != 0 && sunHeightsOn;
+            if (hOk && locHeight >= 0) {
+                GL13.glActiveTexture(GL13.GL_TEXTURE4);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, heightTex[p]);
+                GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                GL20.glUniform1i(locHeight, 4);
             }
+            if (locSun >= 0) u4(S_SUN, locSun, sunX, sunY, sunRise, hOk && atmos ? sunVis : 0f);
+            if (locSunCacheInfo >= 0) {
+                int st = SkyCache.sunTexture(p);
+                GL13.glActiveTexture(GL13.GL_TEXTURE10);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, st);
+                GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                if (locSunCache >= 0) GL20.glUniform1i(locSunCache, 10);
+                boolean sOk = st != 0 && SkyCache.sunRing(p) == (int) info[8];
+                u4(S_SUNCACHE, locSunCacheInfo, info[8], SkyCache.sunDetail(p), sOk ? 1f : 0f, SkyCache.LEVELS);
+            }
+            if (locCloudInfo >= 0) {
+                int ct = SkyCache.cloudTexture(p);
+                GL13.glActiveTexture(GL13.GL_TEXTURE11);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, ct);
+                GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                if (locCloudCache >= 0) GL20.glUniform1i(locCloudCache, 11);
+                u4(S_CLOUDCACHE, locCloudInfo, info[8], 1f, ct != 0 ? 1f : 0f, 0f);
+            }
+            if (locFogCacheInfo >= 0) {
+                int ft = SkyCache.fogTexture(p);
+                GL13.glActiveTexture(GL13.GL_TEXTURE12);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, ft);
+                GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                if (locFogCache >= 0) GL20.glUniform1i(locFogCache, 12);
+                boolean fOk = ft != 0 && SkyCache.fogRing(p) == (int) info[8];
+                u4(S_FOGCACHE, locFogCacheInfo, info[8], SkyCache.FOG_LAYER_TOP, fOk ? 1f : 0f, 0f);
+            }
+            if (locSnowCacheInfo >= 0) {
+                int nt = SkyCache.snowTexture(p);
+                GL13.glActiveTexture(GL13.GL_TEXTURE13);
+                GL11.glBindTexture(GL11.GL_TEXTURE_2D, nt);
+                GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                if (locSnowCache >= 0) GL20.glUniform1i(locSnowCache, 13);
+                boolean nOk = nt != 0 && SkyCache.snowRing(p) == (int) info[8];
+                u4(S_SNOWCACHE, locSnowCacheInfo, info[8], 0f, nOk ? 1f : 0f, 0f);
+            }
+            if (locGSnow >= 0) {
+                // No height map yet means no flags to say where snow lies: draw none rather than snow everywhere
+                u4(S_GSNOW, locGSnow, hOk && atmos ? GroundSnow.depth : 0f, GroundSnow.fresh, worldWindX * windStrength, worldWindY * windStrength);
+                // zw: toward the sun on the ground, scaled by how much direct sun there is (0 overcast or at night)
+                float vis = sunHeightsOn ? sunVis : 0f;
+                u4(S_GSNOW2, locGSnow2, clock, dayLight, sunX * vis, sunY * vis);
+            }
+            u4(S_SKY, locSky, clock, leafDensity, GroundSnow.melt, dayLight);
             u4(S_WET, locWet, atmos ? wetness : 0f, dayLight, rainIntensity, atmos ? 1f : 0f);
             u4(S_MARKS, locTrailMarks, 1f, 0f, 0f, 0f);
             u4(S_BEND, locBend, sway ? 1f : 0f, 0f, 0f, 0f);
@@ -883,8 +1230,9 @@ public final class PixelLight {
 
     // Last values sent per uniform; most stay the same from one chunk draw to the next (about 100 draws a frame)
     private static final int S_A = 0, S_B = 1, S_C = 2, S_LIT = 3, S_WIND = 4, S_ATMOS = 5, S_FOGWIND = 6, S_CLOUDS = 7, S_SNOW = 8,
-        S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12, S_BEND = 13, S_MARKS = 14, S_FOG = 15;
-    private static final float[][] sent = new float[16][4];
+        S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12, S_BEND = 13, S_MARKS = 14, S_FOG = 15, S_GSNOW = 16, S_GSNOW2 = 17,
+        S_SKY = 18, S_SUNCACHE = 19, S_CLOUDCACHE = 20, S_FOGCACHE = 21, S_SNOWCACHE = 22, S_TUNE0 = 23, S_TUNE1 = 24, S_TUNE2 = 25;
+    private static final float[][] sent = new float[26][4];
 
     // PZOLit is a float: only x goes to the GPU for it
     private static void u4(int slot, int loc, float a, float b, float c, float d) {
@@ -901,7 +1249,7 @@ public final class PixelLight {
 
     /** key=value pairs for PZOApi.getChunkEffects(), so a settings card can say what's really running. */
     static String stateText() {
-        return "lighting=" + (deferred ? 1 : 0) + ";lightShader=" + (lightShaderReady ? 1 : 0) + ";sway=" + (sway ? 1 : 0)
+        return RebakeQueue.stateText() + ";lighting=" + (deferred ? 1 : 0) + ";draining=" + (draining ? 1 : 0) + ";lightShader=" + (lightShaderReady ? 1 : 0) + ";sway=" + (sway ? 1 : 0)
             + ";swayShader=" + (swayShaderReady ? 1 : 0) + ";fog=" + (atmos ? 1 : 0) + ";columns=" + columnsUploaded.get()
             + ";kept=" + lightChangesKept.get() + ";draws=" + chunkDraws + ";litDraws=" + chunkDrawsValid
             + ";locLit=" + locLit + ";locWind=" + locWind + ";locC=" + locC + ";drawError=" + (drawError != null ? 1 : 0);
@@ -952,6 +1300,12 @@ public final class PixelLight {
             + ", sway " + (sway ? "on" : "off") + ", fog/glow " + (atmos ? "on" : "off")
             + ", columns uploaded " + columnsUploaded.get() + ", light changes kept from re-baking " + lightChangesKept.get()
             + (drawError != null ? ", draw error: " + drawError : ""));
+        // What the weather effects are fed, so "fog / beams / runoff do nothing" can be told apart from a broken pass
+        float weather = Math.max(fogIntensity, rainIntensity * 0.5f) + 0.12f * (1f - dayLight);
+        PZOLogger.info(String.format(java.util.Locale.ROOT,
+            "[PZOE fx] fog %.2f rain %.2f daylight %.2f clouds %.2f sun %.2f -> fog weather %.2f; tune fog density %.2f height %.2f glow %.2f beams %.2f haze %.2f; %s; %s; %s; %s; rebake %s",
+            fogIntensity, rainIntensity, dayLight, cloudIntensity, sunVis, weather, tune[4], tune[5], tune[6], tune[9], tune[10], FogField.stateText(),
+            LightBeams.stateText(), RainRunoff.stateText(), SkyCache.stateText(), RebakeQueue.stateText()));
     }
 
     // Bytecode

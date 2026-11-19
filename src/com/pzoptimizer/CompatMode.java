@@ -1,8 +1,6 @@
 package com.pzoptimizer;
 
 import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -111,18 +109,17 @@ public final class CompatMode {
         return PZOConfig.getCompatMode();
     }
 
+    /**
+     * Physical RAM in GB, or -1 if unknown. Through the exported com.sun.management interface: reflection on the
+     * implementation class (com.sun.management.internal.OperatingSystemImpl) throws InaccessibleObjectException on the
+     * game's Java 25, which left this at -1 on every PC.
+     */
     static double totalRamGb() {
         try {
-            OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
-            Method m;
-            try {
-                m = os.getClass().getMethod("getTotalMemorySize");
-            } catch (NoSuchMethodException e) {
-                m = os.getClass().getMethod("getTotalPhysicalMemorySize");
+            if (ManagementFactory.getOperatingSystemMXBean() instanceof com.sun.management.OperatingSystemMXBean os) {
+                long bytes = os.getTotalMemorySize();
+                if (bytes > 0) return bytes / (1024.0 * 1024.0 * 1024.0);
             }
-            m.setAccessible(true);
-            Object v = m.invoke(os);
-            if (v instanceof Number n) return n.longValue() / (1024.0 * 1024.0 * 1024.0);
         } catch (Throwable ignored) {}
         return -1;
     }

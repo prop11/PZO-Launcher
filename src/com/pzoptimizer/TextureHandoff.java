@@ -15,6 +15,8 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
  *   on the frame states with no timeout), so a slow loading screen also means slow uploads. I give that wait a 2 ms
  *   timeout so the queue gets flushed as work comes in.
  * Pixels, upload order and the textures themselves don't change.
+ *
+ * In game the vanilla 50 MB wait stays, except it no longer waits forever when the pixels never drain (see waitInGame).
  */
 public final class TextureHandoff {
 
@@ -47,15 +49,87 @@ public final class TextureHandoff {
 
     /** Prepended to TextureIDAssetManager.waitFileTask; true means I handled it and vanilla is skipped. */
     public static boolean waitFileTask(Object manager) {
-        if (!active || !loading()) return false;
-        while (zombie.core.utils.DirectBufferAllocator.getBytesAllocated() > LOAD_LIMIT) {
+        if (active && loading()) {
+            while (zombie.core.utils.DirectBufferAllocator.getBytesAllocated() > LOAD_LIMIT) {
+                try {
+                    Thread.sleep(2L);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+            return true;
+        }
+        waitInGame();
+        return true;
+    }
+
+    private static final long STALL_NS = 2_000_000_000L;
+    private static volatile boolean stallLogged;
+    private static final java.util.concurrent.atomic.AtomicLong stallsSkipped = new java.util.concurrent.atomic.AtomicLong();
+
+    // Vanilla's 50 MB wait, but it gives up once the total stops dropping for 2 s. Vanilla waits forever, so anything
+    // holding over 50 MB of pixels (issue #75, after world map use) froze every texture load and hung quit on
+    // ImagePyramid.destroy. Below the cap this is the same single getBytesAllocated call vanilla makes.
+    private static void waitInGame() {
+        long bytes = zombie.core.utils.DirectBufferAllocator.getBytesAllocated();
+        if (bytes <= VANILLA_LIMIT) return;
+        long lowest = bytes;
+        long since = System.nanoTime();
+        while (bytes > VANILLA_LIMIT) {
             try {
-                Thread.sleep(2L);
+                Thread.sleep(20L);
             } catch (InterruptedException e) {
-                break;
+                return;
+            }
+            bytes = zombie.core.utils.DirectBufferAllocator.getBytesAllocated();
+            if (bytes < lowest) {
+                lowest = bytes;
+                since = System.nanoTime();
+            } else if (System.nanoTime() - since > STALL_NS) {
+                onStall(bytes);
+                return;
             }
         }
-        return true;
+    }
+
+    private static void onStall(long bytes) {
+        long n = stallsSkipped.incrementAndGet();
+        if (stallLogged) return;
+        stallLogged = true;
+        PZOLogger.warn("[TextureHandoff] Texture loads were stuck behind " + (bytes >> 20)
+            + " MB of undrained pixel buffers (vanilla cap 50 MB); letting loads through. Live buffers: " + liveBuffers()
+            + " (stall " + n + ", later ones not logged)");
+    }
+
+    // Size histogram of DirectBufferAllocator's live buffers, to see who holds them
+    private static String liveBuffers() {
+        try {
+            Class<?> c = zombie.core.utils.DirectBufferAllocator.class;
+            java.lang.reflect.Field lockField = c.getDeclaredField("LOCK");
+            java.lang.reflect.Field allField = c.getDeclaredField("ALL");
+            lockField.setAccessible(true);
+            allField.setAccessible(true);
+            java.util.TreeMap<Integer, Integer> sizes = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+            synchronized (lockField.get(null)) {
+                for (Object o : (java.util.List<?>) allField.get(null)) {
+                    zombie.core.utils.WrappedBuffer w = (zombie.core.utils.WrappedBuffer) o;
+                    if (w != null && !w.isDisposed()) sizes.merge(w.capacity(), 1, Integer::sum);
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            int shown = 0;
+            for (java.util.Map.Entry<Integer, Integer> e : sizes.entrySet()) {
+                if (shown++ == 12) {
+                    sb.append(", ...");
+                    break;
+                }
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(e.getValue()).append(" x ").append(e.getKey() >> 10).append(" KB");
+            }
+            return sb.length() == 0 ? "none" : sb.toString();
+        } catch (Throwable t) {
+            return "unavailable (" + t + ")";
+        }
     }
 
     /** Replaces states.wait() in SpriteRenderer.waitForReadyState (the caller holds the monitor). */
