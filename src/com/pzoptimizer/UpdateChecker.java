@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 
 /** Update checks. Stable reads releases/latest, beta/unstable reads the whole release list. */
 public class UpdateChecker {
-    public static final String CURRENT_VERSION = "2.3";
+    public static final String CURRENT_VERSION = "2.3.1";
     // Every OS stays on this release's native binaries (Smart App Control trusts the DLL per file, and a rebuild for a
     // version string alone gains nothing). Only bump it when pzo_native.c really changes.
     public static final String NATIVE_VERSION = "1.9.7";
@@ -364,9 +364,7 @@ public class UpdateChecker {
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel, String downloadUrl, String dllUrl) {
         try {
-            String userHome = System.getProperty("user.home");
-            if (userHome == null) return;
-            File luaDir = new File(userHome, "Zomboid" + File.separator + "Lua");
+            File luaDir = ZomboidDir.sub("Lua");
             if (!luaDir.exists()) luaDir.mkdirs();
 
             File updateFile = new File(luaDir, "pzo_update.json");

@@ -4,6 +4,8 @@ import com.pzoptimizer.AsmSupport;
 import com.pzoptimizer.Extension;
 import com.pzoptimizer.FoliageLod;
 import com.pzoptimizer.PZOLogger;
+import com.pzoptimizer.pzoe.weather.WeatherCore;
+import com.pzoptimizer.pzoe.weather.WeatherStorm;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -42,6 +44,8 @@ public final class PzoeExtension implements Extension {
         s.add(GroundSnow.SNOW_RENDER.replace('/', '.'));
         s.add(Precipitation.WEATHER_FX.replace('/', '.'));
         s.add(NaturalGround.SPRITE.replace('/', '.'));
+        s.add(WeatherCore.CLIMATE_CLASS.replace('/', '.'));
+        s.add(WeatherStorm.THUNDER_CLASS.replace('/', '.'));
         return s;
     }
 
@@ -52,8 +56,13 @@ public final class PzoeExtension implements Extension {
         byte[] snow = ModelSnow.postTransform(loader, cn, cur);
         if (snow != null) out = cur = snow;
         byte[] own = switch (cn) {
-            case PUDDLES -> logged(AsmSupport.transform(cur, loader, "IsoPuddles splash frame", PuddleSplash::patchPuddles),
-                "IsoPuddles: puddle splash frame hook");
+            case PUDDLES -> {
+                byte[] splash = logged(AsmSupport.transform(cur, loader, "IsoPuddles splash frame", PuddleSplash::patchPuddles),
+                    "IsoPuddles: puddle splash frame hook");
+                byte[] dry = logged(AsmSupport.transform(splash != null ? splash : cur, loader, "IsoPuddles weather drying", WeatherCore::patchPuddlesUpdate),
+                    "IsoPuddles.update: PZOE weather ground drying by sun and wind");
+                yield dry != null ? dry : splash;
+            }
             case PUDDLES_SHADER -> logged(AsmSupport.transform(cur, loader, "PuddlesShader splash uniforms", PuddleSplash::patchShader),
                 "PuddlesShader.updatePuddlesParams: PZOTime/PZOSplash for patched shaders");
             case WEATHER_SHADER -> logged(AsmSupport.transform(cur, loader, "WeatherShader screen pass uniforms", ScreenPass::patchShader),
@@ -66,6 +75,18 @@ public final class PzoeExtension implements Extension {
                 "IsoWeatherFX: rain and snow particles replaced by the GPU pass while Better Rain and Snow is on");
             case NaturalGround.SPRITE -> logged(AsmSupport.transform(cur, loader, "IsoSprite natural ground", NaturalGround::patchSprite),
                 "IsoSprite.startTileDepthShader: Natural Ground uniforms on floor pieces");
+            case com.pzoptimizer.pzoe.weather.WeatherEffects.ZOMBIE -> logged(AsmSupport.transform(cur, loader, "IsoZombie weather senses", com.pzoptimizer.pzoe.weather.WeatherEffects::patchZombie),
+                "IsoZombie.updateVisionRadius: PZOE weather snow and hail cut zombie sight");
+            case com.pzoptimizer.pzoe.weather.WeatherEffects.CHARACTER -> logged(AsmSupport.transform(cur, loader, "IsoGameCharacter weather hearing", com.pzoptimizer.pzoe.weather.WeatherEffects::patchCharacter),
+                "IsoGameCharacter.getWeatherHearingMultiplier: PZOE weather wind and hail cover noise");
+            case com.pzoptimizer.pzoe.weather.WeatherEffects.VEHICLE -> logged(AsmSupport.transform(cur, loader, "BaseVehicle weather grip", com.pzoptimizer.pzoe.weather.WeatherEffects::patchVehicle),
+                "BaseVehicle.updateBulletStats: PZOE weather grip on snow, ice and wet roads");
+            case com.pzoptimizer.pzoe.weather.WeatherSnow.CAR -> logged(AsmSupport.transform(cur, loader, "CarController deep snow", com.pzoptimizer.pzoe.weather.WeatherSnow::patchCar),
+                "CarController.checkTire: PZOE weather vehicles bog down in deep snow");
+            case WeatherStorm.THUNDER_CLASS -> logged(AsmSupport.transform(cur, loader, "ThunderStorm weather", WeatherStorm::patchThunder),
+                "ThunderStorm: PZOE weather lightning direction and thunder gameplay");
+            case WeatherCore.CLIMATE_CLASS -> logged(AsmSupport.transform(cur, loader, "ClimateManager weather", WeatherCore::patchClimate),
+                "ClimateManager: PZOE weather tick and weather look");
             default -> null;
         };
         return own != null ? own : out;
@@ -115,6 +136,35 @@ public final class PzoeExtension implements Extension {
             // Better Rain and Snow: on, quality 1-3, amount percent
             case "precip":
                 Precipitation.configure(Boolean.TRUE.equals(a), b instanceof Number n ? n.intValue() : 2, c instanceof Number m ? m.doubleValue() : 100.0);
+                return Boolean.TRUE;
+            // PZOE weather MP sync: the server's Lua asks for the state to send, the client's Lua hands it over
+            case "weatherState":
+                return WeatherCore.encodeForClients();
+            case "weatherStateIfChanged":
+                return WeatherCore.encodeIfChanged();
+            // Shovel (PZOE_SnowShovel.lua): how deep the snow lies on a square (levels), clear one, the list for joiners
+            case "snowHere":
+                return Double.valueOf(a instanceof Number x && b instanceof Number y
+                    ? com.pzoptimizer.pzoe.weather.WeatherSnow.depthAt(x.floatValue() + 0.5f, y.floatValue() + 0.5f, 0f) : 0.0);
+            case "snowClear":
+                if (a instanceof Number x && b instanceof Number y) com.pzoptimizer.pzoe.weather.WeatherSnow.clear(x.intValue(), y.intValue());
+                return Boolean.TRUE;
+            case "snowClearedList":
+                return com.pzoptimizer.pzoe.weather.WeatherSnow.clearedList();
+            // Dev menu: force a kind of weather for b game hours (SP/server), returns what happened
+            case "weatherForce":
+                return com.pzoptimizer.pzoe.weather.WeatherEvents.force(a == null ? "" : a.toString(), b instanceof Number n ? n.doubleValue() : 2.0);
+            // Radio forecast: the PZOE weather events on a day (0 today, 1 tomorrow), "FogBank,Gale"
+            case "weatherForecast":
+                return com.pzoptimizer.pzoe.weather.WeatherEvents.forecast(a instanceof Number n ? n.intValue() : 0);
+            case "weatherApply":
+                WeatherCore.applyRemote(a == null ? "" : a.toString());
+                return Boolean.TRUE;
+            case "weather":
+                return WeatherCore.stateText();
+            // Living Weather card: look-only extras on/off and gust strength (percent)
+            case "weatherLook":
+                com.pzoptimizer.pzoe.weather.WeatherFronts.configure(Boolean.TRUE.equals(a), b instanceof Number n ? n.doubleValue() : 100.0);
                 return Boolean.TRUE;
             // Mods that make those effects stand down: "chunk=A,B;splash=C"
             case "chunkConflicts":

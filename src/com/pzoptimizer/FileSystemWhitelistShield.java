@@ -80,8 +80,7 @@ public final class FileSystemWhitelistShield {
         } catch (Throwable ignored) {}
 
         try {
-            String userHome = System.getProperty("user.home");
-            File zomboidDir = new File(userHome, "Zomboid");
+            File zomboidDir = ZomboidDir.get();
             if (zomboidDir.exists()) {
                 addRootPath(zomboidDir);
             }

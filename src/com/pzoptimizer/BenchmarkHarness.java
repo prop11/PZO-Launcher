@@ -302,7 +302,7 @@ public final class BenchmarkHarness {
 
     private static Map<String, String> readConfig() {
         Map<String, String> cfg = new HashMap<>();
-        File f = new File(System.getProperty("user.home"), "Zomboid" + File.separator + "Lua" + File.separator + CONFIG_FILE);
+        File f = new File(ZomboidDir.sub("Lua"), CONFIG_FILE);
         if (!f.isFile()) return cfg;
         try (BufferedReader r = new BufferedReader(new FileReader(f))) {
             String line;

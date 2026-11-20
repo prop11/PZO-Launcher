@@ -12,8 +12,7 @@ public class PZOServerLogger {
 
     static {
         try {
-            String userHome = System.getProperty("user.home");
-            File zDir = new File(userHome, "Zomboid");
+            File zDir = com.pzoptimizer.ZomboidDir.get();
             File luaDir = new File(zDir, "Lua");
             if (!luaDir.exists()) luaDir.mkdirs();
             logFile = new File(luaDir, "pzo_server_engine.log");

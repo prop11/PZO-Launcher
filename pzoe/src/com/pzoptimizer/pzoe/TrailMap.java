@@ -42,9 +42,13 @@ public final class TrailMap {
 
     // Set from the uniform lookups (chunk shader / puddle shader)
     static volatile boolean chunkWanted, puddleWanted, grassWanted;
+    // Better Ground Snow reads R for deep snow trenches (PZOE weather), with or without the Footprints card
+    static volatile boolean snowWanted;
+    // Deep snow: what has faded the trenches since the last pass (new snow, settling), sent once it's worth 2 steps
+    private static double deepFadeAcc, lastSnowfall = -1, lastGameHours = -1;
 
     static boolean active() {
-        return chunkWanted || puddleWanted || grassWanted;
+        return chunkWanted || puddleWanted || grassWanted || snowWanted;
     }
 
     // Game thread
@@ -163,6 +167,22 @@ public final class TrailMap {
             // minute, wakes settle in about 2 seconds
             fade = new float[] {snowing ? 0.02f : 0.004f, 0.008f, 0.25f};
             fadeTimer = 0;
+            // Deep snow: a waded trench stays until new snow fills it (about 0.7 of a blanket) or it settles over a
+            // day and a half of game time, the same as the paths WeatherSnow slows people by
+            if (GroundSnow.depthNow() > 1.0f) {
+                zombie.GameTime gt = zombie.GameTime.getInstance();
+                double sf = GroundSnow.snowfall, gh = gt == null ? 0 : gt.getWorldAgeHours();
+                if (lastSnowfall >= 0) deepFadeAcc += Math.max(0, sf - lastSnowfall) * 1.5 + Math.max(0, gh - lastGameHours) / 36.0;
+                lastSnowfall = sf;
+                lastGameHours = gh;
+                fade[0] = 0f;
+                if (deepFadeAcc >= 2.0 / 255.0) {
+                    fade[0] = (float) Math.min(0.05, deepFadeAcc);
+                    deepFadeAcc = 0;
+                }
+            } else {
+                lastSnowfall = -1;
+            }
         }
         // Grass springs back: A loses dt / GRASS_LIFE a frame, sent once it's worth 2 steps of the 8-bit channel so very
         // high frame rates don't round it away. Nothing to fade once the last grass stamp has had time to die out.

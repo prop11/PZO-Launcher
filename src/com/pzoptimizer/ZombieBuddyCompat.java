@@ -300,7 +300,7 @@ public final class ZombieBuddyCompat {
             }
             if (lines.isEmpty()) sb.append("  none so far this session\r\n");
             for (String s : lines) sb.append("  ").append(s).append("\r\n");
-            File f = new File(System.getProperty("user.home"), "Zomboid" + File.separator + "PZO_mod_compat.txt");
+            File f = ZomboidDir.sub("PZO_mod_compat.txt");
             Files.writeString(f.toPath(), sb.toString(), StandardCharsets.UTF_8);
         } catch (Throwable ignored) {
         }

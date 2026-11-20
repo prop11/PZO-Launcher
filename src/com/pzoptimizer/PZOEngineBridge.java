@@ -491,21 +491,7 @@ public class PZOEngineBridge {
     }
 
     public static File getZomboidDir() {
-        try {
-            String prop = System.getProperty("zomboid.cachedir");
-            if (prop != null && !prop.trim().isEmpty()) {
-                File f = new File(prop.trim());
-                if (f.exists()) return f;
-            }
-        } catch (Throwable ignored) {}
-        try {
-            String home = System.getProperty("user.home");
-            if (home != null) {
-                File f = new File(home, "Zomboid");
-                if (f.exists()) return f;
-            }
-        } catch (Throwable ignored) {}
-        return new File("Zomboid");
+        return ZomboidDir.get();
     }
 
     public static void openLogsFolder() {
@@ -1612,7 +1598,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.3\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.3.1\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1881,7 +1867,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.3'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.3.1'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

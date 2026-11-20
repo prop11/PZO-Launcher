@@ -368,7 +368,7 @@ public final class ShaderPatchHost {
         if (okLoaded) return;
         okLoaded = true;
         try {
-            okFile = new java.io.File(System.getProperty("user.home"), "Zomboid" + java.io.File.separator + "Lua" + java.io.File.separator + "pzo_shader_ok.txt");
+            okFile = new java.io.File(ZomboidDir.sub("Lua"), "pzo_shader_ok.txt");
             if (!okFile.isFile()) return;
             List<String> lines = java.nio.file.Files.readAllLines(okFile.toPath());
             // Old entries from other shader versions pile up; start over past a few thousand

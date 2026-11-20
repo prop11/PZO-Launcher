@@ -526,11 +526,8 @@ public final class FrameDropDiagnosticEngine {
 
         List<File> targetDirs = new ArrayList<>();
         // Try the Zomboid folders I found
-        String userHome = System.getProperty("user.home");
-        if (userHome != null) {
-            targetDirs.add(new File(userHome, "Zomboid" + File.separator + "Logs"));
-            targetDirs.add(new File(userHome, "Zomboid"));
-        }
+        targetDirs.add(ZomboidDir.sub("Logs"));
+        targetDirs.add(ZomboidDir.get());
         targetDirs.add(new File("Logs"));
         targetDirs.add(new File("."));
 

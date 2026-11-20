@@ -68,8 +68,13 @@ public final class PuddleSplash {
     // wet outdoor square counts instead; the shader shows the rings at full strength only where it draws water.
     static final float WET = 0.05f;
 
+    // Frozen puddles or freezing rain's glaze (PZOE weather): ice doesn't splash, wake or wet a shoe
+    private static boolean frozen() {
+        return com.pzoptimizer.pzoe.weather.WeatherEvents.puddleFreeze() > 0.6f || com.pzoptimizer.pzoe.weather.WeatherEvents.ice() > 0.4f;
+    }
+
     private static boolean groundIsWet(IsoGridSquare sq) {
-        if (sq.z > 0 || !sq.isOutside()) return false;
+        if (sq.z > 0 || !sq.isOutside() || frozen()) return false;
         IsoPuddles p = IsoPuddles.getInstance();
         return p.getPuddlesSizeFinalValue() > 0.01f || p.getWetGroundFinalValue() > WET;
     }
@@ -99,7 +104,7 @@ public final class PuddleSplash {
     private static final float[] lightBest = new float[MAX_LIGHTS * 9];
 
     // Render thread
-    private static final int[] locations = new int[11];
+    private static final int[] locations = new int[12];
 
     // The trail map on unit 5 (the game uses 0-3 here), its size, and the world square at the puddle shader's screen
     // origin for this level: screen x = (x - y) * 64, y = (x + y - 6z) * 32 for the ground of level z
@@ -343,7 +348,7 @@ public final class PuddleSplash {
 
     // Shoes pick up water from puddles or soaked ground, not from a drizzle-damp road
     private static boolean feetGetWet(IsoGridSquare sq) {
-        if (sq.z > 0 || !sq.isOutside()) return false;
+        if (sq.z > 0 || !sq.isOutside() || frozen()) return false;
         IsoPuddles p = IsoPuddles.getInstance();
         return p.getPuddlesSizeFinalValue() > 0.05f || p.getWetGroundFinalValue() > 0.3f;
     }
@@ -442,7 +447,7 @@ public final class PuddleSplash {
         float[] st = walkers.get(chr);
         if (st == null) {
             // lastX, lastY, travelled, foot, wet steps left, last grass press
-            walkers.put(chr, new float[] {x, y, 0f, 0f, 0f, -100f});
+            walkers.put(chr, new float[] {x, y, 0f, 0f, 0f, -100f, Float.NaN, 0f});
             return;
         }
         float mx = x - st[0], my = y - st[1];
@@ -455,6 +460,7 @@ public final class PuddleSplash {
             return;
         }
         if (TrailMap.grassWanted) grass(chr, x, y, mx, my, d, st);
+        if (TrailMap.snowWanted || TrailMap.chunkWanted) trench(chr, x, y, mx, my, st);
         if (streamsAsked && chr instanceof IsoPlayer && dt > 0f && d / dt > 0.6f) {
             IsoGridSquare wsq = chr.getCurrentSquare();
             if (wsq != null) path(walkerPaths, chr, x, y, chr.getZ(), standingWater(wsq), 0.12f, 0.55f);
@@ -494,6 +500,29 @@ public final class PuddleSplash {
     }
 
     /**
+     * Deep snow (PZOE weather): a body-wide trench pushed through it as a character wades, a capsule from the last
+     * stamp to here every 0.15 squares, and a hole where it stands still. Deeper snow, deeper trench (R).
+     */
+    private static void trench(IsoGameCharacter chr, float x, float y, float mx, float my, float[] st) {
+        if (chr.getZ() >= 0.5f || chr.getVehicle() != null || chr.isDead()) return;
+        float h = com.pzoptimizer.pzoe.weather.WeatherSnow.trenchDepth(chr);
+        if (h < 0.04f) return;
+        float r = Math.min(1f, 0.45f + h / 0.3f * 0.55f);
+        if (Float.isNaN(st[6])) {
+            st[6] = x;
+            st[7] = y;
+            TrailMap.stamp(x, y, 1f, 0f, 0.24f, 0.24f, r, 0f, 0f);
+            return;
+        }
+        float dx = x - st[6], dy = y - st[7];
+        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.15f) return;
+        if (dist < 1.5f) TrailMap.stamp((x + st[6]) * 0.5f, (y + st[7]) * 0.5f, dx, dy, dist * 0.5f + 0.18f, 0.26f, r, 0f, 0f);
+        st[6] = x;
+        st[7] = y;
+    }
+
+    /**
      * Grass pressed where a character stands: every frame while it moves, every 0.15 s while it stands, so the grass
      * stays down under it and springs back once it walks off. Oval along the way it walks, a bit wider than the body.
      */
@@ -507,7 +536,7 @@ public final class PuddleSplash {
 
     // Standing water to make a wake in: rain-soaked ground alone has none
     private static boolean standingWater(IsoGridSquare sq) {
-        return sq.z <= 0 && sq.isOutside() && IsoPuddles.getInstance().getPuddlesSizeFinalValue() > 0.02f;
+        return sq.z <= 0 && sq.isOutside() && !frozen() && IsoPuddles.getInstance().getPuddlesSizeFinalValue() > 0.02f;
     }
 
     static final int MAX_STREAMS = 24, STREAM_POINTS = 10, HEAD = 9, PT = 5;
@@ -675,8 +704,10 @@ public final class PuddleSplash {
                 loc[8] = GL20.glGetUniformLocation(prog, "PZOLightCount");
                 loc[9] = GL20.glGetUniformLocation(prog, "PZOStream");
                 loc[10] = GL20.glGetUniformLocation(prog, "PZOStreamCount");
+                loc[11] = GL20.glGetUniformLocation(prog, "PZOFreeze");
                 TrailMap.puddleWanted = loc[3] >= 0;
             }
+            if (loc[11] >= 0) GL20.glUniform1f(loc[11], com.pzoptimizer.pzoe.weather.WeatherEvents.puddleFreeze());
             if (loc[3] >= 0) trailUniforms(loc, z);
             if (loc[6] >= 0) uploadLights(loc, z);
             if (loc[9] >= 0) uploadStreams(loc, z);

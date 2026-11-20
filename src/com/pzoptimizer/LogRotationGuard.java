@@ -13,7 +13,7 @@ public class LogRotationGuard {
             if (userHome == null) return;
 
             String[] zPaths = new String[]{
-                userHome + File.separator + "Zomboid",
+                ZomboidDir.get().getPath(),
                 userHome + File.separator + "Documents" + File.separator + "Zomboid",
                 userHome + File.separator + "OneDrive" + File.separator + "Documents" + File.separator + "Zomboid"
             };

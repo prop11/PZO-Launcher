@@ -23,7 +23,9 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
  * Main thread: frame() from PixelLight.globalFrame. Render thread reads the volatile values.
  */
 public final class GroundSnow {
-    static final float DEPTH_MAX = 1.6f;
+    // 1 is a full blanket; past it the snow keeps building toward deep winter snow (PZOE weather's deep snow: about
+    // knee deep in the open at 3, waist deep in drifts and hollows)
+    static final float DEPTH_MAX = 3.0f;
     private static final String SAVE_KEY = "PZOE_GroundSnow";
 
     // Main thread writes, render thread reads
@@ -47,14 +49,51 @@ public final class GroundSnow {
         return shaderReady;
     }
 
+    /** How much snow lies, for PZOE weather's deep snow (also runs without the card, and on servers, for wading). */
+    public static float depthNow() {
+        return depth;
+    }
+
+    // All the snow that has fallen so far (blanket depth added by snowing): trodden paths and shovelled squares fill in
+    // again as it grows (WeatherSnow)
+    public static volatile double snowfall;
+    // Dev menu: heavy snow piling up fast until this world hour
+    private static volatile double devFastUntil = -1;
+
+    /** Dev menu (SP/server): snow piles up about 40 times as fast for this many game hours. */
+    public static void devFast(double hoursFor) {
+        zombie.GameTime gt = zombie.GameTime.getInstance();
+        devFastUntil = gt == null ? -1 : gt.getWorldAgeHours() + hoursFor;
+    }
+
+    /** Dev menu (SP/server): set how much snow lies; clients get it with the next weather state. */
+    public static void forceDepth(float d) {
+        depth = clamp(d, 0f, DEPTH_MAX);
+        fresh = 1f;
+    }
+
+    /** MP client: the server's depth, when ours has wandered off from it. */
+    public static void serverDepth(float d) {
+        if (Math.abs(d - depth) > 0.15f) depth = clamp(d, 0f, DEPTH_MAX);
+    }
+
+    /** Every frame from PZOE weather, every role: keeps the depth running for deep snow without the card. */
+    public static void weatherFrame() {
+        if (!active() && com.pzoptimizer.pzoe.weather.WeatherSnow.on()) frame(true);
+    }
+
     static void configure(double pct) {
         speed = (float) Math.max(0.25, Math.min(4.0, pct / 100.0));
     }
 
     static void frame() {
+        frame(false);
+    }
+
+    private static void frame(boolean forGameplay) {
         zombie.GameTime gt = zombie.GameTime.getInstance();
         zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
-        if (gt == null || cm == null || !active()) {
+        if (gt == null || cm == null || (!active() && !forGameplay)) {
             lastHours = -1;
             melt = 0f;
             return;
@@ -91,9 +130,18 @@ public final class GroundSnow {
         float d = depth, f = fresh;
         float intensity = cm.getPrecipitationIntensity();
         boolean snow = cm.getPrecipitationIsSnow() && intensity > 0.02f;
+        boolean dev = hours < devFastUntil;
+        if (dev) {
+            snow = true;
+            intensity = 1f;
+        }
         if (snow) {
-            // A third of the blanket an hour at full intensity, slower for light snow (light snow, about 6 hours)
-            d += h * speed * (float) Math.pow(intensity, 0.58) / 3f;
+            // A third of the blanket an hour at full intensity, slower for light snow (light snow, about 6 hours).
+            // Past the blanket it builds more slowly: deep snow takes a day or two of snowing.
+            float rate = h * speed * (float) Math.pow(intensity, 0.58) / 3f * (dev ? 40f : 1f);
+            float add = d < 1.6f ? rate : rate * 0.35f;
+            d += add;
+            snowfall += add;
             f = Math.min(1f, f + h * intensity * 2f);
         } else {
             // Fresh snow loses its sparkle over half a day
@@ -112,9 +160,10 @@ public final class GroundSnow {
             d -= h * melt / 7.5f;
             f = Math.max(0f, f - h * melt);
         }
-        // Far apart from vanilla (snow set by an admin or a mod, weather changed by the server): drift back to it
+        // Far apart from vanilla (snow set by an admin or a mod, weather changed by the server): drift back to it.
+        // Vanilla's own snow stops at a full cover (1), so deep snow above that only follows it when vanilla's is gone.
         float gap = vanilla - d;
-        if (Math.abs(gap) > 0.5f) d += Math.signum(gap) * Math.min(Math.abs(gap) - 0.5f, h * 0.25f);
+        if (gap > 0.5f || (gap < -0.5f && (d <= 1.6f || vanilla < 0.1f))) d += Math.signum(gap) * Math.min(Math.abs(gap) - 0.5f, h * 0.25f);
         depth = clamp(d, 0f, DEPTH_MAX);
         fresh = clamp(f, 0f, 1f);
 

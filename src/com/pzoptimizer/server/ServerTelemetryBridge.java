@@ -42,6 +42,7 @@ public class ServerTelemetryBridge {
                 registerZomboidDir(new File(envCache.trim()));
             }
 
+            registerZomboidDir(com.pzoptimizer.ZomboidDir.get());
             String userHome = System.getProperty("user.home");
             if (userHome != null) {
                 registerZomboidDir(new File(userHome, "Zomboid"));

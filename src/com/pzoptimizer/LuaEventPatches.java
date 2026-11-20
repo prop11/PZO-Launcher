@@ -95,8 +95,8 @@ public final class LuaEventPatches {
             }
 
             File[] candidateFiles = new File[] {
-                new File(System.getProperty("user.home"), "Zomboid" + File.separator + "Lua" + File.separator + "pzo-bench.txt"),
-                new File(System.getProperty("user.home"), "Zomboid" + File.separator + "pzo-bench.txt"),
+                new File(ZomboidDir.sub("Lua"), "pzo-bench.txt"),
+                ZomboidDir.sub("pzo-bench.txt"),
                 new File("pzo-bench.txt"),
                 new File("pzo-args.txt")
             };
