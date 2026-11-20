@@ -364,9 +364,7 @@ public class UpdateChecker {
 
     private static void writeStatus(boolean hasUpdate, String latestVer, String channel, String downloadUrl, String dllUrl) {
         try {
-            String userHome = System.getProperty("user.home");
-            if (userHome == null) return;
-            File luaDir = new File(userHome, "Zomboid" + File.separator + "Lua");
+            File luaDir = ZomboidDir.sub("Lua");
             if (!luaDir.exists()) luaDir.mkdirs();
 
             File updateFile = new File(luaDir, "pzo_update.json");

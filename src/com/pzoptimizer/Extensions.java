@@ -147,7 +147,7 @@ public final class Extensions {
     static File findPzoeJar() {
         String forced = System.getProperty("pzo.pzoe.jar");
         if (forced != null && new File(forced).isFile()) return new File(forced);
-        File zomboid = new File(System.getProperty("user.home"), "Zomboid");
+        File zomboid = ZomboidDir.get();
         File[] items = new File(zomboid, "Workshop").listFiles(File::isDirectory);
         if (items != null) {
             for (File item : items) {

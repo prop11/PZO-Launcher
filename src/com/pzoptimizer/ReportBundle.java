@@ -51,7 +51,7 @@ public final class ReportBundle {
     private static String create(String luaSummary, boolean gameRunning) {
         try {
             File zDir = PZOEngineBridge.getZomboidDir();
-            if (zDir == null) zDir = new File(System.getProperty("user.home"), "Zomboid");
+            if (zDir == null) zDir = ZomboidDir.get();
             File luaDir = new File(zDir, "Lua");
             File gameDir = new File(".").getAbsoluteFile();
             String stamp = new java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new java.util.Date());

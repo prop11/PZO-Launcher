@@ -7,6 +7,8 @@ import java.lang.reflect.Method;
 public class PZOEntrypoint {
 
     public static void main(String[] args) {
+        // Before the agent: its premain already reads mod lists and settings from the Zomboid folder
+        ZomboidDir.setArgs(args);
         // Windows: the agent isn't in the json any more, so load it before anything touches a game class
         AgentSelfLoader.loadIfNeeded();
 
@@ -18,6 +20,7 @@ public class PZOEntrypoint {
         PZOLogger.info("Project Zomboid Build 42 - Config & Engine Optimizer (PZO)");
         PZOLogger.info("Version: " + UpdateChecker.CURRENT_VERSION + " | Java Runtime: " + System.getProperty("java.version") + " (" + System.getProperty("os.name") + ")");
         PZOLogger.info("Log File: " + PZOLogger.getLogFilePath());
+        PZOLogger.info("Zomboid folder: " + ZomboidDir.get() + " (from " + ZomboidDir.source() + ")");
         PZOLogger.info("================================================================================");
         StartupTimer.begin("PZO main");
         StartupTimer.step("premain to main");

@@ -491,21 +491,7 @@ public class PZOEngineBridge {
     }
 
     public static File getZomboidDir() {
-        try {
-            String prop = System.getProperty("zomboid.cachedir");
-            if (prop != null && !prop.trim().isEmpty()) {
-                File f = new File(prop.trim());
-                if (f.exists()) return f;
-            }
-        } catch (Throwable ignored) {}
-        try {
-            String home = System.getProperty("user.home");
-            if (home != null) {
-                File f = new File(home, "Zomboid");
-                if (f.exists()) return f;
-            }
-        } catch (Throwable ignored) {}
-        return new File("Zomboid");
+        return ZomboidDir.get();
     }
 
     public static void openLogsFolder() {

@@ -17,8 +17,7 @@ public class PZOLogger {
 
     static {
         try {
-            String userHome = System.getProperty("user.home");
-            File luaDir = new File(userHome, "Zomboid" + File.separator + "Lua");
+            File luaDir = ZomboidDir.sub("Lua");
             if (!luaDir.exists()) {
                 luaDir.mkdirs();
             }

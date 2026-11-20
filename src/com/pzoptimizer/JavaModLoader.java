@@ -173,8 +173,7 @@ public class JavaModLoader {
         List<File> searchRoots = new ArrayList<>();
 
         try {
-            String userHome = System.getProperty("user.home");
-            File zomboidMods = new File(userHome, "Zomboid" + File.separator + "mods");
+            File zomboidMods = ZomboidDir.sub("mods");
             if (zomboidMods.exists() && zomboidMods.isDirectory()) {
                 searchRoots.add(zomboidMods);
             }
@@ -182,7 +181,7 @@ public class JavaModLoader {
             // upload. Each Contents/mods is a root of its own so its children are mod folders, like Zomboid/mods:
             // a mod.info under <mod>/common or <mod>/42 is then within collectModInfo's reach and a mod that's off
             // is skipped. Viewpoint installed here was missed and none of its stand-downs happened.
-            File[] items = new File(userHome, "Zomboid" + File.separator + "Workshop").listFiles(File::isDirectory);
+            File[] items = ZomboidDir.sub("Workshop").listFiles(File::isDirectory);
             if (items != null) {
                 for (File item : items) {
                     File mods = new File(item, "Contents" + File.separator + "mods");
@@ -665,7 +664,7 @@ public class JavaModLoader {
         if (menuModIds != null) return menuModIds;
         Set<String> ids = new java.util.HashSet<>();
         try {
-            File zomboid = new File(System.getProperty("user.home"), "Zomboid");
+            File zomboid = ZomboidDir.get();
             parseModIdsFromFile(new File(zomboid, "mods" + File.separator + "default.txt"), ids);
         } catch (Throwable ignored) {}
         menuModIds = ids;
@@ -681,7 +680,7 @@ public class JavaModLoader {
         // still patches the game. Reading default.txt alone lost its stand-downs once 2.0 started adding MPOptimizer
         // to an otherwise empty default.txt: left click dead in Viewpoint again (#41).
         try {
-            File zomboid = new File(System.getProperty("user.home"), "Zomboid");
+            File zomboid = ZomboidDir.get();
             parseModIdsFromFile(new File(zomboid, "mods" + File.separator + "default.txt"), ENABLED_MOD_IDS);
             File[] modes = new File(zomboid, "Saves").listFiles(File::isDirectory);
             if (modes != null) {
