@@ -1,5 +1,6 @@
 package com.pzoptimizer.pzoe;
 
+import com.pzoptimizer.pzoe.weather.WeatherLook;
 import com.pzoptimizer.AsmSupport;
 import com.pzoptimizer.ShaderPatchHost;
 import com.pzoptimizer.PZOLogger;
@@ -65,7 +66,7 @@ public final class PixelLight {
     public static final AtomicLong lightChangesKept = new AtomicLong();
 
     // Seen by the render thread on the chunk shader
-    static volatile boolean lightShaderReady, swayShaderReady, atmosShaderReady, snowShaderReady, windowsWanted, sunWanted;
+    static volatile boolean lightShaderReady, swayShaderReady, atmosShaderReady, snowShaderReady, iceShaderReady, windowsWanted, sunWanted;
     // Snow on Surfaces only needs the light map while there is snow; without it the card would keep the whole
     // light map pipeline running all year
     private static boolean snowing, groundSnowWas;
@@ -120,7 +121,7 @@ public final class PixelLight {
     private static int locProgram = -1;
     private static long locCheckedNs;
     private static int locA, locB, locC, locLit, locWind, locTex, locAtmos = -1, locFogWind = -1, locClouds = -1, locSnow = -1, locTrail = -1, locTrailInfo = -1, locWindows = -1,
-        locHeight = -1, locSun = -1, locWet = -1, locBend = -1, locTrailMarks = -1, locBeams = -1, locBeamInfo = -1,
+        locHeight = -1, locSun = -1, locWet = -1, locIce = -1, locBend = -1, locTrailMarks = -1, locTrailSnow = -1, locBeams = -1, locBeamInfo = -1,
         locFogField = -1, locFogInfo = -1, locGSnow = -1, locGSnow2 = -1, locSky = -1, locSunCache = -1, locSunCacheInfo = -1,
         locCloudCache = -1, locCloudInfo = -1, locFogCache = -1, locFogCacheInfo = -1, locSnowCache = -1, locSnowCacheInfo = -1, locTune0 = -1, locTune1 = -1, locTune2 = -1;
 
@@ -257,7 +258,9 @@ public final class PixelLight {
         } else {
             snowing = false;
         }
-        boolean wantAtmos = atmosShaderReady || ((snowShaderReady || GroundSnow.active()) && snowing);
+        // Freezing rain's glaze reads the light map only while there's ice (PZOE weather)
+        boolean wantAtmos = atmosShaderReady || ((snowShaderReady || GroundSnow.active()) && snowing)
+            || (iceShaderReady && com.pzoptimizer.pzoe.weather.WeatherEvents.ice() > 0.01f);
         if (wantAtmos != atmos) {
             // The light map stopped following changes while nothing used it, so it goes up again from scratch
             if (wantAtmos && !(deferred || sway || draining)) markStale();
@@ -266,18 +269,20 @@ public final class PixelLight {
         }
         if (sway || atmos) {
             zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
-            fogIntensity = cm.getFogIntensity();
-            rainIntensity = cm.getRainIntensity();
-            dayLight = cm.getDayLightStrength();
-            cloudIntensity = cm.getCloudIntensity();
+            // The weather as PZOE weather shows it (gusts, build-up, mist), vanilla when that's off
+            fogIntensity = WeatherLook.fog();
+            rainIntensity = cm.getPrecipitationIsSnow() ? 0f : WeatherLook.precipitation();
+            dayLight = WeatherLook.dayLight();
+            cloudIntensity = WeatherLook.cloud();
             // Snow on Surfaces follows the ground snow's smooth depth when that card is on
             snowCover = GroundSnow.active() ? Math.min(1f, GroundSnow.depth) : cm.getSnowFracNow();
-            wetness = zombie.iso.IsoPuddles.getInstance().getWetGroundFinalValue();
+            // Freezing rain's glaze shines like wet ground (PZOE weather)
+            wetness = Math.max(zombie.iso.IsoPuddles.getInstance().getWetGroundFinalValue(), com.pzoptimizer.pzoe.weather.WeatherEvents.ice());
             // The cloud field drifts with the wind, faster when it blows harder; kept small so float noise stays smooth
-            double ca = cm.getWindAngleRadians(), speed = (0.5 + 3.0 * cm.getWindIntensity()) * 0.03 * dt;
+            double ca = WeatherLook.windAngleRadians(), speed = (0.5 + 3.0 * WeatherLook.wind()) * 0.03 * dt;
             cloudOffX = (float) ((cloudOffX + Math.cos(ca) * speed) % 512.0);
             cloudOffY = (float) ((cloudOffY + Math.sin(ca) * speed) % 512.0);
-            float a = cm.getWindAngleRadians();
+            float a = WeatherLook.windAngleRadians();
             // World wind vector to screen: x - y across, (x + y) / 2 down
             float wx = (float) Math.cos(a), wy = (float) Math.sin(a);
             worldWindX = wx;
@@ -288,9 +293,20 @@ public final class PixelLight {
                 windX = sx / len;
                 windY = sy / len;
             }
-            windStrength = cm.getWindIntensity();
-            if (sunHeightsOn) sun(cm);
-            else sunVis = 0f;
+            windStrength = WeatherLook.wind();
+            if (sunHeightsOn) {
+                sun(cm);
+                // A lightning flash lights the world from the strike for a moment (PZOE weather)
+                float[] fs = com.pzoptimizer.pzoe.weather.WeatherStorm.flashSun();
+                if (fs != null && fs[3] > sunVis) {
+                    sunX = fs[0];
+                    sunY = fs[1];
+                    sunRise = fs[2];
+                    sunVis = fs[3];
+                }
+            } else {
+                sunVis = 0f;
+            }
             // Fog drift as the chunk shader had it: screen wind back to the ground, carried with the clock
             float fwx = windY + 0.5f * windX, fwy = windY - 0.5f * windX, fk = clock * (0.15f + 0.6f * windStrength);
             float weather = Math.max(fogIntensity, rainIntensity * 0.5f) + 0.12f * (1f - dayLight);
@@ -331,7 +347,7 @@ public final class PixelLight {
         float rise = (float) Math.max(0.0, Math.min(1.0, (deg - 2.0) / 8.0));
         // Overcast or rain/snow means no direct sun at all. A leftover 15% here showed as faint square patches in snow.
         float clear = 1f - smooth(0.3f, 0.7f, cloudIntensity);
-        float dry = 1f - smooth(0.02f, 0.15f, cm.getPrecipitationIntensity());
+        float dry = 1f - smooth(0.02f, 0.15f, WeatherLook.precipitation());
         sunVis = rise * rise * (3f - 2f * rise) * clear * dry;
     }
 
@@ -356,6 +372,14 @@ public final class PixelLight {
 
     // Every column goes up again, nearest first within a budget. Slots keep their chunk, so the composite carries on
     // with the old column meanwhile instead of the whole screen dropping its effects for a frame.
+    /** A chunk's squares changed in a way the light map's height texture shows (a square shovelled clear). */
+    public static void chunkChanged(IsoChunk c) {
+        if (c == null) return;
+        for (PlayerState ps : players) {
+            if (ps != null) ps.dirty.add(c);
+        }
+    }
+
     private static void markStale() {
         for (PlayerState ps : players) {
             if (ps == null || ps.stale == null) continue;
@@ -766,6 +790,8 @@ public final class PixelLight {
         if (pr == null || sq.room != null || !pr.has(zombie.iso.SpriteDetails.IsoFlagType.exterior)
             || !pr.has(zombie.iso.SpriteDetails.IsoFlagType.solidfloor) || pr.has(zombie.iso.SpriteDetails.IsoFlagType.water)) return;
         if (sq.getWater() != null && sq.getWater().isValid()) return;
+        // Shovelled clear (PZOE weather deep snow): bare until new snow fills it in
+        if (com.pzoptimizer.pzoe.weather.WeatherSnow.cleared(sq.x, sq.y)) return;
         hSnowGround[i] = true;
         zombie.iso.IsoObject floor = sq.getFloor();
         String name = floor == null || floor.sprite == null ? null : floor.sprite.getName();
@@ -1069,8 +1095,10 @@ public final class PixelLight {
                 locHeight = GL20.glGetUniformLocation(prog, "PZOHeight");
                 locSun = GL20.glGetUniformLocation(prog, "PZOSun");
                 locWet = GL20.glGetUniformLocation(prog, "PZOWet");
+                locIce = GL20.glGetUniformLocation(prog, "PZOIce");
                 locBend = GL20.glGetUniformLocation(prog, "PZOBend");
                 locTrailMarks = GL20.glGetUniformLocation(prog, "PZOTrailMarks");
+                locTrailSnow = GL20.glGetUniformLocation(prog, "PZOTrailSnow");
                 locBeams = GL20.glGetUniformLocation(prog, "PZOBeams");
                 locBeamInfo = GL20.glGetUniformLocation(prog, "PZOBeamInfo");
                 locFogField = GL20.glGetUniformLocation(prog, "PZOFogField");
@@ -1099,6 +1127,7 @@ public final class PixelLight {
                 sunWanted = (locHeight >= 0 && (locSun >= 0 || locGSnow >= 0)) || SkyCache.sunWanted;
                 // Footprints and grass share the trail texture but are asked for apart, so neither card gathers for the other
                 TrailMap.chunkWanted = locTrail >= 0 && locTrailMarks >= 0;
+                TrailMap.snowWanted = locTrail >= 0 && locTrailSnow >= 0;
                 TrailMap.grassWanted = locTrail >= 0 && locBend >= 0;
                 LightBeams.wanted = locBeams >= 0 && locBeamInfo >= 0;
                 LightBeams.invalidate();
@@ -1106,9 +1135,11 @@ public final class PixelLight {
                 lightShaderReady = locLit >= 0;
                 swayShaderReady = locWind >= 0;
                 // Fog, cloud shadows, snow and trails only read the light map (outdoors flag, light, chunk placement)
-                atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || locTrail >= 0 || locWindows >= 0 || locSun >= 0 || locWet >= 0
+                // The trail map counts for footprints and grass bending; ground snow's own use waits for snow like the rest of it
+                atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || (locTrail >= 0 && (locTrailMarks >= 0 || locBend >= 0)) || locWindows >= 0 || locSun >= 0 || locWet >= 0
                     || LightBeams.wanted;
                 snowShaderReady = locSnow >= 0;
+                iceShaderReady = locIce >= 0;
                 for (float[] s : sent) java.util.Arrays.fill(s, Float.NaN);
             }
             if (locC < 0) return;
@@ -1126,6 +1157,7 @@ public final class PixelLight {
                 GL13.glActiveTexture(GL13.GL_TEXTURE0);
                 GL20.glUniform1i(locTrail, 5);
                 u4(S_TRAIL, locTrailInfo, Math.max(1, tr), TrailMap.TEXELS_PER_SQUARE, 0f, tt != 0 && tr > 0 ? 1f : 0f);
+                if (locTrailSnow >= 0) GL20.glUniform4f(locTrailSnow, 1f, 0f, 0f, 0f);
             }
             float[] info = texd.tex1 == null ? null : chunkInfo.get(texd.tex1);
             int p = info == null ? -1 : (int) info[9];
@@ -1210,6 +1242,7 @@ public final class PixelLight {
             }
             u4(S_SKY, locSky, clock, leafDensity, GroundSnow.melt, dayLight);
             u4(S_WET, locWet, atmos ? wetness : 0f, dayLight, rainIntensity, atmos ? 1f : 0f);
+            u4(S_ICE, locIce, atmos ? com.pzoptimizer.pzoe.weather.WeatherEvents.ice() : 0f, clock, dayLight, atmos ? 1f : 0f);
             u4(S_MARKS, locTrailMarks, 1f, 0f, 0f, 0f);
             u4(S_BEND, locBend, sway ? 1f : 0f, 0f, 0f, 0f);
             LightBeams.upload(locBeams, locBeamInfo, atmos, info[4], info[5], fogIntensity, rainIntensity, 1f - 0.85f * dayLight);
@@ -1231,8 +1264,8 @@ public final class PixelLight {
     // Last values sent per uniform; most stay the same from one chunk draw to the next (about 100 draws a frame)
     private static final int S_A = 0, S_B = 1, S_C = 2, S_LIT = 3, S_WIND = 4, S_ATMOS = 5, S_FOGWIND = 6, S_CLOUDS = 7, S_SNOW = 8,
         S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12, S_BEND = 13, S_MARKS = 14, S_FOG = 15, S_GSNOW = 16, S_GSNOW2 = 17,
-        S_SKY = 18, S_SUNCACHE = 19, S_CLOUDCACHE = 20, S_FOGCACHE = 21, S_SNOWCACHE = 22, S_TUNE0 = 23, S_TUNE1 = 24, S_TUNE2 = 25;
-    private static final float[][] sent = new float[26][4];
+        S_SKY = 18, S_SUNCACHE = 19, S_CLOUDCACHE = 20, S_FOGCACHE = 21, S_SNOWCACHE = 22, S_TUNE0 = 23, S_TUNE1 = 24, S_TUNE2 = 25, S_ICE = 26;
+    private static final float[][] sent = new float[27][4];
 
     // PZOLit is a float: only x goes to the GPU for it
     private static void u4(int slot, int loc, float a, float b, float c, float d) {

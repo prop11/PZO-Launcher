@@ -195,13 +195,14 @@ other reports `"conflict"`.
 ### Settings screen
 
 Add your own tab and cards to PZO's settings screen (client only). With at least one added tab, PZO's own tabs go
-under a foldable "Optimisations" heading and yours under "Third Party Mods". The "Enhancements" heading is kept for
-PZO Enhancements, the official companion mod.
+under a foldable "Optimisations" heading and yours under "Third Party Mods". The "PZO Addons" heading is kept for
+the official addons (PZO Enhancements and later first-party mods), each under its own foldable sub category.
 
 | Function | Effect |
 |---|---|
 | `PZOApi.addModTab({ id, label, textKey })` | A tab under "Third Party Mods". |
-| `PZOApi.addEnhancementTab(tab)` | Reserved for PZO Enhancements. A tab from any other mod sent here goes under "Third Party Mods". |
+| `PZOApi.addEnhancementTab(tab)` / `PZOApi.addAddonTab(tab)` | Reserved for the official PZO addons (`tab.mod` is the addon's mod ID). A tab from any other mod sent here goes under "Third Party Mods". |
+| `PZOApi.addDevPage({ id, label, rows })` | A page in the red developer section of the sidebar, shown only with developer mode on (Ctrl + click the Optimiser button). `rows(ui)` returns the screen's own row kinds: `{ kind = "section", text }` and `{ kind = "action", id, title, tip, button, style, run = function(ui) }`. The same id again replaces the page. |
 | `PZOApi.addSettings(cards, defaults)` | Cards use the same fields as PZO's own (`client/MPOptim_SettingsRegistry.lua`, the comment above `S.List`). `defaults` (optional) adds your setting keys and reads the player's saved values back. Text is translated through `UI_MPOptim_Set_<key>`, `UI_MPOptim_SetTip_<key>` and the rest listed there. |
 
 ## Setting keys

@@ -1,5 +1,6 @@
 package com.pzoptimizer.pzoe;
 
+import com.pzoptimizer.pzoe.weather.WeatherLook;
 import com.pzoptimizer.PZOLogger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -139,7 +140,7 @@ final class FogField {
         float dew = (float) (243.04 * g / (17.625 - g));
         float cold = 1f - smooth(8f, 14f, t);
         float damp = 1f - smooth(0.75f, 3f, Math.max(0f, t - dew));
-        float calm = 1f - smooth(0.175f, 0.35f, cm.getWindIntensity());
+        float calm = 1f - smooth(0.175f, 0.35f, WeatherLook.wind());
         return 0.5f * envelope * cold * damp * calm;
     }
 

@@ -1,5 +1,6 @@
 package com.pzoptimizer.pzoe;
 
+import com.pzoptimizer.pzoe.weather.WeatherLook;
 import com.pzoptimizer.AsmSupport;
 import com.pzoptimizer.ShaderPatchHost;
 
@@ -86,7 +87,7 @@ public final class ScreenPass {
     private static volatile float[] grade = new float[8];
 
     // Render thread
-    private static final int[] locations = new int[7];
+    private static final int[] locations = new int[9];
     // World textures switched to mipmap filtering for bloom, put back when bloom goes away
     private static final java.util.Set<Integer> mipTextures = new java.util.HashSet<>();
     private static int lastMipFrame = Integer.MIN_VALUE;
@@ -148,14 +149,15 @@ public final class ScreenPass {
             dawn = season.getDawn();
             dusk = season.getDusk();
         }
-        float cloud = clamp01(cm.getCloudIntensity());
-        float rain = cm.getPrecipitationIsSnow() ? 0f : clamp01(cm.getPrecipitationIntensity());
-        float snow = cm.getPrecipitationIsSnow() ? clamp01(cm.getPrecipitationIntensity()) : 0f;
+        float cloud = clamp01(WeatherLook.cloud());
+        float rain = cm.getPrecipitationIsSnow() ? 0f : clamp01(WeatherLook.precipitation());
+        float snow = cm.getPrecipitationIsSnow() ? clamp01(WeatherLook.precipitation()) : 0f;
         // The low sun from just before dawn to an hour and a half after, and the same around dusk; clouds hide it
         float golden = Math.max(bump(t, dawn - 0.5f, dawn + 1.5f), bump(t, dusk - 1.5f, dusk + 0.5f)) * (1f - 0.8f * cloud);
         float night = clamp01(cm.getNightStrength());
         float overcast = clamp01(cloud * (1f - 0.5f * night) + rain * 0.4f);
-        grade = new float[] {golden, night, overcast, clamp01(cm.getFogIntensity()), rain, snow, 0f, 1f};
+        grade = new float[] {golden, night, overcast, clamp01(WeatherLook.fog()), rain, snow,
+            clamp01(com.pzoptimizer.pzoe.weather.WeatherEvents.heat()), 1f};
     }
 
     private static float clamp01(float v) {
@@ -301,6 +303,17 @@ public final class ScreenPass {
                 loc[4] = GL20.glGetUniformLocation(prog, "PZOGrade2");
                 loc[5] = GL20.glGetUniformLocation(prog, "PZOBloomTex");
                 loc[6] = GL20.glGetUniformLocation(prog, "PZOBloom");
+                loc[7] = GL20.glGetUniformLocation(prog, "PZOStorm");
+                loc[8] = GL20.glGetUniformLocation(prog, "PZOBolt");
+            }
+            if (loc[8] >= 0) {
+                float[] b = com.pzoptimizer.pzoe.weather.WeatherStorm.bolt();
+                GL20.glUniform4f(loc[8], b[0], b[1], b[2], b[3]);
+            }
+            // A storm off to one side (PZOE weather): screen direction and strength
+            if (loc[7] >= 0) {
+                float[] st = com.pzoptimizer.pzoe.weather.WeatherRegional.storm();
+                GL20.glUniform4f(loc[7], st[0], st[1], st[2], 0f);
             }
             bloom(loc, texd);
             if (loc[3] >= 0 || loc[4] >= 0) {
