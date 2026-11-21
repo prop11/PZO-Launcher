@@ -73,7 +73,7 @@ public final class PuddleSplash {
         return com.pzoptimizer.pzoe.weather.WeatherEvents.puddleFreeze() > 0.6f || com.pzoptimizer.pzoe.weather.WeatherEvents.ice() > 0.4f;
     }
 
-    private static boolean groundIsWet(IsoGridSquare sq) {
+    static boolean groundIsWet(IsoGridSquare sq) {
         if (sq.z > 0 || !sq.isOutside() || frozen()) return false;
         IsoPuddles p = IsoPuddles.getInstance();
         return p.getPuddlesSizeFinalValue() > 0.01f || p.getWetGroundFinalValue() > WET;
@@ -104,7 +104,10 @@ public final class PuddleSplash {
     private static final float[] lightBest = new float[MAX_LIGHTS * 9];
 
     // Render thread
-    private static final int[] locations = new int[12];
+    private static final int[] locations = new int[21];
+    // Scene reflection strength (modApi puddleScene), and whether a puddle shader asks for it (render thread)
+    static volatile float sceneStrength;
+    static volatile boolean sceneWanted;
 
     // The trail map on unit 5 (the game uses 0-3 here), its size, and the world square at the puddle shader's screen
     // origin for this level: screen x = (x - y) * 64, y = (x + y - 6z) * 32 for the ground of level z
@@ -122,6 +125,48 @@ public final class PuddleSplash {
             GL20.glUniform2f(loc[5], (float) ox, (float) oy);
         }
     }
+    // PZOE Gore's blood map on unit 15 (blood in a puddle tints the water), with this level's screen origin in squares
+    private static void goreUniforms(int[] loc, int z) {
+        int tex = GoreMap.texture(), rt = GoreMap.ringTexels();
+        int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
+        GL13.glActiveTexture(GL13.GL_TEXTURE15);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex);
+        GL13.glActiveTexture(prevActive);
+        GL20.glUniform1i(loc[12], 15);
+        boolean ok = tex != 0 && rt > 0 && com.pzoptimizer.pzoe.gore.GoreCore.mapDraws && z >= 0 && z < GoreMap.LEVELS;
+        if (loc[13] >= 0) GL20.glUniform4f(loc[13], Math.max(1, rt), Math.max(1, GoreMap.texelsPerSquare()), GoreMap.BANDS, ok ? 1f : 0f);
+        if (loc[14] >= 0) {
+            org.joml.Vector4f off = IsoPuddles.getInstance().getShaderOffset();
+            double ox = off.x / 128.0 + off.y / 64.0 + 3.0 * z, oy = off.y / 64.0 - off.x / 128.0 + 3.0 * z;
+            GL20.glUniform4f(loc[14], (float) ox, (float) oy, z, 0f);
+        }
+    }
+
+    // Scene reflection: the height map on unit 6, last frame's image on unit 9 (both rebound per chunk draw by their
+    // owners), this level's origin in squares as for gore, and the history's camera
+    private static void sceneUniforms(int[] loc, int z, int player) {
+        TemporalPass.historyAskedNs = System.nanoTime();
+        float[] pr = player == 0 ? TemporalPass.projection() : null;
+        int hist = pr != null ? TemporalPass.history() : 0;
+        int ht = PixelLight.heightTexture(player), ring = PixelLight.lightRing(player);
+        boolean ok = hist != 0 && ht != 0 && ring > 0 && sceneStrength > 0f;
+        int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
+        GL13.glActiveTexture(GL13.GL_TEXTURE6);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, ok ? ht : 0);
+        GL13.glActiveTexture(GL13.GL_TEXTURE9);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, ok ? hist : 0);
+        GL13.glActiveTexture(prevActive);
+        if (loc[15] >= 0) GL20.glUniform1i(loc[15], 6);
+        if (loc[16] >= 0) GL20.glUniform1i(loc[16], 9);
+        org.joml.Vector4f off = IsoPuddles.getInstance().getShaderOffset();
+        double ox = off.x / 128.0 + off.y / 64.0 + 3.0 * z, oy = off.y / 64.0 - off.x / 128.0 + 3.0 * z;
+        GL20.glUniform4f(loc[17], (float) ox, (float) oy, z, ok ? 1f : 0f);
+        if (!ok) return;
+        if (loc[18] >= 0) GL20.glUniform4f(loc[18], pr[0], pr[1], pr[2], pr[3]);
+        if (loc[19] >= 0) GL20.glUniform4f(loc[19], pr[4], pr[5], pr[6], ring);
+        if (loc[20] >= 0) GL20.glUniform4f(loc[20], pr[7], pr[8], pr[9], sceneStrength);
+    }
+
     private static int locProgram = -1;
     private static long locCheckedNs;
     private static final AtomicLong uploadsWithPoints = new AtomicLong();
@@ -319,7 +364,11 @@ public final class PuddleSplash {
         if (loc[10] >= 0) GL20.glUniform1f(loc[10], count);
     }
 
+    // This gather's time step, for the vehicle ploughs
+    private static float frameDt;
+
     private static void gather(float dt, boolean splashAsked) {
+        frameDt = dt;
         IsoPlayer[] players = IsoPlayer.players;
         if (IsoWorld.instance == null || IsoWorld.instance.currentCell == null) return;
         for (IsoMovingObject o : IsoWorld.instance.currentCell.getObjectList()) {
@@ -342,7 +391,7 @@ public final class PuddleSplash {
         return false;
     }
 
-    private static boolean snowAt(IsoGridSquare sq) {
+    static boolean snowAt(IsoGridSquare sq) {
         return sq.isOutside() && IsoWorld.instance.currentCell.gridSquareIsSnow(sq.x, sq.y, sq.z);
     }
 
@@ -386,6 +435,7 @@ public final class PuddleSplash {
                 }
             }
         }
+        if (TrailMap.snowWanted || TrailMap.chunkWanted) plough(v, script, kmh);
         for (int i = 0; i < n; i++) {
             zombie.scripting.objects.VehicleScript.Wheel wh = script.getWheel(i);
             if (wh == null) continue;
@@ -415,8 +465,11 @@ public final class PuddleSplash {
             if (sq == null) continue;
             float halfLen = len * 0.5f + 0.04f, halfWid = Math.max(0.08f, wh.width * 0.35f);
             boolean wet = groundIsWet(sq);
-            if (TrailMap.chunkWanted) {
-                if (snowAt(sq)) TrailMap.stamp(cx, cy, sx, sy, halfLen, halfWid, 1f, 0f, 0f);
+            if (TrailMap.chunkWanted || TrailMap.snowWanted) {
+                // PZOE's deep snow counts as snow too, so ruts print with only the ground snow card on
+                if (snowAt(sq) || com.pzoptimizer.pzoe.weather.WeatherSnow.depthAt(w.x, w.y, w.z) > 0.01f) {
+                    TrailMap.stamp(cx, cy, sx, sy, halfLen, halfWid, 1f, 0f, 0f);
+                }
                 else if (wet) TrailMap.stamp(cx, cy, sx, sy, halfLen, halfWid, 0f, 0.45f, 0f);
             }
             if (TrailMap.puddleWanted && wet && IsoPuddles.getInstance().getPuddlesSizeFinalValue() > 0.01f) {
@@ -431,6 +484,72 @@ public final class PuddleSplash {
             }
         }
     }
+
+    // Per vehicle: where its body trench was last stamped
+    private static final WeakHashMap<zombie.vehicles.BaseVehicle, float[]> ploughs = new WeakHashMap<>();
+
+    /**
+     * Snow deeper than the car sits off the ground: the body pushes through it and leaves a trench its own width, the
+     * snow shoved aside into berms (the ground snow shader finds those from the trench), and packs it down for
+     * whoever wades or drives along it next. Shallower snow only gets the wheel ruts.
+     */
+    private static void plough(zombie.vehicles.BaseVehicle v, zombie.scripting.objects.VehicleScript script, float kmh) {
+        float x = v.getX(), y = v.getY();
+        // last stamp x, y, snow load on the bumper 0..1, seconds stood still, last direction x, y
+        float[] st = ploughs.get(v);
+        if (st == null) {
+            ploughs.put(v, new float[] {x, y, 0f, 0f, 1f, 0f});
+            return;
+        }
+        float halfWid = Math.max(0.5f, script.getExtents().x * 0.5f);
+        org.joml.Vector3f fw = v.getForwardVector(wheelPos);
+        float fl = (float) Math.sqrt(fw.x * fw.x + fw.z * fw.z);
+        float fx = fl > 1e-4f ? fw.x / fl : st[4], fy = fl > 1e-4f ? fw.z / fl : st[5];
+        float front = script.getExtents().z * 0.5f + 0.3f;
+        boolean reversing = v.getCurrentSpeedKmHour() < -0.5f;
+        // Stopped for most of a second or backing off: the pile stays where it is
+        if (kmh < 1f) st[3] += (float) frameDt;
+        else st[3] = 0f;
+        if (st[2] > 0.05f && (st[3] > 0.7f || reversing)) {
+            com.pzoptimizer.pzoe.weather.WeatherSnow.dropPile(v, x + st[4] * front, y + st[5] * front, st[4], st[5], halfWid * 1.1f, pileHeight(st[2]));
+            st[2] = 0f;
+        }
+        float dx = x - st[0], dy = y - st[1];
+        float dist = (float) Math.sqrt(dx * dx + dy * dy);
+        if (dist > 3f || kmh < 1f || v.getZ() >= 0.5f) {
+            st[0] = x;
+            st[1] = y;
+            return;
+        }
+        if (dist < 0.3f) return;
+        float mx = (x + st[0]) * 0.5f, my = (y + st[1]) * 0.5f;
+        st[0] = x;
+        st[1] = y;
+        st[4] = fx;
+        st[5] = fy;
+        float h = com.pzoptimizer.pzoe.weather.WeatherSnow.depthAt(mx, my, v.getZ());
+        if (h >= 0.05f) {
+            float r = Math.min(1f, 0.45f + (h - 0.05f) / 0.15f * 0.55f);
+            TrailMap.stamp(mx, my, dx, dy, dist * 0.5f + 0.12f, halfWid, r, 0f, 0f);
+            com.pzoptimizer.pzoe.weather.WeatherSnow.plow(mx, my, dx, dy, dist * 0.5f, halfWid);
+        }
+        // Going forward through deep snow the bumper gathers a load; some always spills to the sides, much more at
+        // speed, where the snow is thrown clear instead (the wheels' spray)
+        if (!reversing) {
+            float gain = h >= 0.05f ? dist * Math.min(1f, (h - 0.05f) / 0.15f + 0.3f) * 0.3f : 0f;
+            float spill = (float) Math.exp(-dist / (kmh > 30f ? 2f : 7f));
+            st[2] = Math.min(1f, st[2] * spill + gain);
+        }
+        com.pzoptimizer.pzoe.weather.WeatherSnow.livePile(v, x + fx * front, y + fy * front, fx, fy, halfWid * 1.1f,
+            st[2] > 0.05f ? pileHeight(st[2]) : 0f);
+    }
+
+    private static float pileHeight(float load) {
+        return 0.03f + 0.09f * load;
+    }
+
+    // Footprints' Tracked-in mud (modApi trailsMud)
+    static volatile boolean trackedMud;
 
     private static boolean near(IsoGameCharacter chr, IsoPlayer[] players) {
         float x = chr.getX(), y = chr.getY();
@@ -447,7 +566,7 @@ public final class PuddleSplash {
         float[] st = walkers.get(chr);
         if (st == null) {
             // lastX, lastY, travelled, foot, wet steps left, last grass press
-            walkers.put(chr, new float[] {x, y, 0f, 0f, 0f, -100f, Float.NaN, 0f});
+            walkers.put(chr, new float[] {x, y, 0f, 0f, 0f, -100f, Float.NaN, 0f, 0f});
             return;
         }
         float mx = x - st[0], my = y - st[1];
@@ -490,11 +609,24 @@ public final class PuddleSplash {
             // A boot-sized oval along the walking line: pressed into snow, or wet on a dry floor for ~10 steps
             if (snowAt(sq)) {
                 TrailMap.stamp(fx, fy, mx, my, 0.13f, 0.07f, 0.9f, 0f, 0f);
+            } else if (trackedMud && st.length > 8 && DustTrails.natural(sq) && groundIsWet(sq)) {
+                // Wet dirt: the shoes come away muddy
+                st[4] = 18f;
+                st[8] = 1f;
             } else if (feetGetWet(sq)) {
-                st[4] = 10f;
+                // A puddle wets them and washes the mud off
+                st[4] = Math.max(st[4], trackedMud ? 14f : 10f);
+                if (st.length > 8) st[8] = 0f;
+            } else if (trackedMud && sq.isOutside() && !frozen() && com.pzoptimizer.pzoe.weather.WeatherLook.precipitation() > 0.25f) {
+                // Out in the rain the shoes get wet anyway, without leaving a mark on the wet ground
+                st[4] = Math.max(st[4], 8f);
             } else if (st[4] > 0f) {
-                TrailMap.stamp(fx, fy, mx, my, 0.12f, 0.06f, 0f, 0.35f * st[4] / 10f, 0f);
+                // Muddy prints are stamped above 0.36 in G, which the shader tints brown; wet ones below
+                boolean mud = st.length > 8 && st[8] > 0.5f;
+                float k = st[4] / (mud ? 18f : trackedMud ? 14f : 10f);
+                TrailMap.stamp(fx, fy, mx, my, 0.12f, 0.06f, 0f, mud ? 0.36f + 0.34f * k : 0.35f * Math.min(1f, k), 0f);
                 st[4] -= 1f;
+                if (st[4] <= 0f && st.length > 8) st[8] = 0f;
             }
         }
     }
@@ -679,6 +811,19 @@ public final class PuddleSplash {
 
     private static volatile long uploadCalls;
 
+    // Once per puddle program: whether the driver linked it, and how much of it is live (0 = the game destroyed it)
+    private static void logProgram(zombie.core.opengl.Shader shader, int prog) {
+        try {
+            String what = prog == 0 ? "id 0 (compile, link or validate failed, the game destroyed it)"
+                : "id " + prog + " linked=" + GL20.glGetProgrami(prog, GL20.GL_LINK_STATUS) + " validated=" + GL20.glGetProgrami(prog, GL20.GL_VALIDATE_STATUS)
+                + " activeUniforms=" + GL20.glGetProgrami(prog, GL20.GL_ACTIVE_UNIFORMS) + " PZOFreeze=" + GL20.glGetUniformLocation(prog, "PZOFreeze")
+                + " PuddlesParams=" + GL20.glGetUniformLocation(prog, "PuddlesParams");
+            PZOLogger.info("[PuddleSplash] puddle program " + shader.getName() + ": " + what);
+        } catch (Throwable t) {
+            PZOLogger.info("[PuddleSplash] puddle program " + prog + ": " + t);
+        }
+    }
+
     /** End of PuddlesShader.updatePuddlesParams(userId, z), render thread, with the puddle program bound. */
     public static void upload(zombie.core.opengl.Shader shader, int userId, int z) {
         try {
@@ -691,6 +836,7 @@ public final class PuddleSplash {
             long nowNs = System.nanoTime();
             int[] loc = locations;
             if (prog != locProgram || nowNs - locCheckedNs > 250_000_000L) {
+                if (prog != locProgram) logProgram(shader, prog);
                 locProgram = prog;
                 locCheckedNs = nowNs;
                 loc[0] = GL20.glGetUniformLocation(prog, "PZOTime");
@@ -705,10 +851,22 @@ public final class PuddleSplash {
                 loc[9] = GL20.glGetUniformLocation(prog, "PZOStream");
                 loc[10] = GL20.glGetUniformLocation(prog, "PZOStreamCount");
                 loc[11] = GL20.glGetUniformLocation(prog, "PZOFreeze");
+                loc[12] = GL20.glGetUniformLocation(prog, "PZOGore");
+                loc[13] = GL20.glGetUniformLocation(prog, "PZOGoreInfo");
+                loc[14] = GL20.glGetUniformLocation(prog, "PZOGoreOrigin");
+                loc[15] = GL20.glGetUniformLocation(prog, "PZOHeight");
+                loc[16] = GL20.glGetUniformLocation(prog, "PZOHist");
+                loc[17] = GL20.glGetUniformLocation(prog, "PZOReflOrigin");
+                loc[18] = GL20.glGetUniformLocation(prog, "PZOReflRef");
+                loc[19] = GL20.glGetUniformLocation(prog, "PZOReflU");
+                loc[20] = GL20.glGetUniformLocation(prog, "PZOReflV");
+                sceneWanted = loc[17] >= 0;
                 TrailMap.puddleWanted = loc[3] >= 0;
             }
             if (loc[11] >= 0) GL20.glUniform1f(loc[11], com.pzoptimizer.pzoe.weather.WeatherEvents.puddleFreeze());
             if (loc[3] >= 0) trailUniforms(loc, z);
+            if (loc[12] >= 0) goreUniforms(loc, z);
+            if (loc[17] >= 0) sceneUniforms(loc, z, userId);
             if (loc[6] >= 0) uploadLights(loc, z);
             if (loc[9] >= 0) uploadStreams(loc, z);
             if (loc[0] < 0 && loc[1] < 0) return;

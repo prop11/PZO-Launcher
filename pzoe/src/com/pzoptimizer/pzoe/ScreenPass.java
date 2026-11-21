@@ -51,6 +51,8 @@ import zombie.vehicles.BaseVehicle;
  *   uniform vec4 PZOGrade2;       rain, snow falling, 0, 1 = values are live
  *   uniform sampler2D PZOBloomTex; the world image again, with mipmaps made this frame (bloom reads blurred levels)
  *   uniform vec4 PZOBloom;        1 = live, night 0..1, 0, 0
+ *   uniform vec4 PZOEye;          scene brightness for eye adaptation (EyeAdapt)
+ *   uniform vec4 PZOSmoke[16], PZOSmokeInfo;   smoke columns over fires (SmokePlumes)
  *
  * Haze sources: the cell's heat sources (fires, fireplaces, barbecues, campfires: everything lit registers one),
  * burning characters, and vehicles with the engine running (behind the rear axle; vehicle scripts have no exhaust
@@ -66,7 +68,7 @@ public final class ScreenPass {
     static final float RANGE_SQ = 30f * 30f;
     static final int SEQ_VAR = 24;
 
-    private record Filed(int seq, float zoom, float[] data, int worldTex, int frame) {}
+    private record Filed(int seq, float zoom, float[] data, int worldTex, int frame, int player, float[] rect, float[] smoke, float[] ref, float[] breath, float[] moodle, float[] glass, float[] dust, float[] glare) {}
 
     // Main thread
     private static int lastFrame = Integer.MIN_VALUE;
@@ -81,13 +83,16 @@ public final class ScreenPass {
 
     // Shared
     private static final AtomicReferenceArray<Filed> filed = new AtomicReferenceArray<>(8);
-    private static volatile long askedNanos, gradeAskedNanos, bloomAskedNanos;
+    private static volatile long askedNanos, gradeAskedNanos, bloomAskedNanos, eyeAskedNanos;
     private static volatile float bloomNight;
     private static volatile float published;
     private static volatile float[] grade = new float[8];
 
     // Render thread
-    private static final int[] locations = new int[9];
+    private static final int[] locations = new int[25];
+    private static final FloatBuffer glareBuf = ByteBuffer.allocateDirect(Glare.MAX * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private static final FloatBuffer dustBuf = ByteBuffer.allocateDirect(DustTrails.MAX * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private static final FloatBuffer breathBuf = ByteBuffer.allocateDirect(Breath.MAX * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     // World textures switched to mipmap filtering for bloom, put back when bloom goes away
     private static final java.util.Set<Integer> mipTextures = new java.util.HashSet<>();
     private static int lastMipFrame = Integer.MIN_VALUE;
@@ -121,12 +126,45 @@ public final class ScreenPass {
             texd.vars[SEQ_VAR] = s;
             float zoom = Core.getInstance().getZoom(playerIndex);
             int worldTex = 0;
-            if (now - bloomAskedNanos < 1_000_000_000L) {
+            float[] rect = null;
+            boolean eye = now - eyeAskedNanos < 1_000_000_000L;
+            boolean temporal = (TemporalPass.on || TemporalPass.historyAsked()) && playerIndex == 0;
+            if (eye || temporal || now - bloomAskedNanos < 1_000_000_000L) {
                 zombie.core.textures.TextureFBO fbo = Core.getInstance().getOffscreenBuffer();
                 if (fbo != null && fbo.getTexture() != null) worldTex = fbo.getTexture().getID();
                 bloomNight = zombie.iso.weather.ClimateManager.getInstance().getNightStrength();
             }
-            filed.set(s & 7, new Filed(s, zoom, sourceCount == 0 ? null : project(playerIndex, zoom, texd.col2, texd.col3), worldTex, f));
+            if (eye && texd.col2 > 0 && texd.col3 > 0) {
+                float left = IsoCamera.getScreenLeft(playerIndex), top = IsoCamera.getScreenTop(playerIndex);
+                float w = IsoCamera.getScreenWidth(playerIndex), h = IsoCamera.getScreenHeight(playerIndex);
+                rect = new float[] {left / texd.col2, top / texd.col3, (left + w) / texd.col2, (top + h) / texd.col3};
+            }
+            float[] ref = temporal ? reference(playerIndex, zoom) : null;
+            float[] smoke = null;
+            if (now - SmokePlumes.askedNanos < 1_000_000_000L) {
+                SmokePlumes.frame();
+                smoke = SmokePlumes.project(playerIndex, zoom, texd.col2, texd.col3);
+            }
+            float[] breath = null;
+            if (now - Breath.askedNanos < 1_000_000_000L) {
+                Breath.frame();
+                breath = Breath.project(playerIndex, zoom, texd.col2, texd.col3);
+            }
+            float[] dust = null;
+            if (now - DustTrails.askedNanos < 1_000_000_000L) {
+                DustTrails.frame();
+                dust = DustTrails.project(playerIndex, zoom, texd.col2, texd.col3);
+            }
+            if (playerIndex == 0) Lut.frame();
+            float[] glare = null;
+            if (now - Glare.askedNanos < 1_000_000_000L) {
+                if (playerIndex == 0) Glare.frame();
+                glare = Glare.project(playerIndex, zoom, texd.col2, texd.col3);
+            }
+            float[] moodle = now - MoodleFx.askedNanos < 1_000_000_000L ? MoodleFx.sample(playerIndex) : null;
+            filed.set(s & 7, new Filed(s, zoom, sourceCount == 0 ? null : project(playerIndex, zoom, texd.col2, texd.col3),
+                worldTex, f, playerIndex, rect, smoke, ref, breath, moodle,
+                now - Windscreen.askedNanos < 1_000_000_000L ? Windscreen.sample(playerIndex) : null, dust, glare));
         } catch (Throwable t) {
             // Worst case no haze this frame
         }
@@ -260,6 +298,18 @@ public final class ScreenPass {
         best[o + 5] = d;
     }
 
+    // A world point near the camera (snapped to 32 squares, so it stays put while the camera moves) and where it lands
+    // in the world texture this frame, pixels with v up: the camera's move for the history buffer
+    private static float[] reference(int playerIndex, float zoom) {
+        PlayerCamera cam = IsoCamera.cameras[playerIndex];
+        IsoPlayer pl = IsoPlayer.players[playerIndex];
+        if (cam == null || pl == null || zoom <= 0f) return null;
+        float wx = (float) Math.floor(pl.getX() / 32f) * 32f, wy = (float) Math.floor(pl.getY() / 32f) * 32f;
+        float left = IsoCamera.getScreenLeft(playerIndex), top = IsoCamera.getScreenTop(playerIndex);
+        float sh = IsoCamera.getScreenHeight(playerIndex);
+        return new float[] {wx, wy, left + cam.XToScreenExact(wx, wy, 0f, 0) / zoom, top + sh - cam.YToScreenExact(wx, wy, 0f, 0) / zoom};
+    }
+
     // Per point: u, v in the world image, tile width in screen pixels, strength. The world quad maps texture row
     // (screenTop + screenHeight) to the top of the viewport (Texture.rendershader2), so v runs upward.
     private static float[] project(int playerIndex, float zoom, int texW, int texH) {
@@ -305,6 +355,94 @@ public final class ScreenPass {
                 loc[6] = GL20.glGetUniformLocation(prog, "PZOBloom");
                 loc[7] = GL20.glGetUniformLocation(prog, "PZOStorm");
                 loc[8] = GL20.glGetUniformLocation(prog, "PZOBolt");
+                loc[9] = GL20.glGetUniformLocation(prog, "PZOEye");
+                loc[10] = GL20.glGetUniformLocation(prog, "PZOSmoke");
+                loc[11] = GL20.glGetUniformLocation(prog, "PZOSmokeInfo");
+                loc[12] = GL20.glGetUniformLocation(prog, "PZOLens");
+                loc[13] = GL20.glGetUniformLocation(prog, "PZOBreath");
+                loc[14] = GL20.glGetUniformLocation(prog, "PZOBreathInfo");
+                loc[15] = GL20.glGetUniformLocation(prog, "PZOMoodle");
+                loc[16] = GL20.glGetUniformLocation(prog, "PZOMoodle2");
+                loc[17] = GL20.glGetUniformLocation(prog, "PZOWindscreen");
+                loc[18] = GL20.glGetUniformLocation(prog, "PZOWindscreen2");
+                loc[19] = GL20.glGetUniformLocation(prog, "PZODust");
+                loc[20] = GL20.glGetUniformLocation(prog, "PZODustInfo");
+                loc[21] = GL20.glGetUniformLocation(prog, "PZOGlare");
+                loc[22] = GL20.glGetUniformLocation(prog, "PZOGlareInfo");
+                loc[23] = GL20.glGetUniformLocation(prog, "PZOLut");
+                loc[24] = GL20.glGetUniformLocation(prog, "PZOLutInfo");
+            }
+            if (loc[24] >= 0) Lut.upload(loc[23], loc[24]);
+            if (loc[22] >= 0) {
+                Glare.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] gl = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.glare : null;
+                int n = gl == null ? 0 : Math.min(Glare.MAX, gl.length / 8);
+                if (n > 0 && loc[21] >= 0) {
+                    glareBuf.clear();
+                    glareBuf.put(gl, 0, n * 8);
+                    glareBuf.flip();
+                    GL20.glUniform4fv(loc[21], glareBuf);
+                }
+                GL20.glUniform4f(loc[22], n, Glare.rain, Glare.night, n > 0 ? 1f : 0f);
+            }
+            if (loc[20] >= 0) {
+                DustTrails.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] du = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.dust : null;
+                int n = du == null ? 0 : Math.min(DustTrails.MAX, du.length / 4);
+                if (n > 0 && loc[19] >= 0) {
+                    dustBuf.clear();
+                    dustBuf.put(du, 0, n * 4);
+                    dustBuf.flip();
+                    GL20.glUniform4fv(loc[19], dustBuf);
+                }
+                GL20.glUniform4f(loc[20], n, zombie.iso.weather.ClimateManager.getInstance().getDayLightStrength(), 0f, n > 0 ? 1f : 0f);
+            }
+            if (loc[18] >= 0) {
+                Windscreen.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] g = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.glass : null;
+                if (g != null) {
+                    if (loc[17] >= 0) GL20.glUniform4f(loc[17], g[0], g[1], g[2], g[3]);
+                    GL20.glUniform4f(loc[18], g[4], g[5], g[6], g[7]);
+                } else {
+                    GL20.glUniform4f(loc[18], 0f, 0f, 0f, 0f);
+                }
+            }
+            if (loc[16] >= 0) {
+                MoodleFx.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] m = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.moodle : null;
+                if (m != null) {
+                    if (loc[15] >= 0) GL20.glUniform4f(loc[15], m[0], m[1], m[2], m[3]);
+                    GL20.glUniform4f(loc[16], m[4], m[5], m[6], published);
+                } else {
+                    GL20.glUniform4f(loc[16], 0f, 0f, 0f, 0f);
+                }
+            }
+            if (loc[14] >= 0) {
+                Breath.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] br = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.breath : null;
+                int n = br == null ? 0 : Math.min(Breath.MAX, br.length / 8);
+                if (n > 0 && loc[13] >= 0) {
+                    breathBuf.clear();
+                    breathBuf.put(br, 0, n * 8);
+                    breathBuf.flip();
+                    GL20.glUniform4fv(loc[13], breathBuf);
+                }
+                GL20.glUniform4f(loc[14], n, published, Breath.windScreen, Breath.cold);
+            }
+            if (loc[12] >= 0) {
+                // PZOE Gore's lens blood: amount, seed, palette, live
+                float[] lb = GoreFx.lensUniform();
+                GL20.glUniform4f(loc[12], lb[0], lb[1], lb[2], lb[3]);
             }
             if (loc[8] >= 0) {
                 float[] b = com.pzoptimizer.pzoe.weather.WeatherStorm.bolt();
@@ -315,7 +453,36 @@ public final class ScreenPass {
                 float[] st = com.pzoptimizer.pzoe.weather.WeatherRegional.storm();
                 GL20.glUniform4f(loc[7], st[0], st[1], st[2], 0f);
             }
+            if (TemporalPass.on || TemporalPass.historyAsked()) {
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                if (fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] && fl.ref != null) {
+                    TemporalPass.render(fl.worldTex, fl.frame, fl.ref, fl.zoom);
+                }
+            }
             bloom(loc, texd);
+            if (loc[9] >= 0) {
+                eyeAskedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                boolean ok = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14];
+                EyeAdapt.render(loc[9], ok ? fl.worldTex : 0, ok ? fl.frame : 0, ok ? fl.player : 0, ok ? fl.rect : null);
+            }
+            if (loc[11] >= 0) {
+                SmokePlumes.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                // A thumbnail draw re-runs startMainThread and then changes the zoom; those get no smoke
+                float[] sm = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.smoke : null;
+                int n = sm == null ? 0 : Math.min(SmokePlumes.MAX, sm.length / 4);
+                if (n > 0 && loc[10] >= 0) {
+                    buf.clear();
+                    buf.put(sm, 0, n * 4);
+                    buf.flip();
+                    GL20.glUniform4fv(loc[10], buf);
+                }
+                GL20.glUniform4f(loc[11], n, published, SmokePlumes.windScreen, SmokePlumes.night);
+            }
             if (loc[3] >= 0 || loc[4] >= 0) {
                 gradeAskedNanos = nowNs;
                 float[] g = grade;
@@ -375,21 +542,29 @@ public final class ScreenPass {
             if (mipTextures.add(fl.worldTex)) {
                 GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR_MIPMAP_LINEAR);
             }
-            if (fl.frame != lastMipFrame) {
-                lastMipFrame = fl.frame;
-                GL30.glGenerateMipmap(GL11.GL_TEXTURE_2D);
-            }
+            mipmaps(fl.worldTex, fl.frame);
             GL13.glActiveTexture(prevActive);
             GL20.glUniform1i(loc[5], 3);
         }
         if (loc[6] >= 0) GL20.glUniform4f(loc[6], live ? 1f : 0f, bloomNight, 0f, 0f);
     }
 
+    /** Mipmaps of the world texture, once a frame; the texture is bound on the active unit. Render thread. */
+    static void mipmaps(int worldTex, int frame) {
+        if (frame == lastMipFrame && worldTex == lastMipTex) return;
+        lastMipFrame = frame;
+        lastMipTex = worldTex;
+        GL30.glGenerateMipmap(GL11.GL_TEXTURE_2D);
+    }
+
+    private static int lastMipTex;
+
     /** key=value pairs for the settings card (PZOApi.getChunkEffects). */
     static String stateText() {
         boolean asked = System.nanoTime() - askedNanos < 1_000_000_000L;
         return "hazeShader=" + (asked ? 1 : 0) + ";hazeSources=" + sourceCount + ";hazeDraws=" + draws
-            + ";hazeDrawsWithPoints=" + drawsWithPoints + ";locHaze=" + locations[0] + ";locGrade=" + locations[3];
+            + ";hazeDrawsWithPoints=" + drawsWithPoints + ";locHaze=" + locations[0] + ";locGrade=" + locations[3]
+            + ";locEye=" + locations[9] + ";" + EyeAdapt.stateText() + ";" + SmokePlumes.stateText() + ";" + Breath.stateText() + ";" + TemporalPass.stateText();
     }
 
     static boolean patchShader(ClassNode node) {

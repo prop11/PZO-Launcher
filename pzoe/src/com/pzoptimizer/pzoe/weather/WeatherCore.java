@@ -143,7 +143,7 @@ public final class WeatherCore {
     public static String encodeForClients() {
         if (!zombie.network.GameServer.server || ticks == 0) return null;
         return "v=" + VERSION + ";sim=" + (sim ? 1 : 0) + ";fx=" + (effects ? 1 : 0) + ";" + WeatherFronts.encode() + ";" + WeatherEvents.encode() + ";" + WeatherRegional.encode()
-            + ";gsd=" + String.format(java.util.Locale.ROOT, "%.2f", com.pzoptimizer.pzoe.GroundSnow.depthNow());
+            + ";" + WeatherAuthority.encode() + ";gsd=" + String.format(java.util.Locale.ROOT, "%.2f", com.pzoptimizer.pzoe.GroundSnow.depthNow());
     }
 
     private static String lastSig = "";
@@ -157,7 +157,7 @@ public final class WeatherCore {
         if (s == null) return null;
         String sig = "sim" + sim + effects + WeatherEvents.encode().replaceAll("ice=[0-9.]+", "")
             + Math.round(WeatherEvents.hail * 4) + Math.round(WeatherFronts.preTarget * 5) + Math.round(WeatherFronts.mistTarget * 5) + Math.round(WeatherRegional.angleDeg / 15f)
-            + Math.round(com.pzoptimizer.pzoe.GroundSnow.depthNow() * 5);
+            + Math.round(com.pzoptimizer.pzoe.GroundSnow.depthNow() * 5) + "m" + WeatherAuthority.mask;
         sig = sig.replaceAll("hail=[0-9.]+", "");
         if (sig.equals(lastSig)) return null;
         lastSig = sig;
@@ -228,7 +228,7 @@ public final class WeatherCore {
 
     public static String stateText() {
         return "weatherRole=" + role + ";weatherSim=" + (behaviourOn() ? 1 : 0) + ";weatherFx=" + (effectsOn() ? 1 : 0)
-            + ";weatherServer=" + (serverEngine ? 1 : 0) + ";" + WeatherFronts.stateText() + ";" + WeatherLook.stateText();
+            + ";weatherServer=" + (serverEngine ? 1 : 0) + ";" + WeatherFronts.stateText() + ";" + WeatherLook.stateText() + ";" + WeatherAuthority.stateText();
     }
 
     // ClimateManager patches
@@ -256,7 +256,7 @@ public final class WeatherCore {
 
     /** update(): simTick after weatherPeriod.update, WeatherFronts.post before updateWindTick. updateFx(): every IsoWeatherFX setter goes through WeatherLook. */
     public static boolean patchClimate(ClassNode node) {
-        int ticked = 0, posted = 0, fx = 0, body = 0;
+        int ticked = 0, posted = 0, fx = 0, body = 0, vanilla = 0;
         for (MethodNode m : node.methods) {
             if (m.name.equals("update") && m.desc.equals("()V")) {
                 for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
@@ -303,8 +303,12 @@ public final class WeatherCore {
                 }
             }
         }
-        if (ticked != 1 || posted != 1 || fx != WeatherLook.FX_COUNT + 1 || body < 1) {
-            PZOLogger.warn("[PZOE weather] ClimateManager didn't match (sim " + ticked + ", post " + posted + ", fx " + fx + ", body " + body + "): left vanilla");
+        // Last: vanillaEnd goes straight after weatherPeriod.update, so simTick (inserted there above) runs outside it
+        for (MethodNode m : node.methods) {
+            if (m.name.equals("update") && m.desc.equals("()V")) vanilla += WeatherAuthority.patchVanillaSections(m);
+        }
+        if (ticked != 1 || posted != 1 || fx != WeatherLook.FX_COUNT + 1 || body < 1 || vanilla != 2) {
+            PZOLogger.warn("[PZOE weather] ClimateManager didn't match (sim " + ticked + ", post " + posted + ", fx " + fx + ", body " + body + ", vanilla " + vanilla + "): left vanilla");
             return false;
         }
         return true;

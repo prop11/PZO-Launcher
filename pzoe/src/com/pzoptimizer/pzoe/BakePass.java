@@ -25,6 +25,11 @@ import zombie.iso.fboRenderChunk.FBORenderChunk;
  * attachment comes off for the pass and goes back after; reading it while attached is undefined in GL. Empty texels
  * have the cleared depth of 1.0, so the colour texture is never read. All GL state it touches is saved and restored.
  *
+ * Uniforms: PZOBakeDepth (unit 6), PZOBakeSize = (texture width, height, scale, chunk image width at 1x),
+ * PZOBakeChunk = (chunk world x, y in squares, first level, top offset), PZOBakeWorld = (days since the apocalypse in
+ * whole weeks, 0, 0, 0) for weathering. The week only moves forward a step at a time, so a world aging re-bakes once a
+ * game week, spread over frames.
+ *
  * Nothing runs until a mod registers a pass and its setting is on.
  */
 public final class BakePass {
@@ -52,7 +57,13 @@ public final class BakePass {
 
     // Render thread
     private static int builtVersion = -1, vertexShader, emptyVao;
-    private static int[] programs = new int[0], locDepth = new int[0], locSize = new int[0], locChunk = new int[0];
+    private static int[] programs = new int[0], locDepth = new int[0], locSize = new int[0], locChunk = new int[0], locWorld = new int[0], locScorch = new int[0];
+    private static final float[] scorchBuf = new float[144];
+    private static final java.nio.FloatBuffer scorchFb = java.nio.ByteBuffer.allocateDirect(144 * 4).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
+
+    // Main thread writes, render thread reads
+    private static volatile float ageDays;
+    private static int lastWeek = Integer.MIN_VALUE;
 
     private BakePass() {}
 
@@ -124,6 +135,8 @@ public final class BakePass {
         locDepth = new int[n];
         locSize = new int[n];
         locChunk = new int[n];
+        locWorld = new int[n];
+        locScorch = new int[n];
         for (int i = 0; i < n; i++) {
             String id = passes.get(i)[0];
             int fs = compile(GL20.GL_FRAGMENT_SHADER, passes.get(i)[1], id);
@@ -146,6 +159,9 @@ public final class BakePass {
             locDepth[i] = GL20.glGetUniformLocation(prog, "PZOBakeDepth");
             locSize[i] = GL20.glGetUniformLocation(prog, "PZOBakeSize");
             locChunk[i] = GL20.glGetUniformLocation(prog, "PZOBakeChunk");
+            locWorld[i] = GL20.glGetUniformLocation(prog, "PZOBakeWorld");
+            // Scorched Ground: the burnt squares around the chunk (Scorch)
+            locScorch[i] = GL20.glGetUniformLocation(prog, "PZOBakeScorch");
             status.put(id, ShaderPatchHost.APPLIED);
         }
     }
@@ -200,8 +216,16 @@ public final class BakePass {
                 if (programs[i] == 0) continue;
                 GL20.glUseProgram(programs[i]);
                 if (locDepth[i] >= 0) GL20.glUniform1i(locDepth[i], 6);
-                if (locSize[i] >= 0) GL20.glUniform4f(locSize[i], w, h, scale, 0f);
+                if (locSize[i] >= 0) GL20.glUniform4f(locSize[i], w, h, scale, rc.w / scale);
                 if (locChunk[i] >= 0) GL20.glUniform4f(locChunk[i], rc.chunk.wx * 8, rc.chunk.wy * 8, min, topOffset);
+                if (locWorld[i] >= 0) GL20.glUniform4f(locWorld[i], ageDays, 0f, 0f, 0f);
+                if (locScorch[i] >= 0) {
+                    Scorch.around(rc.chunk.wx, rc.chunk.wy, scorchBuf);
+                    scorchFb.clear();
+                    scorchFb.put(scorchBuf);
+                    scorchFb.flip();
+                    GL20.glUniform1fv(locScorch[i], scorchFb);
+                }
                 GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
             }
             GpuTimer.bakeEnd(timer);
@@ -216,5 +240,24 @@ public final class BakePass {
         }
     }
 
+    /** Main thread, once a frame (PixelLight.frame): the world's age for weathering, a re-bake when the week turns. */
+    static void frame() {
+        zombie.GameTime gt = zombie.GameTime.getInstance();
+        if (gt == null) return;
+        int week = (int) Math.floor(Math.max(0.0, gt.getWorldAgeDaysSinceBegin()) / 7.0);
+        if (week == lastWeek) return;
+        boolean first = lastWeek == Integer.MIN_VALUE;
+        lastWeek = week;
+        ageDays = week * 7f;
+        // Chunks baked before the first frame had no age yet
+        if (!live.isEmpty() && (!first || week > 0)) rebakeSoon = true;
+    }
+
     static volatile long passesRun;
+
+    /** Whether a live pass's source mentions this uniform (main thread: what to gather for the bakes). */
+    static boolean anyUses(String name) {
+        for (String[] p : live) if (p.length > 1 && p[1] != null && p[1].contains(name)) return true;
+        return false;
+    }
 }

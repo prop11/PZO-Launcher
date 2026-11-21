@@ -45,6 +45,8 @@ public final class Precipitation {
     private static volatile boolean enabled;
     private static volatile int quality = 2;
     private static volatile float amount = 1f;
+    // Leaves and blowing snow (modApi precipExtras), 1 = 100 percent, 0 = off
+    static volatile float extras;
     private static volatile boolean failed;
 
     private static VarHandle vhInstance, vhIndoors, vhPlayerIndoors, vhSnow, vhRain, vhWindAngle, vhWindSpeed;
@@ -55,7 +57,7 @@ public final class Precipitation {
     private static int lastFrame = Integer.MIN_VALUE;
 
     // Render thread
-    private static int program, vao, locA, locB, locC, locL, locD, locLight;
+    private static int program, vao, locA, locB, locC, locL, locD, locE, locLight;
     private static volatile long draws;
 
     private Precipitation() {}
@@ -123,7 +125,8 @@ public final class Precipitation {
                 if (zombie.GameTime.isGamePaused()) dt = 0f;
                 clock = (clock + dt * zombie.core.Core.getInstance().getOptionPrecipitationSpeedMultiplier()) % 600f;
             }
-            if (rain <= 0.001f && snow <= 0.001f && com.pzoptimizer.pzoe.weather.WeatherEvents.hail() <= 0.001f) return;
+            float[] ex = extras();
+            if (rain <= 0.001f && snow <= 0.001f && com.pzoptimizer.pzoe.weather.WeatherEvents.hail() <= 0.001f && ex[0] <= 0.001f && ex[1] <= 0.001f) return;
             float alpha = ((SteppedUpdateFloat) vhIndoors.get(fx)).value() * ((boolean) vhPlayerIndoors.get(fx) ? 0.5f : 1f);
             if (alpha <= 0.001f) return;
             zombie.iso.IsoCamera.FrameState fs = zombie.iso.IsoCamera.frameState;
@@ -139,6 +142,7 @@ public final class Precipitation {
                 (float) Math.cos(angle), (float) Math.sin(angle), speed, 64f * zombie.core.Core.tileScale,
                 0f, PixelLight.BASE_LEVEL, (float) Math.floor(fs.camCharacterZ), 0f,
                 day, quality + 1, amount * Math.max(0.3f, mod), com.pzoptimizer.pzoe.weather.WeatherEvents.hail(),
+                ex[0] * Math.max(0.3f, mod), ex[1], ex[2], 0f,
             };
             zombie.core.SpriteRenderer.instance.drawGeneric(new Draw(v, p, PixelLight.deferred || PixelLight.atmos));
         } catch (Throwable t) {
@@ -184,6 +188,7 @@ public final class Precipitation {
                     GL20.glUniform4f(locC, v[8], v[9], v[10], v[11]);
                     GL20.glUniform4f(locL, ring, v[13], v[14], lit ? 1f : 0f);
                     GL20.glUniform4f(locD, v[16], v[17], v[18], v[19]);
+                    GL20.glUniform4f(locE, v[20], v[21], v[22], v[23]);
                     GL30.glBindVertexArray(vao);
                     GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
                     GL30.glBindVertexArray(0);
@@ -226,9 +231,25 @@ public final class Precipitation {
         locC = GL20.glGetUniformLocation(prog, "PZOPrecipC");
         locL = GL20.glGetUniformLocation(prog, "PZOPrecipL");
         locD = GL20.glGetUniformLocation(prog, "PZOPrecipD");
+        locE = GL20.glGetUniformLocation(prog, "PZOPrecipE");
         locLight = GL20.glGetUniformLocation(prog, "PZOLight");
         PZOLogger.info("[Precipitation] GPU rain and snow ready");
         return true;
+    }
+
+    // Leaves falling (autumn, and gales while the trees are in leaf), snow blowing along the ground (snow lying and a
+    // strong wind), and the wind's strength: what the leaf and drift layers need
+    private static float[] extras() {
+        float k = extras;
+        if (k <= 0f) return new float[3];
+        float wind = com.pzoptimizer.pzoe.weather.WeatherLook.wind();
+        int month = Math.floorMod(zombie.GameTime.getInstance().getMonth(), 12);
+        float autumn = month == 8 ? 0.35f : month == 9 ? 1f : month == 10 ? 0.6f : 0f;
+        float gale = month >= 4 && month <= 7 ? Math.max(0f, (wind - 0.55f) / 0.45f) * 0.4f : 0f;
+        float leaves = Math.min(1f, (autumn * (0.35f + 0.65f * wind) + gale)) * k;
+        float lying = Math.max(GroundSnow.active() ? Math.min(1f, GroundSnow.depth * 3f) : 0f, Math.min(1f, PixelLight.snowCover * 1.5f));
+        float drift = lying * Math.max(0f, (wind - 0.35f) / 0.65f) * k;
+        return new float[] {leaves, drift, wind};
     }
 
     private static int compile(int type, String src, String what) {
@@ -258,6 +279,8 @@ public final class Precipitation {
         uniform vec4 PZOPrecipC;
         uniform vec4 PZOPrecipL;
         uniform vec4 PZOPrecipD;
+        // Leaves, blowing snow, wind strength
+        uniform vec4 PZOPrecipE;
         uniform sampler2D PZOLight;
 
         float pzoPHash(vec2 p)
@@ -346,13 +369,14 @@ public final class Precipitation {
         vec2 pzoHailBall(vec2 d, float rad)
         {
             float r = length(d) / rad;
-            float a = 1.0 - smoothstep(0.75, 1.15, r);
+            float a = 1.0 - smoothstep(0.85, 1.05, r);
             if (a <= 0.0) return vec2(0.0);
             vec2 nn = d / rad;
             float z = sqrt(max(0.0, 1.0 - dot(nn, nn)));
             float lit = clamp(dot(vec3(nn, z), normalize(vec3(-0.5, -0.6, 0.65))), 0.0, 1.0);
             float glint = smoothstep(0.86, 0.97, lit);
-            return vec2(a, 0.62 + 0.38 * lit + 0.35 * glint - 0.18 * smoothstep(0.6, 1.0, r));
+            // A darker rim so a stone reads as a solid ball against pale ground, not as a fleck of rain
+            return vec2(a, 0.72 + 0.4 * lit + 0.45 * glint - 0.4 * smoothstep(0.55, 1.0, r));
         }
 
         // One layer of falling hail: hard round stones coming down fast and straight, a short blur trailing above
@@ -363,19 +387,20 @@ public final class Precipitation {
             vec2 q = (px + PZOPrecipA.zw * parallax) / scale;
             vec2 across = vec2(-dir.y, dir.x);
             float u = dot(q, across);
-            float v = dot(q, dir) - mix(900.0, 560.0, k) * t / scale;
-            float cs = 44.0;
+            float v = dot(q, dir) - mix(700.0, 450.0, k) * t / scale;
+            float cs = 38.0;
             vec2 cell = floor(vec2(u, v) / cs);
             vec2 lc = vec2(u, v) / cs - cell;
             cell += k * 43.0;
             if (pzoPHash(cell) > density) return vec2(0.0);
             vec2 c = vec2(0.2 + 0.6 * pzoPHash(cell + 2.1), 0.2 + 0.6 * pzoPHash(cell + 6.3));
             vec2 d = (lc - c) * cs * scale;
-            float rad = mix(2.8, 1.3, k) * (0.7 + 0.6 * pzoPHash(cell + 4.8));
+            float rad = mix(5.0, 2.4, k) * (0.75 + 0.5 * pzoPHash(cell + 4.8));
             vec2 ball = pzoHailBall(d, rad);
             // Blur trailing above the stone (toward where it came from)
             float behind = -d.y;
-            float trail = behind > 0.0 ? (1.0 - smoothstep(rad * 0.5, rad * 0.9, abs(d.x))) * (1.0 - smoothstep(0.0, rad * 3.5, behind)) * 0.35 : 0.0;
+            // Short: a long streak is what made hail read as rain
+            float trail = behind > 0.0 ? (1.0 - smoothstep(rad * 0.4, rad * 0.8, abs(d.x))) * (1.0 - smoothstep(0.0, rad * 1.8, behind)) * 0.22 : 0.0;
             float fade = mix(1.0, 0.55, k);
             return vec2(max(ball.x, trail) * fade, ball.x > trail ? ball.y : 0.75);
         }
@@ -384,19 +409,74 @@ public final class Precipitation {
         vec2 pzoHailBounce(vec2 px, float t, float density)
         {
             vec2 q = px + PZOPrecipA.zw;
-            float cs = 70.0;
+            float cs = 52.0;
             vec2 cell = floor(q / cs);
             if (pzoPHash(cell + 19.1) > density) return vec2(0.0);
             float period = 0.55 + 0.5 * pzoPHash(cell + 7.7);
             float ph = fract(t / period + pzoPHash(cell + 1.9));
             float hop = 0.0;
-            if (ph < 0.35) hop = 9.0 * 4.0 * (ph / 0.35) * (1.0 - ph / 0.35);
-            else if (ph < 0.55) hop = 3.5 * 4.0 * ((ph - 0.35) / 0.2) * (1.0 - (ph - 0.35) / 0.2);
+            if (ph < 0.35) hop = 14.0 * 4.0 * (ph / 0.35) * (1.0 - ph / 0.35);
+            else if (ph < 0.55) hop = 5.0 * 4.0 * ((ph - 0.35) / 0.2) * (1.0 - (ph - 0.35) / 0.2);
             else if (ph > 0.75) return vec2(0.0);
             vec2 spot = (cell + vec2(0.2 + 0.6 * pzoPHash(cell + 3.3), 0.2 + 0.6 * pzoPHash(cell + 8.8))) * cs;
             spot.x += (pzoPHash(cell + 5.5) - 0.5) * 10.0 * ph;
             vec2 d = q - (spot - vec2(0.0, hop));
-            return pzoHailBall(d, 2.2 + 0.8 * pzoPHash(cell + 4.4));
+            return pzoHailBall(d, 3.0 + 1.5 * pzoPHash(cell + 4.4));
+        }
+
+        // Stones lying where they fell: scattered pellets pinned to the world, more the harder it hails
+        vec2 pzoHailLying(vec2 px, float density)
+        {
+            vec2 q = px + PZOPrecipA.zw;
+            float cs = 24.0;
+            vec2 cell = floor(q / cs);
+            if (pzoPHash(cell + 31.7) > density) return vec2(0.0);
+            vec2 spot = (cell + vec2(0.2 + 0.6 * pzoPHash(cell + 12.3), 0.2 + 0.6 * pzoPHash(cell + 15.1))) * cs;
+            vec2 b = pzoHailBall((q - spot) * vec2(1.0, 1.6), 1.8 + 1.0 * pzoPHash(cell + 9.9));
+            return vec2(b.x * 0.85, b.y);
+        }
+
+        // One layer of falling leaves: tumbling as they come down (the width flips as a leaf turns), blown along by
+        // the wind far more than snow. rgb = its colour from the autumn palette, a = coverage.
+        vec4 pzoLeafLayer(vec2 px, float k, float t, float density, vec2 dir, float wind)
+        {
+            float scale = mix(1.0, 0.5, k);
+            vec2 q = (px + PZOPrecipA.zw * mix(1.15, 0.7, k)) / scale;
+            q -= vec2(dir.x * (40.0 + 160.0 * wind), mix(46.0, 30.0, k)) * t;
+            float cs = 70.0;
+            vec2 cell = floor(q / cs);
+            vec2 lc = q / cs - cell;
+            cell += k * 23.0 + 101.0;
+            if (pzoPHash(cell) > density) return vec4(0.0);
+            float ph = pzoPHash(cell + 2.2) * 6.2832;
+            float w = 0.8 + 1.4 * pzoPHash(cell + 3.3);
+            vec2 c = vec2(0.25 + 0.5 * pzoPHash(cell + 1.1), 0.25 + 0.5 * pzoPHash(cell + 4.4));
+            c.x += sin(t * w * 0.9 + ph) * 0.2;
+            c.y += sin(t * w * 1.3 + ph) * 0.06;
+            vec2 d = (lc - c) * cs * scale;
+            float ang = t * w * 2.0 + ph;
+            float ca = cos(ang), sa = sin(ang);
+            d = vec2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
+            float flip = 0.25 + 0.75 * abs(sin(t * w * 3.1 + ph));
+            float size = mix(3.2, 1.6, k) * (0.7 + 0.6 * pzoPHash(cell + 5.5));
+            float e = length(d / vec2(size, size * 0.55 * flip + 0.4));
+            float a = (1.0 - smoothstep(0.75, 1.05, e)) * mix(0.95, 0.55, k);
+            float h = pzoPHash(cell + 6.6);
+            vec3 col = h < 0.3 ? vec3(0.78, 0.42, 0.12) : h < 0.55 ? vec3(0.62, 0.2, 0.1) : h < 0.8 ? vec3(0.8, 0.65, 0.2) : vec3(0.42, 0.3, 0.17);
+            // The turned side is a little darker
+            col *= 0.75 + 0.25 * flip;
+            return vec4(col, a);
+        }
+
+        // Snow blowing low along the ground: wispy streaks racing downwind in a strong wind
+        float pzoDriftLayer(vec2 px, float t, float drift, vec2 dir, float wind)
+        {
+            vec2 q = px + PZOPrecipA.zw;
+            vec2 along = normalize(vec2(dir.x, dir.x * 0.5 + 0.0001));
+            vec2 m = vec2(dot(q, along), dot(q, vec2(-along.y, along.x)));
+            m.x -= t * (260.0 + 380.0 * wind);
+            float n = pzoPNoise(m * vec2(0.006, 0.04)) * 0.6 + pzoPNoise(m * vec2(0.015, 0.11) + 7.0) * 0.4;
+            return smoothstep(0.5, 0.85, n) * drift * 0.35;
         }
 
         void main()
@@ -408,8 +488,8 @@ public final class Precipitation {
             float aRain = 0.0, aSnow = 0.0;
             if (rain > 0.001) {
                 vec2 dir = normalize(PZOPrecipC.xy);
-                // Hail takes over most of a downpour
-                float density = clamp(rain * PZOPrecipD.z * 0.55, 0.0, 0.9) * (1.0 - 0.75 * clamp(PZOPrecipD.w, 0.0, 1.0));
+                // Hail takes over the downpour: a few streaks left, so the stones are what you see
+                float density = clamp(rain * PZOPrecipD.z * 0.55, 0.0, 0.9) * (1.0 - 0.92 * clamp(PZOPrecipD.w, 0.0, 1.0));
                 for (int i = 0; i < 4; i++) {
                     if (float(i) >= layers) break;
                     float k = float(i) / max(layers - 1.0, 1.0);
@@ -440,17 +520,34 @@ public final class Precipitation {
                     hailShade = mix(hailShade, h.y, h.x / max(aHail + h.x, 0.001));
                     aHail += h.x;
                 }
-                vec2 b = pzoHailBounce(px, t, clamp(PZOPrecipD.w * 0.7, 0.0, 0.7));
+                vec2 b = pzoHailBounce(px, t, clamp(PZOPrecipD.w * 0.9, 0.0, 0.9));
                 hailShade = mix(hailShade, b.y, b.x / max(aHail + b.x, 0.001));
                 aHail += b.x;
+                vec2 ly = pzoHailLying(px, clamp(PZOPrecipD.w * 0.45, 0.0, 0.45));
+                hailShade = mix(hailShade, ly.y, ly.x / max(aHail + ly.x, 0.001));
+                aHail += ly.x;
             }
-            float a = clamp((aRain * 0.6 + aSnow * 0.85 + aHail) * PZOPrecipB.w, 0.0, 1.0);
+            vec4 leaf = vec4(0.0);
+            if (PZOPrecipE.x > 0.001) {
+                vec2 ldir = normalize(PZOPrecipC.xy + vec2(0.0001, 0.0));
+                float ld = clamp(PZOPrecipE.x * 0.22, 0.0, 0.3);
+                for (int i = 0; i < 3; i++) {
+                    if (float(i) >= min(layers, 3.0)) break;
+                    float k = float(i) / max(min(layers, 3.0) - 1.0, 1.0);
+                    vec4 l = pzoLeafLayer(px, k, t, ld, ldir, PZOPrecipE.z);
+                    leaf.rgb = mix(leaf.rgb, l.rgb, l.a / max(leaf.a + l.a, 0.001));
+                    leaf.a += l.a;
+                }
+            }
+            if (PZOPrecipE.y > 0.001) aSnow += pzoDriftLayer(px, t, PZOPrecipE.y, normalize(PZOPrecipC.xy + vec2(0.0001, 0.0)), PZOPrecipE.z);
+            float a = clamp((aRain * 0.6 + aSnow * 0.85 + aHail + leaf.a) * PZOPrecipB.w, 0.0, 1.0);
             if (a < 0.004) discard;
             vec3 light = PZOPrecipL.w > 0.5 ? pzoPLight(px + PZOPrecipA.zw) : vec3(0.35 + 0.65 * PZOPrecipD.x);
             // Lit like the world under it, never quite black so a dark downpour still reads
             vec3 col = mix(vec3(0.78, 0.85, 0.93), vec3(0.96, 0.97, 1.0), aSnow / max(aRain + aSnow, 0.001));
             // Hailstones: their own shading, icy white with a blue-grey edge
-            col = mix(col, vec3(0.86, 0.91, 0.97) * hailShade, clamp(aHail / max(aRain + aSnow + aHail, 0.001), 0.0, 1.0));
+            col = mix(col, vec3(0.93, 0.96, 1.0) * hailShade, clamp(aHail / max(aRain + aSnow + aHail, 0.001), 0.0, 1.0));
+            col = mix(col, leaf.rgb, clamp(leaf.a / max(aRain + aSnow + aHail + leaf.a, 0.001), 0.0, 1.0));
             col *= 0.22 + 0.9 * light;
             gl_FragColor = vec4(col, a);
         }

@@ -353,7 +353,7 @@ public final class NaturalGround {
         }
     }
 
-    private static float[] measure(Texture tex) {
+    static float[] measure(Texture tex) {
         int page = tex.getID(), pw = tex.getWidthHW(), ph = tex.getHeightHW();
         int w = tex.getWidth(), h = tex.getHeight();
         if (page <= 0 || pw <= 0 || ph <= 0 || w <= 0 || h <= 0 || w > 1024 || h > 1024) return null;
