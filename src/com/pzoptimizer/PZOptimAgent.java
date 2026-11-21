@@ -21,7 +21,8 @@ public class PZOptimAgent {
         "zombie.MovingObjectUpdateScheduler", "zombie.MovingObjectUpdateSchedulerUpdateBucket",
         "zombie.WorldSoundManager", "zombie.buildingRooms.BuildingRoomsEditor", "zombie.characters.IsoGameCharacter",
         "zombie.characters.IsoPlayer", "zombie.characters.IsoZombie", "zombie.characters.ZombieVocalsManager",
-        "zombie.characters.action.conditions.CharacterVariableCondition", "zombie.characters.animals.IsoAnimal",
+        "zombie.characters.action.conditions.CharacterVariableCondition", "zombie.characters.animals.AnimalManagerMain",
+        "zombie.characters.animals.IsoAnimal",
         "zombie.characters.ecs.ECSComponent", "zombie.core.SpriteRenderer", "zombie.core.SpriteRenderer$RingBuffer",
         "zombie.core.VBO.GLVertexBufferObject", "zombie.core.opengl.RenderThread", "zombie.core.opengl.ShaderUnit",
         "zombie.core.opengl.VBORenderer", "zombie.core.physics.WorldSimulation",
@@ -1040,6 +1041,13 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched BuildingRoomsEditor.checkBuildingAndRoomIDs: log-only ID walk skipped outside debug");
                 }
                 return be;
+            }
+            if ("zombie/characters/animals/AnimalManagerMain".equals(className) && classfileBuffer != null) {
+                byte[] am = AsmSupport.transform(classfileBuffer, loader, "AnimalManagerMain spawn facing guard", AnimalSpawnDirGuard::patchManager);
+                if (am != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched AnimalManagerMain.fromWorker: no crash when a loaded animal gets a zero facing");
+                }
+                return am;
             }
             if ("zombie/iso/objects/IsoTree".equals(className) && classfileBuffer != null) {
                 byte[] tr = AsmSupport.transform(classfileBuffer, loader, "IsoTree room guard", TreeRoomGuard::patchTree);

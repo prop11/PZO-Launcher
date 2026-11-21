@@ -4,9 +4,10 @@
     "Rules for the PZO crash diagnoser. The Java engine (Diagnoser.java) and the Discord bot's /diagnose read this same file, so a verdict is the same wherever it is worked out.",
     "Inputs: 'console' = the last 4 MB of console.txt, 'engine' = pzo_engine.log of the crashed session (pzo_engine.prev.log when read at the next launch), 'hs_err' = each hs_err_pid*.log, only the lines above the first '---------------  P R O C E S S' header (the crashing thread).",
     "A rule is tried against every line of each input in 'files'. 'pattern' is a regex that must work in both Java and Python (search, not full match). 'flags': 'i' = ignore case. 'tail_lines' limits console/engine to their last N lines.",
-    "'mod_group' is the capture group holding a mod's name. 'kind': 'rewritten_frame' has no pattern: it matches a stack frame (class.method followed by an opening bracket) whose class.method is listed on a '[PZO Rewrites] class: method, method' line of 'engine'.",
+    "'mod_group' is the capture group holding a mod's name. 'kind': 'rewritten_frame' has no pattern: it matches a stack frame (class.method followed by an opening bracket) whose class.method is listed on a '[PZO Rewrites] class: method, method' line of 'engine'. Its 'ignore_frames' lists class.method names that never count, for rewritten methods every stack on a thread goes through.",
     "The verdict is the matched rule with the highest 'priority'; for that rule the last matching line is the evidence. Other matched rules are listed as 'also seen'. No match = verdict 'unknown'.",
     "'text': true marks a rule the Discord bot also tries against the text of a message posted in a support ticket, for errors people paste instead of sending a report. The engine ignores it.",
+    "The PZO frame patterns skip PZO methods that only call through to game code (the main loop hook, the chunk update wrapper): they sit under every main-thread stack, so they say nothing about the cause.",
     "Verdicts: pzo, pzo_possible, mod, install, user, unknown."
   ],
   "rules": [
@@ -24,7 +25,7 @@
       "verdict": "pzo",
       "priority": 95,
       "files": ["hs_err"],
-      "pattern": "^[jJ]\\s.*\\bcom\\.pzoptimizer\\.",
+      "pattern": "^[jJ]\\s.*\\bcom\\.pzoptimizer\\.(?!EngineThreadGovernor\\$MainThreadDiagnosticHook\\.run\\(|LiveProfiler\\.(?:chunkUpdate|processChunkPos)\\()",
       "title": "PZO code was running on the thread that crashed",
       "advice": "This is most likely a PZO bug. Please send the report file."
     },
@@ -34,9 +35,20 @@
       "priority": 90,
       "files": ["console"],
       "tail_lines": 600,
-      "pattern": "^\\s+(?:at )?com\\.pzoptimizer\\.[\\w.$]+\\(",
+      "pattern": "^\\s+(?:at )?com\\.pzoptimizer\\.(?!EngineThreadGovernor\\$MainThreadDiagnosticHook\\.run\\(|LiveProfiler\\.(?:chunkUpdate|processChunkPos)\\()[\\w.$]+\\(",
       "title": "An error near the end of the log came from PZO code",
       "advice": "This is most likely a PZO bug. Please send the report file."
+    },
+    {
+      "id": "game_animal_zero_facing",
+      "verdict": "unknown",
+      "priority": 85,
+      "files": ["console"],
+      "tail_lines": 600,
+      "text": true,
+      "pattern": "\\bzombie\\.characters\\.animals\\.AnimalManagerMain\\.fromWorker\\(",
+      "title": "A base game bug in animal spawning (zero facing direction)",
+      "advice": "This is a bug in Project Zomboid itself: when a chunk with animals loads, the game sometimes gives an animal a zero-length facing and throws 'Forward Direction cannot be zero length vector'. It is random and rare. Newer PZO builds stop this crash, so update PZO."
     },
     {
       "id": "gpu_driver_crash",
@@ -82,6 +94,7 @@
       "priority": 70,
       "files": ["console", "hs_err"],
       "tail_lines": 600,
+      "ignore_frames": ["zombie.GameWindow.logic", "zombie.GameWindow.renderInternal", "zombie.iso.IsoCell.updateInternal", "zombie.gameStates.IngameState.updateInternal"],
       "title": "The error went through a game method that PZO changes",
       "advice": "PZO may be involved. Please send the report file so it can be checked."
     },

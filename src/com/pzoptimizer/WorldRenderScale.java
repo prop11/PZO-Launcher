@@ -328,12 +328,16 @@ public final class WorldRenderScale {
      * gl_FragCoord inside the scaled world FBO is in reduced pixels, but every game shader expects full-resolution ones
      * (puddles/water WViewport, fog screenInfo, visibility blur screenSize). The uniform defaults to 0, which leaves
      * gl_FragCoord alone, so an unset uniform can never break a shader.
+     *
+     * A macro, not a function: a program links several fragment units (puddles_hq + puddles_common), and when more
+     * than one used gl_FragCoord each got its own pzo_FragCoord body, which AMD refuses to link ("multiple function
+     * bodies"). The game then destroyed the HQ puddle program and no puddles were drawn.
      */
     static String rewriteFragCoord(String src) {
         String replaced = FRAG_COORD.matcher(src).replaceAll(Matcher.quoteReplacement("pzo_FragCoord()"));
         String helper = "uniform vec2 " + FRAG_SCALE_UNIFORM + ";\n"
-            + "vec4 pzo_FragCoord() { return " + FRAG_SCALE_UNIFORM + ".y > 0.5 ? vec4(gl_FragCoord.xy / "
-            + FRAG_SCALE_UNIFORM + ".x, gl_FragCoord.zw) : gl_FragCoord; }\n";
+            + "#define pzo_FragCoord() (" + FRAG_SCALE_UNIFORM + ".y > 0.5 ? vec4(gl_FragCoord.xy / "
+            + FRAG_SCALE_UNIFORM + ".x, gl_FragCoord.zw) : gl_FragCoord)\n";
 
         // Goes after the leading #version / #extension lines, which have to come before anything else
         String[] lines = replaced.split("\n", -1);

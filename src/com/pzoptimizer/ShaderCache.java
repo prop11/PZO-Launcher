@@ -146,6 +146,7 @@ public final class ShaderCache {
         for (int s : shaders) anyHeld |= held.get(s);
         if (!anyHeld) {
             WorldRenderScale.glLinkProgram(program);
+            if (GL20C.glGetProgrami(program, GL_LINK_STATUS) == 0) logFailedLink(program, shaders);
             return;
         }
         long start = System.nanoTime();
@@ -170,12 +171,34 @@ public final class ShaderCache {
         }
         if (key != null) programParameter(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, 1);
         WorldRenderScale.glLinkProgram(program);
-        if (key != null && GL20C.glGetProgrami(program, GL_LINK_STATUS) != 0) {
+        if (GL20C.glGetProgrami(program, GL_LINK_STATUS) == 0) {
+            logFailedLink(program, shaders);
+        } else if (key != null) {
             save(program, key);
         }
         misses.incrementAndGet();
         missNanos.addAndGet(System.nanoTime() - start);
         lastMissNanos = System.nanoTime();
+    }
+
+    // The game only reports a failed link on its Shader debug channel, which is normally off, so a broken shader
+    // (a mod patch the driver rejects) just drew nothing. Logged here with the driver's own messages.
+    private static void logFailedLink(int program, int[] shaders) {
+        try {
+            StringBuilder sb = new StringBuilder("[ShaderCache] program ").append(program).append(" failed to link: ")
+                .append(GL20C.glGetProgramInfoLog(program).trim());
+            for (int s : shaders) {
+                String src = GL20C.glGetShaderSource(s);
+                int nl = src.indexOf("\n", src.indexOf("\n") + 1);
+                sb.append(" | shader ").append(s).append(" compiled=").append(GL20C.glGetShaderi(s, GL20C.GL_COMPILE_STATUS))
+                    .append(" (").append(nl > 0 ? src.substring(0, Math.min(nl, 60)) : "").append("): ")
+                    .append(GL20C.glGetShaderInfoLog(s).trim());
+            }
+            String msg = sb.toString();
+            PZOLogger.warn(msg.length() > 4000 ? msg.substring(0, 4000) + " ..." : msg);
+        } catch (Throwable t) {
+            PZOLogger.warn("[ShaderCache] program " + program + " failed to link (no log: " + t + ")");
+        }
     }
 
     private static int[] attached(int program) {
