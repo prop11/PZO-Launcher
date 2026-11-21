@@ -121,6 +121,8 @@ final class Diagnoser {
         }
         int tailLines = rule.get("tail_lines") == null ? Integer.MAX_VALUE : ((Number) rule.get("tail_lines")).intValue();
         int modGroup = rule.get("mod_group") == null ? 0 : ((Number) rule.get("mod_group")).intValue();
+        Set<String> ignored = new HashSet<>();
+        for (Object f : (List<Object>) rule.getOrDefault("ignore_frames", List.of())) ignored.add(String.valueOf(f));
 
         String[] hit = null;
         for (Object file : (List<Object>) rule.getOrDefault("files", List.of())) {
@@ -131,7 +133,8 @@ final class Diagnoser {
                 if (frames) {
                     Matcher m = FRAME.matcher(line);
                     while (m.find()) {
-                        if (rewritten.contains(m.group(1) + "." + m.group(2))) hit = new String[] {line.trim(), ""};
+                        String frame = m.group(1) + "." + m.group(2);
+                        if (rewritten.contains(frame) && !ignored.contains(frame)) hit = new String[] {line.trim(), ""};
                     }
                 } else {
                     Matcher m = p.matcher(line);

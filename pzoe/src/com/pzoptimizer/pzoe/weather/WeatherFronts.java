@@ -190,6 +190,7 @@ public final class WeatherFronts {
             ft = cm.getClimateFloat(TEMP), fd = cm.getClimateFloat(DAYLIGHT);
         float p = fp.getFinalValue(), w = fw.getFinalValue(), a = fa.getFinalValue(), c = fc.getFinalValue(),
             f = ff.getFinalValue(), t = ft.getFinalValue(), d = fd.getFinalValue();
+        WeatherAuthority.frame(cm, dt);
 
         boolean raining = p > 0.01f;
         if (raining && !wasRaining) rainStart = hours;
@@ -234,6 +235,10 @@ public final class WeatherFronts {
         WeatherRegional.apply(ms, sim, p, pre, (float) dt);
         Mix ml = lookExtras ? LOOK.set(pLook, w2, a2, f2, c2, d2, t, vSnow, gust) : LOOK.set(p, w, a, f, c, d, t, vSnow, 0f);
         if (lookExtras) WeatherEvents.apply(ml, hours, false);
+        // Another mod's climate values win over PZOE's own shaping (gusts stay)
+        float wGust = clamp(w + gust * gustAmt * (0.05f + 0.2f * w), 0f, 1f);
+        WeatherAuthority.arbitrate(ms, p, wGust, a, f, c, d, t, vSnow);
+        if (lookExtras) WeatherAuthority.arbitrate(ml, p, wGust, a, f, c, d, t, vSnow);
 
         WeatherEvents.freezePuddles(sim ? ms.temp : t, d * (1f - c), (float) dt);
 
@@ -327,7 +332,7 @@ public final class WeatherFronts {
     }
 
     static void apply(String k, String v) {
-        if (WeatherEvents.apply(k, v) || WeatherRegional.apply(k, v)) return;
+        if (WeatherEvents.apply(k, v) || WeatherRegional.apply(k, v) || WeatherAuthority.apply(k, v)) return;
         float x = parse(v);
         if (Float.isNaN(x)) return;
         switch (k) {
@@ -345,6 +350,7 @@ public final class WeatherFronts {
     static void clearRemote() {
         preTarget = mistTarget = coldTarget = 0f;
         WeatherEvents.clearRemote();
+        WeatherAuthority.clearRemote();
     }
 
     static String stateText() {

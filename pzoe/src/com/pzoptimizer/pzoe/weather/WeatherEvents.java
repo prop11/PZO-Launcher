@@ -226,7 +226,9 @@ public final class WeatherEvents {
             }
         }
         boolean forcedFrz = hours < forcedFreezeUntil;
-        boolean frz = forcedFrz || (running && freezeThisPeriod && p > 0.02f && t > -3f && t < 0.5f);
+        // Not under another mod's rain, cold or snow: that storm is theirs
+        boolean modWeather = WeatherAuthority.drives(WeatherAuthority.PRECIP) || WeatherAuthority.drives(WeatherAuthority.TEMP) || WeatherAuthority.drivesSnow();
+        boolean frz = forcedFrz || (!modWeather && running && freezeThisPeriod && p > 0.02f && t > -3f && t < 0.5f);
         freezing = frz ? 1f : 0f;
         float i = ice;
         if (frz) i += h * Math.max(p, forcedFrz ? 0.5f : 0f) * 1.2f;
@@ -246,7 +248,7 @@ public final class WeatherEvents {
                     hailThisStage = chance(s.getStageStart(), 23) < 0.35f;
                 }
                 double into = hours - s.getStageStart();
-                if (hailThisStage && t > 12f && !cm.getPrecipitationIsSnow() && into >= 0 && into < 0.2) {
+                if (hailThisStage && !modWeather && t > 12f && !cm.getPrecipitationIsSnow() && into >= 0 && into < 0.2) {
                     hl = (float) Math.min(1.0, Math.min(into / 0.03, (0.2 - into) / 0.05));
                 }
             }
@@ -256,6 +258,7 @@ public final class WeatherEvents {
         for (Event e : all()) {
             if (e.type != STORM || hours < e.start || hours > e.start + e.dur) continue;
             if (!e.forced && (!WeatherCore.behaviourOn() || t < 22f || (running && p > 0.05f && e.start != stormThunderFor))) continue;
+            if (!e.forced && (modWeather || WeatherAuthority.drives(WeatherAuthority.CLOUD))) continue;
             stormNow = true;
             if (e.start != stormThunderFor && hours > e.start + e.dur * 0.15) {
                 stormThunderFor = e.start;

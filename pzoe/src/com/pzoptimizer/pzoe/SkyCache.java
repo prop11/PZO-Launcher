@@ -47,23 +47,58 @@ final class SkyCache {
 
     // Set from the chunk shader's uniform lookups (render thread), read on the main thread
     static volatile boolean sunWanted, cloudWanted, fogWanted, snowWanted;
+    // Cached fog: the chunk shader's whole ground fog march per world point (PZOFogScatter0/1)
+    static volatile boolean scatterWanted;
+    // Fog march steps (Fog quality) and the march's strengths, set on the main thread before frame()
+    static volatile int scatterSamples = 6;
+    private static volatile float scFogK, scGlowK, scFogH = 1f, scSunK;
+    // Sun through windows: indoor texels walk the rooms map (PixelLight.roomTexture) instead of the solid heights
+    static volatile boolean roomsWanted;
     // Texels a square for the sun cache; Lua sends 4 on integrated graphics
     static volatile int detail = 8;
 
     // Render thread
     private static final int[] sunTex = new int[4], sunRing = new int[4], sunDetail = new int[4], cursor = new int[4];
     private static final boolean[] sunReady = new boolean[4];
+    // The rooms map that was bound for the pass in progress, and whether a whole pass has used it
+    private static final int[] roomPassTex = new int[4];
+    private static final boolean[] roomPassDone = new boolean[4];
     private static final int[] cloudTex = new int[4], cloudRing = new int[4], cloudT = new int[4], fogT = new int[4];
     private static final boolean[] cloudReady = new boolean[4];
     private static final int[] fogTex = new int[4], fogRing = new int[4];
     private static final boolean[] fogReady = new boolean[4];
     private static final int[] snowTex = new int[4], snowRing = new int[4], snowT = new int[4], snowCursor = new int[4];
     private static final boolean[] snowReady = new boolean[4];
+    private static final int[] scatTex0 = new int[4], scatTex1 = new int[4], scatRing = new int[4], scatT = new int[4];
+    private static final boolean[] scatReady = new boolean[4];
+    static final int SCATTER_INTERLEAVE = 2;
+    private static int scatterProg, lxLight, lxFogN, lxSunC, lxField, lxInfo, lxOrigin, lxFog, lxSunInfo, lxFieldInfo, lxPhase;
     private static int sunProg, cloudProg, fogProg, snowProg, fbo, vao;
     private static int lnInfo, lnOrigin;
-    private static int lsHeight, lsInfo, lsOrigin, lsSun, lcInfo, lcOrigin, lcCloud, lcPhase, lfInfo, lfOrigin, lfDrift, lfPhase;
+    private static int lsHeight, lsRooms, lsRoomsOn, lsInfo, lsOrigin, lsSun, lcInfo, lcOrigin, lcCloud, lcPhase, lfInfo, lfOrigin, lfDrift, lfPhase;
     private static boolean failed;
-    static volatile long sunTexels, cloudTexels, fogTexels, snowTexels;
+    static volatile long sunTexels, cloudTexels, fogTexels, snowTexels, scatterTexels;
+
+    /** Main thread: the ground fog march's strengths as the chunk shader will have them this frame. */
+    static void scatterParams(float fogK, float glowK, float fogH, float sunK) {
+        scFogK = fogK;
+        scGlowK = glowK;
+        scFogH = fogH;
+        scSunK = sunK;
+    }
+
+    // The highest point the cache covers: above it a pixel is on level 1 to the chunk shader (its ground is the floor)
+    static float scatterTop(float fogH) {
+        return Math.min(Math.max(fogH, 0.5f), 0.97f);
+    }
+
+    static int scatterTexture(int p, int k) {
+        return p >= 0 && p < 4 && scatReady[p] ? (k == 0 ? scatTex0[p] : scatTex1[p]) : 0;
+    }
+
+    static int scatterRing(int p) {
+        return p >= 0 && p < 4 ? scatRing[p] : 0;
+    }
 
     private SkyCache() {}
 
@@ -106,12 +141,13 @@ final class SkyCache {
         if (failed) return;
         boolean doSun = sunWanted && sunUp;
         boolean doCloud = cloudWanted && cover > 0f;
-        boolean doFog = fogWanted && fogUp;
+        // Cached fog also carries the light glow, which shows without any fog, so the noise it reads keeps going
+        boolean doFog = fogWanted && (fogUp || (scatterWanted && scGlowK > 0f));
         boolean doSnow = snowWanted && snowUp;
         if (!doSun && !doCloud && !doFog && !doSnow) return;
         zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
         if (cell == null) return;
-        int[] ox = new int[4], oy = new int[4], ring = new int[4], height = new int[4];
+        int[] ox = new int[4], oy = new int[4], ring = new int[4], height = new int[4], rooms = new int[4], light = new int[4];
         boolean any = false;
         for (int p = 0; p < 4; p++) {
             zombie.iso.IsoChunkMap map = cell.getChunkMap(p);
@@ -122,20 +158,26 @@ final class SkyCache {
             oy[p] = map.getWorldYMinTiles();
             ring[p] = r;
             height[p] = h;
+            rooms[p] = roomsWanted ? PixelLight.roomTexture(p) : 0;
+            light[p] = PixelLight.lightTexture(p);
             any = true;
         }
         if (!any) return;
-        zombie.core.SpriteRenderer.instance.drawGeneric(new Step(doSun, doCloud, doFog, doSnow, ox, oy, ring, height, detail, sunX, sunY, sunRise, leaf,
+        zombie.core.SpriteRenderer.instance.drawGeneric(new Step(doSun, doCloud, doFog, doSnow, ox, oy, ring, height, rooms, light, detail, sunX, sunY, sunRise, leaf,
             cover, cloudOffX, cloudOffY, clock, driftX, driftY));
     }
 
     private static final class Step extends TextureDraw.GenericDrawer {
         final boolean doSun, doCloud, doFog, doSnow;
-        final int[] ox, oy, ring, height;
+        final int[] ox, oy, ring, height, rooms, light;
+        // Cached fog: on, steps, strengths (fogK, glowK, fogH, sunK), moving fog field (texture, corner, ready)
+        final boolean doScatter;
+        final int samples, fieldTex;
+        final float fogK, glowK, fogH, sunK, fieldOx, fieldOy;
         final int detail;
         final float sunX, sunY, sunRise, leaf, cover, cloudOffX, cloudOffY, clock, driftX, driftY;
 
-        Step(boolean doSun, boolean doCloud, boolean doFog, boolean doSnow, int[] ox, int[] oy, int[] ring, int[] height, int detail, float sunX, float sunY,
+        Step(boolean doSun, boolean doCloud, boolean doFog, boolean doSnow, int[] ox, int[] oy, int[] ring, int[] height, int[] rooms, int[] light, int detail, float sunX, float sunY,
              float sunRise, float leaf, float cover, float cloudOffX, float cloudOffY, float clock, float driftX, float driftY) {
             this.doSun = doSun;
             this.doCloud = doCloud;
@@ -147,6 +189,17 @@ final class SkyCache {
             this.oy = oy;
             this.ring = ring;
             this.height = height;
+            this.rooms = rooms;
+            this.light = light;
+            this.doScatter = doFog && scatterWanted && scFogK + scGlowK > 0f;
+            this.samples = Math.max(4, Math.min(8, scatterSamples));
+            this.fogK = scFogK;
+            this.glowK = scGlowK;
+            this.fogH = scFogH;
+            this.sunK = scSunK;
+            this.fieldTex = FogField.wanted ? FogField.texture() : 0;
+            this.fieldOx = FogField.fieldOx;
+            this.fieldOy = FogField.fieldOy;
             this.detail = detail;
             this.sunX = sunX;
             this.sunY = sunY;
@@ -176,6 +229,12 @@ final class SkyCache {
         int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
         GL13.glActiveTexture(GL13.GL_TEXTURE8);
         int prev8 = GlGet.integer(GL11.GL_TEXTURE_BINDING_2D);
+        GL13.glActiveTexture(GL13.GL_TEXTURE9);
+        int prev9 = GlGet.integer(GL11.GL_TEXTURE_BINDING_2D);
+        GL13.glActiveTexture(GL13.GL_TEXTURE6);
+        int prev6 = GlGet.integer(GL11.GL_TEXTURE_BINDING_2D);
+        GL13.glActiveTexture(GL13.GL_TEXTURE7);
+        int prev7 = GlGet.integer(GL11.GL_TEXTURE_BINDING_2D);
         GL11.glPushAttrib(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_ENABLE_BIT | GL11.GL_DEPTH_BUFFER_BIT | GL11.GL_VIEWPORT_BIT
             | GL11.GL_SCISSOR_BIT | GL11.GL_STENCIL_BUFFER_BIT);
         try {
@@ -197,6 +256,8 @@ final class SkyCache {
                 if (s.doSun && s.height[p] != 0) sunBand(s, p);
                 if (s.doCloud) clouds(s, p);
                 if (s.doFog) fog(s, p);
+                if (s.doScatter && scatterProg != 0 && fogReady[p] && s.light[p] != 0) scatter(s, p);
+                else scatReady[p] = false;
                 if (s.doSnow) snowBand(s, p);
             }
         } finally {
@@ -206,6 +267,12 @@ final class SkyCache {
             GL11.glPopAttrib();
             GL13.glActiveTexture(GL13.GL_TEXTURE8);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, prev8);
+            GL13.glActiveTexture(GL13.GL_TEXTURE9);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, prev9);
+            GL13.glActiveTexture(GL13.GL_TEXTURE6);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, prev6);
+            GL13.glActiveTexture(GL13.GL_TEXTURE7);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, prev7);
             GL13.glActiveTexture(prevActive);
         }
     }
@@ -231,6 +298,16 @@ final class SkyCache {
         GL13.glActiveTexture(GL13.GL_TEXTURE8);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, s.height[p]);
         GL20.glUniform1i(lsHeight, 8);
+        int rt = s.rooms[p];
+        if (rt != roomPassTex[p]) {
+            // A new rooms map (or none): indoor texels count as worked out once a whole pass has read it
+            roomPassTex[p] = rt;
+            roomPassDone[p] = false;
+        }
+        GL13.glActiveTexture(GL13.GL_TEXTURE9);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, rt);
+        GL20.glUniform1i(lsRooms, 9);
+        GL20.glUniform1f(lsRoomsOn, rt != 0 ? 1f : 0f);
         GL20.glUniform4f(lsInfo, ring, t, w, LEVELS);
         GL20.glUniform4f(lsOrigin, s.ox[p], s.oy[p], 0f, 0f);
         GL20.glUniform4f(lsSun, s.sunX, s.sunY, s.sunRise, s.leaf);
@@ -240,8 +317,14 @@ final class SkyCache {
         if (y0 >= rows) {
             y0 = 0;
             sunReady[p] = true;
+            if (rt != 0) roomPassDone[p] = true;
         }
         cursor[p] = y0;
+    }
+
+    /** Render thread: the sun cache's indoor texels hold sun through windows for this player. */
+    static boolean roomsReady(int p) {
+        return p >= 0 && p < 4 && roomPassDone[p] && roomPassTex[p] != 0;
     }
 
     static int fieldTexels(int detail) {
@@ -295,6 +378,65 @@ final class SkyCache {
         fogReady[p] = true;
     }
 
+    private static void scatter(Step s, int p) {
+        int ring = s.ring[p], t = fieldTexels(s.detail), w = ring * t;
+        if (scatTex0[p] == 0 || scatRing[p] != ring || scatT[p] != t) {
+            if (scatTex0[p] != 0) GL11.glDeleteTextures(scatTex0[p]);
+            if (scatTex1[p] != 0) GL11.glDeleteTextures(scatTex1[p]);
+            // Half floats: the glow adds up past 1
+            scatTex0[p] = floatTexture(w, w);
+            scatTex1[p] = floatTexture(w, w);
+            scatRing[p] = ring;
+            scatT[p] = t;
+            scatReady[p] = false;
+        }
+        GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, scatTex0[p], 0);
+        GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT1, GL11.GL_TEXTURE_2D, scatTex1[p], 0);
+        GL20.glDrawBuffers(new int[] { GL30.GL_COLOR_ATTACHMENT0, GL30.GL_COLOR_ATTACHMENT1 });
+        try {
+            GL11.glViewport(0, 0, w, w);
+            GL20.glUseProgram(scatterProg);
+            GL13.glActiveTexture(GL13.GL_TEXTURE6);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, s.light[p]);
+            GL13.glActiveTexture(GL13.GL_TEXTURE7);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, fogTex[p]);
+            GL13.glActiveTexture(GL13.GL_TEXTURE8);
+            int st = sunReady[p] && sunRing[p] == ring ? sunTex[p] : 0;
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, st);
+            GL13.glActiveTexture(GL13.GL_TEXTURE9);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, s.fieldTex);
+            GL20.glUniform1i(lxLight, 6);
+            GL20.glUniform1i(lxFogN, 7);
+            GL20.glUniform1i(lxSunC, 8);
+            GL20.glUniform1i(lxField, 9);
+            GL20.glUniform4f(lxInfo, ring, t, s.samples, FOG_LAYER_TOP);
+            GL20.glUniform4f(lxOrigin, s.ox[p], s.oy[p], PixelLight.BASE_LEVEL, PixelLight.LEVELS);
+            GL20.glUniform4f(lxFog, s.fogK, s.glowK, s.fogH, st != 0 ? s.sunK : 0f);
+            GL20.glUniform4f(lxSunInfo, ring, Math.max(1, sunDetail[p]), st != 0 ? 1f : 0f, LEVELS);
+            GL20.glUniform4f(lxFieldInfo, s.fieldOx, s.fieldOy, s.fieldTex != 0 ? 1f : 0f, FogField.HEIGHT);
+            int every = scatReady[p] ? SCATTER_INTERLEAVE : 1;
+            GL20.glUniform2f(lxPhase, phase % every, every);
+            GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
+            scatterTexels += (long) w * w / every;
+            scatReady[p] = true;
+        } finally {
+            GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT1, GL11.GL_TEXTURE_2D, 0, 0);
+            GL20.glDrawBuffers(GL30.GL_COLOR_ATTACHMENT0);
+        }
+    }
+
+    private static int floatTexture(int w, int h) {
+        GL13.glActiveTexture(GL13.GL_TEXTURE8);
+        int t = GL11.glGenTextures();
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, t);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL11.GL_REPEAT);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL11.GL_REPEAT);
+        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL30.GL_RGBA16F, w, h, 0, GL11.GL_RGBA, GL11.GL_FLOAT, (ByteBuffer) null);
+        return t;
+    }
+
     private static void snowBand(Step s, int p) {
         int ring = s.ring[p], t = Math.max(2, Math.min(8, s.detail)), w = ring * t;
         if (snowTex[p] == 0 || snowRing[p] != ring || snowT[p] != t) {
@@ -342,16 +484,31 @@ final class SkyCache {
         sunProg = compile(VERTEX, SUN_FRAGMENT, "sun");
         cloudProg = compile(VERTEX, CLOUD_FRAGMENT, "cloud");
         fogProg = compile(VERTEX, FOG_FRAGMENT, "fog");
+        scatterProg = compile(VERTEX, SCATTER_FRAGMENT, "fog scatter");
         snowProg = compile(VERTEX, SNOW_FRAGMENT, "snow");
         if (sunProg == 0 || cloudProg == 0 || fogProg == 0 || snowProg == 0) return false;
         lnInfo = GL20.glGetUniformLocation(snowProg, "uInfo");
         lnOrigin = GL20.glGetUniformLocation(snowProg, "uOrigin");
         lfInfo = GL20.glGetUniformLocation(fogProg, "uInfo");
+        if (scatterProg != 0) {
+            lxLight = GL20.glGetUniformLocation(scatterProg, "uLight");
+            lxFogN = GL20.glGetUniformLocation(scatterProg, "uFogN");
+            lxSunC = GL20.glGetUniformLocation(scatterProg, "uSunC");
+            lxField = GL20.glGetUniformLocation(scatterProg, "uField");
+            lxInfo = GL20.glGetUniformLocation(scatterProg, "uInfo");
+            lxOrigin = GL20.glGetUniformLocation(scatterProg, "uOrigin");
+            lxFog = GL20.glGetUniformLocation(scatterProg, "uFog");
+            lxSunInfo = GL20.glGetUniformLocation(scatterProg, "uSunInfo");
+            lxFieldInfo = GL20.glGetUniformLocation(scatterProg, "uFieldInfo");
+            lxPhase = GL20.glGetUniformLocation(scatterProg, "uPhase");
+        }
         lfOrigin = GL20.glGetUniformLocation(fogProg, "uOrigin");
         lfDrift = GL20.glGetUniformLocation(fogProg, "uDrift");
         lfPhase = GL20.glGetUniformLocation(fogProg, "uPhase");
         lcPhase = GL20.glGetUniformLocation(cloudProg, "uPhase");
         lsHeight = GL20.glGetUniformLocation(sunProg, "uHeight");
+        lsRooms = GL20.glGetUniformLocation(sunProg, "uRooms");
+        lsRoomsOn = GL20.glGetUniformLocation(sunProg, "uRoomsOn");
         lsInfo = GL20.glGetUniformLocation(sunProg, "uInfo");
         lsOrigin = GL20.glGetUniformLocation(sunProg, "uOrigin");
         lsSun = GL20.glGetUniformLocation(sunProg, "uSun");
@@ -363,7 +520,7 @@ final class SkyCache {
         return true;
     }
 
-    private static int compile(String vs, String fs, String what) {
+    static int compile(String vs, String fs, String what) {
         int p = GL20.glCreateProgram();
         for (int k = 0; k < 2; k++) {
             int s = GL20.glCreateShader(k == 0 ? GL20.GL_VERTEX_SHADER : GL20.GL_FRAGMENT_SHADER);
@@ -397,10 +554,34 @@ final class SkyCache {
     static final String SUN_FRAGMENT = """
         #version 330
         uniform sampler2D uHeight;
+        // Rooms map (PixelLight.rooms): R = indoors per level bit, G / B = north / west edge openings (window bits
+        // 0-3, open door bits 4-7), A = ground floor furniture height. uRoomsOn 0 = none bound.
+        uniform sampler2D uRooms;
+        uniform float uRoomsOn;
         uniform vec4 uInfo;
         uniform vec4 uOrigin;
         uniform vec4 uSun;
         out vec4 o;
+
+        vec4 roomAt(vec2 sq)
+        {
+            return floor(texture(uRooms, (mod(sq, uInfo.x) + 0.5) / uInfo.x) * 255.0 + 0.5);
+        }
+
+        float bit(float v, float b)
+        {
+            return mod(floor(v / exp2(b)), 2.0);
+        }
+
+        // How open an edge is at heights rz on level L: a window from a third of the way up to near the top, an
+        // open door from the floor
+        vec4 opening(float e, float L, vec4 rz)
+        {
+            vec4 f = rz - L;
+            vec4 top = 1.0 - smoothstep(0.8, 0.86, f);
+            vec4 o = bit(e, L) > 0.5 ? smoothstep(0.28, 0.34, f) * top : vec4(0.0);
+            return bit(e, L + 4.0) > 0.5 ? max(o, top) : o;
+        }
 
         // Heights in levels (content, north wall, west wall) and opacity of a square; low bits are flags (G, B =
         // see-through wall), same packing as PixelLight.heights
@@ -486,7 +667,10 @@ final class SkyCache {
         // The ray toward the sun walks the square grid exactly (every square it crosses, in order, one read each), the
         // penumbra widening with the distance from what casts it, at the far end (height) and along the sides (how
         // deep the ray cuts a square). The texel's own square doesn't shade it; its walls do, as edges.
-        vec4 sunShadow(vec2 w, vec4 z, float base)
+        // room: the texel is indoors on level base. Then a room the ray is in has a ceiling at the top of its level and
+        // only its ground floor furniture stands in the way (the heights count upper floors as solid), and windows and
+        // open doors in its walls let the sun through. Out of the window it's the outdoor walk again.
+        vec4 sunShadow(vec2 w, vec4 z, float base, bool room)
         {
             vec2 own = floor(w);
             vec2 dir = uSun.xy;
@@ -504,10 +688,19 @@ final class SkyCache {
             // building cut the run in two and the shadow's side came out as a saw tooth.
             vec4 run = vec4(0.0);
             float tMax = min(11.0, 3.0 / uSun.z);
+            vec4 rm = room ? roomAt(cell) : vec4(0.0);
             for (int i = 0; i < 24; i++) {
                 float tExit = min(tNext.x, tNext.y);
                 float soft = 0.06 + 0.06 * t;
-                if (cell != own && t < tMax) {
+                if (room && bit(rm.r, base) > 0.5) {
+                    run = vec4(0.0);
+                    occ = max(occ, smoothstep(base + 0.96, base + 1.01, z + tExit * uSun.z));
+                    if (cell != own && base < 0.5 && rm.a > 0.0) {
+                        vec4 rz = z + t * uSun.z;
+                        float miss = length(w + dir * clamp(dot(cell + 0.5 - w, dir), t, tExit) - cell - 0.5);
+                        occ = max(occ, smoothstep(0.0, soft, rm.a / 255.0 - rz) * 0.8 * (1.0 - smoothstep(0.3 - soft, 0.34 + soft, miss)));
+                    }
+                } else if (cell != own && t < tMax) {
                     vec4 rz = z + t * uSun.z;
                     float chord = tExit - t;
                     vec2 c = cell + 0.5 - w;
@@ -532,6 +725,7 @@ final class SkyCache {
                 vec2 prev = cell;
                 vec4 prevH = h;
                 vec2 prevSee = see;
+                vec4 prevRm = rm;
                 bool xSide = tNext.x < tNext.y;
                 t = tExit;
                 if (xSide) {
@@ -542,16 +736,19 @@ final class SkyCache {
                     tNext.y += inv.y;
                 }
                 h = heightSee(cell, see);
+                if (room) rm = roomAt(cell);
                 // The square with the larger x owns the wall on the edge between them (west), larger y the north one.
                 // See-through fences only take a little of the sun.
                 vec4 rzb = z + t * uSun.z;
                 float softb = 0.06 + 0.06 * t;
                 if (xSide) {
                     bool mine = cell.x > prev.x;
-                    occ = max(occ, smoothstep(0.0, softb, (mine ? h.b : prevH.b) - rzb) * (1.0 - 0.75 * (mine ? see.y : prevSee.y)));
+                    vec4 open = room ? opening(mine ? rm.b : prevRm.b, base, rzb) : vec4(0.0);
+                    occ = max(occ, smoothstep(0.0, softb, (mine ? h.b : prevH.b) - rzb) * (1.0 - 0.75 * (mine ? see.y : prevSee.y)) * (1.0 - open));
                 } else {
                     bool mine = cell.y > prev.y;
-                    occ = max(occ, smoothstep(0.0, softb, (mine ? h.g : prevH.g) - rzb) * (1.0 - 0.75 * (mine ? see.x : prevSee.x)));
+                    vec4 open = room ? opening(mine ? rm.g : prevRm.g, base, rzb) : vec4(0.0);
+                    occ = max(occ, smoothstep(0.0, softb, (mine ? h.g : prevH.g) - rzb) * (1.0 - 0.75 * (mine ? see.x : prevSee.x)) * (1.0 - open));
                 }
             }
             if (least(occ) > 0.98) return occ;
@@ -595,7 +792,126 @@ final class SkyCache {
                     return;
                 }
             }
-            o = sunShadow(sq + sub, level + vec4(0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0), level);
+            bool room = uRoomsOn > 0.5 && bit(roomAt(sq).r, level) > 0.5;
+            o = sunShadow(sq + sub, level + vec4(0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0), level, room);
+        }
+        """;
+
+    // Cached fog: the chunk shader's ground fog march (pzoAtmosPost), done here for each world point of level 0 at two
+    // heights, the ground (o0) and half way up what the cache covers (o1), instead of for every screen pixel of every
+    // chunk draw. The camera never turns, so the march from a point only depends on the point. Out: rgb = light the fog
+    // adds, a = how much of what's behind still shows. Same light map, fog noise cache, sun cache and moving fog field
+    // the chunk shader reads, in world squares. uInfo = ring, texels a square, steps, fog noise top; uOrigin = loaded
+    // area corner, light map base level, levels; uFog = fog, glow, fog height, sun (already times fog);
+    // uSunInfo = sun cache ring, texels a square, ready, levels; uFieldInfo = field corner, ready, height.
+    static final String SCATTER_FRAGMENT = """
+        #version 330
+        uniform sampler2D uLight;
+        uniform sampler2D uFogN;
+        uniform sampler2D uSunC;
+        uniform sampler2D uField;
+        uniform vec4 uInfo;
+        uniform vec4 uOrigin;
+        uniform vec4 uFog;
+        uniform vec4 uSunInfo;
+        uniform vec4 uFieldInfo;
+        uniform vec2 uPhase;
+        layout(location = 0) out vec4 o0;
+        layout(location = 1) out vec4 o1;
+
+        vec2 lightUV(vec3 own, vec2 f, float slice)
+        {
+            vec2 cell = mod(own.xy, uInfo.x);
+            float lz = clamp(own.z - uOrigin.z, 0.0, uOrigin.w - 1.0);
+            float tile = 2.0 * uInfo.x;
+            float s = 2.0 * lz + slice;
+            return (vec2(mod(s, 8.0), floor(s / 8.0)) * tile + 2.0 * cell + 0.5 + f) / (vec2(8.0, 6.0) * tile);
+        }
+
+        vec4 lightAt(vec3 p)
+        {
+            vec3 own = floor(p + 0.03);
+            vec3 f = clamp(p - own, 0.0, 1.0);
+            vec4 lo = texture(uLight, lightUV(own, f.xy, 0.0));
+            if (f.z < 0.02) return lo;
+            return mix(lo, texture(uLight, lightUV(own, f.xy, 1.0)), f.z);
+        }
+
+        float sunShadow(vec3 q)
+        {
+            if (uSunInfo.z < 0.5 || q.z < -0.02) return 0.0;
+            float lv = floor(q.z + 0.03);
+            if (lv >= uSunInfo.w) return 0.0;
+            float T = uSunInfo.y;
+            float R = uSunInfo.x;
+            vec2 own = floor(q.xy + 0.03);
+            vec2 qq = clamp(q.xy, own + 0.5 / T, own + 1.0 - 0.5 / T);
+            vec2 tc = (own - R * floor(own / R) + (qq - own)) * T;
+            vec4 c = texture(uSunC, vec2(tc.x, tc.y + lv * R * T) / vec2(R * T, R * T * uSunInfo.w));
+            float e = clamp(q.z - lv, 0.0, 1.0) * 3.0;
+            return e < 1.0 ? mix(c.r, c.g, e) : (e < 2.0 ? mix(c.g, c.b, e - 1.0) : mix(c.b, c.a, e - 2.0));
+        }
+
+        float fogN(vec2 wq, float h)
+        {
+            vec4 c = texture(uFogN, wq / uInfo.x);
+            float e = clamp(h / uInfo.w, 0.0, 1.0) * 3.0;
+            return e < 1.0 ? mix(c.r, c.g, e) : (e < 2.0 ? mix(c.g, c.b, e - 1.0) : mix(c.b, c.a, e - 2.0));
+        }
+
+        float field(vec2 wxy, float h, float outdoors)
+        {
+            vec2 g = (wxy - uFieldInfo.xy) / 64.0;
+            if (uFieldInfo.z < 0.5 || g.x <= 0.0 || g.y <= 0.0 || g.x >= 1.0 || g.y >= 1.0) return outdoors;
+            float lz = clamp(h / uFieldInfo.w * 4.0 - 0.5, 0.0, 3.0);
+            float l0 = floor(lz);
+            float l1 = min(l0 + 1.0, 3.0);
+            float gx = clamp(g.x, 0.5 / 128.0, 1.0 - 0.5 / 128.0);
+            float m = mix(texture(uField, vec2((gx + l0) * 0.25, g.y)).b, texture(uField, vec2((gx + l1) * 0.25, g.y)).b, lz - l0);
+            vec2 e = min(g, 1.0 - g);
+            return mix(outdoors, m, smoothstep(0.0, 0.06, min(e.x, e.y)));
+        }
+
+        // Ground is level 0, so a point's height is its z
+        vec4 march(vec3 p)
+        {
+            float fogH = uFog.z;
+            float span = max(fogH, 0.5) - p.z;
+            if (span <= 0.0) return vec4(0.0, 0.0, 0.0, 1.0);
+            int n = int(uInfo.z + 0.5);
+            float dz = span / float(n);
+            vec3 stepv = vec3(3.0, 3.0, 1.0) * dz;
+            float len = dz * 4.9;
+            vec3 q = p + stepv * 0.5;
+            float T = 1.0;
+            vec3 S = vec3(0.0);
+            for (int i = 0; i < 8; i++) {
+                if (i >= n) break;
+                vec4 L = lightAt(q);
+                float outdoors = step(63.5, mod(floor(L.a * 255.0 + 0.5), 128.0));
+                float h = q.z;
+                outdoors = field(q.xy, h, outdoors);
+                float fall = clamp(1.0 - h / fogH, 0.0, 1.0);
+                float fd = uFog.x * outdoors * fall * fall * (0.35 + 0.9 * fogN(q.xy, h)) * len;
+                float gd = uFog.y * 0.08 * len;
+                S += T * (fd * L.rgb * vec3(0.92, 0.95, 1.0) + gd * L.rgb * L.rgb);
+                if (uFog.w > 0.0 && fd > 0.0) S += T * fd * uFog.w * (1.0 - sunShadow(q)) * vec3(1.0, 0.9, 0.75) * 0.35;
+                T *= exp(-fd);
+                q += stepv;
+            }
+            return vec4(S, T);
+        }
+
+        void main()
+        {
+            vec2 fc = floor(gl_FragCoord.xy);
+            if (mod(fc.y, uPhase.y) != uPhase.x) discard;
+            vec2 m = floor(fc / uInfo.y);
+            vec2 sub = (fc - m * uInfo.y + 0.5) / uInfo.y;
+            vec2 wq = uOrigin.xy + mod(m - uOrigin.xy, uInfo.x) + sub;
+            float top = min(max(uFog.z, 0.5), 0.97);
+            o0 = march(vec3(wq, 0.0));
+            o1 = march(vec3(wq, 0.5 * top));
         }
         """;
 

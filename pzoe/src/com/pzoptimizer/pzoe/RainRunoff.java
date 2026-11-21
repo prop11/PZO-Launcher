@@ -188,6 +188,7 @@ public final class RainRunoff {
 
     /** End of FBORenderCell.renderRainSplashes(player, z): main thread, once per level per player each frame. */
     public static void render(int player, int z) {
+        if (com.pzoptimizer.pzoe.gore.GoreCore.enabled()) GoreFx.render(player, z);
         if (!on) {
             if (!active.isEmpty() || !edges.isEmpty()) clear();
             return;
@@ -510,7 +511,7 @@ public final class RainRunoff {
     }
 
     private static Art roof(IsoGridSquare sq) {
-        List<IsoObject> objects = sq.getObjects();
+        List<IsoObject> objects = com.pzoptimizer.GameCompat.objects(sq);
         for (int i = 0, n = Math.min(32, objects.size()); i < n; i++) {
             Art a = art(objects.get(i));
             if (a.roof) return a;
