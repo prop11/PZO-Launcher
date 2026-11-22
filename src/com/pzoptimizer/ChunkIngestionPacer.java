@@ -3,6 +3,11 @@ package com.pzoptimizer;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import zombie.characters.IsoPlayer;
+import zombie.core.Core;
+import zombie.iso.IsoChunk;
+import zombie.iso.IsoChunkMap;
+import zombie.iso.IsoWorld;
 
 /** Caps how much chunk integration the main thread does per frame. A B42 chunk is 2,048 squares (32 levels). */
 public final class ChunkIngestionPacer {
@@ -271,6 +276,7 @@ public final class ChunkIngestionPacer {
     /** ConcurrentLinkedQueue that meters poll() calls on the main thread. */
     public static final class PacedConcurrentQueue extends ConcurrentLinkedQueue<Object> {
         private static final long serialVersionUID = 42L;
+        private static final int ZOOM_LOOKAHEAD = 16;
 
         private static volatile long lastFrameCount = -1;
         private static volatile long frameStartTime = 0;
@@ -282,6 +288,7 @@ public final class ChunkIngestionPacer {
         private static volatile boolean playerIsDriving = false;
 
         private final java.util.concurrent.atomic.AtomicInteger approximateSize = new java.util.concurrent.atomic.AtomicInteger(0);
+        private boolean takeOldestNext;
 
         public PacedConcurrentQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
@@ -420,13 +427,56 @@ public final class ChunkIngestionPacer {
                 return null;
             }
 
-            Object chunk = super.poll();
+            Object chunk = pollForView(driving, backlog);
             if (chunk != null) {
                 approximateSize.decrementAndGet();
                 if (chunksThisFrame == 0) ingestStartTime = now;
                 chunksThisFrame++;
             }
             return chunk;
+        }
+
+        private Object pollForView(boolean driving, int backlog) {
+            if (takeOldestNext) {
+                takeOldestNext = false;
+                return super.poll();
+            }
+            if (driving || backlog < 2 || IsoWorld.instance == null || IsoWorld.instance.currentCell == null) {
+                return super.poll();
+            }
+
+            var cell = IsoWorld.instance.currentCell;
+            for (int player = 0; player < IsoPlayer.numPlayers; player++) {
+                if (IsoPlayer.players[player] == null || Core.getInstance().getZoom(player) <= 1.0f) continue;
+                IsoChunkMap map = cell.getChunkMap(player);
+                if (map == null || map.ignore) continue;
+
+                // A loaded neighbor's last render tells us which ground borders the player can see.
+                var candidates = super.iterator();
+                for (int i = 0; i < ZOOM_LOOKAHEAD && candidates.hasNext(); i++) {
+                    Object entry = candidates.next();
+                    if (!(entry instanceof IsoChunk chunk) || !chunk.refs.contains(map)) continue;
+                    int x = chunk.wx * 8;
+                    int y = chunk.wy * 8;
+                    if (!visibleGround(map, player, x - 1, y) && !visibleGround(map, player, x + 8, y)
+                            && !visibleGround(map, player, x, y - 1) && !visibleGround(map, player, x, y + 8)) {
+                        continue;
+                    }
+                    if (i == 0) return super.poll();
+                    if (super.remove(chunk)) {
+                        // Give older work a turn even when the time budget admits only one chunk per frame.
+                        takeOldestNext = true;
+                        return chunk;
+                    }
+                }
+            }
+            return super.poll();
+        }
+
+        private static boolean visibleGround(IsoChunkMap map, int player, int x, int y) {
+            IsoChunk neighbor = map.getChunkForGridSquare(x, y);
+            return neighbor != null && neighbor.loaded && !neighbor.lightingNeverDone[player]
+                && neighbor.minLevel <= 0 && neighbor.maxLevel >= 0 && neighbor.getRenderLevels(player).isOnScreen(0);
         }
 
         private boolean isEngineLoading() {
