@@ -5,6 +5,7 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -14,6 +15,11 @@ import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import zombie.core.opengl.ShaderProgram;
 import zombie.core.opengl.ShaderUnit;
+import zombie.core.opengl.RenderThread;
+import zombie.iso.IsoChunk;
+import zombie.iso.IsoChunkMap;
+import zombie.iso.IsoWorld;
+import zombie.iso.fboRenderChunk.FBORenderChunk;
 
 /**
  * Shader source patches sent by other mods (PZO Enhancements) through PZOApi. Each patch names the shader files it
@@ -26,7 +32,7 @@ import zombie.core.opengl.ShaderUnit;
  *
  * Registrations are staged and only take effect on commit, so a Lua reload (reset, then every mod registers again)
  * doesn't rebuild anything unless the result differs. Programs that loaded a changed file are flagged with the
- * same sourceFilesChanged bit the game's debug file watcher uses, and rebuild the next time they're bound.
+ * same sourceFilesChanged bit the game's debug file watcher uses, and are refreshed on the render context.
  */
 public final class ShaderPatchHost {
 
@@ -67,6 +73,7 @@ public final class ShaderPatchHost {
     private static final Map<String, String> status = new ConcurrentHashMap<>();
     // Base file name -> programs that compiled it
     private static final Map<String, Map<ShaderProgram, Boolean>> programsByFile = new HashMap<>();
+    private static final Set<ShaderProgram> pendingRefresh = new LinkedHashSet<>();
 
     private static final class H {
         static final MethodHandle PARENT = parentGetter();
@@ -189,6 +196,8 @@ public final class ShaderPatchHost {
         }
         if (changedFiles.isEmpty()) return 0;
         int n = flagPrograms(changedFiles);
+        if (n > 0 && (changedFiles.contains("tilewithdepth.frag") || changedFiles.contains("seamfix2.frag")
+                || changedFiles.contains("opaquewithdepth.frag"))) redrawChunks();
         PZOLogger.info("[ShaderPatch] " + changedFiles + " changed, " + n + " shader program(s) will rebuild");
         return n;
     }
@@ -204,24 +213,63 @@ public final class ShaderPatchHost {
 
     private static int flagPrograms(Set<String> files) {
         if (H.CHANGED == null) return 0;
-        List<ShaderProgram> list = new ArrayList<>();
+        Set<ShaderProgram> list = new LinkedHashSet<>();
         synchronized (programsByFile) {
             for (String f : files) {
                 Map<ShaderProgram, Boolean> m = programsByFile.get(f);
                 if (m != null) list.addAll(m.keySet());
             }
         }
-        int n = 0;
-        for (ShaderProgram prog : list) {
-            if (prog == null) continue;
+        list.remove(null);
+        list.removeIf(program -> {
             try {
-                H.CHANGED.invokeExact(prog, true);
-                n++;
+                H.CHANGED.invokeExact(program, true);
+                return false;
             } catch (Throwable t) {
-                PZOLogger.warn("[ShaderPatch] couldn't flag " + prog.getName() + ": " + t);
+                PZOLogger.warn("[ShaderPatch] couldn't flag " + program.getName() + ": " + t);
+                return true;
+            }
+        });
+        if (list.isEmpty()) return 0;
+        boolean queue;
+        synchronized (pendingRefresh) {
+            queue = pendingRefresh.isEmpty();
+            pendingRefresh.addAll(list);
+        }
+        if (queue) RenderThread.queueInvokeOnRenderContext(ShaderPatchHost::refreshPrograms);
+        return list.size();
+    }
+
+    private static void refreshPrograms() {
+        List<ShaderProgram> pending;
+        synchronized (pendingRefresh) {
+            pending = new ArrayList<>(pendingRefresh);
+            pendingRefresh.clear();
+        }
+        for (ShaderProgram program : pending) {
+            try {
+                program.getShaderID();
+            } catch (Throwable t) {
+                PZOLogger.warn("[ShaderPatch] couldn't refresh " + program.getName() + ": " + t);
             }
         }
-        return n;
+    }
+
+    private static void redrawChunks() {
+        var cell = IsoWorld.instance == null ? null : IsoWorld.instance.currentCell;
+        if (cell == null) return;
+        Set<IsoChunk> dirty = new LinkedHashSet<>();
+        int width = IsoChunkMap.chunkGridWidth;
+        for (int player = 0; player < 4; player++) {
+            IsoChunkMap map = cell.getChunkMap(player);
+            if (map == null) continue;
+            for (int y = 0; y < width; y++) {
+                for (int x = 0; x < width; x++) {
+                    IsoChunk chunk = map.getChunk(x, y);
+                    if (chunk != null && dirty.add(chunk)) chunk.invalidateRenderChunkLevels(FBORenderChunk.DIRTY_REDRAW);
+                }
+            }
+        }
     }
 
     // Render thread, from ShaderUnit.compile

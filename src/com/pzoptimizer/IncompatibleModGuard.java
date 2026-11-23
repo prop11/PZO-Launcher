@@ -1,6 +1,11 @@
 package com.pzoptimizer;
 
 import java.io.File;
+import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -12,6 +17,9 @@ import java.util.Set;
 public final class IncompatibleModGuard {
 
     public static final String PZ_OPTIMIZATION_WORKSHOP_ID = "3805285544";
+
+    private static final Pattern PZOPT_AGENT = Pattern.compile(
+        "(?i)(?:^|\")-javaagent:(?:[^\"\r\n]*[/\\\\])?pzopt-agent\\.jar(?:[\"=\\s]|$)");
 
     private static volatile Boolean cachedDetected = null;
     private static volatile File detectedMarker = null;
@@ -57,7 +65,8 @@ public final class IncompatibleModGuard {
                     break;
                 }
             }
-            if (!found && ClassLoader.getSystemResource("pzopt/BootRepair.class") != null) {
+            if (!found && (hasPzOptimizationAgentArgument()
+                    || ClassLoader.getSystemResource("pzopt/BootRepair.class") != null)) {
                 found = true;
             }
         } catch (Throwable ignored) {}
@@ -71,9 +80,13 @@ public final class IncompatibleModGuard {
         try {
             dirs.add(new File(".").getAbsoluteFile().getCanonicalFile());
         } catch (Throwable ignored) {}
+        try {
+            File engine = new File(IncompatibleModGuard.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            if (engine.isFile()) dirs.add(engine.getCanonicalFile().getParentFile());
+        } catch (Exception ignored) {}
         String cp = System.getProperty("java.class.path", "");
         for (String entry : cp.split(File.pathSeparator)) {
-            if (entry.toLowerCase().endsWith("projectzomboid.jar")) {
+            if (entry.toLowerCase(Locale.ROOT).endsWith("projectzomboid.jar")) {
                 try {
                     File parent = new File(entry).getAbsoluteFile().getCanonicalFile().getParentFile();
                     if (parent != null) dirs.add(parent);
@@ -83,6 +96,11 @@ public final class IncompatibleModGuard {
         return dirs;
     }
 
+    private static boolean hasPzOptimizationAgentArgument() {
+        return ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
+            .anyMatch(arg -> arg.startsWith("-javaagent:") && PZOPT_AGENT.matcher(arg).find());
+    }
+
     // pzopt-installed.txt is its install manifest; the pzopt folder has its boot repair and helper classes
     private static File findPzOptimizationMarker(File gameDir) {
         if (gameDir == null || !gameDir.isDirectory()) return null;
@@ -90,6 +108,14 @@ public final class IncompatibleModGuard {
         if (manifest.isFile()) return manifest;
         File bootRepair = new File(gameDir, "pzopt/BootRepair.class");
         if (bootRepair.isFile()) return bootRepair;
+        File agent = new File(gameDir, "pzopt/agent/pzopt-agent.jar");
+        if (agent.isFile()) return agent;
+        File config = new File(gameDir, ZomboidConfigMigrator.TARGET_JSON_NAME);
+        if (config.isFile()) {
+            try {
+                if (PZOPT_AGENT.matcher(Files.readString(config.toPath())).find()) return config;
+            } catch (IOException ignored) {}
+        }
         File pzoptDir = new File(gameDir, "pzopt");
         if (pzoptDir.isDirectory()) {
             File[] classes = pzoptDir.listFiles((d, name) -> name.endsWith(".class"));
@@ -114,12 +140,16 @@ public final class IncompatibleModGuard {
         PZOLogger.warn("================================================================================");
 
         try {
-            TelemetryReporter.writeStatusFile(String.format(
+            File luaDir = ZomboidDir.sub("Lua");
+            Files.createDirectories(luaDir.toPath());
+            Files.writeString(new File(luaDir, "pzo_status.json").toPath(), String.format(
                 "{\"optimized\":false,\"disabled\":\"incompatible_mod\",\"incompatible_mod\":\"PZ_Optimization\",\"version\":\"%s\"}",
                 UpdateChecker.CURRENT_VERSION));
-        } catch (Throwable ignored) {}
+        } catch (IOException | SecurityException e) {
+            PZOLogger.warn("[PZO] Could not write incompatible mod status: " + e);
+        }
 
-        UpdateDialog.showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", warningMessage());
+        UpdateDialog.showIncompatibleModNoticeAsync(warningMessage());
     }
 
     static String warningMessage() {

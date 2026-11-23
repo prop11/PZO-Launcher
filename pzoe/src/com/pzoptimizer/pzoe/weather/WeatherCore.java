@@ -83,13 +83,16 @@ public final class WeatherCore {
         if (!loaded) {
             loaded = true;
             load(gt);
+            com.pzoptimizer.pzoe.water.WaterIce.load(gt);
             savedAt = hours;
         }
         WeatherFronts.climateTick(cm, hours);
+        com.pzoptimizer.pzoe.water.WaterIce.advance(cm.getTemperature(), hours);
         WeatherStorm.climateTick(hours);
         if (hours - savedAt > 1.0 / 6.0 || hours < savedAt) {
             savedAt = hours;
             save(gt);
+            com.pzoptimizer.pzoe.water.WaterIce.save(gt);
         }
         logMaybe(cm);
     }
@@ -143,7 +146,8 @@ public final class WeatherCore {
     public static String encodeForClients() {
         if (!zombie.network.GameServer.server || ticks == 0) return null;
         return "v=" + VERSION + ";sim=" + (sim ? 1 : 0) + ";fx=" + (effects ? 1 : 0) + ";" + WeatherFronts.encode() + ";" + WeatherEvents.encode() + ";" + WeatherRegional.encode()
-            + ";" + WeatherAuthority.encode() + ";gsd=" + String.format(java.util.Locale.ROOT, "%.2f", com.pzoptimizer.pzoe.GroundSnow.depthNow());
+            + ";" + WeatherAuthority.encode() + ";gsd=" + String.format(java.util.Locale.ROOT, "%.2f", com.pzoptimizer.pzoe.GroundSnow.depthNow())
+            + ";waterIce=" + com.pzoptimizer.pzoe.water.WaterIce.remoteState();
     }
 
     private static String lastSig = "";
@@ -157,7 +161,8 @@ public final class WeatherCore {
         if (s == null) return null;
         String sig = "sim" + sim + effects + WeatherEvents.encode().replaceAll("ice=[0-9.]+", "")
             + Math.round(WeatherEvents.hail * 4) + Math.round(WeatherFronts.preTarget * 5) + Math.round(WeatherFronts.mistTarget * 5) + Math.round(WeatherRegional.angleDeg / 15f)
-            + Math.round(com.pzoptimizer.pzoe.GroundSnow.depthNow() * 5) + "m" + WeatherAuthority.mask;
+            + Math.round(com.pzoptimizer.pzoe.GroundSnow.depthNow() * 5) + "m" + WeatherAuthority.mask
+            + "w" + com.pzoptimizer.pzoe.water.WaterIce.remoteState();
         sig = sig.replaceAll("hail=[0-9.]+", "");
         if (sig.equals(lastSig)) return null;
         lastSig = sig;
@@ -172,6 +177,7 @@ public final class WeatherCore {
             serverEngine = false;
             lastRemote = "";
             WeatherFronts.clearRemote();
+            com.pzoptimizer.pzoe.water.WaterIce.apply("");
             return;
         }
         int v = 0;
@@ -199,7 +205,8 @@ public final class WeatherCore {
         effects = nf;
         for (String[] kv : rest) {
             // The server's wetness is its own bookkeeping
-            if (!kv[0].equals("wet")) WeatherFronts.apply(kv[0], kv[1]);
+            if (kv[0].equals("waterIce")) com.pzoptimizer.pzoe.water.WaterIce.apply(kv[1]);
+            else if (!kv[0].equals("wet")) WeatherFronts.apply(kv[0], kv[1]);
         }
         if (!serverEngine) PZOLogger.info("[PZOE weather] server state " + s);
         serverEngine = true;

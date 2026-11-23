@@ -122,7 +122,7 @@ public final class BakePass {
     }
 
     // Covers the whole target with one triangle and no vertex data
-    private static final String VERTEX = "#version 130\nvoid main()\n{\n"
+    static final String VERTEX = "#version 130\nvoid main()\n{\n"
         + "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
         + "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n}\n";
 
@@ -166,7 +166,7 @@ public final class BakePass {
         }
     }
 
-    private static int compile(int type, String src, String what) {
+    static int compile(int type, String src, String what) {
         int s = GL20.glCreateShader(type);
         GL20.glShaderSource(s, src);
         GL20.glCompileShader(s);
@@ -188,6 +188,15 @@ public final class BakePass {
         }
         int depthId = rc.depth.getID(), w = rc.tex.getWidthHW(), h = rc.tex.getHeightHW();
         if (depthId <= 0 || w <= 0 || h <= 0) return;
+        int min = rc.getMinLevel(), top = rc.getTopLevel();
+        boolean hasScorchPass = false, hasOtherPass = false;
+        for (int i = 0; i < programs.length; i++) {
+            if (programs[i] == 0) continue;
+            if (locScorch[i] >= 0) hasScorchPass = true;
+            else hasOtherPass = true;
+        }
+        boolean hasScorch = hasScorchPass && Scorch.around(rc.chunk.wx, rc.chunk.wy, min, top, scorchBuf);
+        if (!hasOtherPass && !hasScorch) return;
         zombie.core.textures.IGLFramebufferObject funcs = zombie.core.textures.TextureFBO.getFuncs();
         int prevProgram = GlGet.integer(GL20.GL_CURRENT_PROGRAM);
         int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
@@ -209,18 +218,17 @@ public final class BakePass {
             GL11.glViewport(0, 0, w, h);
             GL30.glBindVertexArray(emptyVao);
             float scale = rc.highRes ? 2f : 1f;
-            int min = rc.getMinLevel(), top = rc.getTopLevel();
             float topOffset = 192f * (top - min + 1) + zombie.iso.fboRenderChunk.FBORenderLevels.extraHeightForJumboTrees(min, top);
             int timer = GpuTimer.bakeBegin();
             for (int i = 0; i < programs.length; i++) {
                 if (programs[i] == 0) continue;
+                if (locScorch[i] >= 0 && !hasScorch) continue;
                 GL20.glUseProgram(programs[i]);
                 if (locDepth[i] >= 0) GL20.glUniform1i(locDepth[i], 6);
                 if (locSize[i] >= 0) GL20.glUniform4f(locSize[i], w, h, scale, rc.w / scale);
                 if (locChunk[i] >= 0) GL20.glUniform4f(locChunk[i], rc.chunk.wx * 8, rc.chunk.wy * 8, min, topOffset);
                 if (locWorld[i] >= 0) GL20.glUniform4f(locWorld[i], ageDays, 0f, 0f, 0f);
                 if (locScorch[i] >= 0) {
-                    Scorch.around(rc.chunk.wx, rc.chunk.wy, scorchBuf);
                     scorchFb.clear();
                     scorchFb.put(scorchBuf);
                     scorchFb.flip();

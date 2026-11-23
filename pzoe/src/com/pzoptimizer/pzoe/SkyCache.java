@@ -75,7 +75,8 @@ final class SkyCache {
     private static int scatterProg, lxLight, lxFogN, lxSunC, lxField, lxInfo, lxOrigin, lxFog, lxSunInfo, lxFieldInfo, lxPhase;
     private static int sunProg, cloudProg, fogProg, snowProg, fbo, vao;
     private static int lnInfo, lnOrigin;
-    private static int lsHeight, lsRooms, lsRoomsOn, lsInfo, lsOrigin, lsSun, lcInfo, lcOrigin, lcCloud, lcPhase, lfInfo, lfOrigin, lfDrift, lfPhase;
+    private static int lsHeight, lsRooms, lsRoomsOn, lsTrees, lsTreeProfiles, lsTreeReady, lsInfo, lsOrigin, lsSun;
+    private static int lcInfo, lcOrigin, lcCloud, lcPhase, lfInfo, lfOrigin, lfDrift, lfPhase;
     private static boolean failed;
     static volatile long sunTexels, cloudTexels, fogTexels, snowTexels, scatterTexels;
 
@@ -308,6 +309,13 @@ final class SkyCache {
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, rt);
         GL20.glUniform1i(lsRooms, 9);
         GL20.glUniform1f(lsRoomsOn, rt != 0 ? 1f : 0f);
+        int trees = PixelLight.treeTexture(p);
+        GL13.glActiveTexture(GL13.GL_TEXTURE6);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, trees);
+        GL20.glUniform1i(lsTrees, 6);
+        GL13.glActiveTexture(GL13.GL_TEXTURE7);
+        GL20.glUniform1i(lsTreeProfiles, 7);
+        GL20.glUniform1i(lsTreeReady, trees != 0 ? TreeShadowProfiles.bind() : 0);
         GL20.glUniform4f(lsInfo, ring, t, w, LEVELS);
         GL20.glUniform4f(lsOrigin, s.ox[p], s.oy[p], 0f, 0f);
         GL20.glUniform4f(lsSun, s.sunX, s.sunY, s.sunRise, s.leaf);
@@ -507,6 +515,9 @@ final class SkyCache {
         lfPhase = GL20.glGetUniformLocation(fogProg, "uPhase");
         lcPhase = GL20.glGetUniformLocation(cloudProg, "uPhase");
         lsHeight = GL20.glGetUniformLocation(sunProg, "uHeight");
+        lsTrees = GL20.glGetUniformLocation(sunProg, "uTrees");
+        lsTreeProfiles = GL20.glGetUniformLocation(sunProg, "uTreeProfiles");
+        lsTreeReady = GL20.glGetUniformLocation(sunProg, "uTreeReady");
         lsRooms = GL20.glGetUniformLocation(sunProg, "uRooms");
         lsRoomsOn = GL20.glGetUniformLocation(sunProg, "uRoomsOn");
         lsInfo = GL20.glGetUniformLocation(sunProg, "uInfo");
@@ -554,6 +565,9 @@ final class SkyCache {
     static final String SUN_FRAGMENT = """
         #version 330
         uniform sampler2D uHeight;
+        uniform sampler2D uTrees;
+        uniform sampler2D uTreeProfiles;
+        uniform int uTreeReady;
         // Rooms map (PixelLight.rooms): R = indoors per level bit, G / B = north / west edge openings (window bits
         // 0-3, open door bits 4-7), A = ground floor furniture height. uRoomsOn 0 = none bound.
         uniform sampler2D uRooms;
@@ -601,67 +615,43 @@ final class SkyCache {
             return heightSee(sq, see);
         }
 
-        float hash(vec2 p)
-        {
-            vec3 q = fract(vec3(mod(p, 4096.0).xyx) * 0.1031);
-            q += dot(q, q.yzx + 33.33);
-            return fract((q.x + q.y) * q.z);
-        }
-
-        float noise(vec2 p)
-        {
-            vec2 i = floor(p);
-            vec2 f = fract(p);
-            f = f * f * (3.0 - 2.0 * f);
-            return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
-        }
-
         float least(vec4 v)
         {
             return min(min(v.x, v.y), min(v.z, v.w));
         }
 
-        // A tree crown as an ellipsoid (round in plan, flatter up and down), hit analytically by the sun ray from w
-        // at 4 heights z: the ray's closest approach to the crown, in units of its radii, gives a round shadow with a
-        // soft rim that widens with how far the shadow travels (pen), and a lumpy outline per tree. In leaf it's a
-        // canopy with gaps the sun shows through; bare in winter a net of limbs and twigs. Trees are the squares with
-        // opacity under 0.6.
-        vec4 crown(vec2 w, vec4 z, vec2 sq, vec4 h, float base)
+        // One sun-facing projection for the trunk and crown. Each height samples the same sprite profile.
+        float treeCoverage(vec2 tile, float x, float y, float blur, float leaf)
         {
-            if (h.a >= 0.6) return vec4(0.0);
-            float tall = h.r - base;
-            if (tall < 0.5) return vec4(0.0);
-            vec3 c = vec3(sq + 0.5, base + tall * 0.66);
-            float rr = clamp(tall * 0.36, 0.5, 0.76);
-            float hz = tall * 0.36;
-            vec2 bxy = uSun.xy / rr;
-            float bz = uSun.z / hz;
-            float bb = dot(bxy, bxy) + bz * bz;
-            vec2 axy = (w - c.xy) / rr;
-            vec4 az = (z - c.z) / hz;
-            // Closest point along the ray, toward the sun only
-            vec4 t = max(-(dot(axy, bxy) + az * bz) / bb, 0.0);
-            vec4 dz = az + bz * t;
-            vec4 d2 = vec4(dot(axy, axy)) + 2.0 * dot(axy, bxy) * t + dot(bxy, bxy) * t * t + dz * dz;
-            if (least(d2) > 2.0) return vec4(0.0);
-            // Where it passes, seen from above, for the outline and the leaves (the lowest height speaks for all)
-            vec2 d = w + uSun.xy * t.x - c.xy;
-            float dl = length(d);
-            float ang = atan(d.y, d.x);
-            float h1 = hash(sq), h2 = hash(sq + 31.7);
-            float lobes = 0.86 + 0.09 * sin(ang * 3.0 + h1 * 6.283) + 0.07 * sin(ang * 5.0 + h2 * 6.283);
-            vec4 pen = min(0.1 + 0.05 * t, 0.25) / rr;
-            vec4 cov = 1.0 - smoothstep(lobes - pen, lobes + pen, sqrt(d2));
-            if (max(max(cov.x, cov.y), max(cov.z, cov.w)) <= 0.0) return vec4(0.0);
-            vec2 q = c.xy + d;
-            vec2 lq = q * 3.1 + sq * 5.3;
-            vec2 lq2 = mat2(0.8, 0.6, -0.6, 0.8) * lq * 2.3;
-            float gaps = smoothstep(0.3, 0.62, noise(lq) * 0.6 + noise(lq2) * 0.4);
-            float bend = noise(d * 2.5 + sq * 3.3) * 2.0;
-            float limbs = smoothstep(0.82, 0.98, abs(sin(ang * (3.0 + floor(h1 * 3.0)) + bend + dl * 2.0)));
-            float twigs = smoothstep(0.78, 0.95, 1.0 - abs(noise(lq2 * 1.8) * 2.0 - 1.0));
-            float bare = (limbs * (1.0 - 0.5 * dl / rr) * 0.75 + twigs * 0.3) + 0.06;
-            return cov * mix(bare, 0.35 + 0.65 * gaps, uSun.w) * clamp((0.6 - h.a) * 2.5 + 0.5, 0.5, 1.0);
+            if (y < 0.0 || y > 1.0) return 0.0;
+            vec2 uv = clamp(vec2(x, y) * vec2(32.0, 64.0), vec2(0.5), vec2(31.5, 63.5));
+            vec4 mask = texture(uTreeProfiles, (tile + uv) / vec2(256.0, 2048.0));
+            vec2 opacity = mix(mask.rg, mask.ba, blur);
+            return 1.0 - (1.0 - opacity.r * 0.88) * (1.0 - opacity.g * leaf * 0.72);
+        }
+
+        vec4 treeShadow(vec2 w, vec4 z, vec2 sq)
+        {
+            if (any(lessThan(sq, uOrigin.xy)) || any(greaterThanEqual(sq, uOrigin.xy + uInfo.x))) return vec4(0.0);
+            vec4 d = floor(texture(uTrees, (mod(sq, uInfo.x) + 0.5) / uInfo.x) * 255.0 + 0.5);
+            if (d.r < 0.5) return vec4(0.0);
+            vec2 rel = sq + 0.5 - w;
+            float along = dot(rel, uSun.xy);
+            if (along < -0.12 || along >= 11.0) return vec4(0.0);
+            float radius = mod(d.a, 128.0) / 32.0;
+            float across = dot(rel, vec2(-uSun.y, uSun.x));
+            if (abs(across) >= radius) return vec4(0.0);
+            float height = d.b / 32.0;
+            vec4 ry = (z + max(along, 0.0) * uSun.z - (d.g - 1.0)) / height;
+            if (ry.w < 0.0 || ry.x > 1.0) return vec4(0.0);
+            float slot = d.r <= float(uTreeReady) ? d.r : (d.a >= 128.0 ? 2.0 : 1.0);
+            vec2 tile = vec2(mod(slot, 8.0) * 32.0, floor(slot / 8.0) * 64.0);
+            float x = across / (-2.0 * radius) + 0.5;
+            float blur = smoothstep(0.35, 6.0, along);
+            float leaf = d.a >= 128.0 ? 1.0 : uSun.w;
+            return vec4(treeCoverage(tile, x, ry.x, blur, leaf), treeCoverage(tile, x, ry.y, blur, leaf),
+                treeCoverage(tile, x, ry.z, blur, leaf), treeCoverage(tile, x, ry.w, blur, leaf))
+                * (1.0 - smoothstep(9.0, 11.0, along));
         }
 
         // The ray toward the sun walks the square grid exactly (every square it crosses, in order, one read each), the
@@ -700,25 +690,24 @@ final class SkyCache {
                         float miss = length(w + dir * clamp(dot(cell + 0.5 - w, dir), t, tExit) - cell - 0.5);
                         occ = max(occ, smoothstep(0.0, soft, rm.a / 255.0 - rz) * 0.8 * (1.0 - smoothstep(0.3 - soft, 0.34 + soft, miss)));
                     }
-                } else if (cell != own && t < tMax) {
+                } else if (t < tMax) {
                     vec4 rz = z + t * uSun.z;
                     float chord = tExit - t;
                     vec2 c = cell + 0.5 - w;
                     float along = clamp(dot(c, dir), t, tExit);
                     float miss = length(w + dir * along - cell - 0.5);
-                    if (h.a >= 0.99) {
+                    if (h.a >= 0.99 && cell != own) {
                         vec4 k = smoothstep(0.0, soft, h.r - rz) * h.a;
                         run = (run + chord) * step(0.01, k);
                         occ = max(occ, k * smoothstep(0.0, 0.08 + 0.12 * soft, run));
-                    } else if (h.a >= 0.6) {
+                    } else if (h.a >= 0.6 && h.a < 0.99 && h.r > 0.01) {
                         run = vec4(0.0);
-                        vec4 k = smoothstep(0.0, soft, h.r - rz) * h.a;
-                        k *= 1.0 - smoothstep(0.3 - soft, 0.34 + soft, miss);
+                        float radius = h.a < 0.72 ? 0.13 : 0.32;
+                        vec4 k = smoothstep(0.0, soft, h.r - (z + along * uSun.z)) * h.a;
+                        k *= 1.0 - smoothstep(max(0.01, radius - soft), radius + soft, miss);
                         occ = max(occ, k);
                     } else {
                         run = vec4(0.0);
-                        float tall = h.r - base;
-                        occ = max(occ, (1.0 - smoothstep(0.05, 0.07 + soft, miss)) * step(rz, vec4(h.r - tall * 0.55)) * 0.75);
                     }
                 }
                 if (tExit > tMax || least(occ) > 0.98) break;
@@ -752,22 +741,22 @@ final class SkyCache {
                 }
             }
             if (least(occ) > 0.98) return occ;
-            // Crowns: every tree whose crown could reach the ray, found from 2 x 2 squares round points a square apart
-            // along it (a crown is under a square across, so none slips between), each hit exactly
-            // Only the stretch of ray that can be inside a canopy (crowns span about half a level to 2.5 above the
-            // ground they stand on, a square's reach each side)
-            float rise = max(uSun.z, 0.02);
-            float tStart = max(0.0, floor((base + 0.4 - z.w) / rise) - 1.0);
-            float tEnd = min(11.0, (base + 2.6 - z.x) / rise + 1.0);
-            for (int k = 0; k < 12; k++) {
-                float tc = tStart + float(k);
-                if (tc > tEnd) break;
-                vec2 c0 = floor(w + uSun.xy * tc - 0.5);
-                occ = max(occ, crown(w, z, c0, heightAt(c0), base));
-                occ = max(occ, crown(w, z, c0 + vec2(1.0, 0.0), heightAt(c0 + vec2(1.0, 0.0)), base));
-                occ = max(occ, crown(w, z, c0 + vec2(0.0, 1.0), heightAt(c0 + vec2(0.0, 1.0)), base));
-                occ = max(occ, crown(w, z, c0 + vec2(1.0, 1.0), heightAt(c0 + vec2(1.0, 1.0)), base));
-                if (least(occ) > 0.98) break;
+            // Scan the strip that can intersect a silhouette. Consecutive neighbourhoods overlap.
+            if (uTreeReady >= 2) {
+                vec2 previous = vec2(-1e6);
+                for (int k = 0; k <= 11; k++) {
+                    vec2 center = floor(w + uSun.xy * float(k));
+                    if (center == previous) continue;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        for (int dx = -1; dx <= 1; dx++) {
+                            vec2 sq = center + vec2(dx, dy);
+                            if (all(lessThanEqual(abs(sq - previous), vec2(1.0)))) continue;
+                            occ = max(occ, treeShadow(w, z, sq));
+                        }
+                    }
+                    previous = center;
+                    if (least(occ) > 0.98) break;
+                }
             }
             return occ;
         }

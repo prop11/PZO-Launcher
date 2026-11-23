@@ -78,6 +78,8 @@ public final class WeatherEvents {
                 forcedEvents = List.of();
                 forcedHailUntil = forcedFreezeUntil = -1;
                 WeatherFronts.forcedPreUntil = -1;
+                // Fast snow's flurries go with the rest, so its hidden build-up has to stop too
+                com.pzoptimizer.pzoe.GroundSnow.devStop();
                 return "Forced weather cleared";
             }
             case "Hail" -> {
@@ -109,6 +111,8 @@ public final class WeatherEvents {
                 return "Snow piling up about 40 times as fast for " + fmtH(dur);
             }
             case "NoSnow" -> {
+                com.pzoptimizer.pzoe.GroundSnow.devStop();
+                com.pzoptimizer.pzoe.GroundSnow.clearVanilla();
                 com.pzoptimizer.pzoe.GroundSnow.forceDepth(0f);
                 return "Ground snow cleared";
             }

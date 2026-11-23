@@ -123,7 +123,9 @@ final class BounceLight {
     private static void scan(zombie.iso.IsoCell cell, zombie.characters.IsoPlayer pl, int r) {
         int side = Math.min(2 * WINDOW, r), total = side * side * LEVELS;
         int x0 = (int) Math.floor(pl.getX()) - side / 2, y0 = (int) Math.floor(pl.getY()) - side / 2;
-        for (int k = 0; k < 2048; k++) {
+        // 512 a frame: the 96 x 96 x 4 window goes round in about 70 frames. Floors rarely change, and 2048 a frame was
+        // about 3.9% of the main thread (JFR 2026-11-21).
+        for (int k = 0; k < 512; k++) {
             int i = scanCursor;
             scanCursor = (scanCursor + 1) % total;
             int lvl = i / (side * side), rest = i % (side * side);

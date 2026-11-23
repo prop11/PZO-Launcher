@@ -3,6 +3,7 @@ package com.pzoptimizer.pzoe;
 import com.pzoptimizer.PZOLogger;
 import com.pzoptimizer.pzoe.gore.GoreAtlas;
 import com.pzoptimizer.pzoe.gore.GoreCore;
+import com.pzoptimizer.pzoe.gore.GoreImpact;
 import com.pzoptimizer.pzoe.gore.GoreListener;
 import com.pzoptimizer.pzoe.gore.GoreState;
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import zombie.core.textures.Texture;
 import zombie.core.textures.TextureDraw;
 import zombie.iso.IsoCamera;
 import zombie.iso.IsoCell;
+import zombie.iso.IsoChunk;
 import zombie.iso.IsoDepthHelper;
 import zombie.iso.IsoGridSquare;
 import zombie.iso.IsoUtils;
@@ -42,23 +44,38 @@ public final class GoreFx implements GoreListener {
 
     // Cards
     static volatile boolean sprayOn, gibsOn, poolsOn, tracksOn, weaponOn, vehicleOn, decayOn, fliesOn, playerWoundsOn, ragdollBreaks,
-        hitStopOn, killCamOn, lensOn;
+        hitStopOn, squashOn, killCamOn, lensOn, detailedGibsOn;
+    private static volatile boolean active;
     static volatile float amount = 1f;
     static volatile int quality = 2, palette;
 
     static boolean anyOn() {
-        return sprayOn || gibsOn || poolsOn || tracksOn || weaponOn || vehicleOn || decayOn || fliesOn || playerWoundsOn || lensOn
-            || hitStopOn || killCamOn || GoreCore.dismemberLook || GoreModel.wanted;
+        return active;
     }
 
     // Particle kinds
-    private static final int DROP = 0, MIST = 1, GIB = 2, BONE = 3, ARM = 4, LEG = 5, HEAD = 6, FLY = 7, BRAIN = 8;
+    private static final int DROP = 0, MIST = 1, GIB = 2, BONE = 3, ARM = 4, LEG = 5, HEAD = 6, FLY = 7, BRAIN = 8, WEAPON_DROP = 9;
     private static final int MAX = 4096;
     private static final float GRAVITY = 4.2f, RANGE = 30f;
     private static final float[] px = new float[MAX], py = new float[MAX], pz = new float[MAX], vx = new float[MAX], vy = new float[MAX],
         vz = new float[MAX], age = new float[MAX], life = new float[MAX], size = new float[MAX], ground = new float[MAX];
     private static final byte[] kind = new byte[MAX], resting = new byte[MAX];
     private static int count;
+
+    private static final int MAX_PARTS = 24, MAX_DETAILED_PARTS = 12;
+    private static final byte[] partSlot = new byte[MAX];
+    private static final int[] partParticle = new int[MAX_PARTS], partChunkId = new int[MAX_PARTS];
+    private static final IsoChunk[] partChunk = new IsoChunk[MAX_PARTS];
+    private static final short[] partTile = new short[MAX_PARTS];
+    private static final GoreDetached.Part[] partCapture = new GoreDetached.Part[MAX_PARTS];
+    private static final byte[] partAngle = new byte[MAX_PARTS];
+    private static final boolean[] partFlipped = new boolean[MAX_PARTS], partBounced = new boolean[MAX_PARTS],
+        partDetailed = new boolean[MAX_PARTS];
+    private static int activeParts, detailedParts;
+    private static IsoCell partCell;
+    private static long nextPartCleanup;
+
+    private static int combatGibletFrame = Integer.MIN_VALUE, combatGiblets;
     private static long spawned;
 
     private static final Texture[] tex = new Texture[13];
@@ -71,8 +88,7 @@ public final class GoreFx implements GoreListener {
     private static String problem;
 
     // Palette: fresh blood colour per choice (red, dark, green, black)
-    // Flying blood is dark: (0.32, 0.03, 0.025) reads as blood in the air at this size; bright red reads as paint
-    private static final float[][] PAL = {{0.34f, 0.03f, 0.025f}, {0.2f, 0.02f, 0.02f}, {0.12f, 0.32f, 0.05f}, {0.06f, 0.05f, 0.05f}};
+    private static final float[][] PAL = {{0.56f, 0.068f, 0.048f}, {0.15f, 0.031f, 0.026f}, {0.12f, 0.32f, 0.05f}, {0.06f, 0.05f, 0.05f}};
 
     private GoreFx() {}
 
@@ -83,6 +99,7 @@ public final class GoreFx implements GoreListener {
     /** "spray=1;gibs=1;..." from the cards (PZOE_Settings.lua). */
     static void configure(String s) {
         if (s == null) return;
+        int oldAtlasLook = GoreAtlas.look();
         for (String kv : s.split(";")) {
             int e = kv.indexOf('=');
             if (e < 0) continue;
@@ -96,7 +113,23 @@ public final class GoreFx implements GoreListener {
             }
             switch (k) {
                 case "spray" -> sprayOn = on;
+                case "wounds" -> GoreCore.woundsLook = on;
+                case "runoff" -> GoreCore.runoffLook = on;
+                case "detailedGibs" -> detailedGibsOn = on;
                 case "gibs" -> {
+                    if (on && !gibsOn) {
+                        GoreParts.warm();
+                        texture(GIB, 0);
+                        texture(GIB, 1);
+                        texture(GIB, 2);
+                        texture(GIB, 3);
+                        texture(BONE, 0);
+                        texture(BRAIN, 0);
+                        texture(ARM, 0);
+                        texture(LEG, 0);
+                        texture(HEAD, 0);
+                    }
+                    if (!on && activeParts != 0) clearParts();
                     gibsOn = on;
                     GoreCore.giblets = on;
                 }
@@ -113,7 +146,11 @@ public final class GoreFx implements GoreListener {
                 case "dismember" -> GoreCore.dismemberLook = on;
                 case "ragdoll" -> ragdollBreaks = on;
                 case "hitStop" -> hitStopOn = on;
-                case "killCam" -> killCamOn = on;
+                case "squash" -> squashOn = on;
+                case "killCam" -> {
+                    killCamOn = on;
+                    if (!on && GoreKillCam.active()) GoreKillCam.cancel();
+                }
                 case "lens" -> lensOn = on;
                 case "amount" -> amount = Math.max(0.25f, Math.min(3f, f / 100f));
                 case "quality" -> quality = Math.max(1, Math.min(3, (int) f));
@@ -123,6 +160,37 @@ public final class GoreFx implements GoreListener {
                 }
             }
         }
+        boolean single = (hitStopOn || squashOn || killCamOn) && singlePlayer();
+        GoreCore.hitLook = GoreCore.woundsLook || GoreCore.dismemberLook || sprayOn || gibsOn || weaponOn || (single && killCamOn)
+            || (single && (hitStopOn || squashOn));
+        GoreCore.deathLook = GoreCore.dismemberLook || poolsOn || lensOn || (single && killCamOn);
+        GoreCore.vehicleLook = sprayOn || vehicleOn || GoreCore.dismemberLook;
+        if (oldAtlasLook != GoreAtlas.look()) {
+            for (IsoDeadBody body : GoreAtlas.seen.keySet()) GoreAtlas.refreshTexture(body);
+        }
+        if (!sprayOn) spurts.clear();
+        if (!poolsOn) pools.clear();
+        if (!vehicleOn) glass.clear();
+        if (!tracksOn) {
+            walkers.clear();
+            tyres.clear();
+        }
+        if (!lensOn) lens = 0f;
+        if (!hitStopOn) stopUntil = -1f;
+        if (!fliesOn) flies.clear();
+        for (int i = count - 1; i >= 0; i--) {
+            int k = kind[i];
+            boolean on = switch (k) {
+                case DROP, MIST -> sprayOn;
+                case WEAPON_DROP -> weaponOn;
+                case FLY -> fliesOn;
+                default -> gibsOn;
+            };
+            if (!on) remove(i);
+        }
+        active = GoreCore.hitLook || GoreCore.deathLook || GoreCore.vehicleLook || tracksOn || decayOn
+            || fliesOn || playerWoundsOn || ragdollBreaks;
+        if (!active) lastNs = 0L;
     }
 
     static float rainNow() {
@@ -160,7 +228,8 @@ public final class GoreFx implements GoreListener {
     // Spawning
 
     private static int add(int k, float x, float y, float z, float ux, float uy, float uz, float lf, float sz) {
-        if (count >= cap()) return -1;
+        int limit = cap();
+        if (count >= limit || (count >= limit * 3 / 4 && (k == MIST || !near(x, y, 9f)))) return -1;
         int i = count++;
         kind[i] = (byte) k;
         px[i] = x;
@@ -173,6 +242,7 @@ public final class GoreFx implements GoreListener {
         life[i] = lf;
         size[i] = sz;
         resting[i] = 0;
+        partSlot[i] = 0;
         ground[i] = (float) Math.floor(z + 0.02f);
         spawned++;
         return i;
@@ -182,7 +252,9 @@ public final class GoreFx implements GoreListener {
     static void spray(float x, float y, float z, float dx, float dy, float strength, float spread) {
         if (!sprayOn) return;
         float scale = GoreCore.bloodScale() * amount;
-        int n = (int) (strength * 6f * Math.min(scale, 1.5f) * (quality == 1 ? 0.5f : quality == 3 ? 1.3f : 1f));
+        int n = (int) (strength * 4.5f * Math.min(scale, 1.5f) * (quality == 1 ? 0.5f : quality == 3 ? 1.3f : 1f));
+        if (!near(x, y, 9f)) n = (n + 1) / 2;
+        if (n == 0 || count >= cap()) return;
         float len = (float) Math.sqrt(dx * dx + dy * dy);
         if (len < 1e-4f) {
             double a = Math.random() * Math.PI * 2;
@@ -192,18 +264,20 @@ public final class GoreFx implements GoreListener {
             dx /= len;
             dy /= len;
         }
+        double direction = Math.atan2(dy, dx);
         for (int i = 0; i < n; i++) {
-            double a = Math.atan2(dy, dx) + (rnd() - 0.5) * spread;
-            float sp = (0.35f + 0.9f * rnd()) * (0.7f + 0.3f * Math.min(strength, 1.5f));
-            add(DROP, x + (rnd() - 0.5f) * 0.1f, y + (rnd() - 0.5f) * 0.1f, z, (float) Math.cos(a) * sp, (float) Math.sin(a) * sp,
-                0.1f + 0.45f * rnd(), 3f, 0.4f + 0.6f * rnd());
+            double a = direction + (rnd() - 0.5) * spread;
+            float sp = (0.22f + 0.53f * rnd()) * (0.7f + 0.3f * Math.min(strength, 1.5f));
+            if (add(DROP, x + (rnd() - 0.5f) * 0.1f, y + (rnd() - 0.5f) * 0.1f, z,
+                (float) Math.cos(a) * sp, (float) Math.sin(a) * sp, 0.07f + 0.30f * rnd(), 3f, 0.4f + 0.6f * rnd()) < 0) break;
         }
     }
 
     static void mist(float x, float y, float z, int n) {
-        if (!sprayOn) return;
+        if (!sprayOn || !near(x, y, 12f)) return;
         for (int i = 0; i < n; i++) {
-            add(MIST, x, y, z, (rnd() - 0.5f) * 0.6f, (rnd() - 0.5f) * 0.6f, 0.1f * rnd(), 0.6f + 0.4f * rnd(), 0.8f + rnd());
+            if (add(MIST, x, y, z, (rnd() - 0.5f) * 0.32f, (rnd() - 0.5f) * 0.32f, 0.1f * rnd(),
+                0.6f + 0.4f * rnd(), 0.8f + rnd()) < 0) break;
         }
     }
 
@@ -212,7 +286,7 @@ public final class GoreFx implements GoreListener {
         for (int i = 0; i < n; i++) {
             double a = Math.random() * Math.PI * 2;
             float sp = speed * (0.5f + rnd());
-            add(i % 6 == 5 ? BONE : GIB, x, y, z, (float) Math.cos(a) * sp * 0.6f, (float) Math.sin(a) * sp * 0.6f, 0.3f + 0.6f * rnd(), 40f,
+            add(i % 6 == 5 ? BONE : GIB, x, y, z, (float) Math.cos(a) * sp * 0.34f, (float) Math.sin(a) * sp * 0.34f, 0.20f + 0.38f * rnd(), 40f,
                 0.7f + 0.5f * rnd());
         }
     }
@@ -223,16 +297,96 @@ public final class GoreFx implements GoreListener {
         for (int i = 0; i < n; i++) {
             double a = Math.random() * Math.PI * 2;
             float sp = speed * (0.4f + rnd());
-            add(BRAIN, x, y, z, (float) Math.cos(a) * sp * 0.5f, (float) Math.sin(a) * sp * 0.5f, 0.2f + 0.5f * rnd(), 60f, 0.6f + 0.6f * rnd());
+            add(BRAIN, x, y, z, (float) Math.cos(a) * sp * 0.28f, (float) Math.sin(a) * sp * 0.28f, 0.14f + 0.32f * rnd(), 60f, 0.6f + 0.6f * rnd());
         }
     }
 
-    private static void limb(int limbs, float x, float y, float z, float dx, float dy) {
+    private static void severedParts(IsoGameCharacter victim, int cuts, int cutBefore, float dx, float dy) {
         if (!gibsOn) return;
-        int k = (limbs & GoreState.HEAD) != 0 ? HEAD : (limbs & (GoreState.LEGS_L | GoreState.LEGS_R)) != 0 ? LEG : ARM;
-        if (limbs == GoreState.JAW) return;
-        float sp = 1.2f + rnd();
-        add(k, x, y, z, (dx * sp + (rnd() - 0.5f)) * 0.5f, (dy * sp + (rnd() - 0.5f)) * 0.5f, 0.3f + 0.4f * rnd(), 300f, 1f);
+        int roots = GoreParts.cutRoots(cuts & ~cutBefore);
+        if (roots == 0) return;
+        float x = victim.getX(), y = victim.getY(), floor = victim.getZ();
+        IsoCell cell = victim.getCell();
+        if (cell == null) return;
+        if (activeParts > 0 && partCell != cell) clearParts();
+        var square = victim.getCurrentSquare();
+        IsoChunk chunk = square == null ? null : square.getChunk();
+        int chunkId = partLoadId(chunk);
+        if (chunkId < Short.MIN_VALUE) return;
+        boolean close = near(x, y, 12f);
+        while (roots != 0) {
+            int root = Integer.lowestOneBit(roots);
+            roots ^= root;
+            if (activeParts >= MAX_PARTS) {
+                GoreMap.blob(x, y, (int) Math.floor(floor), 0.10f, 1f, 0.45f);
+                break;
+            }
+            int k = root == GoreState.HEAD ? HEAD : (root & (GoreState.LEGS_L | GoreState.LEGS_R)) != 0 ? LEG : ARM;
+            float height = victim.isOnFloor() ? 0.05f : k == HEAD ? 0.58f : k == LEG ? 0.19f : 0.42f;
+            float speed = 1.2f + rnd();
+            int i = add(k, x, y, floor + height, (dx * speed + rnd() - 0.5f) * 0.28f,
+                (dy * speed + rnd() - 0.5f) * 0.28f, 0.18f + 0.32f * rnd(), 150f, 1f);
+            if (i < 0) {
+                GoreMap.blob(x, y, (int) Math.floor(floor), 0.10f, 1f, 0.45f);
+                break;
+            }
+
+            boolean shortened = GoreParts.shortened(root, cutBefore);
+            int appearance = close && detailedParts < MAX_DETAILED_PARTS ? GoreParts.snapshot(victim, root, shortened) : -1;
+            GoreDetached.Part capture = detailedGibsOn && close && quality >= 2 && GoreCore.dismemberLook && zombie.core.PerformanceSettings.fboRenderChunk
+                ? GoreDetached.request(victim, root, shortened) : null;
+            rememberPart(i, cell, chunk, chunkId, root, shortened, appearance, capture);
+        }
+    }
+
+    private static void rememberPart(int i, IsoCell cell, IsoChunk chunk, int chunkId, int root, boolean shortened, int appearance,
+                                     GoreDetached.Part capture) {
+        int slot = 0;
+        while (partParticle[slot] != 0) slot++;
+        partSlot[i] = (byte) (slot + 1);
+        partParticle[slot] = i + 1;
+        partCell = cell;
+        partChunk[slot] = chunk;
+        partChunkId[slot] = chunkId;
+        partTile[slot] = (short) (appearance >= 0 ? appearance : GoreParts.neutralTile(root, shortened));
+        partCapture[slot] = capture;
+        partAngle[slot] = (byte) (rnd() * GoreParts.TUMBLE_STEPS);
+        partFlipped[slot] = GoreParts.left(root);
+        partBounced[slot] = false;
+        partDetailed[slot] = appearance >= 0;
+        activeParts++;
+        if (partDetailed[slot]) detailedParts++;
+    }
+
+    private static int partLoadId(IsoChunk chunk) {
+        if (chunk == null || chunk.refs.isEmpty()) return Integer.MIN_VALUE;
+        try {
+            return chunk.getLoadID();
+        } catch (IllegalStateException e) {
+            return Integer.MIN_VALUE;
+        }
+    }
+
+    private static void clearParts() {
+        for (int slot = 0; slot < MAX_PARTS; slot++) {
+            if (partParticle[slot] != 0) remove(partParticle[slot] - 1);
+        }
+        nextPartCleanup = 0;
+    }
+
+    private static void checkParts(IsoCell cell, long now) {
+        if (cell != partCell) {
+            clearParts();
+            return;
+        }
+        if (now < nextPartCleanup) return;
+        nextPartCleanup = now + 250_000_000L;
+        for (int slot = 0; slot < MAX_PARTS; slot++) {
+            int i = partParticle[slot] - 1;
+            if (i < 0) continue;
+            IsoChunk chunk = cell.getChunk((int) Math.floor(px[i]) >> 3, (int) Math.floor(py[i]) >> 3);
+            if (chunk != partChunk[slot] || partLoadId(chunk) != partChunkId[slot]) remove(i);
+        }
     }
 
     private static float heightOf(IsoGameCharacter c, int part) {
@@ -289,7 +443,7 @@ public final class GoreFx implements GoreListener {
     private static float lastPlayerHit;
 
     @Override
-    public void hit(IsoGameCharacter v, IsoGameCharacter att, int part, int k, int weapon) {
+    public void hit(IsoGameCharacter v, IsoGameCharacter att, int part, int k, int weapon, boolean openingHit, GoreImpact contact) {
         if (!near(v.getX(), v.getY(), RANGE)) return;
         float dx = 0f, dy = 0f;
         if (att != null) {
@@ -297,7 +451,8 @@ public final class GoreFx implements GoreListener {
             dy = v.getY() - att.getY();
         }
         float h = heightOf(v, part);
-        float z = v.getZ() + h;
+        float x = contact == null ? v.getX() : contact.worldX(), y = contact == null ? v.getY() : contact.worldY();
+        float z = contact == null ? v.getZ() + h : contact.worldZ();
         float strength = switch (k) {
             case GoreState.BULLET -> weapon == GoreCore.W_SHOTGUN ? 1.4f : 0.9f;
             case GoreState.CUT -> 1.1f;
@@ -305,16 +460,40 @@ public final class GoreFx implements GoreListener {
             case GoreState.STAB -> 0.8f;
             default -> 0.4f;
         };
-        spray(v.getX(), v.getY(), z, dx, dy, strength, k == GoreState.BLUNT ? 2.4f : 1.1f);
-        if (k == GoreState.BULLET && (part == GoreCore.P_HEAD || weapon == GoreCore.W_SHOTGUN)) mist(v.getX() + dx * 0.1f, v.getY() + dy * 0.1f, z, 3);
+        spray(x, y, z, dx, dy, openingHit ? strength * 0.5f : strength, k == GoreState.BLUNT ? 2.0f : 0.95f);
+        if (k == GoreState.BULLET && (part == GoreCore.P_HEAD || weapon == GoreCore.W_SHOTGUN)) {
+            float distance = (float) Math.sqrt(dx * dx + dy * dy);
+            float offset = 0.08f / Math.max(0.08f, distance);
+            mist(x + dx * offset, y + dy * offset, z, openingHit ? 1 : 2);
+        }
         if (att instanceof IsoPlayer p && p.isLocalPlayer()) {
             lastPlayerHit = clock;
-            if (hitStopOn && singlePlayer() && (k == GoreState.CUT || (k == GoreState.BLUNT && att.isCriticalHit()))) stopUntil = clock + 0.05f;
+            if (killCamOn && contact != null && singlePlayer()) {
+                GoreState g = GoreState.of(v);
+                if (g != null) {
+                    g.camHitAt = GoreCore.clock();
+                    g.camHitPart = part;
+                    g.camHitX = x;
+                    g.camHitY = y;
+                    g.camHitZ = z;
+                }
+            }
+            if ((hitStopOn || squashOn) && singlePlayer() && (k == GoreState.CUT || (k == GoreState.BLUNT && att.isCriticalHit()))) {
+                if (hitStopOn) stopUntil = GoreCore.clock() + 0.05f;
+                if (squashOn && GoreModel.wanted && near(v.getX(), v.getY(), 12f)) {
+                    GoreState g = GoreState.of(v);
+                    if (g != null) {
+                        g.squashPart = part;
+                        g.squashAt = GoreCore.clock();
+                        g.version++;
+                    }
+                }
+            }
         }
     }
 
     @Override
-    public void death(IsoGameCharacter v, IsoGameCharacter killer, GoreState g, int taken, int burst, int weapon, boolean gory) {
+    public void death(IsoGameCharacter v, IsoGameCharacter killer, GoreState g, int taken, int cutBefore, int burst, int weapon, int part, boolean gory) {
         if (!near(v.getX(), v.getY(), RANGE)) return;
         float dx = 0f, dy = 0f;
         if (killer != null) {
@@ -341,7 +520,7 @@ public final class GoreFx implements GoreListener {
             spurt(v, hz, 3f);
         }
         if (taken != 0) {
-            if (burst != 1) limb(taken, x, y, z + ((taken & (GoreState.LEGS_L | GoreState.LEGS_R)) != 0 ? 0.2f : 0.45f), dx, dy);
+            if (burst != 1) severedParts(v, taken, cutBefore, dx, dy);
             spurt(v, (taken & GoreState.HEAD) != 0 ? 0.55f : 0.4f, 3.5f + 3f * rnd());
             spray(x, y, z + 0.45f, dx, dy, 1.5f, 1.4f);
         }
@@ -350,8 +529,9 @@ public final class GoreFx implements GoreListener {
             gibs(x, y, z + 0.4f, 5, 1.2f);
         }
         if (gory) pool(x, y, z, 0.22f + 0.05f * Math.min(4, g.count) + (taken != 0 || g.slice != 0 || g.crush ? 0.15f : 0f));
-        if (killer instanceof IsoPlayer p && p.isLocalPlayer() && singlePlayer()) {
-            if (killCamOn && (burst == 1 || (taken & GoreState.HEAD) != 0 || g.slice != 0)) camUntil = clock + 0.9f;
+        if (killCamOn && gory && killer instanceof IsoPlayer p && p.isLocalPlayer() && singlePlayer()
+            && (burst != 0 || taken != 0 || g.slice != 0 || (weapon == GoreCore.W_GUN && part == GoreCore.P_HEAD && g.lastPart == part))) {
+            GoreKillCam.start(v, p, g, part);
         }
         if (killer instanceof IsoPlayer p && p.isLocalPlayer() && lensOn && weapon != GoreCore.W_GUN && weapon != GoreCore.W_SHOTGUN) {
             float ddx = killer.getX() - x, ddy = killer.getY() - y;
@@ -364,10 +544,10 @@ public final class GoreFx implements GoreListener {
     }
 
     @Override
-    public void severed(IsoGameCharacter v, int limbs, boolean living) {
+    public void severed(IsoGameCharacter v, int limbs, int cutBefore) {
         if (!near(v.getX(), v.getY(), RANGE)) return;
         float z = v.getZ() + ((limbs & (GoreState.LEGS_L | GoreState.LEGS_R)) != 0 ? 0.15f : 0.42f);
-        limb(limbs, v.getX(), v.getY(), z, rnd() - 0.5f, rnd() - 0.5f);
+        severedParts(v, limbs, cutBefore, rnd() - 0.5f, rnd() - 0.5f);
         spray(v.getX(), v.getY(), z, 0f, 0f, 1.3f, 6.3f);
         spurt(v, z - v.getZ(), 4f);
     }
@@ -393,7 +573,7 @@ public final class GoreFx implements GoreListener {
         if (best == null) return;
         float[] s = glass.computeIfAbsent(best, k -> new float[] {0f, rnd() * 50f});
         s[0] = Math.min(1f, s[0] + 0.15f + speed / 120f);
-        tyres.put(best, new float[] {10f});
+        if (tracksOn) tyres.put(best, new float[] {10f});
     }
 
     @Override
@@ -415,31 +595,42 @@ public final class GoreFx implements GoreListener {
     }
 
     @Override
+    public boolean combatGiblet(float x, float y, float z, float dx, float dy) {
+        if (!gibsOn || !near(x, y, RANGE)) return false;
+        int frame = IsoCamera.frameState.frameCount;
+        if (frame != combatGibletFrame) {
+            combatGibletFrame = frame;
+            combatGiblets = 0;
+        }
+        if (combatGiblets < 4 && compactGiblet(x, y, z, dx, dy)) combatGiblets++;
+        return true;
+    }
+
+    @Override
     public boolean giblet(zombie.iso.objects.IsoZombieGiblets gib) {
         if (!gibsOn || !near(gib.getX(), gib.getY(), RANGE)) return false;
-        int i = add(rnd() < 0.2f ? BONE : GIB, gib.getX(), gib.getY(), gib.getZ(), gib.velX * 30f, gib.velY * 30f, 0.8f + rnd(), 90f,
-            0.7f + 0.4f * rnd());
-        return i >= 0;
+        return compactGiblet(gib.getX(), gib.getY(), gib.getZ(), gib.velX, gib.velY);
+    }
+
+    private static boolean compactGiblet(float x, float y, float z, float dx, float dy) {
+        float speed = (float) Math.sqrt(dx * dx + dy * dy);
+        float scale = Math.min(0.65f, 0.8f / Math.max(speed, 0.01f));
+        return add(rnd() < 0.2f ? BONE : GIB, x, y, z, dx * scale, dy * scale, 0.20f + 0.38f * rnd(), 40f,
+            0.7f + 0.4f * rnd()) >= 0;
     }
 
     // Feel: hit-stop and kill cam (single player only), lens blood
-    private static float stopUntil = -1f, camUntil = -1f;
+    private static float stopUntil = -1f;
     static volatile float lens, lensSeed, lensAt;
 
     @Override
     public float timeScale() {
         if (!singlePlayer() || (!hitStopOn && !killCamOn)) return 1f;
-        float now = GoreCore.clock() - clockOffset;
-        if (now < stopUntil) return 0.08f;
-        if (now < camUntil) {
-            float left = camUntil - now;
-            return left < 0.2f ? 0.3f + 0.7f * (1f - left / 0.2f) : 0.3f;
-        }
-        return 1f;
+        if (hitStopOn && GoreCore.clock() < stopUntil) return 0.08f;
+        if (!killCamOn || !GoreKillCam.active()) return 1f;
+        float left = GoreKillCam.remaining();
+        return 1f - 0.7f * Math.min(1f, left / 0.2f);
     }
-
-    // clock runs on GoreCore's clock so timeScale (called from GameTime) and frame agree
-    private static float clockOffset;
 
     /** Lens blood for the screen pass: amount, seed, palette, 1 = live. */
     static float[] lensUniform() {
@@ -461,7 +652,9 @@ public final class GoreFx implements GoreListener {
                 if (zombie.GameTime.isGamePaused()) dt = 0f;
                 // Particles follow game time (slow motion slows them too)
                 float gdt = dt * timeScaleNow();
+                if (activeParts > 0) checkParts(IsoWorld.instance == null ? null : IsoWorld.instance.currentCell, now);
                 update(gdt);
+                if (GoreDetached.hasWork()) GoreDetached.bake();
                 if (dt > 0f) tick(dt);
                 if (now - reportNs > 30_000_000_000L) {
                     reportNs = now;
@@ -469,6 +662,7 @@ public final class GoreFx implements GoreListener {
                 }
             }
             if (count > 0) draw(player, z);
+            if (killCamOn && GoreKillCam.active()) GoreKillCam.draw(player, z);
         } catch (Throwable t) {
             if (problem == null) {
                 problem = t.toString();
@@ -485,6 +679,7 @@ public final class GoreFx implements GoreListener {
         if (dt <= 0f) return;
         IsoCell cell = IsoWorld.instance == null ? null : IsoWorld.instance.currentCell;
         if (cell == null) {
+            if (activeParts > 0) clearParts();
             count = 0;
             return;
         }
@@ -518,16 +713,31 @@ public final class GoreFx implements GoreListener {
             int lvl = (int) ground[i];
             // Crossing into the next square: a wall in the way stops it and takes the mark
             int sx0 = (int) Math.floor(ox), sy0 = (int) Math.floor(oy), sx1 = (int) Math.floor(px[i]), sy1 = (int) Math.floor(py[i]);
-            if ((sx0 != sx1 || sy0 != sy1) && pz[i] > lvl) {
-                if (hitWall(cell, i, sx0, sy0, sx1, sy1, ox, oy, lvl)) {
-                    remove(i--);
-                    continue;
+            if (sx0 != sx1 || sy0 != sy1) {
+                int slot = partSlot[i] - 1;
+                if ((pz[i] > lvl || slot >= 0) && hitWall(cell, i, sx0, sy0, sx1, sy1, ox, oy, lvl)) {
+                    if (slot < 0) {
+                        remove(i--);
+                        continue;
+                    }
+                    px[i] = ox;
+                    py[i] = oy;
+                    vx[i] = vy[i] = 0f;
+                } else if (slot >= 0 && ((sx0 >> 3) != (sx1 >> 3) || (sy0 >> 3) != (sy1 >> 3))) {
+                    IsoChunk chunk = cell.getChunk(sx1 >> 3, sy1 >> 3);
+                    int loadId = partLoadId(chunk);
+                    if (loadId < Short.MIN_VALUE) {
+                        remove(i--);
+                        continue;
+                    }
+                    partChunk[slot] = chunk;
+                    partChunkId[slot] = loadId;
                 }
             }
             if (pz[i] <= lvl) {
                 pz[i] = lvl;
                 land(cell, i, lvl, fresh);
-                if (k == DROP) {
+                if (isDrop(k)) {
                     remove(i--);
                     continue;
                 }
@@ -543,16 +753,16 @@ public final class GoreFx implements GoreListener {
             int row = Math.max(sy0, sy1);
             IsoGridSquare sq = cell.getGridSquare(sx0, row, lvl);
             if (sq != null && sq.getWall(true) != null) {
-                if (kind[i] == DROP) GoreMap.wall(ox, row, h, lvl, 0, 0.05f + 0.05f * size[i], 1f);
-                return kind[i] == DROP;
+                if (isDrop(kind[i])) GoreMap.wall(ox, row, h, lvl, 0, 0.035f + 0.036f * size[i]);
+                return isDrop(kind[i]) || partSlot[i] != 0;
             }
         }
         if (sx1 != sx0) {
             int col = Math.max(sx0, sx1);
             IsoGridSquare sq = cell.getGridSquare(col, sy0, lvl);
             if (sq != null && sq.getWall(false) != null) {
-                if (kind[i] == DROP) GoreMap.wall(oy, col, h, lvl, 1, 0.05f + 0.05f * size[i], 1f);
-                return kind[i] == DROP;
+                if (isDrop(kind[i])) GoreMap.wall(oy, col, h, lvl, 1, 0.035f + 0.036f * size[i]);
+                return isDrop(kind[i]) || partSlot[i] != 0;
             }
         }
         return false;
@@ -560,35 +770,57 @@ public final class GoreFx implements GoreListener {
 
     private static void land(IsoCell cell, int i, int lvl, float fresh) {
         int k = kind[i];
-        float speed = (float) Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]);
-        if (k == DROP) {
+        if (isDrop(k)) {
             if (GoreMap.live()) {
+                float speed = (float) Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]);
                 float r = 0.035f + 0.03f * size[i];
-                if (speed > 0.9f) GoreMap.streak(px[i], py[i], lvl, vx[i], vy[i], r * (1f + speed * 0.25f), r * 0.85f, 1f, fresh);
-                else GoreMap.blob(px[i], py[i], lvl, r, fresh, 0.2f);
+                float length = speed > 0.9f ? r * (1f + speed * 0.25f) : r;
+                if (!GoreMap.deposit(px[i], py[i], lvl, vx[i], vy[i], length, r, 0.2f)) {
+                    GoreMap.blob(px[i], py[i], lvl, r, fresh, 0.2f);
+                }
             } else if (Math.random() < 0.2) {
                 IsoGridSquare sq = cell.getGridSquare((int) Math.floor(px[i]), (int) Math.floor(py[i]), lvl);
                 if (sq != null && sq.getChunk() != null) sq.getChunk().addBloodSplat(px[i], py[i], lvl, zombie.core.random.Rand.Next(8));
             }
             return;
         }
-        // Gibs and limbs bounce once, then lie there
-        if (resting[i] == 0 && Math.abs(vz[i]) > 0.8f && age[i] < 2f && vz[i] < 0f) {
+        int slot = partSlot[i] - 1;
+        if ((slot < 0 || !partBounced[slot]) && Math.abs(vz[i]) > 0.8f && age[i] < 2f && vz[i] < 0f) {
+            if (slot >= 0) partBounced[slot] = true;
             vz[i] = -vz[i] * 0.25f;
             vx[i] *= 0.45f;
             vy[i] *= 0.45f;
             pz[i] = lvl + 0.001f;
-            GoreMap.blob(px[i], py[i], lvl, k >= ARM ? 0.2f : 0.08f, fresh, 0.5f);
+            if (slot < 0) GoreMap.blob(px[i], py[i], lvl, 0.05f, fresh, 0.5f);
             return;
         }
+        if (slot >= 0) partAngle[slot] = (byte) GoreParts.angle(partAngle[slot], age[i]);
         resting[i] = 1;
         vx[i] = vy[i] = vz[i] = 0f;
-        GoreMap.blob(px[i], py[i], lvl, k >= ARM ? 0.3f : 0.12f, fresh, 0.7f);
+        float stain = k >= ARM ? 0.19f : 0.08f;
+        if (!GoreMap.deposit(px[i], py[i], lvl, 0f, 0f, stain, stain, 0.7f)) {
+            GoreMap.blob(px[i], py[i], lvl, stain, fresh, 0.7f);
+        }
     }
 
     private static void remove(int i) {
+        int slot = partSlot[i] - 1;
+        if (slot >= 0) {
+            partParticle[slot] = 0;
+            partChunk[slot] = null;
+            GoreDetached.release(partCapture[slot]);
+            partCapture[slot] = null;
+            if (partDetailed[slot]) detailedParts--;
+            if (--activeParts == 0) {
+                partCell = null;
+                nextPartCleanup = 0;
+            }
+        }
         int j = --count;
-        if (i == j) return;
+        if (i == j) {
+            partSlot[i] = 0;
+            return;
+        }
         px[i] = px[j];
         py[i] = py[j];
         pz[i] = pz[j];
@@ -601,6 +833,9 @@ public final class GoreFx implements GoreListener {
         ground[i] = ground[j];
         kind[i] = kind[j];
         resting[i] = resting[j];
+        partSlot[i] = partSlot[j];
+        partSlot[j] = 0;
+        if (partSlot[i] != 0) partParticle[partSlot[i] - 1] = i + 1;
     }
 
     // Everything that isn't a particle: spurts, pools, tracks, weapons, glass, flies, rot, player wounds, ragdolls
@@ -626,12 +861,15 @@ public final class GoreFx implements GoreListener {
             p.last = clock;
             float t = Math.min(1f, (clock - p.start) / 90f);
             float r = p.max * (float) Math.sqrt(Math.max(0.05f, t));
-            GoreMap.blob(p.x, p.y, p.lvl, r, 1f, 0.9f);
+            boolean stored = r >= 0.09f && GoreMap.deposit(p.x, p.y, p.lvl, 0f, 0f, r, r, 0.9f);
             if (t >= 1f) {
-                // Kept as the game's own big splat so it's saved and other players get it
-                IsoGridSquare sq = IsoWorld.instance.currentCell.getGridSquare((int) Math.floor(p.x), (int) Math.floor(p.y), p.lvl);
-                if (sq != null && sq.getChunk() != null) sq.getChunk().addBloodSplat(p.x, p.y, p.lvl, 16 + zombie.core.random.Rand.Next(4));
+                if (!stored) {
+                    IsoGridSquare sq = IsoWorld.instance.currentCell.getGridSquare((int) Math.floor(p.x), (int) Math.floor(p.y), p.lvl);
+                    if (sq != null && sq.getChunk() != null) sq.getChunk().addBloodSplat(p.x, p.y, p.lvl, 16 + zombie.core.random.Rand.Next(4));
+                }
                 it.remove();
+            } else if (!stored) {
+                GoreMap.blob(p.x, p.y, p.lvl, r, 1f, 0.9f);
             }
         }
         trackTimer += dt;
@@ -646,7 +884,7 @@ public final class GoreFx implements GoreListener {
         if (slowTimer >= 2f) {
             float sdt = slowTimer;
             slowTimer = 0f;
-            corpses();
+            if (decayOn || fliesOn || GoreCore.runoffLook) corpses();
             if (ragdollBreaks) ragdolls();
             GoreState.prune(clock, 60f);
             if (glass.size() > 64) glass.clear();
@@ -747,10 +985,10 @@ public final class GoreFx implements GoreListener {
             if (bl <= 0.01f) continue;
             if (rain > 0.1f && p.isOutside()) w.setBloodLevel(Math.max(0f, bl - dt * rain / 180f));
             dripTimer += dt;
-            if (sprayOn && clock - lastPlayerHit < 6f && bl > 0.15f && dripTimer >= 0.35f) {
+            if (clock - lastPlayerHit < 6f && bl > 0.15f && dripTimer >= 0.35f) {
                 dripTimer = 0f;
                 zombie.iso.Vector2 f = p.getForwardDirection();
-                add(DROP, p.getX() + f.x * 0.35f, p.getY() + f.y * 0.35f, p.getZ() + 0.22f, 0f, 0f, 0f, 2f, 0.35f);
+                add(WEAPON_DROP, p.getX() + f.x * 0.35f, p.getY() + f.y * 0.35f, p.getZ() + 0.22f, 0f, 0f, 0f, 2f, 0.35f);
             }
         }
     }
@@ -784,18 +1022,10 @@ public final class GoreFx implements GoreListener {
             if (b == null || b.getSquare() == null || !near(b.getX(), b.getY(), 20f)) continue;
             float dtH = b.getDeathTime();
             double age = dtH < 0f ? 0 : hours - dtH;
-            if (decayOn) {
-                GoreState g = GoreState.of(b);
-                int stage = Math.min(4, (int) (Math.max(0.0, Math.min(1.0, age / 168.0)) * 5f));
-                int was = g == null ? 0 : Math.min(4, (int) (g.decay * 5f));
-                if (stage != was && stage >= 1) {
-                    if (g == null) GoreState.make(b);
-                    try {
-                        zombie.core.skinnedmodel.DeadBodyAtlas.instance.invalidateBodyTexture(b.getAtlasTexture(), b);
-                    } catch (Throwable ignored) {
-                    }
-                }
-            }
+            GoreState g = GoreState.of(b);
+            float decay = GoreAtlas.decayOf(b, hours);
+            if (g == null && GoreState.decayStage(decay) > 0) g = GoreState.make(b);
+            if (g != null && GoreAtlas.updateStages(g, decay, GoreCore.runoffLook ? hours : Double.POSITIVE_INFINITY)) GoreAtlas.refreshTexture(b);
             if (fliesOn && quality >= 2 && age > 12.0) {
                 float[] f = flies.get(b);
                 if (f == null || clock > f[0]) {
@@ -939,7 +1169,7 @@ public final class GoreFx implements GoreListener {
     // Drawing
 
     private static Texture texture(int k, int variant) {
-        int idx = k == DROP ? 12 : k == BRAIN ? 11 : k == GIB && variant > 0 ? 7 + variant : k;
+        int idx = isDrop(k) ? 12 : k == BRAIN ? 11 : k == GIB && variant > 0 ? 7 + variant : k;
         Texture t = tex[idx];
         if (t == null) {
             t = Texture.getSharedTexture("media/textures/PZOE/" + TEX[idx] + ".png");
@@ -947,6 +1177,8 @@ public final class GoreFx implements GoreListener {
         }
         return t;
     }
+
+    private static boolean isDrop(int kind) { return kind == DROP || kind == WEAPON_DROP; }
 
     private static void draw(int player, int z) {
         if (!zombie.core.PerformanceSettings.fboRenderChunk) return;
@@ -958,16 +1190,21 @@ public final class GoreFx implements GoreListener {
         float scale = zombie.core.Core.tileScale;
         float[] pal = PAL[palette];
         boolean started = false;
+        Texture partAtlas = activeParts == 0 ? null : GoreParts.readyAtlas();
         for (int i = 0; i < count; i++) {
             if ((int) Math.floor(pz[i] + 0.0001f) != z) continue;
             IsoGridSquare sq = cell.getGridSquare((int) Math.floor(px[i]), (int) Math.floor(py[i]), z);
             if (sq == null || !sq.isCouldSee(player)) continue;
-            int k = kind[i];
-            Texture t = texture(k, k == GIB ? (i & 3) : 0);
+            int k = kind[i], slot = partSlot[i] - 1;
+            int tile = slot >= 0 && partAtlas != null ? partTile[slot] : -1;
+            GoreDetached.Part capture = slot < 0 || !detailedGibsOn || quality < 2 || !GoreCore.dismemberLook || !GoreModel.wanted ? null : partCapture[slot];
+            Texture captured = capture == null ? null : capture.image();
+            Texture t = captured != null ? captured : tile >= 0 ? partAtlas : texture(k, k == GIB ? (i & 3) : 0);
             if (t == null || !t.isReady()) continue;
-            float w = t.getWidth() * scale, h = t.getHeight() * scale;
+            float w = slot >= 0 ? 0f : t.getWidth() * scale;
+            float h = slot >= 0 ? 0f : t.getHeight() * scale;
             float s = switch (k) {
-                case DROP -> 0.18f + 0.12f * size[i];
+                case DROP, WEAPON_DROP -> 0.18f + 0.12f * size[i];
                 case MIST -> 0.9f * size[i];
                 case GIB -> 0.55f * size[i];
                 case BONE -> 0.5f * size[i];
@@ -981,11 +1218,11 @@ public final class GoreFx implements GoreListener {
             ColorInfo light = sq.getLightInfo(player);
             if (light == null) continue;
             float r = 1f, g = 1f, b = 1f, a = 1f;
-            if (k == DROP || k == MIST) {
-                r = pal[0] * (k == MIST ? 1.4f : 1f);
-                g = pal[1] * (k == MIST ? 2.5f : 1f);
-                b = pal[2] * (k == MIST ? 2.5f : 1f);
-                a = k == MIST ? 0.3f * (1f - age[i] / life[i]) : 1f;
+            if (isDrop(k) || k == MIST) {
+                r = pal[0];
+                g = pal[1];
+                b = pal[2];
+                a = k == MIST ? 0.17f * (1f - age[i] / life[i]) : 1f;
             } else if (k == GIB && palette != 0) {
                 r = pal[0] * 1.8f + 0.1f;
                 g = pal[1] * 1.8f + 0.05f;
@@ -1003,16 +1240,31 @@ public final class GoreFx implements GoreListener {
             }
             TextureDraw.nextZ = IsoDepthHelper.getSquareDepthData(cx, cy, px[i] + 0.1f, py[i] + 0.1f, pz[i]).depthStart * 2f - 1f;
             TextureDraw.nextChunkDepth = 0f;
-            if (k == DROP) {
-                // A drop is a couple of crisp pixels with a short trail behind it along its flight (screen space)
-                float d = scale * (1.4f + 0.8f * size[i]);
-                float tx = IsoUtils.XToScreen(px[i] - vx[i] * 0.03f, py[i] - vy[i] * 0.03f, pz[i] - vz[i] * 0.03f, 0) - fs.offX;
-                float ty = IsoUtils.YToScreen(px[i] - vx[i] * 0.03f, py[i] - vy[i] * 0.03f, pz[i] - vz[i] * 0.03f, 0) - fs.offY;
-                for (int s2 = 2; s2 >= 0; s2--) {
-                    float f = s2 / 2f;
-                    float qx = x + (tx - x) * f, qy = y + (ty - y) * f;
-                    SpriteRenderer.instance.render(t, qx - d * 0.5f, qy - d * 0.5f, d, d, r * light.r, g * light.g, b * light.b, a * (1f - 0.35f * f), null);
+            if (slot >= 0) {
+                int angle = resting[i] != 0 ? partAngle[slot] : GoreParts.angle(partAngle[slot], age[i]);
+                if (captured != null) GoreParts.drawCaptured(captured, capture.crop(), angle, x, y, light, a);
+                else GoreParts.draw(t, tile, angle, partFlipped[slot], x, y, scale, light, a);
+                continue;
+            }
+            if (isDrop(k)) {
+                // Project the flight direction and taper opacity from the drop toward the tail.
+                float dx = vx[i] - vy[i];
+                float dy = (vx[i] + vy[i]) * 0.5f - vz[i] * 3f;
+                float speed = (float) Math.sqrt(dx * dx + dy * dy);
+                if (speed < 1e-4f) {
+                    dx = 0f;
+                    dy = 1f;
+                    speed = 1f;
                 }
+                float halfWidth = scale * (0.55f + 0.25f * size[i]);
+                float length = scale * Math.min(4f, 1.3f + speed * 0.8f);
+                float nx = -dy * halfWidth / speed, ny = dx * halfWidth / speed;
+                float tx = x - dx * length / speed, ty = y - dy * length / speed;
+                r *= light.r;
+                g *= light.g;
+                b *= light.b;
+                SpriteRenderer.instance.render(t, tx - nx, ty - ny, x - nx, y - ny, x + nx, y + ny, tx + nx, ty + ny,
+                    r, g, b, a * 0.35f, r, g, b, a, r, g, b, a, r, g, b, a * 0.35f, null);
                 continue;
             }
             SpriteRenderer.instance.render(t, x - w * 0.5f, y - h * 0.5f, w, h, r * light.r, g * light.g, b * light.b, a, null);

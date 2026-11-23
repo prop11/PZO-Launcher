@@ -162,6 +162,40 @@ public final class WeatherSnow {
             || pr.has(zombie.iso.SpriteDetails.IsoFlagType.DoorWallW);
     }
 
+    // Banked up against walls and fences, with the settled wind the shader's drifts use, so wading matches what's drawn
+    private static float driftAt(zombie.iso.IsoCell cell, zombie.iso.IsoGridSquare sq, int sx, int sy, float fx, float fy) {
+        float wx = com.pzoptimizer.pzoe.PixelLight.snowWindX, wy = com.pzoptimizer.pzoe.PixelLight.snowWindY;
+        float drift = 0f;
+        if (wallEdge(sq, true)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, fy)) * (0.75f + 0.5f * wy));
+        if (wallEdge(sq, false)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, fx)) * (0.75f + 0.5f * wx));
+        if (wallEdge(cell.getGridSquare(sx, sy + 1, 0), true)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, 1f - fy)) * (0.75f - 0.5f * wy));
+        if (wallEdge(cell.getGridSquare(sx + 1, sy, 0), false)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, 1f - fx)) * (0.75f - 0.5f * wx));
+        return drift;
+    }
+
+    /**
+     * How much of the ground the snow covers at a world point (ground level only), 0..1: the shader's patch rule
+     * (arg / edge / cover in the Better Ground Snow block) without the tufts and tree crowns. Patches open where the
+     * field is low and join into a blanket by about depth 0.8. Shovelled squares and melt rings count as bare.
+     */
+    public static float coverAt(float x, float y) {
+        float total = com.pzoptimizer.pzoe.GroundSnow.depthNow();
+        if (total <= 0.001f) return 0f;
+        zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
+        if (cell == null) return 0f;
+        int sx = (int) Math.floor(x), sy = (int) Math.floor(y);
+        if (cleared(sx, sy)) return 0f;
+        zombie.iso.IsoGridSquare sq = cell.getGridSquare(sx, sy, 0);
+        if (!holds(sq)) return 0f;
+        float d = total * (road(sq) ? 0.85f : 1f);
+        float dl = d + driftAt(cell, sq, sx, sy, x - sx, y - sy) * (0.45f * Math.min(d, 1f) + 0.8f * Math.max(d - 1f, 0f));
+        float edge = field(x, y) * 0.9f;
+        float cover = smooth(edge - 0.05f, edge + 0.12f, dl * 1.35f - 0.05f);
+        if (cover <= 0f) return 0f;
+        float melt = meltAt(x, y);
+        return melt > 0f ? cover * (1f - melt) : cover;
+    }
+
     /** Snow height in levels at a world point (ground level only), 0 where none lies. */
     public static float depthAt(float x, float y, float z) {
         float total = com.pzoptimizer.pzoe.GroundSnow.depthNow();
@@ -173,13 +207,7 @@ public final class WeatherSnow {
         zombie.iso.IsoGridSquare sq = cell.getGridSquare(sx, sy, 0);
         if (!holds(sq)) return 0f;
         float fx = x - sx, fy = y - sy;
-        // The settled wind the shader's drifts use, so wading matches what's drawn
-        float wx = com.pzoptimizer.pzoe.PixelLight.snowWindX, wy = com.pzoptimizer.pzoe.PixelLight.snowWindY;
-        float drift = 0f;
-        if (wallEdge(sq, true)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, fy)) * (0.75f + 0.5f * wy));
-        if (wallEdge(sq, false)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, fx)) * (0.75f + 0.5f * wx));
-        if (wallEdge(cell.getGridSquare(sx, sy + 1, 0), true)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, 1f - fy)) * (0.75f - 0.5f * wy));
-        if (wallEdge(cell.getGridSquare(sx + 1, sy, 0), false)) drift = Math.max(drift, (1f - smooth(0f, 0.9f, 1f - fx)) * (0.75f - 0.5f * wx));
+        float drift = driftAt(cell, sq, sx, sy, fx, fy);
         float d = total * (road(sq) ? 0.85f : 1f);
         float dl = d + drift * (0.45f * Math.min(d, 1f) + 0.8f * Math.max(d - 1f, 0f));
         float deep = Math.max(d - 1f, 0f);

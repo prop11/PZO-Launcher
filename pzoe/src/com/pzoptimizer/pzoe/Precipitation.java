@@ -142,7 +142,7 @@ public final class Precipitation {
                 (float) Math.cos(angle), (float) Math.sin(angle), speed, 64f * zombie.core.Core.tileScale,
                 0f, PixelLight.BASE_LEVEL, (float) Math.floor(fs.camCharacterZ), 0f,
                 day, quality + 1, amount * Math.max(0.3f, mod), com.pzoptimizer.pzoe.weather.WeatherEvents.hail(),
-                ex[0] * Math.max(0.3f, mod), ex[1], ex[2], 0f,
+                ex[0] * Math.max(0.3f, mod), ex[1], ex[2], fs.zoom,
             };
             zombie.core.SpriteRenderer.instance.drawGeneric(new Draw(v, p, PixelLight.deferred || PixelLight.atmos));
         } catch (Throwable t) {
@@ -279,7 +279,7 @@ public final class Precipitation {
         uniform vec4 PZOPrecipC;
         uniform vec4 PZOPrecipL;
         uniform vec4 PZOPrecipD;
-        // Leaves, blowing snow, wind strength
+        // Leaves, blowing snow, wind strength, camera zoom (offscreen pixels per screen pixel)
         uniform vec4 PZOPrecipE;
         uniform sampler2D PZOLight;
 
@@ -375,41 +375,45 @@ public final class Precipitation {
             float z = sqrt(max(0.0, 1.0 - dot(nn, nn)));
             float lit = clamp(dot(vec3(nn, z), normalize(vec3(-0.5, -0.6, 0.65))), 0.0, 1.0);
             float glint = smoothstep(0.86, 0.97, lit);
-            // A darker rim so a stone reads as a solid ball against pale ground, not as a fleck of rain
-            return vec2(a, 0.72 + 0.4 * lit + 0.45 * glint - 0.4 * smoothstep(0.55, 1.0, r));
+            // A dark rim so a stone reads as a solid ball against pale ground, not as a fleck of rain
+            return vec2(a, 0.7 + 0.45 * lit + 0.55 * glint - 0.5 * smoothstep(0.5, 1.0, r));
         }
 
-        // One layer of falling hail: hard round stones coming down fast and straight, a short blur trailing above
+        // Offscreen pixels per screen pixel, so falling stones keep their size on screen when zoomed out (at 5 px they
+        // shrank to short dashes and read as rain)
+        float pzoHailZoom()
+        {
+            return clamp(PZOPrecipE.w, 0.5, 4.0);
+        }
+
+        // One layer of falling hail: hard round stones coming down fast and straight. No trail: any streak makes it rain.
         vec2 pzoHailLayer(vec2 px, float k, float t, float density, vec2 dir)
         {
+            float zm = pzoHailZoom();
             float scale = mix(1.0, 0.45, k);
             float parallax = mix(1.12, 0.74, k);
             vec2 q = (px + PZOPrecipA.zw * parallax) / scale;
             vec2 across = vec2(-dir.y, dir.x);
             float u = dot(q, across);
-            float v = dot(q, dir) - mix(700.0, 450.0, k) * t / scale;
-            float cs = 38.0;
+            float v = dot(q, dir) - mix(700.0, 450.0, k) * zm * t / scale;
+            float cs = 46.0 * zm;
             vec2 cell = floor(vec2(u, v) / cs);
             vec2 lc = vec2(u, v) / cs - cell;
             cell += k * 43.0;
             if (pzoPHash(cell) > density) return vec2(0.0);
-            vec2 c = vec2(0.2 + 0.6 * pzoPHash(cell + 2.1), 0.2 + 0.6 * pzoPHash(cell + 6.3));
+            vec2 c = vec2(0.25 + 0.5 * pzoPHash(cell + 2.1), 0.25 + 0.5 * pzoPHash(cell + 6.3));
             vec2 d = (lc - c) * cs * scale;
-            float rad = mix(5.0, 2.4, k) * (0.75 + 0.5 * pzoPHash(cell + 4.8));
+            float rad = mix(7.0, 3.5, k) * zm * (0.75 + 0.5 * pzoPHash(cell + 4.8));
             vec2 ball = pzoHailBall(d, rad);
-            // Blur trailing above the stone (toward where it came from)
-            float behind = -d.y;
-            // Short: a long streak is what made hail read as rain
-            float trail = behind > 0.0 ? (1.0 - smoothstep(rad * 0.4, rad * 0.8, abs(d.x))) * (1.0 - smoothstep(0.0, rad * 1.8, behind)) * 0.22 : 0.0;
-            float fade = mix(1.0, 0.55, k);
-            return vec2(max(ball.x, trail) * fade, ball.x > trail ? ball.y : 0.75);
+            return vec2(ball.x * mix(1.0, 0.7, k), ball.y);
         }
 
         // Stones bouncing where they land: each cell has a spot where one hits every so often and hops twice
         vec2 pzoHailBounce(vec2 px, float t, float density)
         {
+            float zm = pzoHailZoom();
             vec2 q = px + PZOPrecipA.zw;
-            float cs = 52.0;
+            float cs = 52.0 * zm;
             vec2 cell = floor(q / cs);
             if (pzoPHash(cell + 19.1) > density) return vec2(0.0);
             float period = 0.55 + 0.5 * pzoPHash(cell + 7.7);
@@ -418,13 +422,15 @@ public final class Precipitation {
             if (ph < 0.35) hop = 14.0 * 4.0 * (ph / 0.35) * (1.0 - ph / 0.35);
             else if (ph < 0.55) hop = 5.0 * 4.0 * ((ph - 0.35) / 0.2) * (1.0 - (ph - 0.35) / 0.2);
             else if (ph > 0.75) return vec2(0.0);
-            vec2 spot = (cell + vec2(0.2 + 0.6 * pzoPHash(cell + 3.3), 0.2 + 0.6 * pzoPHash(cell + 8.8))) * cs;
-            spot.x += (pzoPHash(cell + 5.5) - 0.5) * 10.0 * ph;
-            vec2 d = q - (spot - vec2(0.0, hop));
-            return pzoHailBall(d, 3.0 + 1.5 * pzoPHash(cell + 4.4));
+            // Low in the cell, so the first hop stays inside it (a cell only draws its own stone)
+            vec2 spot = (cell + vec2(0.2 + 0.6 * pzoPHash(cell + 3.3), 0.55 + 0.25 * pzoPHash(cell + 8.8))) * cs;
+            spot.x += (pzoPHash(cell + 5.5) - 0.5) * 10.0 * zm * ph;
+            vec2 d = q - (spot - vec2(0.0, hop * zm));
+            return pzoHailBall(d, (4.5 + 2.0 * pzoPHash(cell + 4.4)) * zm);
         }
 
-        // Stones lying where they fell: scattered pellets pinned to the world, more the harder it hails
+        // Stones lying where they fell: scattered pellets pinned to the world (world size, so not zoom scaled), more
+        // the harder it hails
         vec2 pzoHailLying(vec2 px, float density)
         {
             vec2 q = px + PZOPrecipA.zw;
@@ -432,7 +438,7 @@ public final class Precipitation {
             vec2 cell = floor(q / cs);
             if (pzoPHash(cell + 31.7) > density) return vec2(0.0);
             vec2 spot = (cell + vec2(0.2 + 0.6 * pzoPHash(cell + 12.3), 0.2 + 0.6 * pzoPHash(cell + 15.1))) * cs;
-            vec2 b = pzoHailBall((q - spot) * vec2(1.0, 1.6), 1.8 + 1.0 * pzoPHash(cell + 9.9));
+            vec2 b = pzoHailBall((q - spot) * vec2(1.0, 1.6), 2.6 + 1.2 * pzoPHash(cell + 9.9));
             return vec2(b.x * 0.85, b.y);
         }
 
@@ -546,9 +552,11 @@ public final class Precipitation {
             // Lit like the world under it, never quite black so a dark downpour still reads
             vec3 col = mix(vec3(0.78, 0.85, 0.93), vec3(0.96, 0.97, 1.0), aSnow / max(aRain + aSnow, 0.001));
             // Hailstones: their own shading, icy white with a blue-grey edge
-            col = mix(col, vec3(0.93, 0.96, 1.0) * hailShade, clamp(aHail / max(aRain + aSnow + aHail, 0.001), 0.0, 1.0));
+            float hailK = clamp(aHail / max(aRain + aSnow + aHail, 0.001), 0.0, 1.0);
+            col = mix(col, vec3(0.93, 0.96, 1.0) * hailShade, hailK);
             col = mix(col, leaf.rgb, clamp(leaf.a / max(aRain + aSnow + aHail + leaf.a, 0.001), 0.0, 1.0));
-            col *= 0.22 + 0.9 * light;
+            // Ice catches what light there is: stones stay readable at night where rain fades out
+            col *= mix(0.22 + 0.9 * light, 0.45 + 0.75 * light, hailK);
             gl_FragColor = vec4(col, a);
         }
         """;
