@@ -19,7 +19,7 @@ exit /b %errorlevel%
 # PZO installer and uninstaller
 
 Write-Host "=================================================================" -ForegroundColor Cyan
-Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.3.2)" -ForegroundColor Cyan
+Write-Host " Project Zomboid Build 42 Engine Optimizer (v2.4)" -ForegroundColor Cyan
 Write-Host " Native Configuration & Engine Agent Installer" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
@@ -1052,12 +1052,25 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
         compat_mode = [bool]$Compat.Active
         zombiebuddy = $isZombieBuddyActive
         launch_mode = $LaunchMode
-        version     = "2.3.2"
+        version     = "2.4"
     }
 
     $StatusJson = $StatusPayload | ConvertTo-Json -Compress
     Write-JsonNoBOM $PzoStatusFile $StatusJson
     Write-Host "Generated Lua bridge status: $PzoStatusFile" -ForegroundColor Green
+}
+
+function Test-PZOConflictingAgent {
+    $agent = Join-Path $InstallPath "pzopt\agent\pzopt-agent.jar"
+    $config = Get-Content -LiteralPath $TargetFilePath -Raw -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $agent -PathType Leaf) -and
+        $config -notmatch '"-javaagent:(?:[^"\r\n]*[/\\])?pzopt-agent\.jar(?:["=\s]|$)') {
+        return $false
+    }
+
+    Write-Host "[ERROR] PZ_Optimization (Workshop 3805285544) is installed or still configured as a Java agent." -ForegroundColor Red
+    Write-Host "Run its uninstaller, then remove any leftover pzopt-launch.cmd launch option in Steam before installing PZO." -ForegroundColor Yellow
+    return $true
 }
 
 # Existing installation: update or uninstall
@@ -1072,6 +1085,7 @@ if (Test-Path $InstalledJarPath) {
 
     switch ($choice) {
         "1" {
+            if (Test-PZOConflictingAgent) { return }
             Write-Host "`nUpdating PZOptimEngine.jar and refreshing game configuration..." -ForegroundColor Cyan
             $updated = Download-PZOGitHubJar $InstalledJarPath
             if (-not $updated -and $SourceJar -and (Test-Path $SourceJar)) {
@@ -1152,6 +1166,7 @@ if (Test-Path $InstalledJarPath) {
 }
 
 # Fresh installation
+if (Test-PZOConflictingAgent) { return }
 Write-Host "`nStarting fresh installation..." -ForegroundColor Cyan
 
 if ($SourceJar -and (Test-Path -LiteralPath $SourceJar -ErrorAction SilentlyContinue)) {
