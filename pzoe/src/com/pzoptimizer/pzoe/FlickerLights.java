@@ -38,13 +38,10 @@ final class FlickerLights {
     private static long lastGather;
     private static final float[] cand = new float[MAX * 9];
     private static int count;
-    private static java.lang.reflect.Field heatField;
-    private static boolean heatTried;
 
     // Render thread
     private static final FloatBuffer buf = ByteBuffer.allocateDirect(MAX * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     private static float[] uploaded;
-    private static long startNs = System.nanoTime();
 
     private FlickerLights() {}
 
@@ -76,11 +73,11 @@ final class FlickerLights {
         float px = p.getX(), py = p.getY();
         for (int i = 0, n = IsoFireManager.FireStack.size(); i < n; i++) {
             IsoFire f = IsoFireManager.FireStack.get(i);
-            if (f == null || f.getSquare() == null) continue;
+            if (f == null || f.getSquare() == null || f.smoke || f.lifeStage >= 5) continue;
             int r = f.lightSource != null ? f.lightSource.getRadius() : 5;
-            offer(px, py, f.getSquare().getX(), f.getSquare().getY(), f.getSquare().getZ(), Math.max(3, r), 0f, 0.22f);
+            offer(px, py, f.getSquare().getX(), f.getSquare().getY(), f.getSquare().getZ(), Math.max(3, r), 0f, 0.22f * RoomSmoke.intensity(f));
         }
-        java.util.ArrayList<?> heat = heatSources(cell);
+        java.util.ArrayList<?> heat = ScreenPass.heatSources(cell);
         if (heat != null) {
             for (int i = 0, n = heat.size(); i < n; i++) {
                 if (!(heat.get(i) instanceof zombie.iso.IsoHeatSource h)) continue;
@@ -147,27 +144,11 @@ final class FlickerLights {
         cand[o + 3] = radius;
         cand[o + 4] = kind;
         // A seed per light so neighbours don't flicker in step
-        cand[o + 5] = (float) ((x * 12.9898 + y * 78.233 + z * 37.719) % 97.0);
+        cand[o + 5] = kind == 0f ? SmokePlumes.seed(x, y, z)
+            : (float) ((x * 12.9898 + y * 78.233 + z * 37.719) % 97.0);
         cand[o + 6] = strength;
         cand[o + 7] = 0f;
         cand[o + 8] = d;
-    }
-
-    private static java.util.ArrayList<?> heatSources(IsoCell cell) {
-        if (!heatTried) {
-            heatTried = true;
-            try {
-                heatField = IsoCell.class.getDeclaredField("heatSources");
-                heatField.setAccessible(true);
-            } catch (Throwable t) {
-                heatField = null;
-            }
-        }
-        try {
-            return heatField == null ? null : (java.util.ArrayList<?>) heatField.get(cell);
-        } catch (Throwable t) {
-            return null;
-        }
     }
 
     /** Render thread, per chunk draw. */
@@ -183,8 +164,7 @@ final class FlickerLights {
         }
         // The array uniform keeps its value in the program; only a new program (uploaded reset) needs it again
         uploaded = d;
-        float clock = ((System.nanoTime() - startNs) / 1_000_000_000L) % 600L + ((System.nanoTime() - startNs) % 1_000_000_000L) / 1e9f;
-        GL20.glUniform4f(locInfo, n, clock, darkness, n > 0 ? 1f : 0f);
+        GL20.glUniform4f(locInfo, n, ScreenPass.effectClock(), darkness, n > 0 ? 1f : 0f);
     }
 
     /** A new or rebuilt chunk program: send the lights again. */

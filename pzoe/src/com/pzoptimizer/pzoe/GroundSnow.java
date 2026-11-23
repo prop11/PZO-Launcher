@@ -5,7 +5,12 @@ import com.pzoptimizer.shaded.asm.Opcodes;
 import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
 import com.pzoptimizer.shaded.asm.tree.FieldInsnNode;
+import com.pzoptimizer.shaded.asm.tree.InsnList;
+import com.pzoptimizer.shaded.asm.tree.InsnNode;
+import com.pzoptimizer.shaded.asm.tree.JumpInsnNode;
+import com.pzoptimizer.shaded.asm.tree.LabelNode;
 import com.pzoptimizer.shaded.asm.tree.MethodInsnNode;
+import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
 import com.pzoptimizer.shaded.asm.tree.MethodNode;
 
 /**
@@ -64,6 +69,32 @@ public final class GroundSnow {
     public static void devFast(double hoursFor) {
         zombie.GameTime gt = zombie.GameTime.getInstance();
         devFastUntil = gt == null ? -1 : gt.getWorldAgeHours() + hoursFor;
+    }
+
+    /** Dev menu: ends a fast build-up early (Clear forced weather, Clear ground snow). */
+    public static void devStop() {
+        devFastUntil = -1;
+    }
+
+    /**
+     * Dev menu Clear ground snow: vanilla's snow total goes to 0 too. Otherwise the depth drifts back up to it (the
+     * catch-up below), so cleared snow crept back after forced flurries had built vanilla's up.
+     */
+    public static void clearVanilla() {
+        zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+        if (cm == null) return;
+        try {
+            java.lang.invoke.MethodHandles.Lookup l = java.lang.invoke.MethodHandles.privateLookupIn(
+                zombie.iso.weather.ClimateManager.class, java.lang.invoke.MethodHandles.lookup());
+            for (String f : new String[] {"snowStrength", "snowFracNow", "snowFall"}) {
+                l.findVarHandle(zombie.iso.weather.ClimateManager.class, f, float.class).set(cm, 0f);
+            }
+            if (zombie.iso.IsoWorld.instance != null && zombie.iso.IsoWorld.instance.currentCell != null) {
+                zombie.iso.IsoWorld.instance.currentCell.setSnowTarget(0);
+            }
+        } catch (Throwable t) {
+            PZOLogger.warn("[GroundSnow] couldn't clear vanilla's snow: " + t);
+        }
     }
 
     /** Dev menu (SP/server): set how much snow lies; clients get it with the next weather state. */
@@ -203,13 +234,40 @@ public final class GroundSnow {
     }
 
     /**
+     * FBORenderSnow.gridSquareIsSnow while the shader draws the snow: 1 or 0 from what it draws, -1 to leave it to
+     * vanilla. Vanilla's grid lags well behind my depth (a dusting in half an hour here, hours there), so light snow
+     * looked white but had no snow footsteps, body drag or tyre sounds and no footprints. Only those three sounds and
+     * PZOE's own footprints ask it.
+     */
+    public static int snowSquare(int x, int y, int z) {
+        if (!active()) return -1;
+        if (z != 0) return 0;
+        return com.pzoptimizer.pzoe.weather.WeatherSnow.coverAt(x + 0.5f, y + 0.5f) >= 0.5f ? 1 : 0;
+    }
+
+    /**
      * FBORenderSnow.RenderSnow: the grid update stays (gameplay asks it whether a square has snow), the draw is
-     * skipped by reading the grid's frac through tileFrac.
+     * skipped by reading the grid's frac through tileFrac. gridSquareIsSnow asks snowSquare first.
      */
     static boolean patchRenderSnow(ClassNode node) {
         MethodNode m = null;
         for (MethodNode mn : node.methods) {
             if (mn.name.equals("RenderSnow") && mn.desc.equals("(Lzombie/iso/IsoChunk;I)V")) m = mn;
+            if (mn.name.equals("gridSquareIsSnow") && mn.desc.equals("(III)Z")) {
+                LabelNode vanilla = new LabelNode();
+                InsnList in = new InsnList();
+                in.add(new VarInsnNode(Opcodes.ILOAD, 1));
+                in.add(new VarInsnNode(Opcodes.ILOAD, 2));
+                in.add(new VarInsnNode(Opcodes.ILOAD, 3));
+                in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/pzoe/GroundSnow", "snowSquare", "(III)I", false));
+                in.add(new InsnNode(Opcodes.DUP));
+                in.add(new JumpInsnNode(Opcodes.IFLT, vanilla));
+                in.add(new InsnNode(Opcodes.IRETURN));
+                in.add(vanilla);
+                in.add(new InsnNode(Opcodes.POP));
+                mn.instructions.insert(in);
+                PZOLogger.info("[GroundSnow] gridSquareIsSnow follows the drawn snow");
+            }
         }
         if (m == null) return false;
         int n = 0;

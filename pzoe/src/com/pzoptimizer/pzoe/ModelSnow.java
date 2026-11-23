@@ -3,6 +3,8 @@ package com.pzoptimizer.pzoe;
 import com.pzoptimizer.AsmSupport;
 import com.pzoptimizer.PZOLogger;
 import com.pzoptimizer.ShaderPatchHost;
+import com.pzoptimizer.pzoe.water.WaterAnimation;
+import com.pzoptimizer.pzoe.water.WaterSurface;
 import com.pzoptimizer.shaded.asm.Opcodes;
 import com.pzoptimizer.shaded.asm.tree.AbstractInsnNode;
 import com.pzoptimizer.shaded.asm.tree.ClassNode;
@@ -50,9 +52,13 @@ import zombie.vehicles.BaseVehicle;
  */
 public final class ModelSnow {
     static final String UNIFORM = "PZOSnowModel", WET_UNIFORM = "PZOWetModel", CLIP_UNIFORM = "PZOSnowClip";
+    private static final String WATER_UNIFORM = "PZOEModelWaterline", MARK_WATER = "PZOE_MODEL_WATERLINE";
     // In the patches' text so Java can tell which cards are on
     static final String MARK_CHARS = "PZO_SNOW_CHARS", MARK_VEHICLES = "PZO_SNOW_VEHICLES", MARK_WET = "PZO_WET_CHARS",
         MARK_WEAR = "PZO_VEHICLE_WEAR", MARK_CLIP = "PZO_SNOW_CLIP";
+    // Model Lighting, Model Contact Shadows and Waxy Zombie Skin (one head, PZOE_ModelSnow.lua): where each model
+    // stands and turns, and what it is. MARK_MLIGHT = per-pixel light from PZO's light map is compiled in.
+    static final String LOOK_POS = "PZOModelPos", LOOK_KIND = "PZOModelLook", MARK_LOOK = "PZO_MODEL_LOOK", MARK_MLIGHT = "PZO_MLIGHT_ON";
     // Levels per unit of a character's posed model space (Model.vectorToWorldCoords: y * 0.61237 = height above its feet)
     private static final float LEVELS_PER_UNIT = 0.61237234f;
     private static final String SELF = "com/pzoptimizer/pzoe/ModelSnow";
@@ -63,13 +69,15 @@ public final class ModelSnow {
     static final Set<String> TARGETS = Set.of(RENDER_DATA, SHADER, MODEL, ANIMATED_MODEL);
 
     // wanted = any of the cards; the rest say which. clipWanted = Better Ground Snow's snow line on people and zombies.
-    static volatile boolean wanted, charsWanted, vehiclesWanted, wetWanted, wearWanted, clipWanted;
+    static volatile boolean wanted, charsWanted, vehiclesWanted, wetWanted, wearWanted, clipWanted, lookWanted, lightWanted;
+    private static volatile boolean waterlineWanted;
     private static long lastCheckNs, lastTrackNs, lastFrameNs;
     private static float clock;
     // Main thread only: {snow, ice, last seen (clock), wet, grime, extra rust}; vehicles add {settled snow, caked, engine}
     private static final Map<Object, float[]> state = new IdentityHashMap<>();
     // Main thread only: snow line per character in model units {shown, target, last seen (clock)}
     private static final Map<Object, float[]> clip = new IdentityHashMap<>();
+    private static final Map<Object, float[]> waterlines = new java.util.WeakHashMap<>();
     private static int tracked;
     private static float lastIntensity;
 
@@ -77,7 +85,7 @@ public final class ModelSnow {
 
     /** Once a frame from PixelLight's frame hook, main thread. */
     static void frame(long now) {
-        if (com.pzoptimizer.pzoe.gore.GoreCore.enabled()) GoreModel.frame(now);
+        if (GoreModel.wanted || GoreFx.vehicleOn || com.pzoptimizer.pzoe.gore.GoreCore.woundsLook) GoreModel.frame(now);
         if (now - lastCheckNs > 1_000_000_000L) {
             lastCheckNs = now;
             boolean c = ShaderPatchHost.liveTextContains(MARK_CHARS);
@@ -85,13 +93,18 @@ public final class ModelSnow {
             boolean w = ShaderPatchHost.liveTextContains(MARK_WET);
             boolean r = ShaderPatchHost.liveTextContains(MARK_WEAR);
             boolean k = ShaderPatchHost.liveTextContains(MARK_CLIP);
+            boolean lk = ShaderPatchHost.liveTextContains(MARK_LOOK);
+            waterlineWanted = ShaderPatchHost.liveTextContains(MARK_WATER);
+            if (!waterlineWanted) waterlines.clear();
+            lightWanted = lk && ShaderPatchHost.liveTextContains(MARK_MLIGHT);
+            lookWanted = lk;
             charsWanted = c;
             vehiclesWanted = v;
             wetWanted = w;
             wearWanted = r;
             clipWanted = k;
             if (!k) clip.clear();
-            boolean any = c || v || w || r || k;
+            boolean any = c || v || w || r || k || lk || waterlineWanted;
             if (!any && wanted) {
                 state.clear();
                 tracked = 0;
@@ -132,7 +145,7 @@ public final class ModelSnow {
         boolean snowWork = (charsWanted || vehiclesWanted) && (snowing || ground >= 0.01f || !state.isEmpty());
         boolean clipWork = clipWanted && (GroundSnow.depthNow() > 0.001f || !clip.isEmpty());
         // No snow anywhere and no wet or wear card: nothing to do
-        if (!snowWork && !clipWork && !wetWanted && !wearWanted) return;
+        if (!snowWork && !clipWork && !wetWanted && !wearWanted && !waterlineWanted) return;
         float days = wearWanted ? (float) (zombie.GameTime.getInstance().getWorldAgeHours() / 24.0) : 0f;
         clock += dt;
         float px[] = new float[4], py[] = new float[4];
@@ -145,11 +158,12 @@ public final class ModelSnow {
             np++;
         }
         if (np == 0) return;
-        if (charsWanted || wetWanted || clipWork) {
+        if (charsWanted || wetWanted || clipWork || waterlineWanted) {
             for (IsoMovingObject o : cell.getObjectList()) {
                 if (!(o instanceof IsoGameCharacter c) || !near(o.getX(), o.getY(), px, py, np)) continue;
                 if (charsWanted || wetWanted) character(c, dt, snowing, intensity, ground, temp, rain);
                 if (clipWork) clipLine(c);
+                if (waterlineWanted) waterline(c, dt);
             }
         }
         if (!clip.isEmpty()) {
@@ -184,6 +198,27 @@ public final class ModelSnow {
         // Getting into a car: no slow slide out of the snow
         if (c.getVehicle() != null) e[0] = 0f;
         e[2] = clock;
+    }
+
+    private static void waterline(IsoGameCharacter character, float dt) {
+        float depth = character.getVehicle() == null
+            ? WaterSurface.liquidDepthAt(character.getCurrentSquare(), character.getX(), character.getY()) : 0f;
+        float level = 0.68f * Math.max(0f, (depth - 0.10f) / 0.9f);
+        if (level > 0f && character instanceof IsoPlayer player) level = WaterAnimation.waterline(player, level);
+        float[] values = waterlines.get(character);
+        if (values == null) {
+            if (level == 0f) return;
+            values = new float[3];
+            waterlines.put(character, values);
+        }
+        values[0] = level;
+        if (level > 0f) {
+            values[1] = Math.max(values[1], level);
+            values[2] = 1f;
+        } else {
+            values[2] = Math.max(0f, values[2] - dt / 80f);
+            if (values[2] == 0f) waterlines.remove(character);
+        }
     }
 
     private static boolean near(float x, float y, float[] px, float[] py, int np) {
@@ -372,7 +407,13 @@ public final class ModelSnow {
                 }
             }
             data.properties.SetVector4(UNIFORM, a, ice, kind, scale);
+            if (lookWanted) look(data, mi, owner);
             if (wetWanted || wearWanted) data.properties.SetVector4(WET_UNIFORM, wet, grime, rust, kind);
+            if (waterlineWanted) {
+                float[] line = waterlines.get(owner);
+                if (line == null) data.properties.SetVector4(WATER_UNIFORM, 0f, 0f, 0f, 0f);
+                else data.properties.SetVector4(WATER_UNIFORM, line[0], line[1], line[2], clock);
+            }
             if (clipWanted) {
                 float[] e = owner == null ? null : clip.get(owner);
                 float y = e == null ? 0f : e[0];
@@ -380,6 +421,22 @@ public final class ModelSnow {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    // Main thread: where the model stands and its rendered turn (Model.vectorToWorldCoords maps the mesh to the world
+    // with them), and what it is: y = 0 player or survivor, 1 zombie, 2 animal. x = 0 leaves the look alone (vehicles,
+    // world items, anything without a character).
+    private static void look(AnimatedModel.AnimatedModelInstanceRenderData data, ModelInstance mi, Object owner) {
+        if (!(owner instanceof IsoGameCharacter c) || owner instanceof BaseVehicle) {
+            data.properties.SetVector4(LOOK_KIND, 0f, 0f, 0f, 0f);
+            return;
+        }
+        zombie.core.skinnedmodel.animation.AnimationPlayer ap = c.getAnimationPlayer();
+        float angle = ap != null ? ap.getRenderedAngle() : 0f;
+        data.properties.SetVector4(LOOK_POS, c.getX(), c.getY(), c.getZ(), angle);
+        float kind = c instanceof IsoZombie ? 1f : c instanceof zombie.characters.animals.IsoAnimal ? 2f : 0f;
+        float attachment = mi.parent != null && mi.model != null && mi.model.isStatic ? 1f : 0f;
+        data.properties.SetVector4(LOOK_KIND, 1f, kind, attachment, 0f);
     }
 
     // Render thread. Location per program, re-read twice a second: a rebuild can hand back the same program id
@@ -399,12 +456,36 @@ public final class ModelSnow {
         if (c == null) {
             c = new float[] {GL20.glGetUniformLocation(prog, UNIFORM), Float.NaN, Float.NaN, Float.NaN, Float.NaN,
                 GL20.glGetUniformLocation(prog, WET_UNIFORM), Float.NaN, Float.NaN, Float.NaN, Float.NaN,
-                GL20.glGetUniformLocation(prog, CLIP_UNIFORM), Float.NaN, Float.NaN, Float.NaN, Float.NaN};
+                GL20.glGetUniformLocation(prog, CLIP_UNIFORM), Float.NaN, Float.NaN, Float.NaN, Float.NaN,
+                GL20.glGetUniformLocation(prog, LOOK_POS), Float.NaN, Float.NaN, Float.NaN, Float.NaN,
+                GL20.glGetUniformLocation(prog, LOOK_KIND), Float.NaN, Float.NaN, Float.NaN, Float.NaN,
+                GL20.glGetUniformLocation(prog, "PZOModelLightTex"), GL20.glGetUniformLocation(prog, "PZOModelLightInfo"),
+                GL20.glGetUniformLocation(prog, WATER_UNIFORM), Float.NaN, Float.NaN, Float.NaN, Float.NaN};
             programs.put(prog, c);
         }
         if (c[0] >= 0f) send(c, 0, d, UNIFORM, 1f);
         if (c[5] >= 0f) send(c, 5, d, WET_UNIFORM, 0f);
         if (c[10] >= 0f) send(c, 10, d, CLIP_UNIFORM, 0f);
+        if (c[15] >= 0f) send(c, 15, d, LOOK_POS, 0f);
+        if (c[20] >= 0f) send(c, 20, d, LOOK_KIND, 0f);
+        if (c[26] >= 0f) modelLight((int) c[25], (int) c[26]);
+        if (c[27] >= 0f) send(c, 27, d, WATER_UNIFORM, 0f);
+    }
+
+    /*
+     * Model Lighting: player 0's light map on unit 14 (nothing in the model shaders uses it), with its ring, first
+     * level and level count. Off with split screen (the map follows player 0) or while PZO isn't keeping the map.
+     */
+    private static void modelLight(int locTex, int locInfo) {
+        int tex = PixelLight.lightTexture(0), ring = PixelLight.lightRing(0);
+        boolean ok = tex != 0 && ring > 0 && PixelLight.atmos && IsoPlayer.numPlayers <= 1;
+        if (ok && locTex >= 0) {
+            org.lwjgl.opengl.GL13.glActiveTexture(org.lwjgl.opengl.GL13.GL_TEXTURE14);
+            org.lwjgl.opengl.GL11.glBindTexture(org.lwjgl.opengl.GL11.GL_TEXTURE_2D, tex);
+            org.lwjgl.opengl.GL13.glActiveTexture(org.lwjgl.opengl.GL13.GL_TEXTURE0);
+            GL20.glUniform1i(locTex, 14);
+        }
+        GL20.glUniform4f(locInfo, ring, PixelLight.BASE_LEVEL, PixelLight.LEVELS, ok ? 1f : 0f);
     }
 
     // c[at] = location, c[at + 1..4] = last value sent to this program
@@ -533,7 +614,7 @@ public final class ModelSnow {
 
     static String stateText() {
         return "snowModels=" + (wanted ? 1 : 0) + ";snowTracked=" + tracked + ";snowFall=" + lastIntensity + ";wetModels=" + (wetWanted ? 1 : 0)
-            + ";wearModels=" + (wearWanted ? 1 : 0);
+            + ";wearModels=" + (wearWanted ? 1 : 0) + ";lookModels=" + (lookWanted ? 1 : 0) + ";lightModels=" + (lightWanted ? 1 : 0);
     }
 
     static byte[] postTransform(ClassLoader loader, String cn, byte[] bytes) {

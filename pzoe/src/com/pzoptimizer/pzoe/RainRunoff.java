@@ -108,7 +108,8 @@ public final class RainRunoff {
     private static final class Particle {
         double x, y, height, target, velocity, born, size, opacity, splashSize, splashOpacity;
         int lightZ, occluders;
-        boolean splash, stream;
+        boolean splash, stream, powder;
+        double windX, windY;
         final int[] occluder = new int[MAX_OCC * 3];
         final double[] hidden = new double[MAX_OCC * 2];
     }
@@ -188,8 +189,8 @@ public final class RainRunoff {
 
     /** End of FBORenderCell.renderRainSplashes(player, z): main thread, once per level per player each frame. */
     public static void render(int player, int z) {
-        if (com.pzoptimizer.pzoe.gore.GoreCore.enabled()) GoreFx.render(player, z);
-        if (!on) {
+        if (GoreFx.anyOn()) GoreFx.render(player, z);
+        if (!on && Precipitation.extras <= 0f) {
             if (!active.isEmpty() || !edges.isEmpty()) clear();
             return;
         }
@@ -242,7 +243,10 @@ public final class RainRunoff {
             observers[observerCount * 2 + 1] = p.getY();
             observerCount++;
         }
-        discoverAndEmit(cell, scanDt, snow ? 0 : clamp(cm.getRainIntensity(), 0, 1));
+        double wind = com.pzoptimizer.pzoe.weather.WeatherLook.wind();
+        double powder = Precipitation.extras > 0f
+            ? Precipitation.extras * cm.getSnowStrength() * clamp((wind - 0.38) / 0.62, 0, 1) : 0;
+        discoverAndEmit(cell, scanDt, on && !snow ? clamp(cm.getRainIntensity(), 0, 1) : 0, powder, wind);
     }
 
     // Roof water follows a tapering shower: rising rain counts at once, falling rain drains over a few seconds, and
@@ -267,7 +271,7 @@ public final class RainRunoff {
         return false;
     }
 
-    private static void discoverAndEmit(IsoCell cell, double dt, double rain) {
+    private static void discoverAndEmit(IsoCell cell, double dt, double rain, double powder, double wind) {
         spawnCount = 0;
         rainAtScan = rain;
         scanned.clear();
@@ -286,7 +290,7 @@ public final class RainRunoff {
             }
         }
         double wet = runoff * amount;
-        if (wet > 0.001) {
+        if (wet > 0.001 || powder > 0.01) {
             for (int i = 0; i < SCAN_BUDGET; i++) {
                 if (!scanningColumn) {
                     int o = observerCursor % observerCount;
@@ -311,6 +315,8 @@ public final class RainRunoff {
         }
         // Round robin so the first edges found can't take the whole budget
         int count = order.size();
+        double angle = powder > 0.01 ? com.pzoptimizer.pzoe.weather.WeatherLook.windAngleRadians() : 0;
+        double wx = Math.sin(angle), wy = Math.cos(angle);
         for (int i = 0; i < count; i++) {
             Edge e = order.get((edgeCursor + i) % count);
             if (rainAtScan > 0) e.water = clamp(e.water + dt * rainAtScan * amount / FILL_SECONDS, 0, 1);
@@ -329,12 +335,16 @@ public final class RainRunoff {
             if (dripRate > 0 && unit(++sequence ^ e.seed) < 1 - Math.exp(-dripRate * dt)) {
                 spawn(cell, e, 0.1 + 0.8 * unit(sequence ^ 0x19afL), false, 0);
             }
+            if (powder > 0.01 && wx * DX[e.side] + wy * DY[e.side] > 0.25
+                && unit(++sequence ^ e.seed) < 1 - Math.exp(-powder * dt * 1.5)) {
+                spawnPowder(cell, e, wx * (1 + 4 * wind), wy * (1 + 4 * wind));
+            }
             if (spawnCount >= EMIT_BUDGET) {
                 edgeCursor = (edgeCursor + i + 1) % count;
                 break;
             }
         }
-        if (runoff == 0 && !edges.isEmpty()) {
+        if (runoff == 0 && powder <= 0.01 && !edges.isEmpty()) {
             if (edges.values().removeIf(e -> e.water <= 0)) orderDirty = true;
         }
     }
@@ -397,6 +407,7 @@ public final class RainRunoff {
         p.velocity = stream ? 0.8 : 0.2;
         p.born = seconds - age;
         p.stream = stream;
+        p.powder = false;
         p.splash = false;
         p.height -= p.velocity * age + 2 * age * age;
         p.velocity += 4 * age;
@@ -407,6 +418,29 @@ public final class RainRunoff {
         active.add(p);
         spawnCount++;
         emitted++;
+    }
+
+    private static void spawnPowder(IsoCell cell, Edge e, double wx, double wy) {
+        if (spawnCount >= EMIT_BUDGET || active.size() >= MAX_PARTICLES) return;
+        double u = e.side == 1 ? 0.98 : e.side == 3 ? 0.02 : e.along;
+        double v = e.side == 2 ? 0.98 : e.side == 0 ? 0.02 : e.along;
+        double h = height(cell, e.x, e.y, e.z, u, v);
+        if (!Double.isFinite(h)) return;
+        Particle p = pool.isEmpty() ? new Particle() : pool.remove(pool.size() - 1);
+        p.powder = true;
+        p.splash = p.stream = false;
+        p.x = e.x + u;
+        p.y = e.y + v;
+        p.height = h + 0.04;
+        p.lightZ = e.z;
+        p.windX = wx;
+        p.windY = wy;
+        p.born = seconds;
+        p.size = 0.55;
+        p.opacity = 0.23;
+        p.occluders = 0;
+        active.add(p);
+        spawnCount++;
     }
 
     // The view ray from a drop rises a third of a level for every square it moves toward the camera (+x, +y). A
@@ -454,6 +488,18 @@ public final class RainRunoff {
         seconds += dt;
         for (int i = active.size() - 1; i >= 0; i--) {
             Particle p = active.get(i);
+            if (p.powder) {
+                double age = seconds - p.born;
+                if (age >= 0.65 || Precipitation.extras <= 0f) {
+                    recycle(i);
+                } else {
+                    p.x += p.windX * dt;
+                    p.y += p.windY * dt;
+                    p.height += (0.4 - age * 0.8) * dt;
+                    p.size += dt * 0.7;
+                }
+                continue;
+            }
             if (p.splash) {
                 if (seconds - p.born >= 0.28) recycle(i);
                 continue;
@@ -624,18 +670,22 @@ public final class RainRunoff {
             IsoGridSquare sq = cell.getGridSquare((int) Math.floor(p.x), (int) Math.floor(p.y), p.lightZ);
             if (sq == null || !sq.isCouldSee(player)) continue;
             double age = seconds - p.born;
-            int index = p.splash ? 1 + Math.min(3, (int) (age / 0.07)) : 0;
+            int index = p.powder ? 2 : p.splash ? 1 + Math.min(3, (int) (age / 0.07)) : 0;
             Texture tex = textures[index];
             if (tex == null) textures[index] = tex = Texture.getSharedTexture(index == 0 ? "Rain_00_0" : "RainSplash_00_" + (index - 1));
             if (tex == null || !tex.isReady()) continue;
             float halfW = (float) (tex.getWidth() * scale * p.size * 0.5), halfH = (float) (tex.getHeight() * scale * p.size * 0.5);
             // Vanilla rain is a texel wide: thinner than a pixel and a small drop vanishes
-            if (!p.splash) halfW = Math.max(0.75f, halfW);
+            if (p.powder) {
+                halfW *= 1.8f;
+                halfH *= 0.75f;
+            }
+            if (!p.splash && !p.powder) halfW = Math.max(0.75f, halfW);
             float px = (float) p.x, py = (float) p.y, ph = (float) p.height;
             float x = IsoUtils.XToScreen(px, py, ph, 0) - fs.offX, y = IsoUtils.YToScreen(px, py, ph, 0) - fs.offY;
             // A falling streak hangs from its lower tip; a splash is centred on the impact
-            if (!p.splash) y -= halfH;
-            double alpha = p.opacity * (p.splash ? clamp(1 - age / 0.28, 0, 1) : clamp(age / 0.03, 0, 1));
+            if (!p.splash && !p.powder) y -= halfH;
+            double alpha = p.opacity * (p.powder ? clamp(age / 0.08, 0, 1) * clamp(1 - age / 0.65, 0, 1) : p.splash ? clamp(1 - age / 0.28, 0, 1) : clamp(age / 0.03, 0, 1));
             ColorInfo light = sq.getLightInfo(player);
             if (!started) {
                 SpriteRenderer.instance.StartShader(0, player);

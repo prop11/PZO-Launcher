@@ -48,6 +48,7 @@ final class FogField {
 
     // Set from the chunk shader's uniform lookups
     static volatile boolean wanted;
+    static volatile boolean waterWanted;
     static volatile float mist;
 
     // Game thread
@@ -67,7 +68,7 @@ final class FogField {
     // Render thread
     private static final int[] tex = new int[2];
     private static int cur, fbo, tileTex, prog, vao;
-    private static int locPrev, locTiles, locOrigin, locOriginOld, locDt, locWind, locReset, locCount, locEntA, locEntB, locHeight;
+    private static int locPrev, locTiles, locOrigin, locOriginOld, locDt, locWind, locReset, locCount, locEntA, locEntB, locHeight, locWater;
     private static float simOx = Float.NaN, simOy;
     private static boolean failed;
     // Read by the chunk draws (render thread)
@@ -124,7 +125,13 @@ final class FogField {
             tileCopy = tiles.clone();
             tilesDirty = false;
         }
-        zombie.core.SpriteRenderer.instance.drawGeneric(new Step(ox, oy, stepDt, -wx * speed, -wy * speed, reset, n, ent, tileCopy));
+        float waterMist = 0f;
+        if (waterWanted) {
+            float rain = cm.getPrecipitationIntensity();
+            float warmRain = smooth(12f, 23f, cm.getTemperature()) * smooth(0.04f, 0.4f, rain);
+            waterMist = Math.max(mist * 2f, warmRain * 0.75f) * (1f - smooth(0.35f, 0.85f, WeatherLook.wind()));
+        }
+        zombie.core.SpriteRenderer.instance.drawGeneric(new Step(ox, oy, stepDt, -wx * speed, -wy * speed, reset, n, ent, tileCopy, waterMist));
     }
 
     // Radiation mist (fmac's model): strongest from dawn for a few hours when the air is cold, near its dew point and calm
@@ -157,18 +164,21 @@ final class FogField {
             int x = ox + i % TILES, y = oy + i / TILES;
             IsoGridSquare sq = cell.getGridSquare(x, y, 0);
             int r, g = 0;
+            byte water = 0;
             if (sq == null) {
                 // Not loaded: open ground
                 r = 1;
             } else {
                 r = (sq.isOutside() ? 1 : 0) | (sq.isSolid() ? 2 : 0);
                 g = (sq.has(IsoFlagType.collideN) ? 1 : 0) | (sq.has(IsoFlagType.collideW) ? 2 : 0);
+                if (waterWanted && sq.has(IsoFlagType.water)) water = (byte) 255;
             }
             int at = ((Math.floorMod(y, TILES)) * TILES + Math.floorMod(x, TILES)) * 4;
             byte br = (byte) (r * 255 / 3), bg = (byte) (g * 255 / 3);
-            if (tiles[at] != br || tiles[at + 1] != bg) {
+            if (tiles[at] != br || tiles[at + 1] != bg || tiles[at + 2] != water) {
                 tiles[at] = br;
                 tiles[at + 1] = bg;
+                tiles[at + 2] = water;
                 tilesDirty = true;
             }
         }
@@ -234,11 +244,12 @@ final class FogField {
     private static final class Step extends TextureDraw.GenericDrawer {
         final int ox, oy, count;
         final float dt, windX, windY;
+        final float waterMist;
         final boolean reset;
         final float[] ent;
         final byte[] tileData;
 
-        Step(int ox, int oy, float dt, float windX, float windY, boolean reset, int count, float[] ent, byte[] tileData) {
+        Step(int ox, int oy, float dt, float windX, float windY, boolean reset, int count, float[] ent, byte[] tileData, float waterMist) {
             this.ox = ox;
             this.oy = oy;
             this.dt = dt;
@@ -248,6 +259,7 @@ final class FogField {
             this.count = count;
             this.ent = ent;
             this.tileData = tileData;
+            this.waterMist = waterMist;
         }
 
         @Override
@@ -282,16 +294,17 @@ final class FogField {
         uniform vec4 uEntA[32];
         uniform vec4 uEntB[32];
         uniform float uHeight;
+        uniform float uWaterMist;
         out vec4 o;
         const float G = 128.0;
         const float L = 4.0;
         const float CELL = 0.5;
 
-        ivec2 flags(vec2 w)
+        ivec3 flags(vec2 w)
         {
             ivec2 t = ivec2(floor(w));
             vec4 v = texelFetch(uTiles, ivec2(t.x & 63, t.y & 63), 0);
-            return ivec2(int(v.r * 3.0 + 0.5), int(v.g * 3.0 + 0.5));
+            return ivec3(int(v.r * 3.0 + 0.5), int(v.g * 3.0 + 0.5), int(v.b + 0.5));
         }
 
         vec4 prev(vec2 w, float layer)
@@ -320,7 +333,7 @@ final class FogField {
             float lf = float(layer);
             vec2 w = uOrigin + (vec2(float(px.x - layer * int(G)), float(px.y)) + 0.5) * CELL;
             float h = (lf + 0.5) / L * uHeight;
-            ivec2 f = flags(w);
+            ivec3 f = flags(w);
             if ((f.x & 2) != 0) {
                 o = vec4(0.0);
                 return;
@@ -382,7 +395,10 @@ final class FogField {
             float sp = length(u);
             if (sp > 3.0) u *= 3.0 / sp;
             // Back to the usual amount outdoors; indoors only what drifts in through a door, and it fades
-            if (outdoor) m += (1.0 - m) * (1.0 - exp(-0.25 * uDt));
+            if (outdoor) {
+                float target = 1.0 + float(f.z) * uWaterMist * (1.0 - smoothstep(0.0, uHeight, h));
+                m += (target - m) * (1.0 - exp(-0.25 * uDt));
+            }
             else m *= exp(-1.5 * uDt);
             m *= 1.0 - carve;
             // The window's border hands back to the undisturbed fog
@@ -444,6 +460,7 @@ final class FogField {
         locEntA = GL20.glGetUniformLocation(prog, "uEntA");
         locEntB = GL20.glGetUniformLocation(prog, "uEntB");
         locHeight = GL20.glGetUniformLocation(prog, "uHeight");
+        locWater = GL20.glGetUniformLocation(prog, "uWaterMist");
         GL13.glActiveTexture(GL13.GL_TEXTURE8);
         tex[0] = stateTexture();
         tex[1] = stateTexture();
@@ -507,6 +524,7 @@ final class FogField {
             GL20.glUniform2f(locWind, s.windX, s.windY);
             GL20.glUniform1i(locReset, reset ? 1 : 0);
             GL20.glUniform1f(locHeight, HEIGHT);
+            GL20.glUniform1f(locWater, s.waterMist);
             GL20.glUniform1i(locCount, s.count);
             if (s.count > 0) {
                 entBuf.clear();

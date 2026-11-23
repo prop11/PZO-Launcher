@@ -2,6 +2,7 @@ package com.pzoptimizer.pzoe;
 
 import com.pzoptimizer.PZOLogger;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.opengl.GL13;
@@ -28,11 +29,13 @@ final class TemporalPass {
     static volatile float blend = 0.5f;
     // Puddle scene reflections read the history: kept (unblended, the world image left alone) while they ask
     static volatile long historyAskedNs;
+    static volatile long waterHistoryAskedNs;
     // Where last frame's history sits: ref world x, y, its uv, then du/dx, du/dy, du/dz, dv/dx, dv/dy, dv/dz
     private static volatile float[] proj;
 
     static boolean historyAsked() {
-        return System.nanoTime() - historyAskedNs < 1_000_000_000L;
+        long now = System.nanoTime();
+        return now - historyAskedNs < 1_000_000_000L || now - waterHistoryAskedNs < 1_000_000_000L;
     }
 
     /** Render thread: the history's camera, for placing world points in it; null until it has run. */
@@ -41,6 +44,10 @@ final class TemporalPass {
     }
 
     private static int fbo, readFbo, vao, prog, locCur, locHist, locInfo, locDelta;
+    private static int locSmoke, locSmokeBounds, locSmokeCount, locSmokeOffset;
+    private static final java.nio.FloatBuffer smokeBuffer = ByteBuffer
+        .allocateDirect(SmokePlumes.MAX * 4 * Float.BYTES).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private static SmokePlumes.Projection previousSmoke;
     private static final int[] hist = new int[2];
     private static int histW, histH, write, sizeTex = -1, texW, texH;
     private static long sizeCheckedNs;
@@ -55,9 +62,11 @@ final class TemporalPass {
      * worldTex = this frame's world image; ref = reference point (world x, y) and where it lands in the world texture
      * this frame (pixels, v up); zoom to see zoom changes.
      */
-    static void render(int worldTex, int frame, float[] ref, float zoom) {
+    static void render(int worldTex, int frame, float[] ref, float zoom, SmokePlumes.Projection smoke) {
         boolean smooth = on;
         if (!(smooth || historyAsked()) || failed || worldTex == 0 || ref == null || frame == lastFrame) return;
+        boolean half = !smooth && System.nanoTime() - historyAskedNs >= 1_000_000_000L;
+        boolean consecutive = frame == lastFrame + 1;
         lastFrame = frame;
         int prevDraw = GlGet.integer(GL30.GL_DRAW_FRAMEBUFFER_BINDING), prevRead = GlGet.integer(GL30.GL_READ_FRAMEBUFFER_BINDING);
         int prevProgram = GlGet.integer(GL20.GL_CURRENT_PROGRAM);
@@ -75,7 +84,8 @@ final class TemporalPass {
                 return;
             }
             long now = System.nanoTime();
-            if (worldTex != sizeTex || now - sizeCheckedNs > 2_000_000_000L) {
+            boolean changedSource = worldTex != sizeTex;
+            if (changedSource || now - sizeCheckedNs > 2_000_000_000L) {
                 sizeTex = worldTex;
                 sizeCheckedNs = now;
                 GL11.glBindTexture(GL11.GL_TEXTURE_2D, worldTex);
@@ -83,10 +93,13 @@ final class TemporalPass {
                 texH = GL11.glGetTexLevelParameteri(GL11.GL_TEXTURE_2D, 0, GL11.GL_TEXTURE_HEIGHT);
             }
             if (texW <= 0 || texH <= 0) return;
-            if (histW != texW || histH != texH) allocate(texW, texH);
+            int width = half ? Math.max(1, (texW + 1) / 2) : texW;
+            int height = half ? Math.max(1, (texH + 1) / 2) : texH;
+            if (histW != width || histH != height) allocate(width, height);
             // Same reference point and zoom as last frame: the history moves by the difference; otherwise start over
             float dx = 0f, dy = 0f;
-            boolean keep = valid && ref[0] == lastRefX && ref[1] == lastRefY && zoom == lastZoom;
+            boolean keep = valid && !changedSource && (!half || consecutive)
+                && ref[0] == lastRefX && ref[1] == lastRefY && zoom == lastZoom;
             if (keep) {
                 dx = ref[2] - lastX;
                 dy = ref[3] - lastY;
@@ -109,7 +122,7 @@ final class TemporalPass {
             GL11.glDisable(GL11.GL_BLEND);
             GL11.glDisable(GL11.GL_ALPHA_TEST);
             GL11.glColorMask(true, true, true, true);
-            GL11.glViewport(0, 0, texW, texH);
+            GL11.glViewport(0, 0, width, height);
             GL30.glBindVertexArray(vao);
             GL20.glUseProgram(prog);
             GL13.glActiveTexture(GL13.GL_TEXTURE8);
@@ -118,8 +131,14 @@ final class TemporalPass {
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, hist[read]);
             GL20.glUniform1i(locCur, 8);
             GL20.glUniform1i(locHist, 9);
-            GL20.glUniform4f(locInfo, texW, texH, keep && smooth ? Math.max(0f, Math.min(0.9f, blend)) : 0f, 0f);
-            GL20.glUniform2f(locDelta, dx, dy);
+            float historyWeight = !keep ? 0f : half ? 0.28f : smooth ? Math.max(0f, Math.min(0.9f, blend)) : 0f;
+            GL20.glUniform4f(locInfo, width, height, historyWeight, half ? 1f : 0f);
+            GL20.glUniform2f(locDelta, dx * width / texW, dy * height / texH);
+            if (smooth && historyWeight > 0f && (smoke != null || consecutive && previousSmoke != null)) {
+                var activeSmoke = smoke != null ? smoke : previousSmoke;
+                uploadSmokeMask(activeSmoke, smoke != null ? 0f : dx, smoke != null ? 0f : dy);
+            } else GL20.glUniform1i(locSmokeCount, 0);
+            previousSmoke = smooth ? smoke : null;
             GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
             // Back into the world image for the screen pass and everything after it (only a copy without smoothing)
             if (smooth) {
@@ -158,6 +177,33 @@ final class TemporalPass {
         }
     }
 
+    private static void uploadSmokeMask(SmokePlumes.Projection smoke, float dx, float dy) {
+        float[] data = smoke.data();
+        float left = 1f, bottom = 1f, right = 0f, top = 0f;
+        int count = 0;
+        smokeBuffer.clear();
+        for (int i = 0; i < smoke.count() * 4; i += 4) {
+            int tag = (int) data[i + 3];
+            int profile = tag / 256;
+            if (profile >= 4 && profile <= 6) continue;
+            float scale = data[i + 2];
+            float x = data[i] + dx / texW, y = data[i + 1] + dy / texH;
+            float strength = 2f * (data[i + 3] - tag);
+            left = Math.min(left, x - 0.92f * scale / texW);
+            right = Math.max(right, x + 0.92f * scale / texW);
+            bottom = Math.min(bottom, y - 0.25f * scale / texH);
+            top = Math.max(top, y + 1.8f * scale / texH);
+            smokeBuffer.put(data[i]).put(data[i + 1]).put(scale).put(strength);
+            count++;
+        }
+        GL20.glUniform1i(locSmokeCount, count);
+        if (count == 0) return;
+        smokeBuffer.flip();
+        GL20.glUniform4fv(locSmoke, smokeBuffer);
+        GL20.glUniform4f(locSmokeBounds, left, bottom, right, top);
+        GL20.glUniform2f(locSmokeOffset, dx, dy);
+    }
+
     /** The history (last frame's smoothed world image), for later effects; 0 until it runs. */
     static int history() {
         return valid ? hist[1 - write] : 0;
@@ -166,6 +212,7 @@ final class TemporalPass {
     /** The card went off: start over next time. */
     static void reset() {
         valid = false;
+        previousSmoke = null;
     }
 
     private static void allocate(int w, int h) {
@@ -192,26 +239,67 @@ final class TemporalPass {
         locHist = GL20.glGetUniformLocation(prog, "uHist");
         locInfo = GL20.glGetUniformLocation(prog, "uInfo");
         locDelta = GL20.glGetUniformLocation(prog, "uDelta");
+        locSmoke = GL20.glGetUniformLocation(prog, "uReactiveSmoke[0]");
+        locSmokeBounds = GL20.glGetUniformLocation(prog, "uReactiveBounds");
+        locSmokeCount = GL20.glGetUniformLocation(prog, "uReactiveCount");
+        locSmokeOffset = GL20.glGetUniformLocation(prog, "uReactiveOffset");
         fbo = GL30.glGenFramebuffers();
         readFbo = GL30.glGenFramebuffers();
         vao = GL30.glGenVertexArrays();
         return true;
     }
 
-    // uInfo = width, height, blend (0 = no history this frame); uDelta = how far the image moved since last frame, in
-    // texels. The history is clamped to the box of this pixel's own neighbourhood (3 x 3, as in Karis' TAA), with the
-    // box tightened toward the mean so slow drifts don't pass as real.
+    // The reflection-only path downsamples the scene and rejects history outside the current pixel's colour range.
     static final String FRAGMENT = """
         #version 330
         uniform sampler2D uCur;
         uniform sampler2D uHist;
         uniform vec4 uInfo;
         uniform vec2 uDelta;
+        uniform vec4 uReactiveSmoke[16];
+        uniform vec4 uReactiveBounds;
+        uniform vec2 uReactiveOffset;
+        uniform int uReactiveCount;
         out vec4 o;
+
+        float smokeReactivity(vec2 pixel)
+        {
+            if (uReactiveCount == 0) return 0.0;
+            vec2 uv = pixel / uInfo.xy;
+            if (any(lessThan(uv, uReactiveBounds.xy)) || any(greaterThan(uv, uReactiveBounds.zw))) return 0.0;
+            float coverage = 0.0;
+            for (int i = 0; i < uReactiveCount; i++) {
+                vec4 s = uReactiveSmoke[i];
+                vec2 d = (pixel - uReactiveOffset - s.xy * uInfo.xy) / s.z;
+                if (d.y < -0.25 || d.y > 1.8 || abs(d.x) >= 0.92) continue;
+                float width = 0.55 + 0.20 * smoothstep(0.0, 0.8, d.y);
+                float opacity = (1.0 - smoothstep(width * 0.45, width + 0.17, abs(d.x)))
+                    * smoothstep(-0.25, 0.05, d.y) * (1.0 - smoothstep(0.7, 1.8, d.y));
+                coverage = max(coverage, opacity * (0.45 + 0.45 * s.w));
+            }
+            return coverage;
+        }
 
         void main()
         {
             ivec2 ip = ivec2(gl_FragCoord.xy);
+            if (uInfo.w > 0.5) {
+                ivec2 limit = textureSize(uCur, 0) - 1;
+                ivec2 p = ip * 2;
+                vec4 a = texelFetch(uCur, min(p, limit), 0);
+                vec4 b = texelFetch(uCur, min(p + ivec2(1, 0), limit), 0);
+                vec4 c = texelFetch(uCur, min(p + ivec2(0, 1), limit), 0);
+                vec4 d = texelFetch(uCur, min(p + ivec2(1, 1), limit), 0);
+                o = (a + b + c + d) * 0.25;
+                vec2 prev = (gl_FragCoord.xy - uDelta) / uInfo.xy;
+                if (uInfo.z > 0.0 && all(greaterThanEqual(prev, vec2(0.0))) && all(lessThan(prev, vec2(1.0)))) {
+                    vec3 lo = min(min(a.rgb, b.rgb), min(c.rgb, d.rgb));
+                    vec3 hi = max(max(a.rgb, b.rgb), max(c.rgb, d.rgb));
+                    vec3 h = clamp(texture(uHist, prev).rgb, lo, hi);
+                    o.rgb = mix(o.rgb, h, uInfo.z);
+                }
+                return;
+            }
             ivec2 mx = ivec2(uInfo.xy) - 1;
             vec4 cur = texelFetch(uCur, ip, 0);
             if (uInfo.z <= 0.0) {
@@ -235,11 +323,13 @@ final class TemporalPass {
             }
             vec3 h = texture(uHist, huv).rgb;
             h = clamp(h, mean - sd * 1.25, mean + sd * 1.25);
-            o = vec4(mix(cur.rgb, h, uInfo.z), cur.a);
+            float weight = uInfo.z * (1.0 - smokeReactivity(gl_FragCoord.xy));
+            o = vec4(mix(cur.rgb, h, weight), cur.a);
         }
         """;
 
     static String stateText() {
-        return "temporal=" + (on ? 1 : 0) + ";temporalRuns=" + runs + ";temporalResets=" + resets + ";temporalFailed=" + (failed ? 1 : 0);
+        return "temporal=" + (on ? 1 : 0) + ";temporalRuns=" + runs + ";temporalResets=" + resets
+            + ";temporalFailed=" + (failed ? 1 : 0) + ";historyWidth=" + histW + ";historyHeight=" + histH;
     }
 }

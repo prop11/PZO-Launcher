@@ -7,6 +7,14 @@ import com.pzoptimizer.PZOLogger;
 import com.pzoptimizer.pzoe.gore.GoreCore;
 import com.pzoptimizer.pzoe.weather.WeatherCore;
 import com.pzoptimizer.pzoe.weather.WeatherStorm;
+import com.pzoptimizer.pzoe.water.WaterWaves;
+import com.pzoptimizer.pzoe.water.WaterAnimation;
+import com.pzoptimizer.pzoe.water.WaterWading;
+import com.pzoptimizer.pzoe.water.WaterVehicles;
+import com.pzoptimizer.pzoe.water.WaterSwimming;
+import com.pzoptimizer.pzoe.water.WaterZombies;
+import com.pzoptimizer.pzoe.water.WaterBuoyancy;
+import com.pzoptimizer.pzoe.water.UnderwaterView;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -32,7 +40,7 @@ public final class PzoeExtension implements Extension {
     @Override
     public void init() {
         FoliageLod.bakeWindFoliage = PixelLight::bakeWindFoliage;
-        if (GoreCore.enabled()) GoreFx.install();
+        GoreFx.install();
     }
 
     @Override
@@ -42,6 +50,24 @@ public final class PzoeExtension implements Extension {
         for (String t : ModelSnow.TARGETS) s.add(t.replace('/', '.'));
         s.add(PUDDLES.replace('/', '.'));
         s.add(PUDDLES_SHADER.replace('/', '.'));
+        s.add(WaterWaves.TARGET.replace('/', '.'));
+        s.add(GpuTimer.WATER_RENDERER.replace('/', '.'));
+        s.add(WaterWading.TARGET.replace('/', '.'));
+        s.add(WaterAnimation.TARGET.replace('/', '.'));
+        s.add(WaterSwimming.MOVING_OBJECT.replace('/', '.'));
+        s.add(com.pzoptimizer.pzoe.weather.WeatherEffects.ZOMBIE.replace('/', '.'));
+        s.add(GoreCore.SQUARE.replace('/', '.'));
+        s.add(SmokeExposure.CHARACTER.replace('/', '.'));
+        s.add(FireEvents.FIRE.replace('/', '.'));
+        s.add(FireEvents.MANAGER.replace('/', '.'));
+        s.add(GoreCore.COMBAT.replace('/', '.'));
+        s.add(GoreKillCam.TARGET.replace('/', '.'));
+        s.add(GoreCore.DEAD_BODY.replace('/', '.'));
+        s.add(WaterBuoyancy.CELL.replace('/', '.'));
+        s.add(WaterBuoyancy.ITEM.replace('/', '.'));
+        s.add(UnderwaterView.SOUND_MANAGER.replace('/', '.'));
+        s.add(com.pzoptimizer.pzoe.weather.WeatherEffects.VEHICLE.replace('/', '.'));
+        s.add(com.pzoptimizer.pzoe.weather.WeatherSnow.CAR.replace('/', '.'));
         s.add(WEATHER_SHADER.replace('/', '.'));
         s.add(GroundSnow.SNOW_RENDER.replace('/', '.'));
         s.add(Precipitation.WEATHER_FX.replace('/', '.'));
@@ -69,45 +95,102 @@ public final class PzoeExtension implements Extension {
             }
             case PUDDLES_SHADER -> logged(AsmSupport.transform(cur, loader, "PuddlesShader splash uniforms", PuddleSplash::patchShader),
                 "PuddlesShader.updatePuddlesParams: PZOTime/PZOSplash for patched shaders");
+            case WaterWaves.TARGET -> logged(AsmSupport.transform(cur, loader, "WaterShader wave atlas", WaterWaves::patch),
+                "WaterShader.updateWaterParams: PZOE wave atlas for patched water");
+            case GpuTimer.WATER_RENDERER -> logged(AsmSupport.transform(cur, loader, "ModelManager water GPU timing", GpuTimer::patchWater),
+                "ModelManager.RenderWater: debug water GPU timing");
+            case WaterWading.TARGET -> logged(AsmSupport.transform(cur, loader, "IsoPlayer wading", WaterWading::patch),
+                "IsoPlayer: sandbox-controlled wading and swimming");
+            case WaterAnimation.TARGET -> logged(AsmSupport.transform(cur, loader, "AnimationPlayer water pose", WaterAnimation::patch),
+                "AnimationPlayer: sandbox-controlled wading, swim strokes and treading water");
+            case WaterSwimming.MOVING_OBJECT -> logged(AsmSupport.transform(cur, loader, "IsoMovingObject swimming collision", WaterSwimming::patchMovingObject),
+                "IsoMovingObject.postupdate: swimming through open water");
+            case WaterBuoyancy.CELL -> logged(AsmSupport.transform(cur, loader, "IsoCell buoyancy", WaterBuoyancy::patchCell),
+                "IsoCell.update: immersed world items");
+            case WaterBuoyancy.ITEM -> logged(AsmSupport.transform(cur, loader, "IsoWorldInventoryObject buoyancy", WaterBuoyancy::patchItem),
+                "IsoWorldInventoryObject: register immersed items");
+            case UnderwaterView.SOUND_MANAGER -> logged(AsmSupport.transform(cur, loader, "SoundManager underwater filter", UnderwaterView::patchSoundManager),
+                "SoundManager.Update: PZOE underwater low pass");
+            case GoreCore.DEAD_BODY -> logged(AsmSupport.transform(cur, loader, "IsoDeadBody buoyancy", WaterBuoyancy::patchCorpse),
+                "IsoDeadBody.render: PZOE water bobbing");
             case WEATHER_SHADER -> logged(AsmSupport.transform(cur, loader, "WeatherShader screen pass uniforms", ScreenPass::patchShader),
                 "WeatherShader: haze and grade uniforms for patched screen shaders");
             case RENDER_CELL -> {
                 byte[] runoff = logged(AsmSupport.transform(cur, loader, "FBORenderCell roof runoff", RainRunoff::patchCell),
                     "FBORenderCell.renderRainSplashes: roof runoff drops");
-                byte[] blood = !GoreCore.enabled() ? null : logged(AsmSupport.transform(runoff != null ? runoff : cur, loader, "FBORenderCell floor blood", GoreCore::patchCell),
+                byte[] blood = logged(AsmSupport.transform(runoff != null ? runoff : cur, loader, "FBORenderCell floor blood", GoreCore::patchCell),
                     "FBORenderCell.renderOneLevel_Blood: floor splat sprites off while Ground Blood draws them");
                 yield blood != null ? blood : runoff;
             }
-            case GoreCore.CHUNK -> !GoreCore.enabled() ? null : logged(AsmSupport.transform(cur, loader, "IsoChunk blood splat", GoreCore::patchChunk),
+            case GoreCore.CHUNK -> logged(AsmSupport.transform(cur, loader, "IsoChunk blood splat", GoreCore::patchChunk),
                 "IsoChunk.addBloodSplat: no chunk re-bake per splat while Ground Blood draws them");
-            case GoreCore.SQUARE -> !GoreCore.enabled() ? null : logged(AsmSupport.transform(cur, loader, "IsoGridSquare blood removal", GoreCore::patchSquare),
-                "IsoGridSquare.removeBlood: Ground Blood wipes cleaned blood");
+            case FireEvents.FIRE -> logged(AsmSupport.transform(cur, loader, "IsoFire aftermath", FireEvents::patchFire),
+                "IsoFire: distinguish spread and record heat damage");
+            case FireEvents.MANAGER -> logged(AsmSupport.transform(cur, loader, "IsoFireManager ignition", FireEvents::patchManager),
+                "IsoFireManager: record ignition for accepted fires");
+            case GoreCore.SQUARE -> {
+                byte[] blood = logged(AsmSupport.transform(cur, loader, "IsoGridSquare blood removal", GoreCore::patchSquare),
+                    "IsoGridSquare.removeBlood: Ground Blood wipes cleaned blood");
+                byte[] water = logged(AsmSupport.transform(blood != null ? blood : cur, loader, "IsoGridSquare swimming collision", WaterSwimming::patchSquare),
+                    "IsoGridSquare.testCollideAdjacent: open water transitions for swimming");
+                byte[] upstream = water != null ? water : blood;
+                byte[] splash = logged(AsmSupport.transform(upstream != null ? upstream : cur, loader, "IsoGridSquare water splash", PuddleSplash::patchWaterSplash),
+                    "IsoGridSquare.startWaterSplash: PZOE water ripples");
+                byte[] clean = logged(AsmSupport.transform(splash != null ? splash : upstream != null ? upstream : cur,
+                    loader, "IsoGridSquare soot cleaning", FireEvents::patchCleaning), "IsoGridSquare: clean soot through vanilla stains");
+                yield clean != null ? clean : splash != null ? splash : upstream;
+            }
             case GroundSnow.SNOW_RENDER -> logged(AsmSupport.transform(cur, loader, "FBORenderSnow tiles", GroundSnow::patchRenderSnow),
-                "FBORenderSnow.RenderSnow: vanilla snow tiles off while Better Ground Snow draws");
+                "FBORenderSnow.RenderSnow/gridSquareIsSnow: vanilla snow tiles off and snow checks follow Better Ground Snow while it draws");
             case Precipitation.WEATHER_FX -> logged(AsmSupport.transform(cur, loader, "IsoWeatherFX precipitation", Precipitation::patchWeatherFx),
                 "IsoWeatherFX: rain and snow particles replaced by the GPU pass while Better Rain and Snow is on");
+            case PuddleSplash.FOOTSTEP2 -> logged(AsmSupport.transform(cur, loader, "ParameterFootstepMaterial2 puddles", PuddleSplash::patchFootstep2),
+                "ParameterFootstepMaterial2: footsteps splash in any drawn puddle, not only full-depth ones");
             case NaturalGround.SPRITE -> logged(AsmSupport.transform(cur, loader, "IsoSprite natural ground", NaturalGround::patchSprite),
                 "IsoSprite.startTileDepthShader: Natural Ground uniforms on floor pieces");
-            case com.pzoptimizer.pzoe.weather.WeatherEffects.ZOMBIE -> logged(AsmSupport.transform(cur, loader, "IsoZombie weather senses", com.pzoptimizer.pzoe.weather.WeatherEffects::patchZombie),
-                "IsoZombie.updateVisionRadius: PZOE weather snow and hail cut zombie sight");
-            case com.pzoptimizer.pzoe.weather.WeatherEffects.CHARACTER -> logged(AsmSupport.transform(cur, loader, "IsoGameCharacter weather hearing", com.pzoptimizer.pzoe.weather.WeatherEffects::patchCharacter),
-                "IsoGameCharacter.getWeatherHearingMultiplier: PZOE weather wind and hail cover noise");
-            case com.pzoptimizer.pzoe.weather.WeatherEffects.VEHICLE -> logged(AsmSupport.transform(cur, loader, "BaseVehicle weather grip", com.pzoptimizer.pzoe.weather.WeatherEffects::patchVehicle),
-                "BaseVehicle.updateBulletStats: PZOE weather grip on snow, ice and wet roads");
-            case com.pzoptimizer.pzoe.weather.WeatherSnow.CAR -> logged(AsmSupport.transform(cur, loader, "CarController deep snow", com.pzoptimizer.pzoe.weather.WeatherSnow::patchCar),
-                "CarController.checkTire: PZOE weather vehicles bog down in deep snow");
+            case com.pzoptimizer.pzoe.weather.WeatherEffects.ZOMBIE -> {
+                byte[] weather = logged(AsmSupport.transform(cur, loader, "IsoZombie weather senses", com.pzoptimizer.pzoe.weather.WeatherEffects::patchZombie),
+                    "IsoZombie.updateVisionRadius: PZOE weather snow and hail cut zombie sight");
+                byte[] water = logged(AsmSupport.transform(weather != null ? weather : cur, loader, "IsoZombie water exposure", WaterZombies::patch),
+                    "IsoZombie.update: PZOE open water exposure");
+                yield water != null ? water : weather;
+            }
+            case com.pzoptimizer.pzoe.weather.WeatherEffects.CHARACTER -> {
+                byte[] hearing = logged(AsmSupport.transform(cur, loader, "IsoGameCharacter weather hearing",
+                    com.pzoptimizer.pzoe.weather.WeatherEffects::patchCharacter),
+                    "IsoGameCharacter.getWeatherHearingMultiplier: PZOE weather wind and hail cover noise");
+                byte[] smoke = logged(AsmSupport.transform(hearing != null ? hearing : cur, loader,
+                    "IsoGameCharacter smoke exposure", SmokeExposure::patchBlur), "IsoGameCharacter.getBlurFactor: smoke exposure");
+                yield smoke != null ? smoke : hearing;
+            }
+            case com.pzoptimizer.pzoe.weather.WeatherEffects.VEHICLE -> {
+                byte[] weather = logged(AsmSupport.transform(cur, loader, "BaseVehicle weather grip", com.pzoptimizer.pzoe.weather.WeatherEffects::patchVehicle),
+                    "BaseVehicle.updateBulletStats: PZOE weather grip on snow, ice and wet roads");
+                byte[] water = logged(AsmSupport.transform(weather != null ? weather : cur, loader, "BaseVehicle water damage", WaterVehicles::patchVehicle),
+                    "BaseVehicle.update: PZOE water engine stall and damage");
+                yield water != null ? water : weather;
+            }
+            case com.pzoptimizer.pzoe.weather.WeatherSnow.CAR -> {
+                byte[] weather = logged(AsmSupport.transform(cur, loader, "CarController deep snow", com.pzoptimizer.pzoe.weather.WeatherSnow::patchCar),
+                    "CarController.checkTire: PZOE weather vehicles bog down in deep snow");
+                byte[] water = logged(AsmSupport.transform(weather != null ? weather : cur, loader, "CarController water drag", WaterVehicles::patchController),
+                    "CarController.update: PZOE water drag");
+                yield water != null ? water : weather;
+            }
             case WeatherStorm.THUNDER_CLASS -> logged(AsmSupport.transform(cur, loader, "ThunderStorm weather", WeatherStorm::patchThunder),
                 "ThunderStorm: PZOE weather lightning direction and thunder gameplay");
             case com.pzoptimizer.pzoe.weather.WeatherAuthority.FLOAT_CLASS -> logged(AsmSupport.transform(cur, loader, "ClimateFloat writers", com.pzoptimizer.pzoe.weather.WeatherAuthority::patchFloat),
                 "ClimateFloat setters: PZOE weather follows other mods' climate values");
             case com.pzoptimizer.pzoe.weather.WeatherAuthority.BOOL_CLASS -> logged(AsmSupport.transform(cur, loader, "ClimateBool writers", com.pzoptimizer.pzoe.weather.WeatherAuthority::patchBool),
                 "ClimateBool setters: PZOE weather follows other mods' snow");
+            case AutumnTrees.TREE -> logged(AsmSupport.transform(cur, loader, "IsoTree autumn colours", AutumnTrees::patch),
+                "IsoTree.renderInner: Autumn Colours tint each tree its own way");
             case WeatherCore.CLIMATE_CLASS -> logged(AsmSupport.transform(cur, loader, "ClimateManager weather", WeatherCore::patchClimate),
                 "ClimateManager: PZOE weather tick and weather look");
             default -> null;
         };
         byte[] base = own != null ? own : out;
-        byte[] gore = GoreCore.enabled() ? goreTransform(loader, cn, base != null ? base : bytes) : null;
+        byte[] gore = goreTransform(loader, cn, base != null ? base : bytes);
         return gore != null ? gore : base;
     }
 
@@ -124,18 +207,30 @@ public final class PzoeExtension implements Extension {
                 "BodyDamage.AddRandomDamageFromZombie: PZOE gore armless zombies");
             case GoreCore.EAT_STATE -> logged(AsmSupport.transform(cur, loader, "ZombieEatBodyState gore", GoreCore::patchEat),
                 "ZombieEatBodyState.execute: PZOE gore feeding wounds");
+            case GoreKillCam.TARGET -> logged(AsmSupport.transform(cur, loader, "PlayerCamera gore", GoreKillCam::patchCamera),
+                "PlayerCamera.center: PZOE X-ray kill cam");
+            case GoreCore.COMBAT -> logged(AsmSupport.transform(cur, loader, "CombatManager gore", GoreCore::patchCombat),
+                "CombatManager: resolved wound locations and close-range pooled giblets");
             case GoreCore.GIBLETS -> logged(AsmSupport.transform(cur, loader, "IsoZombieGiblets gore", GoreCore::patchGiblets),
                 "IsoZombieGiblets: PZOE gore draws its own gibs");
             case GoreCore.GAME_TIME -> logged(AsmSupport.transform(cur, loader, "GameTime gore", GoreCore::patchGameTime),
                 "GameTime.getSlomoMultiplier: PZOE gore hit-stop and kill cam (single player)");
-            case com.pzoptimizer.pzoe.gore.GoreAtlas.PARAMS -> logged(AsmSupport.transform(cur, loader, "DeadBodyAtlas params gore",
-                com.pzoptimizer.pzoe.gore.GoreAtlas::patchParams), "DeadBodyAtlas.BodyParams.init: PZOE gore on corpses");
             case com.pzoptimizer.pzoe.gore.GoreAtlas.ATLAS -> logged(AsmSupport.transform(cur, loader, "DeadBodyAtlas key gore",
                 com.pzoptimizer.pzoe.gore.GoreAtlas::patchAtlas), "DeadBodyAtlas.getBodyKey: PZOE gore corpses get their own picture");
-            case com.pzoptimizer.pzoe.gore.GoreAtlas.JOB -> logged(AsmSupport.transform(cur, loader, "DeadBodyAtlas job gore",
-                com.pzoptimizer.pzoe.gore.GoreAtlas::patchJob), "DeadBodyAtlas.RenderJob.renderMain: PZOE gore record while a corpse draws");
+            case com.pzoptimizer.pzoe.gore.GoreAtlas.JOB -> {
+                byte[] job = logged(AsmSupport.transform(cur, loader, "DeadBodyAtlas job gore",
+                    com.pzoptimizer.pzoe.gore.GoreAtlas::patchJob), "DeadBodyAtlas.RenderJob.renderMain: PZOE gore record while a corpse draws");
+                byte[] bounds = logged(AsmSupport.transform(job != null ? job : cur, loader, "DeadBodyAtlas detached bounds",
+                    com.pzoptimizer.pzoe.gore.GoreAtlas::patchDetachedBounds), "DeadBodyAtlas.RenderJob: PZOE detached part bounds");
+                if (bounds != null && job != null) GoreDetached.enableBounds();
+                yield bounds != null ? bounds : job;
+            }
             default -> null;
         };
+    }
+
+    private static float pct(Object a, double max, float fallback) {
+        return a instanceof Number n ? (float) Math.max(0.0, Math.min(max, n.doubleValue() / 100.0)) : fallback;
     }
 
     private static byte[] logged(byte[] b, String what) {
@@ -191,6 +286,29 @@ public final class PzoeExtension implements Extension {
             case "glare":
                 Glare.amount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
                 return Boolean.TRUE;
+            // Fireflies, Eye Shine, Character Shadows, Contact Shadows: strength in percent (their shaders say they're on)
+            case "fireflies":
+                Fireflies.amount = pct(a, 2.0, 1f);
+                return Boolean.TRUE;
+            case "eyeShine":
+                EyeShine.amount = pct(a, 2.0, 1f);
+                return Boolean.TRUE;
+            case "charShadows":
+                CharShadows.amount = pct(a, 2.0, 1f);
+                return Boolean.TRUE;
+            case "contact":
+                PixelLight.contactStrength = pct(a, 2.0, 1f);
+                return Boolean.TRUE;
+            // Flies and Rot: amount in percent, rot stains on/off
+            case "corpseFlies":
+                CorpseFlies.amount = pct(a, 2.0, 1f);
+                CorpseFlies.stains = !Boolean.FALSE.equals(b);
+                return Boolean.TRUE;
+            // Autumn Colours has no shader: on/off and strength in percent
+            case "autumnTrees":
+                AutumnTrees.on = Boolean.TRUE.equals(a);
+                AutumnTrees.amount = pct(b, 1.5, 1f);
+                return Boolean.TRUE;
             // Footprints and Tyre Tracks' Tracked-in mud on/off
             case "trailsMud":
                 PuddleSplash.trackedMud = Boolean.TRUE.equals(a);
@@ -236,6 +354,9 @@ public final class PzoeExtension implements Extension {
                 }
                 return Boolean.TRUE;
             // Fog quality steps, for the cached fog march (the shader has them as a define)
+            case "waterMist":
+                FogField.waterWanted = Boolean.TRUE.equals(a);
+                return true;
             case "fogSteps":
                 SkyCache.scatterSamples = a instanceof Number n ? Math.max(4, Math.min(8, n.intValue())) : 6;
                 return Boolean.TRUE;
@@ -299,26 +420,35 @@ public final class PzoeExtension implements Extension {
                 com.pzoptimizer.pzoe.weather.WeatherFronts.configure(Boolean.TRUE.equals(a), b instanceof Number n ? n.doubleValue() : 100.0);
                 return Boolean.TRUE;
             // Ground Blood card: quality 1-3 (texels a square; the shader itself says the card is on)
-            // Whether PZOE Gore is on this launch (developer testing only), and turning it on or off for the next one
             case "goreEnabled":
-                return GoreCore.enabled();
-            case "goreNextLaunch":
-                return a == null ? GoreCore.devFile().isFile() : GoreCore.setNextLaunch(Boolean.TRUE.equals(a));
+                return Boolean.TRUE;
             case "goreGround":
-                if (!GoreCore.enabled()) return Boolean.FALSE;
                 GoreMap.configure(a instanceof Number n ? n.intValue() : 2);
+                return Boolean.TRUE;
+            case "goreSaveSurfaces":
+                GoreMap.saveSurfaces();
                 return Boolean.TRUE;
             // The other Gore cards: "spray=1;gibs=0;amount=100;..."
             case "gore":
-                if (!GoreCore.enabled()) return Boolean.FALSE;
                 GoreFx.configure(a == null ? null : a.toString());
                 return Boolean.TRUE;
             // Gore gameplay in MP: the server's Lua takes limb losses to send, the client's Lua hands them over
             case "goreEvents":
-                return GoreCore.enabled() ? GoreCore.takeOutbox() : "";
+                return GoreCore.takeOutbox();
             case "goreApply":
-                if (!GoreCore.enabled()) return Boolean.FALSE;
                 GoreCore.applyRemote(a == null ? "" : a.toString());
+                return Boolean.TRUE;
+            case "fireExposure":
+                return a instanceof zombie.characters.IsoPlayer p ? SmokeExposure.pulse(p, Boolean.TRUE.equals(b)) : null;
+            case "fireExposureRemote":
+                if (zombie.network.GameClient.client && a instanceof zombie.characters.IsoPlayer p && b instanceof Number severity)
+                    SmokeExposure.setLocal(p, severity.intValue());
+                return Boolean.TRUE;
+            case "fireTopology":
+                if (a instanceof zombie.iso.IsoGridSquare square) SmokeOpenings.invalidate(square);
+                return Boolean.TRUE;
+            case "fireSoot":
+                if (a instanceof zombie.iso.IsoGridSquare square) Scorch.depositSoot(square);
                 return Boolean.TRUE;
             // Mods that make those effects stand down: "chunk=A,B;splash=C"
             case "chunkConflicts":

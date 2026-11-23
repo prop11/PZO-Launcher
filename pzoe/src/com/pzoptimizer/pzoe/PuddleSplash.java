@@ -95,6 +95,30 @@ public final class PuddleSplash {
     // Published for the render thread: [clock, count, then x, y, z, age, strength per point]
     private static volatile float[] published = {0f, 0f};
     private static volatile long splashUploadNanos;
+    private static volatile long waterRipplesAskedNanos;
+    private static volatile float[] waterStreams = {0f};
+    private record WaterImpact(float x, float y, float z, float strength) {}
+    private static final java.util.concurrent.ArrayBlockingQueue<WaterImpact> waterImpacts =
+        new java.util.concurrent.ArrayBlockingQueue<>(32);
+
+    public static float[] waterRippleSnapshot() {
+        waterRipplesAskedNanos = System.nanoTime();
+        return published;
+    }
+
+    public static float[] waterWakeSnapshot() {
+        return waterStreams;
+    }
+
+    public static void waterImpact(IsoGridSquare square, float x, float y, float strength) {
+        if (System.nanoTime() - waterRipplesAskedNanos < 1_000_000_000L && wetBody(square, x, y)) {
+            waterImpacts.offer(new WaterImpact(x, y, square.z, strength));
+        }
+    }
+
+    public static void waterSplash(IsoGridSquare square, boolean big, float dx, float dy) {
+        waterImpact(square, square.x + 0.5f + dx, square.y + 0.5f + dy, big ? 0.86f : 0.46f);
+    }
 
     // Lights for puddle reflections, game thread gathers, render thread places them per level:
     // [count, then x, y, level, height (levels), r, g, b, brightness per light]
@@ -103,11 +127,21 @@ public final class PuddleSplash {
     private static volatile long lightsAskedNanos;
     private static final float[] lightBest = new float[MAX_LIGHTS * 9];
 
+    public static float[] outdoorLightSnapshot() {
+        lightsAskedNanos = System.nanoTime();
+        return lights;
+    }
+
     // Render thread
-    private static final int[] locations = new int[21];
+    private static final int[] locations = new int[23];
     // Scene reflection strength (modApi puddleScene), and whether a puddle shader asks for it (render thread)
     static volatile float sceneStrength;
     static volatile boolean sceneWanted;
+    private static volatile long waterSceneAskedNanos;
+
+    public static boolean waterSceneAsked() {
+        return System.nanoTime() - waterSceneAskedNanos < 1_000_000_000L;
+    }
 
     // The trail map on unit 5 (the game uses 0-3 here), its size, and the world square at the puddle shader's screen
     // origin for this level: screen x = (x - y) * 64, y = (x + y - 6z) * 32 for the ground of level z
@@ -146,25 +180,35 @@ public final class PuddleSplash {
     // owners), this level's origin in squares as for gore, and the history's camera
     private static void sceneUniforms(int[] loc, int z, int player) {
         TemporalPass.historyAskedNs = System.nanoTime();
+        sceneUniforms(loc, z, player, IsoPuddles.getInstance().getShaderOffset(), sceneStrength);
+    }
+
+    public static void waterSceneUniforms(int[] loc, int player) {
+        waterSceneAskedNanos = System.nanoTime();
+        if (player == 0) TemporalPass.waterHistoryAskedNs = waterSceneAskedNanos;
+        sceneUniforms(loc, 0, player, zombie.iso.IsoWater.getInstance().getShaderOffset(), 0.58f);
+    }
+
+    private static void sceneUniforms(int[] loc, int z, int player, org.joml.Vector4f off, float strength) {
         float[] pr = player == 0 ? TemporalPass.projection() : null;
         int hist = pr != null ? TemporalPass.history() : 0;
         int ht = PixelLight.heightTexture(player), ring = PixelLight.lightRing(player);
-        boolean ok = hist != 0 && ht != 0 && ring > 0 && sceneStrength > 0f;
+        boolean ok = hist != 0 && ht != 0 && ring > 0 && strength > 0f;
         int prevActive = GlGet.integer(GL13.GL_ACTIVE_TEXTURE);
         GL13.glActiveTexture(GL13.GL_TEXTURE6);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, ok ? ht : 0);
         GL13.glActiveTexture(GL13.GL_TEXTURE9);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, ok ? hist : 0);
+        SceneReflectionActors.bind(loc[21], loc[22], ok);
         GL13.glActiveTexture(prevActive);
         if (loc[15] >= 0) GL20.glUniform1i(loc[15], 6);
         if (loc[16] >= 0) GL20.glUniform1i(loc[16], 9);
-        org.joml.Vector4f off = IsoPuddles.getInstance().getShaderOffset();
         double ox = off.x / 128.0 + off.y / 64.0 + 3.0 * z, oy = off.y / 64.0 - off.x / 128.0 + 3.0 * z;
         GL20.glUniform4f(loc[17], (float) ox, (float) oy, z, ok ? 1f : 0f);
         if (!ok) return;
         if (loc[18] >= 0) GL20.glUniform4f(loc[18], pr[0], pr[1], pr[2], pr[3]);
         if (loc[19] >= 0) GL20.glUniform4f(loc[19], pr[4], pr[5], pr[6], ring);
-        if (loc[20] >= 0) GL20.glUniform4f(loc[20], pr[7], pr[8], pr[9], sceneStrength);
+        if (loc[20] >= 0) GL20.glUniform4f(loc[20], pr[7], pr[8], pr[9], strength);
     }
 
     private static int locProgram = -1;
@@ -181,6 +225,10 @@ public final class PuddleSplash {
             if (f == lastFrame) return;
             lastFrame = f;
             long now = System.nanoTime();
+            if (com.pzoptimizer.pzoe.water.WaterWaves.needsSun(now)) {
+                com.pzoptimizer.pzoe.water.WaterWaves.setSun(PixelLight.sunNow());
+            }
+            com.pzoptimizer.pzoe.water.WaterWaves.updateEnvironment(now, GroundSnow.active() ? GroundSnow.depth : 0f);
             double dt = lastNanos == 0 ? 0 : Math.min(0.1, (now - lastNanos) / 1e9);
             lastNanos = now;
             if (zombie.GameTime.isGamePaused()) dt = 0;
@@ -188,7 +236,19 @@ public final class PuddleSplash {
             // Wraps well before float precision gets coarse; a wrap restarts the rain ripple phases, nothing else
             if (clock > 4096.0) clock -= 4096.0;
 
+            SceneReflectionActors.frame(now - TemporalPass.historyAskedNs < 1_000_000_000L
+                || now - waterSceneAskedNanos < 1_000_000_000L);
             boolean gather = now - splashUploadNanos < 1_000_000_000L;
+            boolean gatherWater = now - waterRipplesAskedNanos < 1_000_000_000L;
+            if (gatherWater && dt > 0 && !waterImpacts.isEmpty()) {
+                for (int i = 0; i < 32; i++) {
+                    WaterImpact impact = waterImpacts.poll();
+                    if (impact == null) break;
+                    add(impact.x(), impact.y(), impact.z(), -impact.strength());
+                }
+            } else if (!gatherWater && !waterImpacts.isEmpty()) {
+                waterImpacts.clear();
+            }
             if (now - lastReportNanos > 15_000_000_000L) {
                 lastReportNanos = now;
                 long s = splashes.get(), u = uploadsWithPoints.get();
@@ -203,18 +263,19 @@ public final class PuddleSplash {
             if (now - lightsAskedNanos < 1_000_000_000L) gatherLights();
             else if (lights.length > 1) lights = new float[] {0f};
             boolean trails = TrailMap.active();
-            if (!gather) ringUsed = 0;
-            if (!gather && !trails) {
+            if (!gather && !gatherWater) ringUsed = 0;
+            if (!gather && !gatherWater && !trails) {
                 if (!walkers.isEmpty()) walkers.clear();
                 if (!wheels.isEmpty()) wheels.clear();
             } else if (dt > 0) {
-                gather((float) dt, gather);
+                gather((float) dt, gather, gatherWater);
             }
             if (trails) {
                 zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
                 TrailMap.frame(dt, cm.getPrecipitationIsSnow() && cm.getPrecipitationIntensity() > 0.05f);
             }
-            publish();
+            com.pzoptimizer.pzoe.water.WaterRippleField.update((float) dt, now);
+            publish(gatherWater);
         } catch (Throwable t) {
             // Never let this break the frame; worst case no splashes
         }
@@ -367,17 +428,25 @@ public final class PuddleSplash {
     // This gather's time step, for the vehicle ploughs
     private static float frameDt;
 
-    private static void gather(float dt, boolean splashAsked) {
+    private static void gather(float dt, boolean splashAsked, boolean waterAsked) {
         frameDt = dt;
         IsoPlayer[] players = IsoPlayer.players;
         if (IsoWorld.instance == null || IsoWorld.instance.currentCell == null) return;
         for (IsoMovingObject o : IsoWorld.instance.currentCell.getObjectList()) {
-            if (o instanceof IsoGameCharacter chr && near(chr, players)) step(chr, dt, splashAsked);
+            if (o instanceof IsoGameCharacter chr && near(chr, players)) step(chr, dt, splashAsked, waterAsked);
         }
         walkersSeen = walkers.size();
-        if (TrailMap.active() || splashAsked) {
+        boolean wheelEffects = TrailMap.active() || splashAsked;
+        if (wheelEffects || waterAsked) {
             for (zombie.vehicles.BaseVehicle v : IsoWorld.instance.currentCell.getVehicles()) {
-                if (near(v.getX(), v.getY(), players)) wheels(v, splashAsked);
+                float x = v.getX(), y = v.getY(), z = v.getZ();
+                if (!near(x, y, players)) continue;
+                if (wheelEffects) wheels(v, splashAsked);
+                if (waterAsked && Math.abs(v.getCurrentSpeedKmHour()) > 2f && z >= 0f && z < 1f) {
+                    IsoGridSquare square = IsoWorld.instance.currentCell.getGridSquare((int) Math.floor(x), (int) Math.floor(y), 0);
+                    boolean wet = wetBody(square, x, y);
+                    if (wet || waterPaths.containsKey(v)) path(waterPaths, v, x, y, z, wet, 0.75f, 1f);
+                }
             }
         }
     }
@@ -391,8 +460,78 @@ public final class PuddleSplash {
         return false;
     }
 
+    static final String FOOTSTEP2 = "zombie/audio/parameters/ParameterFootstepMaterial2";
+
+    static boolean patchWaterSplash(ClassNode node) {
+        MethodNode method = AsmSupport.findMethod(node, "startWaterSplash", "(ZFF)V");
+        if (method == null) return false;
+        for (var insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (!(insn instanceof com.pzoptimizer.shaded.asm.tree.FieldInsnNode field)
+                || field.getOpcode() != Opcodes.GETSTATIC || !field.owner.endsWith("/FishSplashSoundManager")
+                || !field.name.equals("instance")) continue;
+            InsnList call = new InsnList();
+            call.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            call.add(new VarInsnNode(Opcodes.ILOAD, 1));
+            call.add(new VarInsnNode(Opcodes.FLOAD, 2));
+            call.add(new VarInsnNode(Opcodes.FLOAD, 3));
+            call.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/pzoe/PuddleSplash", "waterSplash",
+                "(Lzombie/iso/IsoGridSquare;ZFF)V", false));
+            method.instructions.insertBefore(field, call);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * The FootstepMaterial2 FMOD value (0 none, 2 shallow puddle, 3 deep puddle; glass, garbage and leaves left alone).
+     * Vanilla only splashes above getPuddlesInGround 0.1, which is the full reflective water level, so stepping through
+     * the darker water drawn below it was silent. Any drawn water splashes here (above 0 the shader draws water), deep
+     * from 0.25. Ice and PZOE snow lying on it don't splash.
+     */
+    public static float footMaterial2(float v, IsoGameCharacter c) {
+        if (v != 0f && v != 2f && v != 3f) return v;
+        try {
+            IsoGridSquare sq = c == null ? null : c.getCurrentSquare();
+            if (sq == null || sq.z > 0) return v;
+            if (frozen() || (GroundSnow.active() && com.pzoptimizer.pzoe.weather.WeatherSnow.coverAt(c.getX(), c.getY()) >= 0.5f)) return 0f;
+            float p = sq.getPuddlesInGround();
+            return p > 0.25f ? 3f : p > 0.01f ? 2f : 0f;
+        } catch (Throwable t) {
+            return v;
+        }
+    }
+
+    /** ParameterFootstepMaterial2.calculateCurrentValue: its result goes through footMaterial2. */
+    static boolean patchFootstep2(ClassNode node) {
+        MethodNode m = AsmSupport.findMethod(node, "calculateCurrentValue", "()F");
+        if (m == null) return false;
+        int n = 0;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() != Opcodes.FRETURN) continue;
+            InsnList in = new InsnList();
+            in.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            in.add(new com.pzoptimizer.shaded.asm.tree.FieldInsnNode(Opcodes.GETFIELD, FOOTSTEP2, "character", "Lzombie/characters/IsoGameCharacter;"));
+            in.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/pzoe/PuddleSplash", "footMaterial2",
+                "(FLzombie/characters/IsoGameCharacter;)F", false));
+            m.instructions.insertBefore(insn, in);
+            n++;
+        }
+        return n > 0;
+    }
+
+    private static boolean naturalFloor(IsoGridSquare sq) {
+        zombie.iso.IsoObject floor = sq.getFloor();
+        return floor != null && floor.sprite != null && NaturalGround.isNaturalName(floor.sprite.getName());
+    }
+
     static boolean snowAt(IsoGridSquare sq) {
         return sq.isOutside() && IsoWorld.instance.currentCell.gridSquareIsSnow(sq.x, sq.y, sq.z);
+    }
+
+    // Per foot, not per square: in thin snow a print only goes where a patch is drawn
+    private static boolean snowUnderFoot(IsoGridSquare sq, float fx, float fy) {
+        if (GroundSnow.active()) return sq.z == 0 && com.pzoptimizer.pzoe.weather.WeatherSnow.coverAt(fx, fy) >= 0.35f;
+        return snowAt(sq);
     }
 
     // Shoes pick up water from puddles or soaked ground, not from a drizzle-damp road
@@ -561,7 +700,7 @@ public final class PuddleSplash {
         return false;
     }
 
-    private static void step(IsoGameCharacter chr, float dt, boolean splashAsked) {
+    private static void step(IsoGameCharacter chr, float dt, boolean splashAsked, boolean waterAsked) {
         float x = chr.getX(), y = chr.getY();
         float[] st = walkers.get(chr);
         if (st == null) {
@@ -584,6 +723,12 @@ public final class PuddleSplash {
             IsoGridSquare wsq = chr.getCurrentSquare();
             if (wsq != null) path(walkerPaths, chr, x, y, chr.getZ(), standingWater(wsq), 0.12f, 0.55f);
         }
+        if (waterAsked && d > dt * 1.4f && !chr.isDead() && chr.getVehicle() == null) {
+            boolean wet = wetBody(chr.getCurrentSquare(), x, y);
+            if (wet || waterPaths.containsKey(chr)) {
+                path(waterPaths, chr, x, y, chr.getZ(), wet, 0.18f, Math.min(0.8f, d / dt * 0.15f));
+            }
+        }
         if (d < 0.0005f) {
             // Standing still: the first step after it splashes a little sooner
             st[2] = Math.max(st[2], 0.3f);
@@ -601,22 +746,35 @@ public final class PuddleSplash {
         float side = (st[3] > 0.5f ? 0.09f : -0.09f) / d;
         float fx = x - my * side, fy = y + mx * side;
         boolean wet = groundIsWet(sq);
-        if (splashAsked && wet) {
+        boolean inWater = waterAsked && wetBody(sq, fx, fy);
+        if (inWater || (splashAsked && wet)) {
             float strength = Math.max(0.35f, Math.min(1f, 0.25f + speed * 0.17f));
-            add(fx, fy, chr.getZ(), strength);
+            // The shared ring uses signed strength to route water steps to the body-of-water shader.
+            add(fx, fy, chr.getZ(), inWater ? -strength : strength);
         }
-        if (TrailMap.chunkWanted) {
-            // A boot-sized oval along the walking line: pressed into snow, or wet on a dry floor for ~10 steps
-            if (snowAt(sq)) {
-                TrailMap.stamp(fx, fy, mx, my, 0.13f, 0.07f, 0.9f, 0f, 0f);
-            } else if (trackedMud && st.length > 8 && DustTrails.natural(sq) && groundIsWet(sq)) {
-                // Wet dirt: the shoes come away muddy
-                st[4] = 18f;
+        // A boot-sized oval along the walking line: pressed into snow (drawn by Better Ground Snow or Footprints), or
+        // wet on a dry floor for ~10 steps (Footprints)
+        if ((TrailMap.chunkWanted || TrailMap.snowWanted) && snowUnderFoot(sq, fx, fy)) {
+            TrailMap.stamp(fx, fy, mx, my, 0.13f, 0.07f, 0.9f, 0f, 0f);
+        } else if (TrailMap.chunkWanted) {
+            if (trackedMud && st.length > 8 && sq.isOutside() && groundIsWet(sq) && naturalFloor(sq)) {
+                // Wet dirt: the shoes come away muddy. Wet grass and plants less so (they used not to count at all, and
+                // most ways into a house cross a lawn)
+                float load = DustTrails.natural(sq) ? 18f : 10f;
+                st[4] = st[8] > 0.5f ? Math.max(st[4], load) : load;
                 st[8] = 1f;
             } else if (feetGetWet(sq)) {
-                // A puddle wets them and washes the mud off
-                st[4] = Math.max(st[4], trackedMud ? 14f : 10f);
-                if (st.length > 8) st[8] = 0f;
+                if (st.length > 8 && st[8] > 0.5f) {
+                    // Wet paving wears the mud off over about 20 steps, real puddles faster. Washing it off on the first
+                    // wet step meant nobody ever got mud indoors: after rain every road counts as wet.
+                    st[4] -= IsoPuddles.getInstance().getPuddlesSizeFinalValue() > 0.25f ? 1.5f : 0.4f;
+                    if (st[4] <= 10f) {
+                        st[8] = 0f;
+                        st[4] = 14f;
+                    }
+                } else {
+                    st[4] = Math.max(st[4], trackedMud ? 14f : 10f);
+                }
             } else if (trackedMud && sq.isOutside() && !frozen() && com.pzoptimizer.pzoe.weather.WeatherLook.precipitation() > 0.25f) {
                 // Out in the rain the shoes get wet anyway, without leaving a mark on the wet ground
                 st[4] = Math.max(st[4], 8f);
@@ -624,7 +782,7 @@ public final class PuddleSplash {
                 // Muddy prints are stamped above 0.36 in G, which the shader tints brown; wet ones below
                 boolean mud = st.length > 8 && st[8] > 0.5f;
                 float k = st[4] / (mud ? 18f : trackedMud ? 14f : 10f);
-                TrailMap.stamp(fx, fy, mx, my, 0.12f, 0.06f, 0f, mud ? 0.36f + 0.34f * k : 0.35f * Math.min(1f, k), 0f);
+                TrailMap.stamp(fx, fy, mx, my, 0.16f, 0.08f, 0f, mud ? 0.6f + 0.4f * Math.min(1f, k) : 0.35f * Math.min(1f, k), 0f);
                 st[4] -= 1f;
                 if (st[4] <= 0f && st.length > 8) st[8] = 0f;
             }
@@ -671,9 +829,14 @@ public final class PuddleSplash {
         return sq.z <= 0 && sq.isOutside() && !frozen() && IsoPuddles.getInstance().getPuddlesSizeFinalValue() > 0.02f;
     }
 
+    private static boolean wetBody(IsoGridSquare sq, float x, float y) {
+        return com.pzoptimizer.pzoe.water.WaterSurface.depthAt(sq, x, y) >= 0.45f;
+    }
+
     static final int MAX_STREAMS = 24, STREAM_POINTS = 10, HEAD = 9, PT = 5;
     static final float STREAM_LIFE = 1.8f, STREAM_STEP = 0.2f;
     private static final WeakHashMap<Object, float[]> vehiclePaths = new WeakHashMap<>(), walkerPaths = new WeakHashMap<>();
+    private static final WeakHashMap<Object, float[]> waterPaths = new WeakHashMap<>();
     private static volatile long streamUploadNanos;
     private static boolean streamsAsked;
     // Published: [count, then ax, ay, bx, by, level, age a, age b, half width, strength per segment]
@@ -708,7 +871,8 @@ public final class PuddleSplash {
         if (n < STREAM_POINTS) p[0] = n + 1;
     }
 
-    private static int segments(WeakHashMap<Object, float[]> paths, float[] out, int count, float now) {
+    private static int segments(WeakHashMap<Object, float[]> paths, float[] out, int count, int limit, float now) {
+        boolean water = paths == waterPaths;
         java.util.Iterator<float[]> it = paths.values().iterator();
         while (it.hasNext()) {
             float[] p = it.next();
@@ -721,12 +885,15 @@ public final class PuddleSplash {
             int n = (int) p[0], head = (int) p[1];
             // Newest first: the live end, then back along the path while it's young enough
             float bx = p[2], by = p[3], bz = p[4], bAge = seen, bWet = p[8];
-            for (int k = 0; k < n && count < MAX_STREAMS; k++) {
+            int perMover = water ? Math.min(limit, count + 2) : limit;
+            for (int k = 0; k < n && count < perMover; k++) {
                 int o = HEAD + Math.floorMod(head - k, STREAM_POINTS) * PT;
                 float aAge = now - p[o + 3];
                 if (aAge < 0f || aAge > STREAM_LIFE) break;
                 float ax = p[o], ay = p[o + 1];
-                if (bWet > 0.5f && p[o + 4] > 0.5f && p[o + 2] == bz && (ax != bx || ay != by)) {
+                float dx = ax - bx, dy = ay - by;
+                if (bWet > 0.5f && p[o + 4] > 0.5f && p[o + 2] == bz && (ax != bx || ay != by)
+                    && (!water || dx * dx + dy * dy < 9f)) {
                     int at = 1 + count * 9;
                     out[at] = ax;
                     out[at + 1] = ay;
@@ -745,7 +912,7 @@ public final class PuddleSplash {
                 bAge = aAge;
                 bWet = p[o + 4];
             }
-            if (count >= MAX_STREAMS) break;
+            if (count >= limit && !water) break;
         }
         return count;
     }
@@ -753,6 +920,9 @@ public final class PuddleSplash {
     private static final float[] streamScratch = new float[1 + MAX_STREAMS * 9];
 
     private static void add(float x, float y, float z, float strength) {
+        if (strength < 0f && z >= 0f && z < 1f) {
+            com.pzoptimizer.pzoe.water.WaterRippleField.impulse(x, y, -strength);
+        }
         int at = ringNext * 5;
         ring[at] = x;
         ring[at + 1] = y;
@@ -764,12 +934,12 @@ public final class PuddleSplash {
         splashes.incrementAndGet();
     }
 
-    private static void publish() {
+    private static void publish(boolean waterAsked) {
         float now = (float) clock;
         streamsAsked = System.nanoTime() - streamUploadNanos < 1_000_000_000L;
         if (streamsAsked) {
-            int c = segments(vehiclePaths, streamScratch, 0, now);
-            c = segments(walkerPaths, streamScratch, c, now);
+            int c = segments(vehiclePaths, streamScratch, 0, MAX_STREAMS, now);
+            c = segments(walkerPaths, streamScratch, c, MAX_STREAMS, now);
             float[] out = new float[1 + c * 9];
             System.arraycopy(streamScratch, 1, out, 1, c * 9);
             out[0] = c;
@@ -778,6 +948,17 @@ public final class PuddleSplash {
             if (streams.length > 1) streams = new float[] {0f};
             vehiclePaths.clear();
             walkerPaths.clear();
+        }
+        if (waterAsked) {
+            int count = segments(waterPaths, streamScratch, 0, com.pzoptimizer.pzoe.water.WaterWaves.MAX_WAKES, now);
+            if (count > 0 || waterStreams[0] != 0f) {
+                float[] snapshot = java.util.Arrays.copyOf(streamScratch, 1 + count * 9);
+                snapshot[0] = count;
+                waterStreams = snapshot;
+            }
+        } else if (!waterPaths.isEmpty() || waterStreams[0] != 0f) {
+            waterPaths.clear();
+            waterStreams = new float[] {0f};
         }
         int alive = 0;
         for (int i = 0; i < ringUsed; i++) {
@@ -860,6 +1041,8 @@ public final class PuddleSplash {
                 loc[18] = GL20.glGetUniformLocation(prog, "PZOReflRef");
                 loc[19] = GL20.glGetUniformLocation(prog, "PZOReflU");
                 loc[20] = GL20.glGetUniformLocation(prog, "PZOReflV");
+                loc[21] = GL20.glGetUniformLocation(prog, "PZOReflActors");
+                loc[22] = GL20.glGetUniformLocation(prog, "PZOReflActorRegion");
                 sceneWanted = loc[17] >= 0;
                 TrailMap.puddleWanted = loc[3] >= 0;
             }
@@ -879,7 +1062,7 @@ public final class PuddleSplash {
             int count = 0, n = (int) snap[1];
             for (int i = 0; i < n && count < MAX; i++) {
                 int at = 2 + i * 5;
-                if ((int) snap[at + 2] != z) continue;
+                if ((int) snap[at + 2] != z || snap[at + 4] < 0f) continue;
                 // Same placement as IsoPuddlesGeometry: a level's ground is drawn at x - 3z, y - 3z on screen level 0
                 float wx = snap[at] - 3f * z, wy = snap[at + 1] - 3f * z;
                 buf.put(IsoUtils.XToScreen(wx, wy, 0f, 0) - off.x);

@@ -163,16 +163,21 @@ public final class TrailMap {
         float[] fade = null;
         fadeTimer += dt;
         if (fadeTimer >= 0.5) {
-            // Per half second: snow fills a print in about 2 minutes (25 s while snowing), wet marks dry in about a
-            // minute, wakes settle in about 2 seconds
-            fade = new float[] {snowing ? 0.02f : 0.004f, 0.008f, 0.25f};
+            // Per half second: snow fills a print in about 2 minutes (25 s while snowing), wet marks dry in about 2
+            // minutes and muddy ones (stamped up to 1) stay brown for 2-3 and go in about 5, wakes settle in about 2
+            // seconds. At 0.008 mud went grey in 15 s and nobody saw it.
+            fade = new float[] {snowing ? 0.02f : 0.004f, 0.0016f, 0.25f};
             fadeTimer = 0;
-            // Deep snow: a waded trench stays until new snow fills it (about 0.7 of a blanket) or it settles over a
-            // day and a half of game time, the same as the paths WeatherSnow slows people by
-            if (GroundSnow.depthNow() > 1.0f) {
+            // Lying snow keeps its marks on game time. Deep snow: a waded trench stays until new snow fills it (about
+            // 0.7 of a blanket) or it settles over a day and a half, the same as the paths WeatherSnow slows people by.
+            // Thin snow: a print fills with about a quarter blanket of new snow or softens away over a day.
+            float lying = GroundSnow.depthNow();
+            if (lying > 0.05f) {
+                boolean deep = lying > 1.0f;
                 zombie.GameTime gt = zombie.GameTime.getInstance();
                 double sf = GroundSnow.snowfall, gh = gt == null ? 0 : gt.getWorldAgeHours();
-                if (lastSnowfall >= 0) deepFadeAcc += Math.max(0, sf - lastSnowfall) * 1.5 + Math.max(0, gh - lastGameHours) / 36.0;
+                if (lastSnowfall >= 0) deepFadeAcc += Math.max(0, sf - lastSnowfall) * (deep ? 1.5 : 4.0)
+                    + Math.max(0, gh - lastGameHours) / (deep ? 36.0 : 24.0);
                 lastSnowfall = sf;
                 lastGameHours = gh;
                 fade[0] = 0f;

@@ -28,7 +28,7 @@ final class FlashLights {
 
     static final int MAX = 16;
     private static final float RANGE_SQ = 40f * 40f;
-    static final int KIND_SHOT = 0, KIND_EXPLOSION = 1, KIND_MOLOTOV = 2;
+    static final int KIND_SHOT = 0, KIND_EXPLOSION = 1, KIND_MOLOTOV = 2, KIND_SPARK = 3;
 
     // Render thread sets it from the uniform lookup
     static volatile boolean wanted;
@@ -124,8 +124,9 @@ final class FlashLights {
         seen = seenNext;
         seenNext = swap;
         for (float[] e; (e = events.poll()) != null; ) {
-            if (e[3] == KIND_EXPLOSION) add(px, py, e[0], e[1], e[2], 13f, 3.2f, 2.3f, 1.3f, now, 0.6f, KIND_EXPLOSION);
-            else add(px, py, e[0], e[1], e[2], 8f, 2.0f, 1.1f, 0.4f, now, 0.7f, KIND_MOLOTOV);
+            if (e[3] == KIND_SPARK) add(px, py, e[0], e[1], e[2], 2.8f, 1.15f, 0.62f, 0.18f, now, 0.13f, KIND_SPARK);
+            else if (e[3] == KIND_EXPLOSION) add(px, py, e[0], e[1], e[2], 13f, 3.2f, 2.3f, 1.3f, now, 0.6f, KIND_EXPLOSION);
+            else if (e[3] == KIND_MOLOTOV) add(px, py, e[0], e[1], e[2], 8f, 2.0f, 1.1f, 0.4f, now, 0.7f, KIND_MOLOTOV);
         }
     }
 
