@@ -82,6 +82,10 @@ public final class WeatherLook {
         return lookValid ? precip : cm().getPrecipitationIntensity();
     }
 
+    public static boolean isSnow() {
+        return lookValid ? shownSnow : cm().getPrecipitationIsSnow();
+    }
+
     public static float wind() {
         return lookValid ? wind : cm().getWindIntensity();
     }

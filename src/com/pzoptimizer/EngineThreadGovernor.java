@@ -26,11 +26,10 @@ public class EngineThreadGovernor {
                 PZONative.exemptFromPowerThrottling(); // opt out of Windows 11 EcoQoS
                 if (PZONative.isLowCoreCpu()) {
                     PZONative.setPriorityLevel(0);
-                    PZOLogger.info("[EngineThreadGovernor] Low core count CPU: process left at NORMAL_PRIORITY_CLASS, working set not locked");
+                    PZOLogger.info("[EngineThreadGovernor] Low core count CPU: process left at NORMAL_PRIORITY_CLASS");
                 } else {
-                    PZONative.lockWorkingSet();
                     PZONative.setPriorityLevel(2); // HIGH_PRIORITY_CLASS
-                    PZOLogger.success("[EngineThreadGovernor] Process working set locked and set to HIGH_PRIORITY_CLASS");
+                    PZOLogger.success("[EngineThreadGovernor] Process set to HIGH_PRIORITY_CLASS");
                 }
             }
         } catch (Throwable t) {

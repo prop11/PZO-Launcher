@@ -48,6 +48,7 @@ public final class PzoeExtension implements Extension {
         Set<String> s = new HashSet<>();
         for (String t : PixelLight.TARGETS) s.add(t.replace('/', '.'));
         for (String t : ModelSnow.TARGETS) s.add(t.replace('/', '.'));
+        for (String t : MuzzleFlashHooks.TARGETS) s.add(t.replace('/', '.'));
         s.add(PUDDLES.replace('/', '.'));
         s.add(PUDDLES_SHADER.replace('/', '.'));
         s.add(WaterWaves.TARGET.replace('/', '.'));
@@ -66,6 +67,11 @@ public final class PzoeExtension implements Extension {
         s.add(WaterBuoyancy.CELL.replace('/', '.'));
         s.add(WaterBuoyancy.ITEM.replace('/', '.'));
         s.add(UnderwaterView.SOUND_MANAGER.replace('/', '.'));
+        s.add(WeatherAudio.AMBIENT.replace('/', '.'));
+        s.add(RoomAcoustics.EMITTER.replace('/', '.'));
+        s.add(RoomAcoustics.OCCLUSION.replace('/', '.'));
+        s.add(GeneratorLights.TARGET.replace('/', '.'));
+        for (String target : WeatherAudio.PARAMETERS) s.add(target.replace('/', '.'));
         s.add(com.pzoptimizer.pzoe.weather.WeatherEffects.VEHICLE.replace('/', '.'));
         s.add(com.pzoptimizer.pzoe.weather.WeatherSnow.CAR.replace('/', '.'));
         s.add(WEATHER_SHADER.replace('/', '.'));
@@ -85,6 +91,11 @@ public final class PzoeExtension implements Extension {
         byte[] cur = out != null ? out : bytes;
         byte[] snow = ModelSnow.postTransform(loader, cn, cur);
         if (snow != null) out = cur = snow;
+        if (MuzzleFlashHooks.TARGETS.contains(cn)) {
+            byte[] flash = logged(AsmSupport.transform(cur, loader, "Muzzle flash " + cn, MuzzleFlashHooks::patch),
+                cn + ": PZOE muzzle flash hook");
+            if (flash != null) out = cur = flash;
+        }
         byte[] own = switch (cn) {
             case PUDDLES -> {
                 byte[] splash = logged(AsmSupport.transform(cur, loader, "IsoPuddles splash frame", PuddleSplash::patchPuddles),
@@ -109,6 +120,17 @@ public final class PzoeExtension implements Extension {
                 "IsoCell.update: immersed world items");
             case WaterBuoyancy.ITEM -> logged(AsmSupport.transform(cur, loader, "IsoWorldInventoryObject buoyancy", WaterBuoyancy::patchItem),
                 "IsoWorldInventoryObject: register immersed items");
+            case RoomAcoustics.EMITTER -> logged(AsmSupport.transform(cur, loader, "Room audio reflections", RoomAcoustics::patchEmitter),
+                "FMODSoundEmitter: room-dependent early reflections");
+            case RoomAcoustics.OCCLUSION -> logged(AsmSupport.transform(cur, loader, "Room audio openings", RoomAcoustics::patchOcclusion),
+                "ParameterOcclusion: sound transmission through room openings");
+            case GeneratorLights.TARGET -> logged(AsmSupport.transform(cur, loader, "Generator lighting", GeneratorLights::patch),
+                "IsoGenerator: visual startup and low-fuel lighting");
+            case WeatherAudio.AMBIENT -> logged(AsmSupport.transform(cur, loader, "Sheltered weather audio", WeatherAudio::patchAmbient),
+                "AmbientStreamManager.update: listener shelter and weather loops");
+            case WeatherAudio.RAIN, WeatherAudio.SNOW, WeatherAudio.WIND -> logged(
+                AsmSupport.transform(cur, loader, "Weather audio parameter", WeatherAudio::patchParameter),
+                cn + ": sheltered weather intensity");
             case UnderwaterView.SOUND_MANAGER -> logged(AsmSupport.transform(cur, loader, "SoundManager underwater filter", UnderwaterView::patchSoundManager),
                 "SoundManager.Update: PZOE underwater low pass");
             case GoreCore.DEAD_BODY -> logged(AsmSupport.transform(cur, loader, "IsoDeadBody buoyancy", WaterBuoyancy::patchCorpse),
@@ -120,7 +142,10 @@ public final class PzoeExtension implements Extension {
                     "FBORenderCell.renderRainSplashes: roof runoff drops");
                 byte[] blood = logged(AsmSupport.transform(runoff != null ? runoff : cur, loader, "FBORenderCell floor blood", GoreCore::patchCell),
                     "FBORenderCell.renderOneLevel_Blood: floor splat sprites off while Ground Blood draws them");
-                yield blood != null ? blood : runoff;
+                byte[] base = blood != null ? blood : runoff;
+                byte[] glass = logged(AsmSupport.transform(base != null ? base : cur, loader, "Window condensation", WindowCondensation::patch),
+                    "FBORenderCell: condensation on visible window glass");
+                yield glass != null ? glass : base;
             }
             case GoreCore.CHUNK -> logged(AsmSupport.transform(cur, loader, "IsoChunk blood splat", GoreCore::patchChunk),
                 "IsoChunk.addBloodSplat: no chunk re-bake per splat while Ground Blood draws them");
@@ -177,8 +202,13 @@ public final class PzoeExtension implements Extension {
                     "CarController.update: PZOE water drag");
                 yield water != null ? water : weather;
             }
-            case WeatherStorm.THUNDER_CLASS -> logged(AsmSupport.transform(cur, loader, "ThunderStorm weather", WeatherStorm::patchThunder),
-                "ThunderStorm: PZOE weather lightning direction and thunder gameplay");
+            case WeatherStorm.THUNDER_CLASS -> {
+                byte[] storm = logged(AsmSupport.transform(cur, loader, "ThunderStorm weather", WeatherStorm::patchThunder),
+                    "ThunderStorm: PZOE weather lightning direction and thunder gameplay");
+                byte[] audio = logged(AsmSupport.transform(storm != null ? storm : cur, loader, "ThunderStorm shelter", WeatherAudio::patchThunder),
+                    "ThunderStorm: sheltered strikes and rumbles");
+                yield audio != null ? audio : storm;
+            }
             case com.pzoptimizer.pzoe.weather.WeatherAuthority.FLOAT_CLASS -> logged(AsmSupport.transform(cur, loader, "ClimateFloat writers", com.pzoptimizer.pzoe.weather.WeatherAuthority::patchFloat),
                 "ClimateFloat setters: PZOE weather follows other mods' climate values");
             case com.pzoptimizer.pzoe.weather.WeatherAuthority.BOOL_CLASS -> logged(AsmSupport.transform(cur, loader, "ClimateBool writers", com.pzoptimizer.pzoe.weather.WeatherAuthority::patchBool),
@@ -275,6 +305,35 @@ public final class PzoeExtension implements Extension {
                 TemporalPass.blend = b instanceof Number n3 ? (float) Math.max(0.0, Math.min(0.9, n3.doubleValue() / 100.0)) : 0.5f;
                 return Boolean.TRUE;
             // Window Reflections: strength in percent (the shader itself says the card is on)
+            case "weatherAudio":
+                WeatherAudio.enabled = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "windShelter":
+                PixelLight.windShelter = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "roomAcoustics":
+                RoomAcoustics.enabled = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "windDebris":
+                WindDebris.enabled = Boolean.TRUE.equals(a);
+                WindDebris.ownsLeaves = Boolean.TRUE.equals(b);
+                return Boolean.TRUE;
+            case "weatherGround":
+                WeatherGround.leaks = Boolean.TRUE.equals(a);
+                WeatherGround.drainage = Boolean.TRUE.equals(b);
+                WeatherGround.debris = Boolean.TRUE.equals(c);
+                return Boolean.TRUE;
+            case "generatorLights":
+                GeneratorLights.enabled = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "waterIceChanged":
+                return zombie.network.GameServer.server ? com.pzoptimizer.pzoe.water.WaterIce.changedHoles() : "";
+            case "waterIceApply":
+                if (zombie.network.GameClient.client) com.pzoptimizer.pzoe.water.WaterIce.apply(a == null ? "" : a.toString());
+                return Boolean.TRUE;
+            case "windowCondensation":
+                WindowCondensation.enabled = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
             case "winRefl":
                 PixelLight.winReflStrength = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
                 return Boolean.TRUE;

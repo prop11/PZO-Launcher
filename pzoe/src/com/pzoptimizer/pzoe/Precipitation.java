@@ -57,7 +57,7 @@ public final class Precipitation {
     private static int lastFrame = Integer.MIN_VALUE;
 
     // Render thread
-    private static int program, vao, locA, locB, locC, locL, locD, locE, locLight;
+    private static int program, vao, locA, locB, locC, locL, locD, locE, locLight, locHeight, locShelter;
     private static volatile long draws;
 
     private Precipitation() {}
@@ -66,6 +66,10 @@ public final class Precipitation {
         enabled = on;
         quality = Math.max(1, Math.min(3, q));
         amount = (float) Math.max(0.25, Math.min(3.0, pct / 100.0));
+    }
+
+    static boolean enabled() {
+        return enabled && !failed;
     }
 
     private static boolean active() {
@@ -182,6 +186,15 @@ public final class Precipitation {
                         GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex);
                         GL13.glActiveTexture(GL13.GL_TEXTURE0);
                     }
+                    int height = PixelLight.heightTexture(player);
+                    float shelter = height != 0 && lit ? PixelLight.windShelterStrength() : 0f;
+                    if (shelter > 0f) {
+                        GL13.glActiveTexture(GL13.GL_TEXTURE4);
+                        GL11.glBindTexture(GL11.GL_TEXTURE_2D, height);
+                        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                    }
+                    GL20.glUniform1i(locHeight, 4);
+                    GL20.glUniform3f(locShelter, PixelLight.worldWindX, PixelLight.worldWindY, shelter);
                     GL20.glUniform1i(locLight, 7);
                     GL20.glUniform4f(locA, v[0], v[1], v[2], v[3]);
                     GL20.glUniform4f(locB, v[4], v[5], v[6], v[7]);
@@ -233,6 +246,8 @@ public final class Precipitation {
         locD = GL20.glGetUniformLocation(prog, "PZOPrecipD");
         locE = GL20.glGetUniformLocation(prog, "PZOPrecipE");
         locLight = GL20.glGetUniformLocation(prog, "PZOLight");
+        locHeight = GL20.glGetUniformLocation(prog, "PZOPrecipHeight");
+        locShelter = GL20.glGetUniformLocation(prog, "PZOPrecipShelter");
         PZOLogger.info("[Precipitation] GPU rain and snow ready");
         return true;
     }
@@ -249,7 +264,7 @@ public final class Precipitation {
         float leaves = Math.min(1f, (autumn * (0.35f + 0.65f * wind) + gale)) * k;
         float lying = Math.max(GroundSnow.active() ? Math.min(1f, GroundSnow.depth * 3f) : 0f, Math.min(1f, PixelLight.snowCover * 1.5f));
         float drift = lying * Math.max(0f, (wind - 0.35f) / 0.65f) * k;
-        return new float[] {leaves, drift, wind};
+        return new float[] {WindDebris.replacesLegacyLeaves() ? 0f : leaves, drift, wind};
     }
 
     private static int compile(int type, String src, String what) {
@@ -282,6 +297,37 @@ public final class Precipitation {
         // Leaves, blowing snow, wind strength, camera zoom (offscreen pixels per screen pixel)
         uniform vec4 PZOPrecipE;
         uniform sampler2D PZOLight;
+        uniform sampler2D PZOPrecipHeight;
+        uniform vec3 PZOPrecipShelter;
+
+        float pzoWindExposure(sampler2D heights, vec2 position, float level, float ring, vec3 wind)
+        {
+            if (wind.z <= 0.0 || ring < 1.0) return 1.0;
+            vec2 ray = -wind.xy;
+            ray.x = abs(ray.x) < 0.0001 ? 0.0001 : ray.x;
+            ray.y = abs(ray.y) < 0.0001 ? 0.0001 : ray.y;
+            vec2 cell = floor(position);
+            vec2 stepDir = sign(ray), stride = 1.0 / abs(ray);
+            vec2 edge = (stepDir * (cell - position) + max(stepDir, 0.0)) * stride;
+            for (int i = 0; i < 6; i++) {
+                bool xSide = edge.x < edge.y;
+                float distance = xSide ? edge.x : edge.y;
+                if (distance >= 4.0) break;
+                vec2 owner = cell + (xSide ? vec2(max(stepDir.x, 0.0), 0.0) : vec2(0.0, max(stepDir.y, 0.0)));
+                vec4 texel = texture2D(heights, (mod(owner, ring) + 0.5) / ring);
+                float wall = floor((xSide ? texel.b : texel.g) * 255.0 + 0.5);
+                if (mod(wall, 2.0) < 0.5 && wall / 32.0 > level + 0.42)
+                    return 1.0 - wind.z * 0.78 * (1.0 - smoothstep(0.25, 4.0, distance));
+                if (xSide) {
+                    cell.x += stepDir.x;
+                    edge.x += stride.x;
+                } else {
+                    cell.y += stepDir.y;
+                    edge.y += stride.y;
+                }
+            }
+            return 1.0;
+        }
 
         float pzoPHash(vec2 p)
         {
@@ -489,6 +535,9 @@ public final class Precipitation {
         {
             float rain = PZOPrecipB.y, snow = PZOPrecipB.z;
             vec2 px = vec2(gl_FragCoord.x, PZOPrecipA.y - gl_FragCoord.y);
+            vec2 ground = px + PZOPrecipA.zw;
+            vec2 world = vec2(ground.x + 2.0 * ground.y, 2.0 * ground.y - ground.x) / PZOPrecipC.w + 3.0 * PZOPrecipL.z;
+            float windExposure = pzoWindExposure(PZOPrecipHeight, world, PZOPrecipL.z, PZOPrecipL.x, PZOPrecipShelter);
             float t = PZOPrecipB.x;
             float layers = PZOPrecipD.y;
             float aRain = 0.0, aSnow = 0.0;
@@ -546,6 +595,10 @@ public final class Precipitation {
                 }
             }
             if (PZOPrecipE.y > 0.001) aSnow += pzoDriftLayer(px, t, PZOPrecipE.y, normalize(PZOPrecipC.xy + vec2(0.0001, 0.0)), PZOPrecipE.z);
+            aRain *= mix(0.35, 1.0, windExposure);
+            aSnow *= mix(0.56, 1.0, windExposure);
+            aHail *= mix(0.70, 1.0, windExposure);
+            leaf.a *= windExposure;
             float a = clamp((aRain * 0.6 + aSnow * 0.85 + aHail + leaf.a) * PZOPrecipB.w, 0.0, 1.0);
             if (a < 0.004) discard;
             vec3 light = PZOPrecipL.w > 0.5 ? pzoPLight(px + PZOPrecipA.zw) : vec3(0.35 + 0.65 * PZOPrecipD.x);

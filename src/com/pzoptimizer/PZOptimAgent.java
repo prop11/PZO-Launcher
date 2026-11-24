@@ -1054,7 +1054,11 @@ public class PZOptimAgent {
                 if (tr != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoTree.isPlayerInsideARoom: no crash when the player's square has no room");
                 }
-                return tr;
+                byte[] cutaway = AsmSupport.transform(tr != null ? tr : classfileBuffer, loader, "IsoTree crown cutaway", TreeCutaway::patchTree);
+                if (cutaway != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoTree: smooth crown recovery and fewer cutaway visibility checks");
+                }
+                return cutaway != null ? cutaway : tr;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null) {
                 byte[] mip = AsmSupport.transform(classfileBuffer, loader, "FBORenderChunk mip levels", ChunkMipLimit::patchRenderChunk);

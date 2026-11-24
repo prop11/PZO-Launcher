@@ -48,7 +48,7 @@ public final class WaterWaves {
     private static java.lang.ref.WeakReference<zombie.iso.IsoCell> seasonCell = new java.lang.ref.WeakReference<>(null);
 
     private record Uniforms(int sampler, int ready, int lights, int lightCount, int[] scene, int ripples, int rippleCount,
-                            int seasons, int iceHoles, int iceHoleCount, int sun, int zoom, int wakes, int wakeCount,
+                            int seasons, int iceHoles, int iceHoleCount, int condition, int sun, int zoom, int wakes, int wakeCount,
                             int terrain, int terrainRegion, int life, int storm, int stormReady, int cloud, int cloudInfo,
                             int rippleField, int rippleRegion) {}
 
@@ -77,6 +77,7 @@ public final class WaterWaves {
         int seasons = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterSeason");
         int iceHoles = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterIceHoles[0]");
         int iceHoleCount = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterIceHoleCount");
+        int condition = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterIceCondition");
         int sun = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterSun");
         int zoom = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterZoom");
         int wakes = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterWakes[0]");
@@ -92,7 +93,7 @@ public final class WaterWaves {
         int rippleRegion = GL20.glGetUniformLocation(program.getShaderID(), "PZOEWaterRippleRegion");
         if (sampler < 0 && lights < 0 && scene == null && ripples < 0 && seasons < 0 && sun < 0 && zoom < 0 && storm < 0) programs.remove(shader);
         else programs.put(shader, new Uniforms(sampler, ready, lights, lightCount, scene, ripples, rippleCount, seasons,
-            iceHoles, iceHoleCount, sun, zoom, wakes, wakeCount, terrain, terrainRegion, life, storm, stormReady, cloud, cloudInfo,
+            iceHoles, iceHoleCount, condition, sun, zoom, wakes, wakeCount, terrain, terrainRegion, life, storm, stormReady, cloud, cloudInfo,
             rippleField, rippleRegion));
     }
 
@@ -119,6 +120,7 @@ public final class WaterWaves {
             seasonsAskedNanos = System.nanoTime();
             GL20.glUniform4f(uniforms.seasons(), WaterIce.coverage(ice), algae, leaves, pollen);
             if (uniforms.life() >= 0) GL20.glUniform3f(uniforms.life(), life, snow, thaw);
+            WaterIce.bindCondition(uniforms.condition(), player);
             if (uniforms.iceHoles() >= 0) uploadIceHoles(uniforms, player);
         }
         if (uniforms.sampler() < 0 || uniforms.ready() < 0) return;
@@ -187,6 +189,7 @@ public final class WaterWaves {
             seasonHour = Double.NaN;
             return;
         }
+        WaterIce.sampleObservers(now);
         var world = zombie.iso.IsoWorld.instance;
         var time = zombie.GameTime.getInstance();
         var climate = zombie.iso.weather.ClimateManager.getInstance();

@@ -744,7 +744,7 @@ if is_proton:
     pzo_args.extend([
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        f"-Xms{min(4096, ram_mb // 2)}m",
+        "-Xms1024m",
         f"-Xmx{ram_mb}m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -755,8 +755,7 @@ if is_proton:
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
-        "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
+        "-XX:+UseNUMA"
     ])
     # Windows 6.1 and 10.0 platform blocks (dropping duplicate agentlib entries)
     data["windows"] = {
@@ -778,6 +777,7 @@ else:
     # Native Linux. The vanilla flags stripped by DROP_PREFIXES are re-added; without zomboid.steam the
     # game skips Steam init and the Workshop mod list comes up empty
     pzo_args.extend([
+        "-Xms1024m",
         f"-Xmx{ram_mb}m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -787,7 +787,6 @@ else:
         "-XX:+PerfDisableSharedMem",
         "-XX:InitiatingHeapOccupancyPercent=45",
         "-XX:G1ReservePercent=15",
-        "-XX:+AlwaysPreTouch",
         "-XX:+UnlockExperimentalVMOptions",
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
@@ -798,46 +797,6 @@ else:
     ])
     if "windows" in data:
         del data["windows"]
-
-# Older or low-end PC (issue #45), same rules as CompatMode in the engine: no heap pre-touch (it commits the whole
-# starting heap before the game starts) and a 1 GB starting heap that grows as needed. pzo_config.json "compat_mode"
-# (on / off) overrides the detection.
-def compat_reasons():
-    why = []
-    try:
-        import platform
-        if platform.machine().lower() in ("x86_64", "amd64"):
-            with open("/proc/cpuinfo", encoding="utf-8", errors="ignore") as f:
-                flags = next((l for l in f if l.startswith("flags")), "")
-            # The kernel hides avx2 when the OS has not enabled the AVX register state
-            if flags and " avx2" not in flags:
-                why.append("no AVX2")
-    except Exception:
-        pass
-    threads = os.cpu_count() or 0
-    if 0 < threads <= 4:
-        why.append("%d threads" % threads)
-    try:
-        with open("/proc/meminfo") as f:
-            kb = int(next(l for l in f if l.startswith("MemTotal")).split()[1])
-        if kb / 1024.0 / 1024.0 < 7.5:
-            why.append("%.1f GB RAM" % (kb / 1024.0 / 1024.0))
-    except Exception:
-        pass
-    return why
-
-compat_mode = "auto"
-try:
-    with open(os.path.join(os.path.expanduser("~"), "Zomboid", "Lua", "pzo_config.json"), encoding="utf-8") as f:
-        compat_mode = json.load(f).get("compat_mode", "auto")
-except Exception:
-    pass
-reasons = compat_reasons()
-compat = compat_mode == "on" or (compat_mode != "off" and bool(reasons))
-if compat:
-    print("[!] Compatibility mode for older hardware (%s): no heap pre-touch, 1 GB starting heap" % (", ".join(reasons) or "forced on"))
-    pzo_args = [a for a in pzo_args if a != "-XX:+AlwaysPreTouch"]
-    pzo_args = ["-Xms1024m" if a.startswith("-Xms") else a for a in pzo_args]
 
 data["vmArgs"] = filtered_args + pzo_args
 

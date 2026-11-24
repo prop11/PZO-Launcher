@@ -62,7 +62,7 @@ $Json5OrLess = @"
         "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        "-Xms2048m",
+        "-Xms1024m",
         "-Xmx4096m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -74,8 +74,7 @@ $Json5OrLess = @"
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
-        "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
+        "-XX:+UseNUMA"
     ],
     "windows": {
         "6.1": {
@@ -106,7 +105,7 @@ $Json6To12 = @"
         "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        "-Xms3072m",
+        "-Xms1024m",
         "-Xmx6144m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -118,8 +117,7 @@ $Json6To12 = @"
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
-        "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
+        "-XX:+UseNUMA"
     ],
     "windows": {
         "6.1": {
@@ -151,7 +149,7 @@ $Json13To20_G1GC = @"
         "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        "-Xms4096m",
+        "-Xms1024m",
         "-Xmx8192m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -163,8 +161,7 @@ $Json13To20_G1GC = @"
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
-        "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
+        "-XX:+UseNUMA"
     ],
     "windows": {
         "6.1": {
@@ -196,7 +193,7 @@ $Json13To20_ZGC = @"
         "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        "-Xms4096m",
+        "-Xms1024m",
         "-Xmx8192m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -208,8 +205,7 @@ $Json13To20_ZGC = @"
         "-XX:+UseSuperWord",
         "-XX:MaxInlineLevel=15",
         "-XX:InlineSmallCode=2500",
-        "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
+        "-XX:+UseNUMA"
     ],
     "windows": {
         "6.1": {
@@ -242,7 +238,7 @@ $JsonAbove20 = @"
         "-XX:+EnableDynamicAgentLoading",
         "--enable-native-access=ALL-UNNAMED",
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-        "-Xms8192m",
+        "-Xms1024m",
         "-Xmx16384m",
         "-Dzomboid.steam=1",
         "-Dzomboid.znetlog=1",
@@ -257,8 +253,7 @@ $JsonAbove20 = @"
         "-XX:+UseZGC",
         "-XX:ZAllocationSpikeTolerance=5",
         "-XX:+UseStringDeduplication",
-        "-XX:+UseNUMA",
-        "-XX:+AlwaysPreTouch"
+        "-XX:+UseNUMA"
     ]
 }
 "@
@@ -630,10 +625,20 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
     }
     if ($null -eq $old -or $null -eq $old.vmArgs) { return $TemplateJson }
 
-    $oldArgs = @(Split-PZOJoinedArgs $old.vmArgs | Where-Object {
+    $oldVmArgs = @(Split-PZOJoinedArgs $old.vmArgs)
+    $legacyHeap = $false
+    if ($old.mainClass -ceq "com/pzoptimizer/PZOEntrypoint" -and $oldVmArgs -ccontains "-XX:+AlwaysPreTouch") {
+        $heapArgs = @($oldVmArgs | Where-Object { $_ -cmatch '^-Xm[sx]' } | Sort-Object)
+        $legacyHeap = ($heapArgs -join " ") -cin @(
+            "-Xms2048m -Xmx4096m", "-Xms3072m -Xmx6144m", "-Xms4096m -Xmx8192m",
+            "-Xms4096m -Xmx12288m", "-Xms6144m -Xmx12288m", "-Xms8192m -Xmx16384m"
+        )
+    }
+
+    $oldArgs = @($oldVmArgs | Where-Object {
         $_ -notmatch 'java\.awt\.headless|pzo_native64|instrument=PZOptimEngine|UseCompactObjectHeaders' -and
         -not ($zbInLaunchOptions -and $_ -match 'zbNative|ZombieBuddy\.jar') -and
-        -not ($CompatActive -and $_ -eq "-XX:+AlwaysPreTouch") -and
+        $_ -cne "-XX:+AlwaysPreTouch" -and
         -not (Test-PZOGcArg $_)
     })
 
@@ -683,7 +688,10 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
             continue
         }
 
-        if ($key -ceq "-Xms") { $oldHasXms = $true }
+        if ($key -ceq "-Xms") {
+            if ($legacyHeap) { continue }
+            $oldHasXms = $true
+        }
         if ($key -ceq "-Xmx") { $oldHasXmx = $true }
 
         $found = $false
@@ -746,7 +754,7 @@ function Merge-PZOUserSettings($TemplateJson, $Path, [bool]$CompatActive) {
         if ($oldBlock) {
             foreach ($arg in @(Split-PZOJoinedArgs $oldBlock.Value.vmArgs)) {
                 if ($arg -match 'pzo_native64|instrument=PZOptimEngine|zbNative|UseCompactObjectHeaders') { continue }
-                if (Test-PZOGcArg $arg) { continue }
+                if ($arg -ceq "-XX:+AlwaysPreTouch" -or (Test-PZOGcArg $arg)) { continue }
                 $key = Get-PZOArgKey $arg
                 if ($key -eq "gc") {
                     if (-not $tplBlock -and -not $CompatActive) { [void]$blockArgs.Add($arg) }
@@ -967,30 +975,25 @@ function Apply-PZOConfiguration([string]$LaunchMode = "normal") {
 
     $chosenJson = ""
     if ($TotalRamGB -le 5) {
-        Write-Host "Applying profile: <= 5 GB RAM (Heap: 2048m - 4096m)" -ForegroundColor Green
+        Write-Host "Applying profile: <= 5 GB RAM (Heap: 1024m - 4096m)" -ForegroundColor Green
         $chosenJson = $Json5OrLess
     }
     elseif ($TotalRamGB -le 12) {
-        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 3072m - 6144m)" -ForegroundColor Green
+        Write-Host "Applying profile: 6 - 12 GB RAM (Heap: 1024m - 6144m)" -ForegroundColor Green
         $chosenJson = $Json6To12
     }
     elseif ($TotalRamGB -le 20) {
-        Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 4096m - 8192m)" -ForegroundColor Green
+        Write-Host "Applying profile: 13 - 20 GB RAM (Heap: 1024m - 8192m)" -ForegroundColor Green
         $chosenJson = $Json13To20_G1GC
     }
     else {
-        Write-Host "Applying profile: > 20 GB RAM (Heap: 8192m - 16384m)" -ForegroundColor Green
+        Write-Host "Applying profile: > 20 GB RAM (Heap: 1024m - 16384m)" -ForegroundColor Green
         $chosenJson = $JsonAbove20
     }
 
-    # Compatibility mode: no heap pre-touch (it commits the whole starting heap before the game starts), a 1 GB
-    # starting heap that grows as needed, and G1
     $Compat = Get-PZOCompatMode $TotalRamBytes
     if ($Compat.Active) {
-        Write-Host "    [!] Compatibility mode for older hardware ($($Compat.Reasons)): no heap pre-touch, 1 GB starting heap, G1GC." -ForegroundColor Cyan
-        $chosenJson = $chosenJson -replace ',\s*"-XX:\+AlwaysPreTouch"', ''
-        $chosenJson = $chosenJson -replace '"-XX:\+AlwaysPreTouch",\s*', ''
-        $chosenJson = $chosenJson -replace '"-Xms\d+m"', '"-Xms1024m"'
+        Write-Host "    [!] Compatibility mode for older hardware ($($Compat.Reasons)): G1GC, starting heap capped at 1 GiB." -ForegroundColor Cyan
     }
 
     # Same choice as ZomboidConfigMigrator.pickGc: G1 below 16 GB (they report a bit under 16) and in compatibility

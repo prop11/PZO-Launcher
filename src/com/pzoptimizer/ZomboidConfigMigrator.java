@@ -17,8 +17,8 @@ import java.util.Objects;
  *
  * buildTarget is the one place that says what the file should contain for this PC, and the file needs updating exactly
  * when that differs from what's on disk, so the check and the update can't disagree. The user's own args (heap size,
- * Steam flags, other agents) are kept; I only add what PZO needs and drop a few broken or outdated ones. In
- * compatibility mode (CompatMode) the heap isn't pre-touched, starts small, and the collector is G1.
+ * Steam flags, other agents) are kept. PZO's legacy pre-touched heap profiles start smaller after migration.
+ * Compatibility mode (CompatMode) also uses G1.
  */
 public final class ZomboidConfigMigrator {
 
@@ -42,7 +42,9 @@ public final class ZomboidConfigMigrator {
     private static final String PRE_TOUCH = "-XX:+AlwaysPreTouch";
     private static final String STOCK_MAX_HEAP = "-Xmx3072m";
 
-    // Added if missing. PRE_TOUCH goes in separately, except in compatibility mode
+    private static final int INITIAL_HEAP_MB = 1024;
+
+    // Added if missing
     private static final String[] PERFORMANCE_ARGS = {
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
@@ -100,13 +102,8 @@ public final class ZomboidConfigMigrator {
         return 4096;
     }
 
-    /** Starting heap: half the maximum, or CompatMode's small start in compatibility mode. */
     public static int getRecommendedInitialHeapMb(int maxMb) {
-        if (CompatMode.isActive()) return Math.min(CompatMode.COMPAT_INITIAL_HEAP_MB, maxMb);
-        if (maxMb >= 12288) return 6144;
-        if (maxMb >= 8192) return 4096;
-        if (maxMb >= 6144) return 3072;
-        return 2048;
+        return Math.min(INITIAL_HEAP_MB, maxMb);
     }
 
     /** Whether the file differs from what buildTarget wants for this PC. */
@@ -153,10 +150,11 @@ public final class ZomboidConfigMigrator {
     }
 
     private static void buildTarget(Map<String, Object> root, File gameDir) {
+        boolean alreadyUsingPzo = TARGET_MAIN_CLASS.equals(root.get("mainClass"));
         root.put("mainClass", TARGET_MAIN_CLASS);
         root.put("classpath", targetClasspath(strings(root.get("classpath"))));
-        root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir));
-        stripGcFromOsBlocks(root);
+        root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir, alreadyUsingPzo));
+        stripManagedArgsFromOsBlocks(root);
     }
 
     private static final String[] OS_BLOCKS = {"windows", "linux", "macos", "osx"};
@@ -173,7 +171,7 @@ public final class ZomboidConfigMigrator {
     // by the launcher, so their collector would clash with the one pickGc puts at the top. A version left with no args
     // goes, and so does a block left empty: a file with no "windows" block is known to start, empty lists aren't
     @SuppressWarnings("unchecked")
-    private static void stripGcFromOsBlocks(Map<String, Object> root) {
+    private static void stripManagedArgsFromOsBlocks(Map<String, Object> root) {
         for (String k : OS_BLOCKS) {
             if (!(root.get(k) instanceof Map)) continue;
             Map<String, Object> block = (Map<String, Object>) root.get(k);
@@ -183,7 +181,9 @@ public final class ZomboidConfigMigrator {
                 if (!(verMap.get("vmArgs") instanceof List)) return false;
                 List<String> kept = new ArrayList<>();
                 for (String a : strings(verMap.get("vmArgs"))) {
-                    if (!isGcArg(a)) kept.add(a);
+                    for (String tok : splitJoinedArgs(a)) {
+                        if (!isGcArg(tok) && !PRE_TOUCH.equals(tok)) kept.add(tok);
+                    }
                 }
                 if (kept.isEmpty()) verMap.remove("vmArgs");
                 else verMap.put("vmArgs", kept);
@@ -276,7 +276,20 @@ public final class ZomboidConfigMigrator {
         return !running.isEmpty();
     }
 
-    private static List<String> targetVmArgs(List<String> rawArgs, File gameDir) {
+    // Old installers and the migrator wrote these exact pairs together with AlwaysPreTouch.
+    private static boolean isLegacyHeapProfile(List<String> args) {
+        if (!args.contains(PRE_TOUCH)) return false;
+        List<String> heap = args.stream().filter(a -> a.startsWith("-Xms") || a.startsWith("-Xmx")).toList();
+        if (heap.size() != 2) return false;
+        String pair = heap.get(0).startsWith("-Xms") ? heap.get(0) + " " + heap.get(1) : heap.get(1) + " " + heap.get(0);
+        return switch (pair) {
+            case "-Xms2048m -Xmx4096m", "-Xms3072m -Xmx6144m", "-Xms4096m -Xmx8192m",
+                 "-Xms4096m -Xmx12288m", "-Xms6144m -Xmx12288m", "-Xms8192m -Xmx16384m" -> true;
+            default -> false;
+        };
+    }
+
+    private static List<String> targetVmArgs(List<String> rawArgs, File gameDir, boolean alreadyUsingPzo) {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         boolean isWin = os.contains("win");
         boolean isLinux = os.contains("linux");
@@ -305,6 +318,9 @@ public final class ZomboidConfigMigrator {
             PZOLogger.info("[ZomboidConfigMigrator] ZombieBuddy comes from the launch options; left out of " + TARGET_JSON_NAME + " so its options win");
         }
 
+        boolean legacyHeap = alreadyUsingPzo && isLegacyHeapProfile(rawArgs.stream()
+            .flatMap(arg -> splitJoinedArgs(arg).stream()).toList());
+
         // The user's args minus anything rebuilt below, broken, or outdated
         List<String> user = new ArrayList<>();
         List<String> userLibraryPaths = new ArrayList<>();
@@ -324,7 +340,7 @@ public final class ZomboidConfigMigrator {
                     continue;
                 }
                 if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
-                if (compat && tok.equals(PRE_TOUCH)) continue;
+                if (tok.equals(PRE_TOUCH)) continue;
                 if (isGcArg(tok)) continue; // pickGc's choice goes in below
                 user.add(tok);
             }
@@ -342,8 +358,7 @@ public final class ZomboidConfigMigrator {
             : ".:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/";
         args.add("-Djava.library.path=" + withUserLibraryPaths(libraryPath, userLibraryPaths, isWin));
 
-        // Heap: the user's sizes are kept and only the game's exact stock max is raised to suit this PC. In compatibility
-        // mode the starting heap is lowered so nothing big is committed up front
+        // A smaller starting heap lets the collector return memory below the old profile's floor.
         int recMax = getRecommendedHeapMb();
         int recStart = getRecommendedInitialHeapMb(recMax);
         boolean hasXms = false, hasXmx = false;
@@ -352,7 +367,7 @@ public final class ZomboidConfigMigrator {
             if (arg.startsWith("-Xms")) {
                 hasXms = true;
                 long mb = parseHeapArgMb(arg);
-                if (compat && mb > recStart) {
+                if ((compat || legacyHeap) && mb > recStart) {
                     arg = "-Xms" + recStart + "m";
                     mb = recStart;
                 }
@@ -371,7 +386,6 @@ public final class ZomboidConfigMigrator {
         for (String pf : PERFORMANCE_ARGS) {
             if (!args.contains(pf)) args.add(pf);
         }
-        if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
         args.addAll(pickGc());
         return args;
     }

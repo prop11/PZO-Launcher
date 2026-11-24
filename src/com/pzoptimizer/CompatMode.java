@@ -13,9 +13,7 @@ import java.util.Locale;
  *  - an x86-64 CPU without AVX2 (the native library falls back to its plain loops)
  *  - 4 or fewer hardware threads
  *  - less than LOW_RAM_GB of RAM
- * It drops -XX:+AlwaysPreTouch (which touches the whole starting heap before the game starts), starts with a small heap
- * that grows as needed, sticks to G1, and the native power shield leaves the process priority, MMCSS and the working
- * set lock alone.
+ * It lowers the starting heap to PZO's default when necessary, uses G1, and skips native MMCSS and priority tuning.
  *
  * Can be forced on or off from the settings screen (pzo_config.json "compat_mode": auto / on / off), with
  * -Dpzo.compat=on|off, or with the launch option -pzo_compat / -pzo_compat=off.
@@ -24,8 +22,6 @@ public final class CompatMode {
 
     public static final double LOW_RAM_GB = 7.5;
     public static final int LOW_THREADS = 4;
-    /** Starting heap in compatibility mode; the heap still grows to -Xmx. */
-    public static final int COMPAT_INITIAL_HEAP_MB = 1024;
 
     private static boolean decided, deciding, active;
     private static String reasons = "";
@@ -85,7 +81,7 @@ public final class CompatMode {
         decided = nativeAvx2Known || !deciding;
         if (decided) {
             if (active) {
-                PZOLogger.warn("[CompatMode] Compatibility mode ON (" + reasons + "): no heap pre-touch, small starting heap, G1, no raised priority or memory lock");
+                PZOLogger.warn("[CompatMode] Compatibility mode ON (" + reasons + "): small starting heap, G1");
             } else if ("off".equals(override)) {
                 PZOLogger.info("[CompatMode] Compatibility mode forced off");
             }

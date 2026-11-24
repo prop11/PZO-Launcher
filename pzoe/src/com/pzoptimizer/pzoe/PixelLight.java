@@ -94,6 +94,9 @@ public final class PixelLight {
     // How much leaf the trees carry this month, 0..1: their sun shadows thin out to bare branches in winter
     static volatile float leafDensity = 1f;
     private static final float[] MONTH_LEAF = {0.2f, 0.2f, 0.25f, 0.55f, 0.9f, 1f, 1f, 1f, 0.95f, 0.75f, 0.4f, 0.2f};
+    static volatile boolean windShelter;
+    private static int locWindShelter = -1;
+    private static int locWeatherGround = -1, locWeatherGroundLevel = -1;
     static volatile float windX = 1f, windY = 0f, windStrength, clock, worldWindX = 1f, worldWindY;
     // Ground snow keeps the wind it was laid by, not every gust: drifts follow a minute-long average, and the ripples
     // in deep snow run across one of 8 directions that only changes once the settled wind has clearly turned. Their
@@ -241,7 +244,8 @@ public final class PixelLight {
             BakePass.rebakeSoon = false;
             RebakeQueue.addAll(DIRTY_REDRAW);
         }
-        boolean heightsWanted = sunWanted || PuddleSplash.waterSceneAsked();
+        boolean shelterWanted = windShelter && WeatherLook.wind() > 0.24f && (Precipitation.enabled() || atmosShaderReady);
+        boolean heightsWanted = sunWanted || PuddleSplash.waterSceneAsked() || shelterWanted;
         if (heightsWanted != sunHeightsOn) {
             sunHeightsOn = heightsWanted;
             // Every column goes up again with its heights
@@ -263,6 +267,7 @@ public final class PixelLight {
         BakePass.frame();
         Scorch.frame();
         FlickerLights.frame(dayLight);
+        WeatherGround.frame(now);
         FlashLights.frame(dayLight);
         CorpseFlies.frame();
         Frost.frame(dayLight, sunVis, cloudIntensity);
@@ -292,7 +297,8 @@ public final class PixelLight {
         }
         // Freezing rain's glaze reads the light map only while there's ice (PZOE weather)
         boolean wantAtmos = atmosShaderReady || ((snowShaderReady || GroundSnow.active()) && snowing)
-            || (iceShaderReady && com.pzoptimizer.pzoe.weather.WeatherEvents.ice() > 0.01f) || ModelSnow.lightWanted;
+            || (iceShaderReady && com.pzoptimizer.pzoe.weather.WeatherEvents.ice() > 0.01f) || ModelSnow.lightWanted || shelterWanted
+            || WeatherGround.wanted && (WeatherGround.leaks || WeatherGround.drainage || WeatherGround.debris);
         if (wantAtmos != atmos) {
             // The light map stopped following changes while nothing used it, so it goes up again from scratch
             if (wantAtmos && !(deferred || sway || draining)) markStale();
@@ -448,6 +454,10 @@ public final class PixelLight {
     }
 
     // Main thread reads it to tell SkyCache a player's height map exists; GL ids are just ints
+    static float windShelterStrength() {
+        return windShelter && sunHeightsOn ? Math.min(1f, Math.max(0f, (windStrength - 0.24f) / 0.5f)) : 0f;
+    }
+
     static int heightTexture(int p) {
         return p >= 0 && p < 4 ? heightTex[p] : 0;
     }
@@ -1430,6 +1440,10 @@ public final class PixelLight {
                 locTrailInfo = GL20.glGetUniformLocation(prog, "PZOTrailInfo");
                 locWindows = GL20.glGetUniformLocation(prog, "PZOWindows");
                 locHeight = GL20.glGetUniformLocation(prog, "PZOHeight");
+                locWindShelter = GL20.glGetUniformLocation(prog, "PZOWindShelter");
+                locWeatherGround = GL20.glGetUniformLocation(prog, "PZOWeatherGround[0]");
+                locWeatherGroundLevel = GL20.glGetUniformLocation(prog, "PZOWeatherGroundLevel");
+                WeatherGround.wanted = locWeatherGround >= 0 && locWeatherGroundLevel >= 0;
                 locSun = GL20.glGetUniformLocation(prog, "PZOSun");
                 locWet = GL20.glGetUniformLocation(prog, "PZOWet");
                 locIce = GL20.glGetUniformLocation(prog, "PZOIce");
@@ -1478,7 +1492,7 @@ public final class PixelLight {
                 locFlickerInfo = GL20.glGetUniformLocation(prog, "PZOFlickerInfo");
                 FlickerLights.wanted = locFlicker >= 0 && locFlickerInfo >= 0;
                 FlickerLights.invalidate();
-                locBurst = GL20.glGetUniformLocation(prog, "PZOBurst");
+                locBurst = GL20.glGetUniformLocation(prog, "PZOBurst[0]");
                 locBurstInfo = GL20.glGetUniformLocation(prog, "PZOBurstInfo");
                 FlashLights.wanted = locBurst >= 0 && locBurstInfo >= 0;
                 FlashLights.invalidate();
@@ -1584,11 +1598,13 @@ public final class PixelLight {
                 u4(S_BEND, locBend, 0f, 0f, 0f, 0f);
                 LightBeams.upload(locBeams, locBeamInfo, false, 0f, 0f, 0f, 0f, 0f);
                 if (locFlickerInfo >= 0) GL20.glUniform4f(locFlickerInfo, 0f, 0f, 0f, 0f);
-                if (locBurstInfo >= 0) GL20.glUniform4f(locBurstInfo, 0f, 0f, 0f, 0f);
+                u4(S_BURST, locBurstInfo, 0f, 0f, 0f, 0f);
                 if (locRotInfo >= 0) GL20.glUniform4f(locRotInfo, 0f, 0f, 0f, 0f);
                 if (locContact >= 0) GL20.glUniform4f(locContact, 0f, 0f, 0f, 0f);
                 if (locSpec >= 0) GL20.glUniform4f(locSpec, 0f, 0f, 0f, 0f);
                 Frost.upload(locFrost, false);
+                if (locWindShelter >= 0) GL20.glUniform3f(locWindShelter, 0f, 0f, 0f);
+                if (locWeatherGroundLevel >= 0) GL20.glUniform1i(locWeatherGroundLevel, 0);
                 if (locWinRefl >= 0) GL20.glUniform4f(locWinRefl, 0f, 0f, 0f, 0f);
                 if (locGIInfo >= 0) GL20.glUniform4f(locGIInfo, 1f, 0f, 0f, 0f);
                 return;
@@ -1607,6 +1623,7 @@ public final class PixelLight {
             u4(S_CLOUDS, locClouds, atmos ? cloudIntensity : 0f, dayLight, cloudOffX, cloudOffY);
             u4(S_SNOW, locSnow, atmos ? snowCover : 0f, 0f, 0f, 0f);
             boolean hOk = (locHeight >= 0 || SkyCache.sunWanted) && heightTex[p] != 0 && sunHeightsOn;
+            if (locWindShelter >= 0) GL20.glUniform3f(locWindShelter, worldWindX, worldWindY, hOk ? windShelterStrength() : 0f);
             if (hOk && locHeight >= 0) {
                 GL13.glActiveTexture(GL13.GL_TEXTURE4);
                 GL11.glBindTexture(GL11.GL_TEXTURE_2D, heightTex[p]);
@@ -1680,7 +1697,12 @@ public final class PixelLight {
             u4(S_BEND, locBend, sway ? 1f : 0f, 0f, 0f, 0f);
             LightBeams.upload(locBeams, locBeamInfo, atmos, info[4], info[5], fogIntensity, rainIntensity, 1f - 0.85f * dayLight);
             FlickerLights.upload(locFlicker, locFlickerInfo);
-            FlashLights.upload(locBurst, locBurstInfo, hOk && locHeight >= 0);
+            WeatherGround.upload(locWeatherGround, locWeatherGroundLevel, (int) info[4], (int) info[5], p);
+            if (locBurstInfo >= 0) {
+                FlashLights.viewReady(p);
+                int bursts = FlashLights.upload(locBurst, info[4], info[5]);
+                u4(S_BURST, locBurstInfo, bursts, bursts > 0 && hOk && locHeight >= 0 ? 1f : 0f, 0f, bursts > 0 ? 1f : 0f);
+            }
             CorpseFlies.upload(locRot, locRotInfo);
             if (locContact >= 0) GL20.glUniform4f(locContact, contactStrength, 0f, 0f, 1f);
             if (locSpec >= 0) GL20.glUniform4f(locSpec, specStrength, specDry, 0f, 1f);
@@ -1763,8 +1785,8 @@ public final class PixelLight {
     private static final int S_A = 0, S_B = 1, S_C = 2, S_LIT = 3, S_WIND = 4, S_ATMOS = 5, S_FOGWIND = 6, S_CLOUDS = 7, S_SNOW = 8,
         S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12, S_BEND = 13, S_MARKS = 14, S_FOG = 15, S_GSNOW = 16, S_GSNOW2 = 17,
         S_SKY = 18, S_SUNCACHE = 19, S_CLOUDCACHE = 20, S_FOGCACHE = 21, S_SNOWCACHE = 22, S_TUNE0 = 23, S_TUNE1 = 24, S_TUNE2 = 25, S_ICE = 26,
-        S_CHARSH = 27;
-    private static final float[][] sent = new float[28][4];
+        S_CHARSH = 27, S_BURST = 28;
+    private static final float[][] sent = new float[29][4];
     private static final int[] shadowOffset = new int[2];
 
     // PZOLit is a float: only x goes to the GPU for it

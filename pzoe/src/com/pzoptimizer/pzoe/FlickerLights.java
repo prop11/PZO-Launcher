@@ -86,6 +86,7 @@ final class FlickerLights {
                 offer(px, py, h.getX(), h.getY(), h.getZ(), Math.max(3, Math.min(8, h.getRadius())), 0f, 0.16f * k);
             }
         }
+        GeneratorLights.gather(px, py, cell);
         float failing = failing();
         if (failing > 0f) {
             java.util.Stack<IsoLightSource> lights = cell.getLamppostPositions();
@@ -111,15 +112,23 @@ final class FlickerLights {
         return (float) (1.0 - left / 3.0);
     }
 
+    static void offerGenerator(float px, float py, int x, int y, int z, int radius, float kind, float effect) {
+        if (effect != 0f) offer(px, py, x, y, z, radius, kind, effect);
+    }
+
     // Same square as one already kept: keep the stronger. Otherwise the MAX nearest.
     private static void offer(float px, float py, int x, int y, int z, int radius, float kind, float strength) {
         float cx = x + 0.5f, cy = y + 0.5f;
         float dx = cx - px, dy = cy - py, d = dx * dx + dy * dy;
-        if (d > RANGE_SQ || strength <= 0f) return;
+        if (d > RANGE_SQ || strength == 0f) return;
         for (int i = 0; i < count; i++) {
             int o = i * 9;
             if (cand[o] == cx && cand[o + 1] == cy && cand[o + 2] == z) {
-                if (strength > cand[o + 6]) cand[o + 6] = strength;
+                if ((kind >= 2f) != (cand[o + 4] >= 2f)) continue;
+                if (Math.abs(strength) > Math.abs(cand[o + 6])) {
+                    cand[o + 4] = kind;
+                    cand[o + 6] = strength;
+                }
                 return;
             }
         }

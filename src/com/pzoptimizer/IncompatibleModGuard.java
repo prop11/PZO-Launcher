@@ -121,6 +121,8 @@ public final class IncompatibleModGuard {
             File[] classes = pzoptDir.listFiles((d, name) -> name.endsWith(".class"));
             if (classes != null && classes.length > 0) return pzoptDir;
         }
+        File launcher = new File(gameDir, "pzopt-launch.cmd");
+        if (launcher.isFile()) return launcher;
         File uninstaller = new File(gameDir, "Uninstall-PZ-Optimization.cmd");
         if (uninstaller.isFile()) return uninstaller;
         return null;
@@ -149,17 +151,15 @@ public final class IncompatibleModGuard {
             PZOLogger.warn("[PZO] Could not write incompatible mod status: " + e);
         }
 
-        UpdateDialog.showIncompatibleModNoticeAsync(warningMessage());
+        UpdateDialog.showIncompatibleModNotice(warningMessage());
     }
 
     static String warningMessage() {
-        return "PZ_Optimization (Steam Workshop " + PZ_OPTIMIZATION_WORKSHOP_ID + ") is installed in your Project Zomboid game folder.\n\n"
-            + "This mod is not recommended: it replaces core game files with its own modified copies, "
-            + "and PZO is incompatible with it.\n\n"
-            + "PZO has been DISABLED for this launch and will stay disabled while PZ_Optimization is detected. "
-            + "The game will now start without PZO.\n\n"
-            + "To use PZO again, remove PZ_Optimization with its uninstaller "
-            + "(Uninstall-PZ-Optimization.cmd in the game folder, or its in-game uninstall option), then restart the game. "
-            + "Unsubscribing from the Workshop item or verifying game files in Steam does not remove its files.";
+        return "PZ_Optimization (Steam Workshop " + PZ_OPTIMIZATION_WORKSHOP_ID + ") files or launch settings were detected.\n\n"
+            + "PZO is disabled for this launch. Leftover PZ_Optimization files or launch options can still prevent "
+            + "Project Zomboid from starting.\n\n"
+            + "Run Uninstall-PZ-Optimization.cmd in the game folder, or use PZ_Optimization's in-game uninstall option "
+            + "if you can reach the menu. Remove any pzopt-launch.cmd entry from Steam's Launch Options, then restart.\n\n"
+            + "Unsubscribing or verifying game files in Steam can leave these files behind.";
     }
 }
