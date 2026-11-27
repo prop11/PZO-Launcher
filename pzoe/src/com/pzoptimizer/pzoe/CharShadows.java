@@ -20,6 +20,9 @@ import zombie.iso.fboRenderChunk.FBORenderCutaways;
 public final class CharShadows {
 
     static final int MAX = 24;
+    // Vehicles on top of the characters, and floats per caster (a vehicle carries its box in the last four)
+    static final int CARS = 8;
+    static final int STRIDE = 12;
     private static final int CHUNK = CharacterShadowMask.SQUARES_PER_CHUNK;
     private static final int HALF_CHUNKS = CharacterShadowMask.CHUNKS / 2;
     private static final float RANGE = 25f;
@@ -31,18 +34,24 @@ public final class CharShadows {
     static volatile boolean wanted;
     // Card strength (modApi "charShadows"), 1 = 100 percent
     static volatile float amount = 1f;
+    // Vehicle shadows row on the card
+    static volatile boolean vehicles = true;
 
     private static final Snapshot EMPTY = new Snapshot(0, 0, 0, new float[0]);
     private static final View[] views = {new View(), new View(), new View(), new View()};
 
-    // Shadow position is relative to this viewport's atlas origin. Negative darkness denotes local light.
+    // Shadow position is relative to this viewport's atlas origin. Negative darkness denotes local light. Width < 0
+    // marks a vehicle: then forward x, y, half length and half width of its body box follow.
     record Snapshot(int originX, int originY, int count, float[] casters) {}
 
     private static final class View {
         final IsoGameCharacter[] who = new IsoGameCharacter[MAX];
         final float[] distance = new float[MAX];
         final float[] sun = new float[4];
-        final float[] work = new float[MAX * 8];
+        final float[] work = new float[(MAX + CARS) * STRIDE];
+        final zombie.vehicles.BaseVehicle[] cars = new zombie.vehicles.BaseVehicle[CARS];
+        final float[] carDistance = new float[CARS];
+        int carCount;
         final IsoGridSquare[] lastSquare = new IsoGridSquare[MAX];
         final int[] lamp = new int[MAX];
         // x, y, level, radius, brightness and fire seed
@@ -56,9 +65,11 @@ public final class CharShadows {
 
         void clear() {
             count = 0;
+            carCount = 0;
             lastPick = 0;
             viewer = null;
             Arrays.fill(who, null);
+            Arrays.fill(cars, null);
             Arrays.fill(lastSquare, null);
             Arrays.fill(lampRooms, null);
             lampCount = 0;
@@ -99,7 +110,7 @@ public final class CharShadows {
                 view.lastPick = now;
                 pick(view, cell, playerIndex);
             }
-            if (view.count == 0) {
+            if (view.count == 0 && view.carCount == 0) {
                 view.published = EMPTY;
                 return;
             }
@@ -169,7 +180,7 @@ public final class CharShadows {
                 if (strength == 0 || length < 0.1f) continue;
                 length = clip(map, square, x, y, dx, dy, length);
                 if (length < 0.1f) continue;
-                int d = n * 8;
+                int d = n * STRIDE;
                 out[d] = x - originX * CHUNK;
                 out[d + 1] = y - originY * CHUNK;
                 out[d + 2] = z;
@@ -180,11 +191,14 @@ public final class CharShadows {
                 out[d + 7] = animal ? 0.3f : 0.2f;
                 n++;
             }
+            for (int i = 0; i < view.carCount; i++) {
+                if (car(view, view.cars[i], playerIndex, originX, originY, sun, day, out, n * STRIDE)) n++;
+            }
             Snapshot previous = view.published;
             if (n == 0) view.published = EMPTY;
             else if (previous.originX != originX || previous.originY != originY || previous.count != n
-                    || !Arrays.equals(previous.casters, 0, n * 8, out, 0, n * 8)) {
-                view.published = new Snapshot(originX, originY, n, Arrays.copyOf(out, n * 8));
+                    || !Arrays.equals(previous.casters, 0, n * STRIDE, out, 0, n * STRIDE)) {
+                view.published = new Snapshot(originX, originY, n, Arrays.copyOf(out, n * STRIDE));
             }
         } catch (Throwable t) {
             view.clear();
@@ -254,10 +268,11 @@ public final class CharShadows {
                 }
             }
         }
+        pickCars(view, cell, playerIndex);
         // Lights near the player, once for everyone: lamps and street lights (lamppost list) and the ceiling lights of
         // rooms (IsoRoomLight, a rectangle of the room lit from the middle)
         view.lampCount = 0;
-        if (view.count == 0) return;
+        if (view.count == 0 && view.carCount == 0) return;
         java.util.Stack<IsoLightSource> lights = cell.getLamppostPositions();
         for (int i = 0, n = lights.size(); i < n; i++) {
             IsoLightSource l = lights.get(i);
@@ -280,6 +295,100 @@ public final class CharShadows {
             addLamp(view, px, py, h.getX() + 0.5f, h.getY() + 0.5f, h.getZ(), Math.max(6f, h.getRadius() * 1.2f), bright,
                 1f + Math.floorMod(h.getX() * 7 + h.getY() * 13, 97), null);
         }
+    }
+
+    // The nearest vehicles on screen, CARS at most
+    private static void pickCars(View view, IsoCell cell, int playerIndex) {
+        view.carCount = 0;
+        Arrays.fill(view.cars, null);
+        if (!vehicles) return;
+        java.util.Set<zombie.vehicles.BaseVehicle> list = cell.getVehicles();
+        if (list == null) return;
+        IsoPlayer p = view.viewer;
+        int farthest = 0;
+        for (zombie.vehicles.BaseVehicle v : list) {
+            if (v == null || v.getScript() == null) continue;
+            IsoGridSquare sq = v.getCurrentSquare();
+            if (sq == null || sq.z < CharacterShadowMask.BASE_LEVEL || sq.z >= CharacterShadowMask.BASE_LEVEL + CharacterShadowMask.WORLD_LEVELS
+                    || !FBORenderCutaways.getInstance().shouldRenderBuildingSquare(playerIndex, sq)) continue;
+            float dx = v.getX() - p.getX(), dy = v.getY() - p.getY(), d = dx * dx + dy * dy;
+            if (d > RANGE_SQ || (view.carCount == CARS && d >= view.carDistance[farthest])) continue;
+            int at = view.carCount == CARS ? farthest : view.carCount++;
+            view.cars[at] = v;
+            view.carDistance[at] = d;
+            if (view.carCount == CARS) {
+                farthest = 0;
+                for (int k = 1; k < CARS; k++) if (view.carDistance[k] > view.carDistance[farthest]) farthest = k;
+            }
+        }
+    }
+
+    private static final org.joml.Vector3f carCentre = new org.joml.Vector3f(), carFront = new org.joml.Vector3f(),
+        carSide = new org.joml.Vector3f();
+
+    // A vehicle's shadow: its body box swept away from the sun (or the strongest lamp at night), at about roof height
+    private static boolean car(View view, zombie.vehicles.BaseVehicle v, int playerIndex, int originX, int originY,
+                               float[] sun, float day, float[] out, int d) {
+        if (v == null) return false;
+        IsoGridSquare square = v.getCurrentSquare();
+        if (square == null || square.chunk == null) return false;
+        zombie.scripting.objects.VehicleScript script = v.getScript();
+        if (script == null) return false;
+        org.joml.Vector3f ext = script.getExtents(), com = script.getCenterOfMassOffset();
+        if (ext == null || com == null || ext.z <= 0f || ext.x <= 0f) return false;
+        v.getWorldPos(com.x, 0f, com.z, carCentre);
+        v.getWorldPos(com.x, 0f, com.z + ext.z * 0.5f, carFront);
+        v.getWorldPos(com.x + ext.x * 0.5f, 0f, com.z, carSide);
+        float fx = carFront.x - carCentre.x, fy = carFront.y - carCentre.y;
+        float halfLength = (float) Math.sqrt(fx * fx + fy * fy);
+        float sx = carSide.x - carCentre.x, sy = carSide.y - carCentre.y;
+        float halfWidth = (float) Math.sqrt(sx * sx + sy * sy);
+        if (halfLength < 0.2f || halfWidth < 0.1f || halfLength > 6f || halfWidth > 6f) return false;
+        fx /= halfLength;
+        fy /= halfLength;
+        // Script units to squares from the box itself; a level is about 2.45 squares of height
+        float height = Math.max(0.25f, Math.min(1.2f, ext.y * (halfLength / (ext.z * 0.5f)) / 2.44949f * 0.85f));
+        float x = carCentre.x, y = carCentre.y;
+        int z = square.getZ();
+        float dx = 0f, dy = 0f, length = 0f, darkness = 0f;
+        if (square.isOutside() && sun[3] > 0.05f) {
+            dx = -sun[0];
+            dy = -sun[1];
+            length = Math.min(5f, height / Math.max(0.05f, sun[2]));
+            darkness = 0.5f * sun[3];
+        }
+        int lamp = strongestLamp(view, x, y, z, null);
+        if (lamp >= 0) {
+            float[] lights = view.lamps;
+            float lx = x - lights[lamp], ly = y - lights[lamp + 1];
+            float dist = (float) Math.sqrt(lx * lx + ly * ly);
+            float strength = lights[lamp + 4] * (1f - dist / lights[lamp + 3]);
+            if (dist >= 1f && strength > 0.08f) {
+                float local = Math.min(0.5f, 0.28f + 0.4f * strength) * (square.isOutside() ? 1f - 0.85f * day : 1f);
+                if (local > darkness) {
+                    dx = lx / dist;
+                    dy = ly / dist;
+                    darkness = -local;
+                    length = Math.min(3.5f, 0.3f + dist * 0.5f) * height / BODY;
+                }
+            }
+        }
+        float alpha = v.getAlpha(playerIndex);
+        int strength = Math.round(Math.abs(darkness) * Math.max(0f, Math.min(1f, alpha)) * 255f);
+        if (strength == 0 || length < 0.1f) return false;
+        out[d] = x - originX * CHUNK;
+        out[d + 1] = y - originY * CHUNK;
+        out[d + 2] = z;
+        out[d + 3] = Math.round(length * 128f) / 128f;
+        out[d + 4] = Math.round(dx * 512f) / 512f;
+        out[d + 5] = Math.round(dy * 512f) / 512f;
+        out[d + 6] = Math.copySign(strength / 255f, darkness);
+        out[d + 7] = -1f;
+        out[d + 8] = Math.round(fx * 512f) / 512f;
+        out[d + 9] = Math.round(fy * 512f) / 512f;
+        out[d + 10] = Math.round(halfLength * 64f) / 64f;
+        out[d + 11] = Math.round(halfWidth * 64f) / 64f;
+        return true;
     }
 
     private static final ArrayList<IsoGameCharacter.TorchInfo> torches = new ArrayList<>();
@@ -382,7 +491,7 @@ public final class CharShadows {
     }
 
     static String stateText() {
-        return "charShadows=" + views[0].published.count + ";charShadowWanted=" + (wanted ? 1 : 0) + ";charShadowLights=" + views[0].lampCount
+        return "charShadows=" + views[0].published.count + ";charShadowCars=" + views[0].carCount + ";charShadowWanted=" + (wanted ? 1 : 0) + ";charShadowLights=" + views[0].lampCount
             + ";charShadowSun=" + lastSun + (lastError != null ? ";charShadowError=" + lastError : "");
     }
 }

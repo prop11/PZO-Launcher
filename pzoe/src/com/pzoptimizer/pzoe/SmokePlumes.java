@@ -48,8 +48,55 @@ final class SmokePlumes {
     private static final RoomSmoke roomSmoke = new RoomSmoke();
     private static int count;
     private static long lastGather;
+    // Gun smoke indoors (Smoke card option): shots wait here until the next gather, which runs on the main thread
+    static volatile boolean gunSmoke = true;
+    private static final java.util.concurrent.ConcurrentLinkedQueue<Object[]> shots = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    // Generator fumes (Smoke card option): running generators indoors, from IsoGenerator.update (main thread)
+    static volatile boolean fumes = true;
+    private static final java.util.WeakHashMap<zombie.iso.objects.IsoGenerator, Boolean> generators = new java.util.WeakHashMap<>();
+
+    static void generator(zombie.iso.objects.IsoGenerator g) {
+        if (zombie.network.GameServer.server) return;
+        boolean on = fumes && System.nanoTime() - askedNanos < 1_000_000_000L;
+        IsoGridSquare square = g.getSquare();
+        boolean indoor = on && g.isActivated() && square != null && square.getRoom() != null && !square.isOutside();
+        synchronized (generators) {
+            if (indoor) {
+                if (generators.size() < 32) generators.put(g, Boolean.TRUE);
+            } else if (!generators.isEmpty()) {
+                generators.remove(g);
+            }
+        }
+    }
+
+    /** Any thread: a shot fired (FlashLights' shot sound hook, local and remote shooters). */
+    static void shot(zombie.characters.IsoGameCharacter shooter) {
+        if (!gunSmoke || shooter == null || zombie.network.GameServer.server
+            || System.nanoTime() - askedNanos > 1_000_000_000L || shots.size() > 64) return;
+        IsoGridSquare square = shooter.getCurrentSquare();
+        if (square == null || square.getRoom() == null || square.isOutside()) return;
+        var weapon = shooter.getAttackingWeapon();
+        float k = weapon == null ? 1f : weapon.getProjectileCount() > 1 ? 1.6f : weapon.isTwoHandWeapon() ? 1.3f : 1f;
+        shots.add(new Object[] {square, k});
+    }
 
     private SmokePlumes() {}
+
+    private static volatile int shotsTaken;
+
+    static String roomText() {
+        StringBuilder b = new StringBuilder("gunShots=").append(shotsTaken).append(";smokeRooms=");
+        try {
+            var rooms = roomSmoke.rooms();
+            for (int i = 0; i < Math.min(4, rooms.size()); i++) {
+                var r = rooms.get(i);
+                b.append(String.format(java.util.Locale.ROOT, "%s%.3f/%.2f", i == 0 ? "" : ",", r.density, r.gun));
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return b.toString();
+    }
 
     /** Main thread, once a frame from ScreenPass.main while the shader asks. */
     static void frame() {
@@ -75,7 +122,20 @@ final class SmokePlumes {
         count = 0;
         IsoCell cell = IsoWorld.instance == null ? null : IsoWorld.instance.currentCell;
         roomSmoke.begin(cell, System.nanoTime());
-        if (cell == null) return;
+        if (cell == null) {
+            shots.clear();
+            return;
+        }
+        for (Object[] s; (s = shots.poll()) != null; ) {
+            roomSmoke.addShot((IsoGridSquare) s[0], (Float) s[1]);
+            shotsTaken++;
+        }
+        synchronized (generators) {
+            for (var g : generators.keySet()) {
+                IsoGridSquare square = g.getSquare();
+                if (fumes && square != null && g.isActivated() && square.getRoom() != null) roomSmoke.addFume(square, 0.35f);
+            }
+        }
         IsoPlayer[] players = IsoPlayer.players;
         for (int i = 0, n = IsoFireManager.FireStack.size(); i < n; i++) {
             IsoFire f = IsoFireManager.FireStack.get(i);
@@ -111,6 +171,7 @@ final class SmokePlumes {
                 add(x, y, h.getZ(), Math.min(1f, h.getTemperature() / 35f) * 0.6f, distance, CAMPFIRE, null);
             }
         }
+        engines(cell, players);
         roomSmoke.advance(dt, windX, windY);
         var rooms = roomSmoke.rooms();
         for (int i = 0; i < rooms.size(); i++) {
@@ -118,7 +179,8 @@ final class SmokePlumes {
             IsoGridSquare anchor = state.anchor;
             float x = anchor.getX() + 0.5f, y = anchor.getY() + 0.5f;
             float distance = distanceSq(x, y, players);
-            if (distance < 0f || state.density < 0.022f) continue;
+            // Gun smoke and exhaust leave quietly; a sooty plume out of the window is only for fire smoke
+            if (distance < 0f || state.density < 0.022f || state.gun > 0.6f) continue;
             var portals = roomSmoke.portals(state);
             for (int j = 0; j < portals.size(); j++) {
                 var portal = portals.get(j);
@@ -146,6 +208,36 @@ final class SmokePlumes {
                 default -> 0.6f;
             };
             src[o + 3] = Math.min(2.8f, base + 0.35f * (float) Math.sqrt(src[o + 6] - 1f));
+        }
+    }
+
+    // Failing engines (Smoke card option): a running engine below 40 condition smokes from under the hood, thicker
+    // the worse it is; it thins out with speed, where the smoke blows away under the car
+    static volatile boolean engineSmoke = true;
+    private static final org.joml.Vector3f hood = new org.joml.Vector3f();
+
+    private static void engines(IsoCell cell, IsoPlayer[] players) {
+        if (!engineSmoke) return;
+        java.util.Set<BaseVehicle> vehicles = cell.getVehicles();
+        if (vehicles == null) return;
+        for (BaseVehicle v : vehicles) {
+            if (v == null || !v.isEngineRunning()) continue;
+            zombie.vehicles.VehiclePart engine = v.getPartById("Engine");
+            if (engine == null) continue;
+            int condition = engine.getCondition();
+            if (condition >= 40) continue;
+            float kmh = Math.abs(v.getCurrentSpeedKmHour());
+            float strength = (40f - condition) / 40f * 0.75f * Math.max(0f, 1f - kmh / 30f);
+            if (strength < 0.05f) continue;
+            zombie.scripting.objects.VehicleScript script = v.getScript();
+            if (script == null) continue;
+            org.joml.Vector3f ext = script.getExtents(), com = script.getCenterOfMassOffset();
+            v.getWorldPos(com.x, 0f, com.z + ext.z * 0.32f, hood);
+            float distance = distanceSq(hood.x, hood.y, players);
+            if (distance < 0f) continue;
+            IsoGridSquare sq = v.getCurrentSquare();
+            if (sq == null || !sq.isOutside()) continue;
+            add(hood.x, hood.y, v.getZ() + 0.15f, strength, distance, SMOULDER, null);
         }
     }
 
@@ -302,6 +394,7 @@ final class SmokePlumes {
                     data[o + 4] = state.density;
                     data[o + 5] = zombie.iso.IsoDepthHelper.getSquareDepthData(cx, cy, rect.x, rect.y, z).depthStart;
                     data[o + 6] = seed(rect.x, rect.y, z) * 0.073f;
+                    data[o + 7] = state.gun;
                     minX = Math.min(minX, x0);
                     minY = Math.min(minY, y0);
                     maxX = Math.max(maxX, x1);

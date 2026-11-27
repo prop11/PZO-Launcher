@@ -57,8 +57,21 @@ public final class LuaCompileCache {
 
     /** Replaces LuaCompiler.loadis(reader, name, env) in LuaManager.RunLuaInternal. */
     public static LuaClosure loadis(Reader reader, String name, KahluaTable env) throws IOException {
-        if (!active || broken) return LuaCompiler.loadis(reader, name, env);
+        String path = org.luaj.kahluafork.compiler.FuncState.currentfullFile;
+        Extension readerExtension = Extensions.luaSourceReader(path);
+        if ((!active || broken) && readerExtension == null) return LuaCompiler.loadis(reader, name, env);
         String source = readAll(reader);
+        if (readerExtension != null) {
+            try {
+                String rewritten = readerExtension.rewriteLuaSource(path, source);
+                if (rewritten != source) {
+                    return LuaCompiler.loadis(new StringReader(rewritten), name, env);
+                }
+            } catch (Exception e) {
+                PZOLogger.warn("[Extensions] Using original Lua for " + path + ": " + e);
+            }
+        }
+        if (!active || broken) return LuaCompiler.loadis(new StringReader(source), name, env);
         String key;
         try {
             key = key(source);

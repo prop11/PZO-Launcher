@@ -77,7 +77,7 @@ public final class AutumnTrees {
         }
     }
 
-    private static boolean isEvergreen(IsoSprite s) {
+    static boolean isEvergreen(IsoSprite s) {
         if (s == null) return true;
         Boolean b = evergreen.get(s);
         if (b == null) {

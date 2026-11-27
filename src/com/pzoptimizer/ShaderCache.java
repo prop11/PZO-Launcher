@@ -62,6 +62,66 @@ public final class ShaderCache {
     public static final AtomicLong hitNanos = new AtomicLong(), missNanos = new AtomicLong();
     // Last time a program had to be compiled, for the on-screen bar
     public static volatile long lastMissNanos;
+    // Where a hit's time goes: reading the shaders back and hashing them, and the driver taking the binary
+    public static final AtomicLong keyNanos = new AtomicLong(), binaryNanos = new AtomicLong();
+    public static final AtomicLong rawHits = new AtomicLong(), rawMisses = new AtomicLong();
+
+    // Binaries read from disk on the writer thread at startup, newest first, so a hit doesn't wait for its file
+    private static final ConcurrentHashMap<String, Object[]> preloaded = new ConcurrentHashMap<>();
+    private static final long PRELOAD_BYTES = 128L << 20;
+    // Attribute locations ShaderUnit.attach bound on a program before its link. Render thread.
+    private static final java.util.HashMap<Integer, List<Object[]>> bindings = new java.util.HashMap<>();
+    // Set while ShaderWarmup probes: a program that isn't stored is handed here instead of being compiled, and no
+    // program is linked (the probe throws its programs away). Render thread.
+    static java.util.function.Consumer<Capture> probe;
+
+    // Linked programs ShaderWarmup made ahead, by key, for the game's ShaderProgram.compile to take over instead of
+    // building its own. Render thread.
+    private static final java.util.HashMap<String, Integer> pool = new java.util.HashMap<>();
+    private static final int MAX_POOL = 800;
+    public static final AtomicLong poolMade = new AtomicLong(), poolTaken = new AtomicLong();
+    // In a holder: ShaderCache first loads while ShaderProgram itself is being patched, and touching ShaderProgram.class
+    // from a static initialiser then defines it twice (LinkageError, no default shader, the game crashes)
+    private static final class Ids {
+        static final java.lang.invoke.VarHandle SHADER_ID = programIdField();
+    }
+
+    private static java.lang.invoke.VarHandle programIdField() {
+        try {
+            return java.lang.invoke.MethodHandles.privateLookupIn(zombie.core.opengl.ShaderProgram.class, java.lang.invoke.MethodHandles.lookup())
+                .findVarHandle(zombie.core.opengl.ShaderProgram.class, "shaderId", int.class);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    static boolean pooled(String key) {
+        return pool.containsKey(key);
+    }
+
+    static int poolSize() {
+        return pool.size();
+    }
+
+    /** What a program needs to be compiled away from the game: its key, shaders and attribute bindings. */
+    static final class Capture {
+        final String key;
+        final int[] types;
+        final String[] sources;
+        final List<Object[]> attribs;
+
+        Capture(String key, int[] types, String[] sources, List<Object[]> attribs) {
+            this.key = key;
+            this.types = types;
+            this.sources = sources;
+            this.attribs = attribs;
+        }
+
+        /** Stored already: made from its binary. */
+        boolean fromBinary() {
+            return sources == null;
+        }
+    }
 
     private static final int MAGIC = 0x505A5343; // "PZSC"
     private static final int FORMAT = 1;
@@ -121,6 +181,7 @@ public final class ShaderCache {
                 return t;
             });
             writer.execute(ShaderCache::prune);
+            writer.execute(ShaderCache::preload);
             state = 1;
             PZOLogger.info("[ShaderCache] on: " + stored.size() + " stored programs, " + driverKey);
             return true;
@@ -128,6 +189,21 @@ public final class ShaderCache {
             PZOLogger.warn("[ShaderCache] off: " + t);
             return false;
         }
+    }
+
+    /** Whether binaries are in use this session (known once the render thread asked). */
+    static boolean isOn() {
+        return state > 0;
+    }
+
+    static boolean usableOnRenderThread() {
+        return active && usable();
+    }
+
+    /** Replaces GL20.glBindAttribLocation in ShaderUnit.attach: the same call, remembered for ShaderWarmup's probe. */
+    public static void bindAttrib(int program, int index, CharSequence name) {
+        if (active && state >= 0) bindings.computeIfAbsent(program, k -> new ArrayList<>(4)).add(new Object[] {index, name.toString()});
+        GL20C.glBindAttribLocation(program, index, name);
     }
 
     /** Replaces GL20.glCompileShader(id) in ShaderUnit.compile. */
@@ -139,11 +215,49 @@ public final class ShaderCache {
         GL20C.glCompileShader(shader);
     }
 
-    /** Replaces GL20.glLinkProgram(id) in ShaderProgram.compile. */
+    /** Replaces GL20.glLinkProgram(id) in ShaderProgram.compile; owner is the ShaderProgram. */
+    public static void linkProgram(int program, Object owner) {
+        link(program, owner);
+    }
+
     public static void linkProgram(int program) {
+        link(program, null);
+    }
+
+    // The game's program takes over one made ahead: its own (never compiled) shaders are attached to it so its
+    // destroy() detaches and deletes them as usual, and its empty GL program goes
+    private static boolean adopt(Object owner, int program, int ready, int[] shaders) {
+        if (!(owner instanceof zombie.core.opengl.ShaderProgram) || Ids.SHADER_ID == null) return false;
+        try {
+            for (int s : shaders) GL20C.glAttachShader(ready, s);
+            Ids.SHADER_ID.set(owner, ready);
+            GL20C.glDeleteProgram(program);
+            while (GL11C.glGetError() != GL11C.GL_NO_ERROR) {}
+            WorldRenderScale.programRelinked(ready);
+            return true;
+        } catch (Throwable t) {
+            PZOLogger.warn("[ShaderCache] couldn't hand over a program made ahead: " + t);
+            return false;
+        }
+    }
+
+    private static void link(int program, Object owner) {
         int[] shaders = attached(program);
+        List<Object[]> attribs = bindings.remove(program);
         boolean anyHeld = false;
         for (int s : shaders) anyHeld |= held.get(s);
+        if (probe != null) {
+            // A probe's program: never linked, the probe throws it away
+            for (int s : shaders) held.clear(s);
+            if (!anyHeld) return;
+            try {
+                String k = key(shaders);
+                probe.accept(stored.contains(k) ? new Capture(k, null, null, null) : capture(k, shaders, attribs));
+            } catch (Throwable t) {
+                PZOLogger.warn("[ShaderCache] couldn't key a probed program: " + t);
+            }
+            return;
+        }
         if (!anyHeld) {
             WorldRenderScale.glLinkProgram(program);
             if (GL20C.glGetProgrami(program, GL_LINK_STATUS) == 0) logFailedLink(program, shaders);
@@ -155,6 +269,18 @@ public final class ShaderCache {
             key = key(shaders);
         } catch (Throwable t) {
             PZOLogger.warn("[ShaderCache] couldn't key a program, compiling it: " + t);
+        }
+        keyNanos.addAndGet(System.nanoTime() - start);
+        if (key != null && owner != null && !pool.isEmpty()) {
+            Integer ready = pool.remove(key);
+            if (ready != null) {
+                if (adopt(owner, program, ready, shaders)) {
+                    for (int s : shaders) held.clear(s);
+                    poolTaken.incrementAndGet();
+                    return;
+                }
+                GL20C.glDeleteProgram(ready);
+            }
         }
         if (key != null && stored.contains(key) && load(program, key)) {
             for (int s : shaders) held.clear(s);
@@ -238,24 +364,19 @@ public final class ShaderCache {
         int format;
         byte[] data;
         Object[] mem = unwritten.get(key);
+        if (mem == null) mem = preloaded.get(key);
         if (mem != null) {
             format = (Integer) mem[0];
             data = (byte[]) mem[1];
-        } else try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(f)))) {
-            if (in.readInt() != MAGIC || in.readInt() != FORMAT) throw new java.io.IOException("not a cache file");
-            format = in.readInt();
-            int len = in.readInt();
-            long crc = in.readLong();
-            if (len <= 0 || len > (64 << 20)) throw new java.io.IOException("bad length " + len);
-            data = new byte[len];
-            in.readFully(data);
-            CRC32 c = new CRC32();
-            c.update(data);
-            if (c.getValue() != crc) throw new java.io.IOException("checksum mismatch");
+        } else try {
+            Object[] read = readFile(f);
+            format = (Integer) read[0];
+            data = (byte[]) read[1];
         } catch (Throwable t) {
             drop(key, "unreadable (" + t.getMessage() + ")");
             return false;
         }
+        long b0 = System.nanoTime();
         ByteBuffer buf = MemoryUtil.memAlloc(data.length);
         try {
             buf.put(data).flip();
@@ -264,6 +385,7 @@ public final class ShaderCache {
         } finally {
             MemoryUtil.memFree(buf);
         }
+        binaryNanos.addAndGet(System.nanoTime() - b0);
         // Clears any error a refused binary raised, so the game's own GL error checks don't pick it up
         while (GL11C.glGetError() != GL11C.GL_NO_ERROR) {}
         if (GL20C.glGetProgrami(program, GL_LINK_STATUS) == 0) {
@@ -273,6 +395,268 @@ public final class ShaderCache {
         }
         if (mem == null) touch(f);
         return true;
+    }
+
+    private static Object[] readFile(File f) throws java.io.IOException {
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(f)))) {
+            if (in.readInt() != MAGIC || in.readInt() != FORMAT) throw new java.io.IOException("not a cache file");
+            int format = in.readInt();
+            int len = in.readInt();
+            long crc = in.readLong();
+            if (len <= 0 || len > (64 << 20)) throw new java.io.IOException("bad length " + len);
+            byte[] data = new byte[len];
+            in.readFully(data);
+            CRC32 c = new CRC32();
+            c.update(data);
+            if (c.getValue() != crc) throw new java.io.IOException("checksum mismatch");
+            return new Object[] {format, data};
+        }
+    }
+
+    // Writer thread, once at startup
+    private static void preload() {
+        try {
+            File[] files = dir.listFiles((d, n) -> n.length() == 68 && n.endsWith(".bin"));
+            if (files == null) return;
+            Arrays.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            long t0 = System.nanoTime(), total = 0;
+            int n = 0;
+            for (File f : files) {
+                if (total + f.length() > PRELOAD_BYTES) break;
+                String key = f.getName().substring(0, 64);
+                try {
+                    Object[] read = readFile(f);
+                    preloaded.put(key, read);
+                    total += ((byte[]) read[1]).length;
+                    n++;
+                } catch (Throwable ignored) {
+                    // load() finds it unreadable and drops it
+                }
+            }
+            PZOLogger.info(String.format("[ShaderCache] %d stored programs read ahead (%d MB) in %.0f ms", n, total >> 20, (System.nanoTime() - t0) / 1e6));
+        } catch (Throwable t) {
+            PZOLogger.warn("[ShaderCache] read-ahead stopped: " + t);
+        }
+    }
+
+    private static Capture capture(String key, int[] shaders, List<Object[]> attribs) {
+        int[] types = new int[shaders.length];
+        String[] sources = new String[shaders.length];
+        for (int i = 0; i < shaders.length; i++) {
+            types[i] = GL20C.glGetShaderi(shaders[i], GL_SHADER_TYPE);
+            sources[i] = GL20C.glGetShaderSource(shaders[i]);
+        }
+        return new Capture(key, types, sources, attribs == null ? List.of() : attribs);
+    }
+
+    private static final int GL_COMPLETION_STATUS = 0x91B1;
+    private static final int MAX_IN_FLIGHT = 48;
+
+    /**
+     * Compiles captured programs and stores their binaries, for ShaderWarmup. With KHR/ARB_parallel_shader_compile the
+     * driver compiles a batch on its own threads while the loading screen keeps drawing; without it one at a time
+     * within the frame's budget. Render thread, tick() once a frame until done() says so.
+     */
+    static final class Batch {
+        private final List<Capture> todo;
+        private final List<int[]> inFlight = new ArrayList<>();
+        private final boolean parallel;
+        private int next;
+        int made, failed;
+
+        // Programs made here go to the pool instead of being thrown away
+        private final boolean keep;
+
+        Batch(List<Capture> todo, boolean keep) {
+            this.todo = todo;
+            this.keep = keep;
+            boolean par = false;
+            try {
+                GLCapabilities caps = GL.getCapabilities();
+                if (caps.GL_KHR_parallel_shader_compile) {
+                    org.lwjgl.opengl.KHRParallelShaderCompile.glMaxShaderCompilerThreadsKHR(0xFFFFFFFF);
+                    par = true;
+                } else if (caps.GL_ARB_parallel_shader_compile) {
+                    org.lwjgl.opengl.ARBParallelShaderCompile.glMaxShaderCompilerThreadsARB(0xFFFFFFFF);
+                    par = true;
+                }
+            } catch (Throwable t) {
+                par = false;
+            }
+            this.parallel = par;
+        }
+
+        boolean parallel() {
+            return parallel;
+        }
+
+        int total() {
+            return todo.size();
+        }
+
+        int finished() {
+            return made + failed;
+        }
+
+        boolean done() {
+            return next >= todo.size() && inFlight.isEmpty();
+        }
+
+        void tick(long budgetNanos) {
+            long end = System.nanoTime() + budgetNanos;
+            if (!parallel) {
+                while (next < todo.size() && System.nanoTime() < end) finish(submit(next++));
+                return;
+            }
+            while (next < todo.size() && inFlight.size() < MAX_IN_FLIGHT) inFlight.add(submit(next++));
+            for (int i = inFlight.size() - 1; i >= 0; i--) {
+                int[] job = inFlight.get(i);
+                if (job[0] != 0 && GL20C.glGetProgrami(job[0], GL_COMPLETION_STATUS) == 0) continue;
+                inFlight.remove(i);
+                finish(job);
+                if (System.nanoTime() >= end) break;
+            }
+        }
+
+        // {program, index of the capture, shaders...}
+        private int[] submit(int index) {
+            Capture c = todo.get(index);
+            if (c.fromBinary()) return submitBinary(index, c);
+            int[] job = new int[2 + c.types.length];
+            job[1] = index;
+            try {
+                int prog = GL20C.glCreateProgram();
+                job[0] = prog;
+                for (int i = 0; i < c.types.length; i++) {
+                    int s = GL20C.glCreateShader(c.types[i]);
+                    GL20C.glShaderSource(s, c.sources[i]);
+                    GL20C.glCompileShader(s);
+                    GL20C.glAttachShader(prog, s);
+                    job[2 + i] = s;
+                }
+                for (Object[] a : c.attribs) GL20C.glBindAttribLocation(prog, (Integer) a[0], (String) a[1]);
+                programParameter(prog, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, 1);
+                GL20C.glLinkProgram(prog);
+            } catch (Throwable t) {
+                PZOLogger.warn("[ShaderCache] couldn't start a program ahead: " + t);
+            }
+            return job;
+        }
+
+        // A stored binary into a fresh program; the driver may take it in on its own threads like a link
+        private int[] submitBinary(int index, Capture c) {
+            int[] job = new int[] {0, index};
+            Object[] mem = unwritten.get(c.key);
+            if (mem == null) mem = preloaded.get(c.key);
+            try {
+                if (mem == null) mem = readFile(new File(dir, c.key + ".bin"));
+            } catch (Throwable t) {
+                drop(c.key, "unreadable (" + t.getMessage() + ")");
+                return job;
+            }
+            byte[] data = (byte[]) mem[1];
+            int prog = GL20C.glCreateProgram();
+            job[0] = prog;
+            long b0 = System.nanoTime();
+            ByteBuffer buf = MemoryUtil.memAlloc(data.length);
+            try {
+                buf.put(data).flip();
+                if (core41) GL41C.glProgramBinary(prog, (Integer) mem[0], buf);
+                else ARBGetProgramBinary.glProgramBinary(prog, (Integer) mem[0], buf);
+            } finally {
+                MemoryUtil.memFree(buf);
+            }
+            binaryNanos.addAndGet(System.nanoTime() - b0);
+            while (GL11C.glGetError() != GL11C.GL_NO_ERROR) {}
+            return job;
+        }
+
+        private void finish(int[] job) {
+            int prog = job[0];
+            Capture c = todo.get(job[1]);
+            boolean kept = false;
+            try {
+                if (prog != 0 && GL20C.glGetProgrami(prog, GL_LINK_STATUS) != 0) {
+                    if (!c.fromBinary()) save(prog, c.key);
+                    made++;
+                    if (keep && pool.size() < MAX_POOL && !pool.containsKey(c.key)) {
+                        // Only the program goes in: its shaders aren't needed once it's linked
+                        for (int i = 2; i < job.length; i++) if (job[i] != 0) GL20C.glDetachShader(prog, job[i]);
+                        pool.put(c.key, prog);
+                        poolMade.incrementAndGet();
+                        kept = true;
+                    }
+                } else {
+                    if (c.fromBinary() && prog != 0) {
+                        rejected.incrementAndGet();
+                        drop(c.key, "turned down by the driver");
+                    }
+                    // The game makes it itself later and logs why it failed
+                    failed++;
+                }
+            } finally {
+                for (int i = 2; i < job.length; i++) if (job[i] != 0) GL20C.glDeleteShader(job[i]);
+                if (prog != 0 && !kept) GL20C.glDeleteProgram(prog);
+                while (GL11C.glGetError() != GL11C.GL_NO_ERROR) {}
+            }
+        }
+    }
+
+    /**
+     * Builds a program from a vertex and a fragment source, through the cache, for code that drives GL itself (PZO
+     * Enhancements). Returns the linked program, or 0 after logging why not. Render thread.
+     */
+    public static int buildProgram(String vertex, String fragment, String what) {
+        String key = null;
+        if (active && usable()) {
+            try {
+                MessageDigest md = MessageDigest.getInstance("SHA-256");
+                md.update(("PZSC" + FORMAT + "|raw|" + driverKey).getBytes(StandardCharsets.UTF_8));
+                md.update((byte) 0);
+                md.update(("35633:" + vertex).getBytes(StandardCharsets.UTF_8));
+                md.update((byte) 0);
+                md.update(("35632:" + fragment).getBytes(StandardCharsets.UTF_8));
+                key = HexFormat.of().formatHex(md.digest());
+            } catch (Throwable t) {
+                key = null;
+            }
+        }
+        long start = System.nanoTime();
+        if (key != null && stored.contains(key)) {
+            int p = GL20C.glCreateProgram();
+            if (load(p, key)) {
+                rawHits.incrementAndGet();
+                hitNanos.addAndGet(System.nanoTime() - start);
+                return p;
+            }
+            GL20C.glDeleteProgram(p);
+        }
+        int p = GL20C.glCreateProgram();
+        for (int k = 0; k < 2; k++) {
+            int s = GL20C.glCreateShader(k == 0 ? GL20C.GL_VERTEX_SHADER : GL20C.GL_FRAGMENT_SHADER);
+            GL20C.glShaderSource(s, k == 0 ? vertex : fragment);
+            GL20C.glCompileShader(s);
+            if (GL20C.glGetShaderi(s, GL20C.GL_COMPILE_STATUS) == 0) {
+                PZOLogger.warn(what + " " + (k == 0 ? "vertex" : "fragment") + " shader didn't compile: " + GL20C.glGetShaderInfoLog(s).trim());
+                GL20C.glDeleteShader(s);
+                GL20C.glDeleteProgram(p);
+                return 0;
+            }
+            GL20C.glAttachShader(p, s);
+            GL20C.glDeleteShader(s);
+        }
+        if (key != null) programParameter(p, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, 1);
+        GL20C.glLinkProgram(p);
+        if (GL20C.glGetProgrami(p, GL_LINK_STATUS) == 0) {
+            PZOLogger.warn(what + " shader didn't link: " + GL20C.glGetProgramInfoLog(p).trim());
+            GL20C.glDeleteProgram(p);
+            return 0;
+        }
+        if (key != null) save(p, key);
+        rawMisses.incrementAndGet();
+        missNanos.addAndGet(System.nanoTime() - start);
+        lastMissNanos = System.nanoTime();
+        return p;
     }
 
     private static void save(int program, String key) {
@@ -379,7 +763,10 @@ public final class ShaderCache {
         long h = hits.get(), m = misses.get();
         return "Shader cache: " + (state > 0 ? "on" : state < 0 ? "off" : "not used yet") + ", " + h + " loaded ("
             + hitNanos.get() / 1_000_000L + " ms), " + m + " compiled (" + missNanos.get() / 1_000_000L + " ms), "
-            + rejected.get() + " turned down, " + stored.size() + " stored";
+            + rejected.get() + " turned down, " + stored.size() + " stored; hits spent " + keyNanos.get() / 1_000_000L
+            + " ms reading back and hashing, " + binaryNanos.get() / 1_000_000L + " ms in the driver; PZOE programs "
+            + rawHits.get() + " loaded, " + rawMisses.get() + " compiled; made ahead " + poolMade.get() + ", handed over "
+            + poolTaken.get();
     }
 
     // ShaderUnit.compile: glCompileShader(id) -> ShaderCache.compileShader(id, this)
@@ -400,6 +787,17 @@ public final class ShaderCache {
                 n++;
             }
         }
+        MethodNode attach = AsmSupport.findMethod(node, "attach", "()Z");
+        if (attach != null && n == 1) {
+            for (AbstractInsnNode insn = attach.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKESTATIC && "glBindAttribLocation".equals(mi.name)
+                        && "(IILjava/lang/CharSequence;)V".equals(mi.desc) && mi.owner.startsWith("org/lwjgl/opengl/GL")) {
+                    MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ShaderCache", "bindAttrib", "(IILjava/lang/CharSequence;)V", false);
+                    attach.instructions.set(mi, call);
+                    insn = call;
+                }
+            }
+        }
         return n == 1;
     }
 
@@ -411,11 +809,18 @@ public final class ShaderCache {
         for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
             if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKESTATIC && "glLinkProgram".equals(mi.name)
                     && "(I)V".equals(mi.desc) && (mi.owner.startsWith("org/lwjgl/opengl/GL") || "com/pzoptimizer/WorldRenderScale".equals(mi.owner))) {
-                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ShaderCache", "linkProgram", "(I)V", false);
+                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ShaderCache", "linkProgram", "(ILjava/lang/Object;)V", false);
+                m.instructions.insertBefore(mi, new VarInsnNode(Opcodes.ALOAD, 0));
                 m.instructions.set(mi, call);
                 insn = call;
                 n++;
             }
+        }
+        if (n == 1) {
+            com.pzoptimizer.shaded.asm.tree.InsnList pre = new com.pzoptimizer.shaded.asm.tree.InsnList();
+            pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ShaderWarmup", "noteProgram", "(Ljava/lang/Object;)V", false));
+            m.instructions.insert(pre);
         }
         return n == 1;
     }

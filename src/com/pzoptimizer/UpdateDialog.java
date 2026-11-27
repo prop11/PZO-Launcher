@@ -190,8 +190,8 @@ public class UpdateDialog {
                 "0000000000000000000000000000000000000000000000000000000000000000"));
         }
         if (all || flags.contains("-pzo_pzwarnbox")) {
-            showIncompatibleModNoticeAsync(IncompatibleModGuard.warningMessage());
-            devResult("PZ_Optimization warning", "scheduled");
+            showIncompatibleModNotice(IncompatibleModGuard.warningMessage());
+            devResult("PZ_Optimization warning", "closed");
         }
         if (all || flags.contains("-pzo_startupbox")) {
             showWarningNotice("Project Zomboid Optimiser - Startup Error", StartupIntegrity.message("PZO-S0"));
@@ -814,21 +814,14 @@ public class UpdateDialog {
 
     // Title and message go in environment variables so neither gets parsed as script
     private static void showWindowsNotice(String title, String text) throws Exception {
-        showWindowsNotice(title, text, true);
-    }
-
-    private static void showWindowsNotice(String title, String text, boolean takeFocus) throws Exception {
-        String guards = takeFocus ? PS_FORM_GUARDS :
-            "$f.ShowInTaskbar=$true;" +
-            "$tm=New-Object Windows.Forms.Timer;$tm.Interval=" + DIALOG_AUTO_CLOSE_MS + ";" +
-            "$tm.Add_Tick({$tm.Stop();$f.Close()});$f.Add_Shown({$global:pzoNoticeShown=$true;$tm.Start()});";
         String psCode =
             "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms');" +
             "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing');" +
             "$f=New-Object Windows.Forms.Form;$f.Text=$env:PZO_DIALOG_TITLE;" +
             "$f.Size=New-Object Drawing.Size(620,430);" +
             "$f.StartPosition='CenterScreen';$f.FormBorderStyle='FixedDialog';" +
-            "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + guards +
+            "$f.MaximizeBox=$false;$f.MinimizeBox=$false;" + PS_FORM_GUARDS +
+            "$f.Add_Shown({$global:pzoNoticeShown=$true});" +
             "$f.BackColor=[Drawing.Color]::FromArgb(30,30,30);$f.ForeColor=[Drawing.Color]::White;" +
             "$t=New-Object Windows.Forms.Label;$t.Text=('[!] ' + $env:PZO_DIALOG_TITLE);" +
             "$t.Font=New-Object Drawing.Font('Segoe UI',12,[Drawing.FontStyle]::Bold);" +
@@ -846,8 +839,8 @@ public class UpdateDialog {
         ProcessBuilder pb = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCode);
         pb.environment().put("PZO_DIALOG_TITLE", title);
         String result = runDialogProcess(pb, text);
-        if (!takeFocus && !result.equals("0:CLOSED")) {
-            PZOLogger.warn("[PZO] Incompatible mod warning could not be confirmed (dialog result " + result + ").");
+        if (!result.equals("0:CLOSED")) {
+            throw new IOException("Windows notice could not be confirmed (" + result + ")");
         }
     }
 
@@ -923,25 +916,8 @@ public class UpdateDialog {
         return "SKIP";
     }
 
-    static void showIncompatibleModNoticeAsync(String text) {
-        try {
-            Thread notice = new Thread(() -> {
-                String title = "Project Zomboid Optimiser - Incompatible Mod Detected";
-                try {
-                    if (System.getProperty("os.name", "").startsWith("Windows")) {
-                        showWindowsNotice(title, text, false);
-                    } else {
-                        showWarningNotice(title, text);
-                    }
-                } catch (Throwable t) {
-                    PZOLogger.warn("[PZO] Incompatible mod warning failed: " + t);
-                }
-            }, "PZO-IncompatibleModNotice");
-            notice.setDaemon(true);
-            notice.start();
-        } catch (Throwable t) {
-            PZOLogger.warn("[PZO] Could not start incompatible mod warning: " + t);
-        }
+    static void showIncompatibleModNotice(String text) {
+        showWarningNotice("Project Zomboid Optimiser - Incompatible Mod Detected", text);
     }
 
     /** Blocking OK-only warning. The title has to be a fixed string; the message goes through PZO_DIALOG_TEXT. */
@@ -956,7 +932,8 @@ public class UpdateDialog {
                 String script =
                     "set msg to system attribute \"PZO_DIALOG_TEXT\"\n" +
                     "display dialog msg with title \"" + title.replace("\"", "") + "\" buttons {\"OK\"} default button \"OK\" with icon caution";
-                runDialogProcess(new ProcessBuilder("osascript", "-e", script), text);
+                String result = runDialogProcess(new ProcessBuilder("osascript", "-e", script), text);
+                if (!result.startsWith("0:")) PZOLogger.warn("Warning dialog failed for " + title + " (" + result + ")");
                 return;
             }
         } catch (Throwable t) {
@@ -966,11 +943,13 @@ public class UpdateDialog {
 
         try {
             String markup = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-            runDialogProcess(new ProcessBuilder("zenity", "--warning", "--width=560", "--title=" + title, "--text=" + markup), text);
-            return;
+            String result = runDialogProcess(
+                new ProcessBuilder("zenity", "--warning", "--width=560", "--title=" + title, "--text=" + markup), text);
+            if (result.startsWith("0:") || result.startsWith("1:") || result.startsWith("-1:")) return;
         } catch (Throwable ignored) {}
         try {
-            runDialogProcess(new ProcessBuilder("kdialog", "--title", title, "--sorry", text), text);
+            String result = runDialogProcess(new ProcessBuilder("kdialog", "--title", title, "--sorry", text), text);
+            if (!result.startsWith("0:")) PZOLogger.warn("Warning dialog failed for " + title + " (" + result + ")");
         } catch (Throwable ignored) {
             PZOLogger.warn("No dialog tool (zenity/kdialog) available to show: " + title);
         }

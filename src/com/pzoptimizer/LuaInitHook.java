@@ -26,4 +26,18 @@ final class LuaInitHook {
         }
         return n > 0;
     }
+
+    /** End of LoadDirBase(): LuaCompanion loads the PZO panel when the server's mod list left the Lua mod out. */
+    static boolean patchLoadDirBase(ClassNode node) {
+        MethodNode m = AsmSupport.findMethod(node, "LoadDirBase", "()V");
+        if (m == null || (m.access & Opcodes.ACC_STATIC) == 0) return false;
+        int n = 0;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn.getOpcode() != Opcodes.RETURN) continue;
+            m.instructions.insertBefore(insn, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/LuaCompanion",
+                "afterBaseLua", "()V", false));
+            n++;
+        }
+        return n > 0;
+    }
 }

@@ -183,16 +183,14 @@ public class PZONative {
             boolean lowCore = isLowCoreCpu();
             boolean mmcss = false;
             boolean prio = false;
-            boolean wsLock = false;
             if (!shield) {
                 PZOLogger.info("[PZONative] CPU power shield switched off in the JAVA tab: timer, power throttling, MMCSS and priority left as stock.");
             } else if (!lowCore && !compat) {
                 mmcss = joinMmcss("Games");
                 prio = setPriorityLevel(1);
-                wsLock = lockWorkingSet();
             } else {
                 PZOLogger.info("[PZONative] " + (compat ? "Compatibility mode" : "Low core count CPU")
-                    + ": skipping MMCSS, raised process priority and working set lock.");
+                    + ": skipping MMCSS and raised process priority.");
             }
 
             int physCores = physicalCores();
@@ -208,11 +206,10 @@ public class PZONative {
                 osAccessRoute(), physCores, pCores, logProc, pCoreMask
             ));
             PZOLogger.success(String.format(
-                "[PZONative] Kernel QoS Active: Timer: %.2fms (Status: %s) | PowerThrottling Disabled: %s | MMCSS: %s | RAM WorkingSet Locked: %s | AVX2: %s",
+                "[PZONative] Kernel QoS Active: Timer: %.2fms (Status: %s) | PowerThrottling Disabled: %s | MMCSS: %s | AVX2: %s",
                 timerMs, timerLock ? "LOCKED" : "FALLBACK",
                 powerShield ? "SUCCESS" : "N/A",
                 mmcss ? "ACTIVE" : "N/A",
-                wsLock ? "YES" : "N/A",
                 avx2 ? "ENABLED" : "DISABLED"
             ));
         } catch (Throwable t) {

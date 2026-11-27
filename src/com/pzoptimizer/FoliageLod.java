@@ -92,7 +92,7 @@ public final class FoliageLod {
         TreeBake.frame(player);
         zombie.iso.IsoChunkMap map = zombie.iso.IsoWorld.instance.currentCell.getChunkMap(0);
         if (map == null) return;
-        // Distance from whatever the camera follows (Viewpoint and spectating move it off the player)
+        // Distance from whatever the camera follows (3D camera mods and spectating move it off the player)
         float px = zombie.iso.IsoCamera.frameState.camCharacterX, py = zombie.iso.IsoCamera.frameState.camCharacterY;
         if (px == 0.0f && py == 0.0f) {
             px = player.getX();

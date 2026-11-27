@@ -462,6 +462,21 @@ public class PZOEngineBridge {
                 CullScoreMemo.active = value;
             } else if ("JVM_HotPathTrims".equals(key)) {
                 HotPathTrims.active = value;
+            } else if ("JVM_ShaderWarmup".equals(key)) {
+                ShaderWarmup.active = value;
+            } else if ("JVM_SoundFilesAhead".equals(key)) {
+                SoundFilesAhead.active = value;
+            } else if ("JVM_LootRollPacer".equals(key)) {
+                LootRollPacer.active = value;
+            } else if ("JVM_ChunkHeadingOrder".equals(key)) {
+                ChunkIngestionPacer.headingOrder = value;
+            } else if ("JVM_AnimSetsAhead".equals(key)) {
+                AnimSetsAhead.active = value;
+            } else if ("JVM_ClassWarmup".equals(key)) {
+                ClassWarmup.active = value;
+                PZOConfig.setClassWarmupEnabled(value);
+            } else if ("JVM_ModPatchTakeover".equals(key)) {
+                SharedPatchTakeover.setActive(value);
             }
             logOptionIfChanged("setJvmOption", key, value);
         } catch (Throwable ignored) {}
@@ -519,7 +534,15 @@ public class PZOEngineBridge {
         sb.append("### Project Zomboid Optimiser - Bug & Crash Diagnostics\n");
         sb.append("- **PZO Engine Version**: ").append(UpdateChecker.CURRENT_VERSION).append("\n");
         sb.append("- **Java Runtime**: ").append(System.getProperty("java.version", "Unknown")).append(" (").append(System.getProperty("os.name", "Unknown")).append(" ").append(System.getProperty("os.arch", "")).append(")\n");
-        sb.append("- **Allocated JVM Heap**: ").append(Runtime.getRuntime().maxMemory() / (1024 * 1024)).append(" MB (Used: ").append((Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024)).append(" MB)\n");
+        var heap = java.lang.management.ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
+        sb.append("- **JVM Heap**: ").append(heap.getUsed() >> 20).append(" MiB used, ")
+            .append(heap.getCommitted() >> 20).append(" MiB committed, ")
+            .append(heap.getMax() >> 20).append(" MiB max\n");
+        for (var pool : java.lang.management.ManagementFactory.getPlatformMXBeans(java.lang.management.BufferPoolMXBean.class)) {
+            if ("direct".equals(pool.getName()) && pool.getMemoryUsed() >= 0) {
+                sb.append("- **JVM Direct Buffers**: ").append(pool.getMemoryUsed() >> 20).append(" MiB\n");
+            }
+        }
         sb.append("- **CPU Logical Cores**: ").append(Runtime.getRuntime().availableProcessors()).append("\n\n");
         sb.append(EnhancedRenderTelemetry.getTelemetryReport()).append("\n");
 
@@ -1387,6 +1410,24 @@ public class PZOEngineBridge {
                                 bindFailed("getCompatStandDowns", bindError);
                             }
 
+                            // getTakeoverStatus: key=value lines, "own=<feature>" for each one PZO runs itself next to the 3D camera mod
+                            try {
+                                Object takeoverFunc = newLuaFunction(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], SharedPatchTakeover.statusLines());
+                                            return 1;
+                                        }
+                                        return null;
+                                    }
+                                );
+                                tableRawset.invoke(pzoTable, "getTakeoverStatus", takeoverFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getTakeoverStatus", bindError);
+                            }
+
                             // getViewpointStanddownMode
                             try {
                                 Object getViewpointModeFunc = newLuaFunction(
@@ -1598,7 +1639,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.4\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.5\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1867,7 +1908,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.4'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.5'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

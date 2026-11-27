@@ -222,6 +222,11 @@ public class PZOptimAgent {
                 ClassSightings.note(className, loader);
                 ZombieBuddyCompat.noteClassLoad(className);
             }
+            if (classBeingRedefined == null) ClassWarmup.record(className, loader);
+            if (className != null && classfileBuffer != null && SharedPatchTakeover.isBridgeClass(className)) {
+                byte[] guarded = SharedPatchTakeover.transformBridges(loader, className, classfileBuffer);
+                if (guarded != null) return guarded;
+            }
             AsmSupport.REDEFINING.set(classBeingRedefined);
             byte[] specific;
             try {
@@ -361,12 +366,26 @@ public class PZOptimAgent {
                 byte[] gl = AsmSupport.transform(classfileBuffer, loader, "GameLoadingState shader bar", n -> {
                     boolean done = ModelShadersAhead.patchLoadingDone(n);
                     boolean bar = ShaderCacheBar.patchBeforeEndFrameUI(n, "render", "()V");
-                    return done || bar;
+                    boolean hold = ModelShadersAhead.patchLoadingHold(n);
+                    return done || bar || hold;
                 });
                 if (gl != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched GameLoadingState: model shaders made ahead once loaded, progress bar armed");
                 }
                 return gl;
+            }
+            if ("fmod/fmod/FMODManager".equals(className) && classfileBuffer != null) {
+                byte[] fm = AsmSupport.transform(classfileBuffer, loader, "FMODManager sound files ahead", SoundFilesAhead::patchManager);
+                if (fm != null) {
+                    SoundFilesAhead.markHooked();
+                    PZOLogger.success("[PZO Agent] ASM-patched FMODManager.loadSound: sound files decoded ahead are handed over");
+                }
+                return fm;
+            }
+            if ("zombie/LoadGridsquarePerformanceWorkaround".equals(className) && classfileBuffer != null) {
+                byte[] lr = AsmSupport.transform(classfileBuffer, loader, "LoadGridsquare loot roll pacing", LootRollPacer::patchWorkaround);
+                if (lr != null) PZOLogger.success("[PZO Agent] ASM-patched LoadGridsquarePerformanceWorkaround: loot rolls spread over frames");
+                return lr;
             }
             if ("zombie/iso/FishSchoolManager".equals(className) && classfileBuffer != null) {
                 byte[] fs = AsmSupport.transform(classfileBuffer, loader, "FishSchoolManager.addSoundNoise", FishNoiseCache::patchFishSchoolManager);
@@ -814,6 +833,7 @@ public class PZOptimAgent {
                         "java/util/Stack", "add", "(Ljava/lang/Object;)Z",
                         "com/pzoptimizer/SpottedListGovernor", "add", "(Ljava/util/Stack;Ljava/lang/Object;)Z");
                     if (added != null) {
+                        SharedPatchTakeover.noteInstalled("zombie/characters/IsoPlayer", java.util.Set.of("updateLOS"));
                         PZOLogger.success("[PZO Agent] Bytecode-patched IsoPlayer: spotted-list lookups routed through SpottedListGovernor");
                         return added;
                     }
@@ -1009,6 +1029,11 @@ public class PZOptimAgent {
                     PZOLogger.success("[PZO Agent] ASM-patched LuaManager.init: PZO globals bound into every new Lua state before mods load");
                     lm = li;
                 }
+                byte[] cu = AsmSupport.transform(lm != null ? lm : classfileBuffer, loader, "LuaManager companion UI", LuaInitHook::patchLoadDirBase);
+                if (cu != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched LuaManager.LoadDirBase: PZO panel loads on servers without the Lua mod");
+                    lm = cu;
+                }
                 return lm;
             }
             if ("zombie/FliesSound$ChunkLevelData".equals(className) && classfileBuffer != null) {
@@ -1054,7 +1079,11 @@ public class PZOptimAgent {
                 if (tr != null) {
                     PZOLogger.success("[PZO Agent] ASM-patched IsoTree.isPlayerInsideARoom: no crash when the player's square has no room");
                 }
-                return tr;
+                byte[] cutaway = AsmSupport.transform(tr != null ? tr : classfileBuffer, loader, "IsoTree crown cutaway", TreeCutaway::patchTree);
+                if (cutaway != null) {
+                    PZOLogger.success("[PZO Agent] ASM-patched IsoTree: smooth crown recovery and fewer cutaway visibility checks");
+                }
+                return cutaway != null ? cutaway : tr;
             }
             if ("zombie/iso/fboRenderChunk/FBORenderChunk".equals(className) && classfileBuffer != null) {
                 byte[] mip = AsmSupport.transform(classfileBuffer, loader, "FBORenderChunk mip levels", ChunkMipLimit::patchRenderChunk);
@@ -1441,7 +1470,7 @@ public class PZOptimAgent {
                         boolean isOnScreen = "Code".equals(aname) && "isOnScreen".equals(mname) && "(I)Z".equals(mdesc);
                         boolean indexForLevel = "Code".equals(aname) && "indexForLevel".equals(mname) && "(I)I".equals(mdesc);
                         // The rewrite reads the stock body's constant pool indices at fixed offsets. Once another mod's
-                        // advice is woven in (Viewpoint patches isOnScreen) those bytes are its code, so I leave it alone.
+                        // advice is woven in (a ZombieBuddy mod patches isOnScreen) those bytes are its code, so I leave it alone.
                         if ((isOnScreen && !isStockCode(b, pos, STOCK_IS_ON_SCREEN))
                                 || (indexForLevel && !isStockCode(b, pos, STOCK_INDEX_FOR_LEVEL))) {
                             PZOLogger.info("[PZO Agent] FBORenderLevels." + mname + " was changed by another mod, boundary guard skipped");

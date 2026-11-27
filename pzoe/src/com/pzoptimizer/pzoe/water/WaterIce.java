@@ -19,6 +19,15 @@ public final class WaterIce {
     private static volatile boolean enabledHere;
     private static volatile float[] visibleHoles = new float[0];
     private static double lastHour = Double.NaN;
+    private static final long WARNING_NS = 850_000_000L;
+    private static final LinkedHashMap<Long, Long> stressed = new LinkedHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicReferenceArray<Warning> warnings =
+        new java.util.concurrent.atomic.AtomicReferenceArray<>(4);
+    private static boolean holesChanged;
+    private static long nextObserverSample;
+    private static volatile float[] observerLoads = new float[4];
+
+    private record Warning(int x, int y, long until, float risk) {}
 
     private WaterIce() {}
 
@@ -29,6 +38,8 @@ public final class WaterIce {
     public static void load(GameTime time) {
         if (GameClient.client) return;
         lastHour = Double.NaN;
+        stressed.clear();
+        clearWarnings();
         Object saved = time.getModData().rawget(SAVE);
         apply(saved instanceof String text ? text : "");
     }
@@ -42,13 +53,18 @@ public final class WaterIce {
         enabledHere = WaterGameplay.enabled(OPTION);
         if (!enabledHere) {
             lastHour = Double.NaN;
+            stressed.clear();
+            clearWarnings();
             return;
         }
         double elapsed = Double.isNaN(lastHour) ? 0 : Math.max(0, Math.min(1, hours - lastHour));
         lastHour = hours;
         if (temperature < -2f) amount = Math.min(1f, amount + (float) elapsed * Math.min(0.06f, (-2f - temperature) * 0.004f));
         if (temperature > 1f) amount = Math.max(0f, amount - (float) elapsed * Math.min(0.09f, (temperature - 1f) * 0.008f));
-        if (!holes.isEmpty() && holes.values().removeIf(expiry -> expiry <= hours)) publishHoles();
+        if (!holes.isEmpty() && holes.values().removeIf(expiry -> expiry <= hours)) {
+            publishHoles();
+            holesChanged = true;
+        }
     }
 
     public static float coverage(float localAmount) {
@@ -80,18 +96,78 @@ public final class WaterIce {
         return active() && thickness(square) >= 0.16f;
     }
 
-    static void step(IsoPlayer player, IsoGridSquare square) {
-        if (GameClient.client || !active() || !player.isPlayerMoving()) return;
-        float ice = thickness(square);
-        if (ice < 0.16f) return;
+    private static float load(IsoPlayer player) {
         float carry = Math.min(2f, player.getInventoryWeight() / Math.max(1, player.getMaxWeight()));
-        float load = 0.26f + 0.12f * carry + (player.isSprinting() ? 0.18f : player.isRunning() ? 0.1f : 0f);
-        if (ice >= load) return;
+        return 0.26f + 0.12f * carry + (player.isSprinting() ? 0.18f : player.isRunning() ? 0.1f : 0f);
+    }
 
+    static void step(IsoPlayer player, IsoGridSquare square) {
+        if (!active()) return;
+        float ice = thickness(square);
+        float load = load(player);
+        if (ice < 0.16f || ice >= load) return;
+        long now = System.nanoTime();
+        if (player.isLocalPlayer() && player.isPlayerMoving()) {
+            int index = player.getIndex();
+            if (index >= 0 && index < warnings.length()) {
+                var prior = warnings.get(index);
+                if (prior == null || prior.x != square.x || prior.y != square.y || prior.until - now < 450_000_000L) {
+                    warnings.set(index, new Warning(square.x, square.y, now + 1_100_000_000L,
+                        Math.min(1f, 0.45f + (load - ice) * 1.25f)));
+                }
+            }
+        }
+        if (GameClient.client) return;
+        long key = key(square);
+        Long since = stressed.get(key);
+        if (since == null || now - since > 3_000_000_000L) {
+            if (!player.isPlayerMoving()) return;
+            if (stressed.size() >= MAX_HOLES) stressed.remove(stressed.keySet().iterator().next());
+            stressed.put(key, now);
+            return;
+        }
+        if (now - since < WARNING_NS) return;
+        stressed.remove(key);
         if (holes.size() >= MAX_HOLES) holes.remove(holes.keySet().iterator().next());
-        holes.put(key(square), GameTime.getInstance().getWorldAgeHours() + 8.0);
+        holes.put(key, GameTime.getInstance().getWorldAgeHours() + 8.0);
         publishHoles();
+        holesChanged = true;
         if (WorldSoundManager.instance != null) WorldSoundManager.instance.addSound(player, square.x, square.y, 0, 8, 8);
+    }
+
+    static void sampleObservers(long now) {
+        if (now < nextObserverSample) return;
+        nextObserverSample = now + 150_000_000L;
+        float[] loads = new float[4];
+        if (active()) {
+            for (int i = 0; i < loads.length; i++) {
+                IsoPlayer player = IsoPlayer.players[i];
+                if (player != null) loads[i] = load(player);
+            }
+        }
+        observerLoads = loads;
+    }
+
+    static void bindCondition(int location, int observer) {
+        if (location < 0) return;
+        float[] loads = observerLoads;
+        float limit = observer >= 0 && observer < loads.length ? loads[observer] : 0f;
+        var warning = observer >= 0 && observer < warnings.length() ? warnings.get(observer) : null;
+        float risk = warning != null && limit > 0f
+            ? warning.risk * Math.max(0f, Math.min(1f, (warning.until - System.nanoTime()) / 400_000_000f)) : 0f;
+        org.lwjgl.opengl.GL20.glUniform4f(location, warning == null ? 0f : warning.x + 0.5f,
+            warning == null ? 0f : warning.y + 0.5f, risk, limit);
+    }
+
+    private static void clearWarnings() {
+        for (int i = 0; i < warnings.length(); i++) warnings.set(i, null);
+        observerLoads = new float[4];
+    }
+
+    public static String changedHoles() {
+        if (!holesChanged || !WaterGameplay.enabled(OPTION)) return "";
+        holesChanged = false;
+        return encodeState();
     }
 
     public static String encodeState() {
@@ -109,7 +185,10 @@ public final class WaterIce {
         publishHoles();
         amount = 0f;
         remoteSnapshot = false;
-        if (text == null || text.isEmpty()) return;
+        if (text == null || text.isEmpty()) {
+            clearWarnings();
+            return;
+        }
         try {
             String[] parts = text.split("/", MAX_HOLES + 2);
             if (parts.length > MAX_HOLES + 1) return;
@@ -123,6 +202,7 @@ public final class WaterIce {
             remoteSnapshot = true;
         } catch (NumberFormatException ignored) {
             holes.clear();
+            publishHoles();
             amount = 0f;
         }
     }

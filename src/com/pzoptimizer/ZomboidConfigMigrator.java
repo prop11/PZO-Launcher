@@ -17,8 +17,8 @@ import java.util.Objects;
  *
  * buildTarget is the one place that says what the file should contain for this PC, and the file needs updating exactly
  * when that differs from what's on disk, so the check and the update can't disagree. The user's own args (heap size,
- * Steam flags, other agents) are kept; I only add what PZO needs and drop a few broken or outdated ones. In
- * compatibility mode (CompatMode) the heap isn't pre-touched, starts small, and the collector is G1.
+ * Steam flags, other agents) are kept. PZO's legacy pre-touched heap profiles start smaller after migration.
+ * Automatic selection uses G1 in compatibility mode.
  */
 public final class ZomboidConfigMigrator {
 
@@ -42,7 +42,9 @@ public final class ZomboidConfigMigrator {
     private static final String PRE_TOUCH = "-XX:+AlwaysPreTouch";
     private static final String STOCK_MAX_HEAP = "-Xmx3072m";
 
-    // Added if missing. PRE_TOUCH goes in separately, except in compatibility mode
+    private static final int INITIAL_HEAP_MB = 1024;
+
+    // Added if missing
     private static final String[] PERFORMANCE_ARGS = {
         "-XX:-CreateCoredumpOnCrash",
         "-XX:-OmitStackTraceInFastThrow",
@@ -56,13 +58,13 @@ public final class ZomboidConfigMigrator {
 
     // Anything that picks a collector. The game picks one per Windows version (G1 on 6.1, ZGC from 10.0.17134), and two
     // in one launch stop the JVM starting, so every one of them goes and pickGc's choice goes in once at the top level
-    private static final String[] GC_SELECTORS = {"-XX:+UseZGC", "-XX:+UseG1GC", "-XX:+UseShenandoahGC", "-XX:+UseParallelGC",
-        "-XX:+UseSerialGC", "-XX:+UseEpsilonGC"};
+    private static final java.util.regex.Pattern GC_SELECTOR = java.util.regex.Pattern.compile(
+        "-XX:([+-])Use(?:G1|Parallel(?:Old)?|Serial|ParNew|ConcMarkSweep|Z|Shenandoah|Epsilon|Graal)GC");
     // Older PZO versions added it with G1; such a small target makes G1 collect far too often
     private static final String OLD_G1_PAUSE = "-XX:MaxGCPauseMillis=16";
     static final double SHENANDOAH_MIN_RAM_GB = 15.0; // "16 GB" PCs report a bit under 16
 
-    // ZGC-only tuning; PZO never picks ZGC any more
+    // ZGC-only tuning, carried over when preserving ZGC
     private static final String[] ZGC_ONLY_PREFIXES = {"-XX:+ZGenerational", "-XX:-ZGenerational", "-XX:ZAllocationSpikeTolerance",
         "-XX:ZCollectionInterval", "-XX:+ZUncommit", "-XX:-ZUncommit", "-XX:ZUncommitDelay", "-XX:SoftMaxHeapSize"};
 
@@ -100,13 +102,8 @@ public final class ZomboidConfigMigrator {
         return 4096;
     }
 
-    /** Starting heap: half the maximum, or CompatMode's small start in compatibility mode. */
     public static int getRecommendedInitialHeapMb(int maxMb) {
-        if (CompatMode.isActive()) return Math.min(CompatMode.COMPAT_INITIAL_HEAP_MB, maxMb);
-        if (maxMb >= 12288) return 6144;
-        if (maxMb >= 8192) return 4096;
-        if (maxMb >= 6144) return 3072;
-        return 2048;
+        return Math.min(INITIAL_HEAP_MB, maxMb);
     }
 
     /** Whether the file differs from what buildTarget wants for this PC. */
@@ -120,6 +117,8 @@ public final class ZomboidConfigMigrator {
             return !Objects.equals(current.get("mainClass"), target.get("mainClass"))
                 || !Objects.equals(strings(current.get("classpath")), strings(target.get("classpath")))
                 || !Objects.equals(JsonMini.format(osBlocks(current)), JsonMini.format(osBlocks(target)))
+                || strings(current.get("vmArgs")).stream().filter(arg -> GC_SELECTOR.matcher(arg).matches()).count()
+                    != strings(target.get("vmArgs")).stream().filter(arg -> GC_SELECTOR.matcher(arg).matches()).count()
                 // JVM arg order doesn't matter, so don't rewrite a hand-edited order
                 || !new LinkedHashSet<>(strings(current.get("vmArgs"))).equals(new LinkedHashSet<>(strings(target.get("vmArgs"))));
         } catch (Throwable t) {
@@ -153,10 +152,72 @@ public final class ZomboidConfigMigrator {
     }
 
     private static void buildTarget(Map<String, Object> root, File gameDir) {
+        boolean alreadyUsingPzo = TARGET_MAIN_CLASS.equals(root.get("mainClass"));
         root.put("mainClass", TARGET_MAIN_CLASS);
         root.put("classpath", targetClasspath(strings(root.get("classpath"))));
-        root.put("vmArgs", targetVmArgs(strings(root.get("vmArgs")), gameDir));
-        stripGcFromOsBlocks(root);
+        List<String> vmArgs = strings(root.get("vmArgs"));
+        List<String> gc = PZOConfig.isPreserveGc() ? configuredGc(root, vmArgs) : pickGc();
+        root.put("vmArgs", targetVmArgs(vmArgs, gameDir, alreadyUsingPzo, gc));
+        stripManagedArgsFromOsBlocks(root);
+        fixClassPathPin(root, gameDir);
+    }
+
+    static final String CLASS_PATH_ARG = "-Djava.class.path=";
+
+    // Some mods (PZOptPreloader for its AOT cache) add -Djava.class.path=...\projectzomboid.jar. It replaces the whole
+    // "classpath" list, so PZOptimEngine.jar never loads and the next launch can't find PZOEntrypoint. The pin stays
+    // (that mod wants one) but lists the real class path, once, at the top level
+    @SuppressWarnings("unchecked")
+    private static void fixClassPathPin(Map<String, Object> root, File gameDir) {
+        boolean pinned = false;
+        List<String> top = new ArrayList<>();
+        for (String arg : strings(root.get("vmArgs"))) {
+            if (arg.startsWith(CLASS_PATH_ARG)) pinned = true;
+            else top.add(arg);
+        }
+        for (String k : OS_BLOCKS) {
+            if (!(root.get(k) instanceof Map)) continue;
+            Map<String, Object> block = (Map<String, Object>) root.get(k);
+            for (Object version : block.values()) {
+                if (!(version instanceof Map) || !(((Map<String, Object>) version).get("vmArgs") instanceof List)) continue;
+                Map<String, Object> options = (Map<String, Object>) version;
+                List<String> kept = new ArrayList<>();
+                for (String arg : strings(options.get("vmArgs"))) {
+                    if (arg.startsWith(CLASS_PATH_ARG)) pinned = true;
+                    else kept.add(arg);
+                }
+                options.put("vmArgs", kept);
+            }
+        }
+        if (!pinned) return;
+        List<String> entries = new ArrayList<>();
+        for (String entry : strings(root.get("classpath"))) {
+            entries.add(gameDir == null ? entry : new File(gameDir, entry).toPath().normalize().toString());
+        }
+        top.add(CLASS_PATH_ARG + String.join(File.pathSeparator, entries));
+        root.put("vmArgs", top);
+        // A version left with no args goes, as in stripManagedArgsFromOsBlocks
+        for (String k : OS_BLOCKS) {
+            if (!(root.get(k) instanceof Map)) continue;
+            Map<String, Object> block = (Map<String, Object>) root.get(k);
+            block.entrySet().removeIf(e -> e.getValue() instanceof Map<?, ?> m
+                && m.get("vmArgs") instanceof List<?> l && l.isEmpty() && m.size() == 1);
+            if (block.isEmpty()) root.remove(k);
+        }
+    }
+
+    /** A class path pin (from another mod) that leaves PZOptimEngine.jar out, which stops the next launch. */
+    static boolean hasBrokenClassPathPin(String json) {
+        Map<String, Object> root = parseRoot(json);
+        if (root == null || !TARGET_MAIN_CLASS.equals(root.get("mainClass"))) return false;
+        List<String> args = new ArrayList<>(strings(root.get("vmArgs")));
+        for (String k : OS_BLOCKS) {
+            if (!(root.get(k) instanceof Map<?, ?> block)) continue;
+            for (Object version : block.values()) {
+                if (version instanceof Map<?, ?> options) args.addAll(strings(options.get("vmArgs")));
+            }
+        }
+        return args.stream().anyMatch(a -> a.startsWith(CLASS_PATH_ARG) && !a.contains("PZOptimEngine.jar"));
     }
 
     private static final String[] OS_BLOCKS = {"windows", "linux", "macos", "osx"};
@@ -173,7 +234,7 @@ public final class ZomboidConfigMigrator {
     // by the launcher, so their collector would clash with the one pickGc puts at the top. A version left with no args
     // goes, and so does a block left empty: a file with no "windows" block is known to start, empty lists aren't
     @SuppressWarnings("unchecked")
-    private static void stripGcFromOsBlocks(Map<String, Object> root) {
+    private static void stripManagedArgsFromOsBlocks(Map<String, Object> root) {
         for (String k : OS_BLOCKS) {
             if (!(root.get(k) instanceof Map)) continue;
             Map<String, Object> block = (Map<String, Object>) root.get(k);
@@ -183,7 +244,9 @@ public final class ZomboidConfigMigrator {
                 if (!(verMap.get("vmArgs") instanceof List)) return false;
                 List<String> kept = new ArrayList<>();
                 for (String a : strings(verMap.get("vmArgs"))) {
-                    if (!isGcArg(a)) kept.add(a);
+                    for (String tok : splitJoinedArgs(a)) {
+                        if (!isGcArg(tok) && !PRE_TOUCH.equals(tok)) kept.add(tok);
+                    }
                 }
                 if (kept.isEmpty()) verMap.remove("vmArgs");
                 else verMap.put("vmArgs", kept);
@@ -193,11 +256,48 @@ public final class ZomboidConfigMigrator {
         }
     }
 
-    private static boolean isGcArg(String arg) {
-        for (String g : GC_SELECTORS) {
-            if (arg.equals(g)) return true;
+    private static List<String> configuredGc(Map<String, Object> root, List<String> vmArgs) {
+        List<String> args = vmArgs.stream().flatMap(arg -> splitJoinedArgs(arg).stream()).toList();
+        List<String> gc = selectConfiguredGc(args);
+        if (!gc.isEmpty()) return gc;
+
+        // An older stock config may select its collector only in a platform block.
+        List<String> platformArgs = new ArrayList<>();
+        for (Object os : osBlocks(root).values()) {
+            if (!(os instanceof Map<?, ?> block)) continue;
+            for (Object version : block.values()) {
+                if (!(version instanceof Map<?, ?> options)) continue;
+                for (String arg : strings(options.get("vmArgs"))) platformArgs.addAll(splitJoinedArgs(arg));
+            }
         }
-        return arg.startsWith("-XX:ShenandoahGCMode=") || arg.equals(OLD_G1_PAUSE) || isZgcOnly(arg);
+        List<String> runningGc = selectConfiguredGc(
+            java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments());
+        if (!runningGc.isEmpty() && platformArgs.contains(runningGc.get(0))) return runningGc;
+        List<String> selectors = platformArgs.stream().filter(ZomboidConfigMigrator::isEnabledCollector).distinct().toList();
+        return selectors.size() == 1 ? selectConfiguredGc(platformArgs) : List.of();
+    }
+
+    private static boolean isEnabledCollector(String arg) {
+        return arg.startsWith("-XX:+") && GC_SELECTOR.matcher(arg).matches();
+    }
+
+    private static List<String> selectConfiguredGc(List<String> args) {
+        String selector = args.stream().filter(ZomboidConfigMigrator::isEnabledCollector).findFirst().orElse(null);
+        if (selector == null) return List.of();
+        List<String> gc = new ArrayList<>();
+        gc.add(selector);
+        if (selector.equals("-XX:+UseShenandoahGC")) {
+            args.stream().filter(arg -> arg.startsWith("-XX:ShenandoahGCMode=")).reduce((first, last) -> last)
+                .ifPresent(gc::add);
+        } else if (selector.equals("-XX:+UseZGC")) {
+            args.stream().filter(ZomboidConfigMigrator::isZgcOnly).distinct().forEach(gc::add);
+        }
+        return gc;
+    }
+
+    private static boolean isGcArg(String arg) {
+        return GC_SELECTOR.matcher(arg).matches() || arg.startsWith("-XX:ShenandoahGCMode=")
+            || arg.equals(OLD_G1_PAUSE) || isZgcOnly(arg);
     }
 
     private static volatile List<String> pickedGc;
@@ -276,7 +376,20 @@ public final class ZomboidConfigMigrator {
         return !running.isEmpty();
     }
 
-    private static List<String> targetVmArgs(List<String> rawArgs, File gameDir) {
+    // Old installers and the migrator wrote these exact pairs together with AlwaysPreTouch.
+    private static boolean isLegacyHeapProfile(List<String> args) {
+        if (!args.contains(PRE_TOUCH)) return false;
+        List<String> heap = args.stream().filter(a -> a.startsWith("-Xms") || a.startsWith("-Xmx")).toList();
+        if (heap.size() != 2) return false;
+        String pair = heap.get(0).startsWith("-Xms") ? heap.get(0) + " " + heap.get(1) : heap.get(1) + " " + heap.get(0);
+        return switch (pair) {
+            case "-Xms2048m -Xmx4096m", "-Xms3072m -Xmx6144m", "-Xms4096m -Xmx8192m",
+                 "-Xms4096m -Xmx12288m", "-Xms6144m -Xmx12288m", "-Xms8192m -Xmx16384m" -> true;
+            default -> false;
+        };
+    }
+
+    private static List<String> targetVmArgs(List<String> rawArgs, File gameDir, boolean alreadyUsingPzo, List<String> gc) {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         boolean isWin = os.contains("win");
         boolean isLinux = os.contains("linux");
@@ -284,7 +397,9 @@ public final class ZomboidConfigMigrator {
 
         // On Linux and macOS, -agentlib:zbNative with no loadable library stops the game starting (issue #40), and a
         // Windows zbNative.dll left in the folder doesn't count
-        boolean zbInArgs = rawArgs.stream().anyMatch(a -> a.contains("zbNative") || a.contains("ZombieBuddy"));
+        // A class path pin names ZombieBuddy.jar without loading ZombieBuddy's agent
+        boolean zbInArgs = rawArgs.stream().filter(a -> !a.startsWith(CLASS_PATH_ARG))
+            .anyMatch(a -> a.contains("zbNative") || a.contains("ZombieBuddy"));
         boolean zbLibFound = false;
         if (gameDir != null) {
             String lib = isWin ? "zbNative.dll" : isLinux ? "libzbNative.so" : "libzbNative.dylib";
@@ -305,6 +420,9 @@ public final class ZomboidConfigMigrator {
             PZOLogger.info("[ZomboidConfigMigrator] ZombieBuddy comes from the launch options; left out of " + TARGET_JSON_NAME + " so its options win");
         }
 
+        boolean legacyHeap = alreadyUsingPzo && isLegacyHeapProfile(rawArgs.stream()
+            .flatMap(arg -> splitJoinedArgs(arg).stream()).toList());
+
         // The user's args minus anything rebuilt below, broken, or outdated
         List<String> user = new ArrayList<>();
         List<String> userLibraryPaths = new ArrayList<>();
@@ -324,8 +442,8 @@ public final class ZomboidConfigMigrator {
                     continue;
                 }
                 if (tok.contains("UseCompactObjectHeaders")) continue; // not a Java 17 option
-                if (compat && tok.equals(PRE_TOUCH)) continue;
-                if (isGcArg(tok)) continue; // pickGc's choice goes in below
+                if (tok.equals(PRE_TOUCH)) continue;
+                if (isGcArg(tok)) continue;
                 user.add(tok);
             }
         }
@@ -342,8 +460,7 @@ public final class ZomboidConfigMigrator {
             : ".:ProjectZomboid.app/Contents/MacOS/:ProjectZomboid.app/Contents/Java/";
         args.add("-Djava.library.path=" + withUserLibraryPaths(libraryPath, userLibraryPaths, isWin));
 
-        // Heap: the user's sizes are kept and only the game's exact stock max is raised to suit this PC. In compatibility
-        // mode the starting heap is lowered so nothing big is committed up front
+        // A smaller starting heap lets the collector return memory below the old profile's floor.
         int recMax = getRecommendedHeapMb();
         int recStart = getRecommendedInitialHeapMb(recMax);
         boolean hasXms = false, hasXmx = false;
@@ -352,7 +469,7 @@ public final class ZomboidConfigMigrator {
             if (arg.startsWith("-Xms")) {
                 hasXms = true;
                 long mb = parseHeapArgMb(arg);
-                if (compat && mb > recStart) {
+                if ((compat || legacyHeap) && mb > recStart) {
                     arg = "-Xms" + recStart + "m";
                     mb = recStart;
                 }
@@ -371,8 +488,7 @@ public final class ZomboidConfigMigrator {
         for (String pf : PERFORMANCE_ARGS) {
             if (!args.contains(pf)) args.add(pf);
         }
-        if (!compat && !args.contains(PRE_TOUCH)) args.add(PRE_TOUCH);
-        args.addAll(pickGc());
+        args.addAll(gc);
         return args;
     }
 
@@ -423,7 +539,7 @@ public final class ZomboidConfigMigrator {
             if (!isMigrationNeeded(jsonFile)) return false;
             backupOnce(jsonFile);
             String migrated = migrateJsonContent(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8), jsonFile.getParentFile());
-            Files.writeString(jsonFile.toPath(), migrated, StandardCharsets.UTF_8);
+            writeAtomic(jsonFile, migrated);
             PZOLogger.success("[ZomboidConfigMigrator] Updated " + jsonFile.getName() + " for PZO " + UpdateChecker.CURRENT_VERSION
                 + (CompatMode.isActive() ? " (compatibility mode)" : ""));
             return true;
@@ -449,12 +565,31 @@ public final class ZomboidConfigMigrator {
             backupOnce(jsonFile);
             String migrated = migrateJsonContent(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8), gameDir);
             File stagedFile = new File(jsonFile.getParentFile(), TARGET_JSON_NAME + ".new");
-            Files.writeString(stagedFile.toPath(), migrated, StandardCharsets.UTF_8);
+            writeAtomic(stagedFile, migrated);
             PZOLogger.success("[ZomboidConfigMigrator] Staged " + stagedFile.getName() + " for replacement on game exit.");
             return true;
         } catch (Throwable t) {
             PZOLogger.warn("[ZomboidConfigMigrator] Notice staging config update: " + t.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Writes next to the file, then swaps it in, so a crash or a killed game mid-write can't leave the launcher with a
+     * cut-off file it can't read (the game then won't start at all).
+     */
+    public static void writeAtomic(File file, String content) throws java.io.IOException {
+        java.nio.file.Path target = file.toPath().toAbsolutePath();
+        java.nio.file.Path temp = Files.createTempFile(target.getParent(), ".pzo-", ".tmp");
+        try {
+            Files.writeString(temp, content, StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
         }
     }
 
@@ -476,9 +611,29 @@ public final class ZomboidConfigMigrator {
                     + " needs on this PC. Updating (applies on the next launch)...");
                 migrateFileInPlace(jsonFile);
             }
+            watchClassPathPin(jsonFile);
         } catch (Throwable t) {
             PZOLogger.warn("[ZomboidConfigMigrator] Non-fatal notice during startup configuration check: " + t.getMessage());
         }
+    }
+
+    private static volatile boolean pinWatch;
+
+    // A mod that pins the class path can do it again mid-session, after the startup check. The next launch would then
+    // fail before PZO runs, so this is the last chance to put PZO's jars back in
+    private static void watchClassPathPin(File jsonFile) {
+        if (pinWatch) return;
+        pinWatch = true;
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                if (jsonFile.isFile()
+                    && hasBrokenClassPathPin(Files.readString(jsonFile.toPath(), StandardCharsets.UTF_8))) {
+                    PZOLogger.info("[ZomboidConfigMigrator] Another mod pinned the class path without PZO during this session; fixing it");
+                    migrateFileInPlace(jsonFile);
+                }
+            } catch (Throwable ignored) {
+            }
+        }, "PZO-ClassPathPin"));
     }
 
     /** Minimal recursive JSON parser and serializer. */

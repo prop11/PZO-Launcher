@@ -47,6 +47,13 @@ final class SkyCache {
 
     // Set from the chunk shader's uniform lookups (render thread), read on the main thread
     static volatile boolean sunWanted, cloudWanted, fogWanted, snowWanted;
+    // Leaf Shadows: the sun pass also writes the tree crowns' own shadow on the ground (level 0) into a second target,
+    // so the chunk shader can sway just that part and leave building shadows still
+    static volatile boolean leafWanted;
+    private static final int[] leafTex = new int[4], leafRing = new int[4], leafDetail = new int[4];
+    private static final boolean[] leafReady = new boolean[4], leafPass = new boolean[4];
+    // God Rays alone need a soft shadow in the air. Surface shadows and fog keep their usual resolution.
+    static volatile boolean coarseSun;
     // Cached fog: the chunk shader's whole ground fog march per world point (PZOFogScatter0/1)
     static volatile boolean scatterWanted;
     // Fog march steps (Fog quality) and the march's strengths, set on the main thread before frame()
@@ -106,6 +113,10 @@ final class SkyCache {
     // Render thread, for the chunk draws
     static int sunTexture(int p) {
         return p >= 0 && p < 4 && sunReady[p] ? sunTex[p] : 0;
+    }
+
+    static int leafTexture(int p) {
+        return p >= 0 && p < 4 && leafReady[p] && sunReady[p] ? leafTex[p] : 0;
     }
 
     static int sunRing(int p) {
@@ -175,7 +186,7 @@ final class SkyCache {
         final boolean doScatter;
         final int samples, fieldTex;
         final float fogK, glowK, fogH, sunK, fieldOx, fieldOy;
-        final int detail;
+        final int detail, sunDetail;
         final float sunX, sunY, sunRise, leaf, cover, cloudOffX, cloudOffY, clock, driftX, driftY;
 
         Step(boolean doSun, boolean doCloud, boolean doFog, boolean doSnow, int[] ox, int[] oy, int[] ring, int[] height, int[] rooms, int[] light, int detail, float sunX, float sunY,
@@ -202,6 +213,7 @@ final class SkyCache {
             this.fieldOx = FogField.fieldOx;
             this.fieldOy = FogField.fieldOy;
             this.detail = detail;
+            this.sunDetail = coarseSun ? 2 : detail;
             this.sunX = sunX;
             this.sunY = sunY;
             this.sunRise = sunRise;
@@ -279,7 +291,7 @@ final class SkyCache {
     }
 
     private static void sunBand(Step s, int p) {
-        int ring = s.ring[p], t = Math.max(2, Math.min(8, s.detail));
+        int ring = s.ring[p], t = Math.max(2, Math.min(8, s.sunDetail));
         int w = ring * t, rows = w * LEVELS;
         if (sunTex[p] == 0 || sunRing[p] != ring || sunDetail[p] != t) {
             if (sunTex[p] != 0) GL11.glDeleteTextures(sunTex[p]);
@@ -294,6 +306,26 @@ final class SkyCache {
         if (!sunReady[p]) band *= 4;
         int y0 = cursor[p], h = Math.min(band, rows - y0);
         GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0, GL11.GL_TEXTURE_2D, sunTex[p], 0);
+        boolean leaf = leafWanted;
+        if (leaf && (leafTex[p] == 0 || leafRing[p] != ring || leafDetail[p] != t)) {
+            if (leafTex[p] != 0) GL11.glDeleteTextures(leafTex[p]);
+            // Repeat wrap: the chunk shader reads it straight by world position, across the ring's seam
+            leafTex[p] = texture(w, w, GL11.GL_LINEAR, GL11.GL_REPEAT, GL30.GL_R8, GL11.GL_RED);
+            leafRing[p] = ring;
+            leafDetail[p] = t;
+            leafReady[p] = false;
+            leafPass[p] = false;
+        }
+        if (y0 == 0) leafPass[p] = leaf;
+        else if (!leaf) leafPass[p] = false;
+        // Level 0 is the first w rows. The leaf target is only that tall, and drawing past an attachment's size
+        // draws nothing at all, so a band never crosses into level 1 while it's attached.
+        boolean leafBand = leaf && y0 < w;
+        if (leafBand) {
+            h = Math.min(h, w - y0);
+            GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT1, GL11.GL_TEXTURE_2D, leafTex[p], 0);
+            GL20.glDrawBuffers(LEAF_BUFFERS);
+        }
         GL11.glViewport(0, y0, w, h);
         GL20.glUseProgram(sunProg);
         GL13.glActiveTexture(GL13.GL_TEXTURE8);
@@ -320,12 +352,17 @@ final class SkyCache {
         GL20.glUniform4f(lsOrigin, s.ox[p], s.oy[p], 0f, 0f);
         GL20.glUniform4f(lsSun, s.sunX, s.sunY, s.sunRise, s.leaf);
         GL11.glDrawArrays(GL11.GL_TRIANGLES, 0, 3);
+        if (leafBand) {
+            GL30.glFramebufferTexture2D(GL30.GL_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT1, GL11.GL_TEXTURE_2D, 0, 0);
+            GL11.glDrawBuffer(GL30.GL_COLOR_ATTACHMENT0);
+        }
         sunTexels += (long) w * h;
         y0 += h;
         if (y0 >= rows) {
             y0 = 0;
             sunReady[p] = true;
             if (rt != 0) roomPassDone[p] = true;
+            if (leafPass[p]) leafReady[p] = true;
         }
         cursor[p] = y0;
     }
@@ -476,7 +513,14 @@ final class SkyCache {
     // Highest fog the card allows, in levels (Fog height 200 percent); the 4 stored heights spread up to it
     static final float FOG_LAYER_TOP = 0.66f;
 
+    private static final java.nio.IntBuffer LEAF_BUFFERS = org.lwjgl.BufferUtils.createIntBuffer(2)
+        .put(GL30.GL_COLOR_ATTACHMENT0).put(GL30.GL_COLOR_ATTACHMENT1).flip();
+
     private static int texture(int w, int h, int filter, int wrap) {
+        return texture(w, h, filter, wrap, GL11.GL_RGBA8, GL11.GL_RGBA);
+    }
+
+    private static int texture(int w, int h, int filter, int wrap, int internal, int format) {
         GL13.glActiveTexture(GL13.GL_TEXTURE8);
         int t = GL11.glGenTextures();
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, t);
@@ -484,7 +528,7 @@ final class SkyCache {
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, filter);
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, wrap);
         GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, wrap);
-        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA8, w, h, 0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
+        GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, internal, w, h, 0, format, GL11.GL_UNSIGNED_BYTE, (ByteBuffer) null);
         return t;
     }
 
@@ -532,27 +576,7 @@ final class SkyCache {
     }
 
     static int compile(String vs, String fs, String what) {
-        int p = GL20.glCreateProgram();
-        for (int k = 0; k < 2; k++) {
-            int s = GL20.glCreateShader(k == 0 ? GL20.GL_VERTEX_SHADER : GL20.GL_FRAGMENT_SHADER);
-            GL20.glShaderSource(s, k == 0 ? vs : fs);
-            GL20.glCompileShader(s);
-            if (GL20.glGetShaderi(s, GL20.GL_COMPILE_STATUS) == 0) {
-                PZOLogger.warn("[SkyCache] " + what + " shader didn't compile: " + GL20.glGetShaderInfoLog(s, 4096).trim());
-                GL20.glDeleteShader(s);
-                GL20.glDeleteProgram(p);
-                return 0;
-            }
-            GL20.glAttachShader(p, s);
-            GL20.glDeleteShader(s);
-        }
-        GL20.glLinkProgram(p);
-        if (GL20.glGetProgrami(p, GL20.GL_LINK_STATUS) == 0) {
-            PZOLogger.warn("[SkyCache] " + what + " shader didn't link: " + GL20.glGetProgramInfoLog(p, 4096).trim());
-            GL20.glDeleteProgram(p);
-            return 0;
-        }
-        return p;
+        return PzoeShaders.program(vs, fs, "[SkyCache] " + what);
     }
 
     static final String VERTEX = "#version 330\nvoid main()\n{\n"
@@ -575,7 +599,10 @@ final class SkyCache {
         uniform vec4 uInfo;
         uniform vec4 uOrigin;
         uniform vec4 uSun;
-        out vec4 o;
+        layout(location = 0) out vec4 o;
+        // Tree crowns' share of the shadow (second target, level 0 only, see leafWanted)
+        layout(location = 1) out vec4 oLeaf;
+        vec4 leafOcc = vec4(0.0);
 
         vec4 roomAt(vec2 sq)
         {
@@ -751,7 +778,9 @@ final class SkyCache {
                         for (int dx = -1; dx <= 1; dx++) {
                             vec2 sq = center + vec2(dx, dy);
                             if (all(lessThanEqual(abs(sq - previous), vec2(1.0)))) continue;
-                            occ = max(occ, treeShadow(w, z, sq));
+                            vec4 tree = treeShadow(w, z, sq);
+                            leafOcc = max(leafOcc, tree);
+                            occ = max(occ, tree);
                         }
                     }
                     previous = center;
@@ -778,11 +807,13 @@ final class SkyCache {
                 float top = max(max(hs.r, max(hs.g, hs.b)), max(hn.g, hw.b));
                 if (top < level - 0.05) {
                     o = vec4(0.0);
+                    oLeaf = vec4(0.0);
                     return;
                 }
             }
             bool room = uRoomsOn > 0.5 && bit(roomAt(sq).r, level) > 0.5;
             o = sunShadow(sq + sub, level + vec4(0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0), level, room);
+            oLeaf = vec4(leafOcc.r);
         }
         """;
 

@@ -190,7 +190,8 @@ public final class RainRunoff {
     /** End of FBORenderCell.renderRainSplashes(player, z): main thread, once per level per player each frame. */
     public static void render(int player, int z) {
         if (GoreFx.anyOn()) GoreFx.render(player, z);
-        if (!on && Precipitation.extras <= 0f) {
+        WindDebris.render(player, z);
+        if (!on && Precipitation.extras <= 0f && !(WeatherGround.wanted && WeatherGround.leaks)) {
             if (!active.isEmpty() || !edges.isEmpty()) clear();
             return;
         }
@@ -225,6 +226,7 @@ public final class RainRunoff {
         double dt = lastTick == 0 ? 0 : clamp((now - lastTick) * 1e-9, 0, 0.1);
         lastTick = now;
         advance(dt);
+        if (!on && Precipitation.extras <= 0f) return;
         if (lastScan != 0 && now - lastScan < 50_000_000L) return;
         double scanDt = lastScan == 0 ? 0.05 : clamp((now - lastScan) * 1e-9, 0, 0.15);
         lastScan = now;
@@ -420,6 +422,27 @@ public final class RainRunoff {
         emitted++;
     }
 
+    static void ingress(IsoCell cell, double x, double y, int z, double height) {
+        if (cell != lastCell || active.size() >= MAX_PARTICLES) return;
+        Particle p = pool.isEmpty() ? new Particle() : pool.remove(pool.size() - 1);
+        p.x = x;
+        p.y = y;
+        p.height = z + height;
+        p.target = z;
+        p.lightZ = z;
+        p.velocity = 1.55;
+        p.born = seconds;
+        p.stream = false;
+        p.powder = false;
+        p.splash = false;
+        p.size = DROP_SIZE;
+        p.opacity = DROP_OPACITY * 0.82;
+        p.splashSize = SPLASH_SIZE * 0.8;
+        p.splashOpacity = SPLASH_OPACITY * 0.8;
+        occluders(cell, p, x, y, p.height, p.target);
+        active.add(p);
+    }
+
     private static void spawnPowder(IsoCell cell, Edge e, double wx, double wy) {
         if (spawnCount >= EMIT_BUDGET || active.size() >= MAX_PARTICLES) return;
         double u = e.side == 1 ? 0.98 : e.side == 3 ? 0.02 : e.along;
@@ -507,6 +530,7 @@ public final class RainRunoff {
             p.height -= p.velocity * dt + 2 * dt * dt;
             p.velocity += 4 * dt;
             if (p.height <= p.target) {
+                WeatherGround.runoff((float) p.x, (float) p.y, (int) Math.floor(p.target));
                 p.height = p.target + 0.012;
                 p.splash = true;
                 p.born = seconds;
@@ -554,6 +578,16 @@ public final class RainRunoff {
         double h = sq.getApparentZ(0.5f, 0.5f);
         // An outdoor upper floor (balcony, flat roof) collects rain; a floor only hides what's below it
         return new Surface(h, 15, z > 0 && sq.getRoom() == null, KIND_FLOOR, h, h);
+    }
+
+    static boolean exposedFloor(IsoCell cell, IsoGridSquare square) {
+        var chunk = square.chunk;
+        if (chunk == null || roof(square) != null) return false;
+        for (int z = square.z + 1; z <= Math.min(chunk.maxLevel, 31); z++) {
+            var above = cell.getGridSquare(square.x, square.y, z);
+            if (above != null && (above.TreatAsSolidFloor() || roof(above) != null)) return false;
+        }
+        return true;
     }
 
     private static Art roof(IsoGridSquare sq) {

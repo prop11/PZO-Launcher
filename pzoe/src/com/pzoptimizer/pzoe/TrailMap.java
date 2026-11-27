@@ -280,27 +280,7 @@ public final class TrailMap {
     private static final String FRAGMENT_FADE = "#version 130\nuniform vec4 uFade;\nvoid main()\n{\n    gl_FragColor = uFade;\n}\n";
 
     private static int program(String vs, String fs) {
-        int prog = GL20.glCreateProgram();
-        for (int k = 0; k < 2; k++) {
-            int s = GL20.glCreateShader(k == 0 ? GL20.GL_VERTEX_SHADER : GL20.GL_FRAGMENT_SHADER);
-            GL20.glShaderSource(s, k == 0 ? vs : fs);
-            GL20.glCompileShader(s);
-            if (GL20.glGetShaderi(s, GL20.GL_COMPILE_STATUS) == 0) {
-                PZOLogger.warn("[TrailMap] shader didn't compile: " + GL20.glGetShaderInfoLog(s, 2048).trim());
-                GL20.glDeleteShader(s);
-                GL20.glDeleteProgram(prog);
-                return 0;
-            }
-            GL20.glAttachShader(prog, s);
-            GL20.glDeleteShader(s);
-        }
-        GL20.glLinkProgram(prog);
-        if (GL20.glGetProgrami(prog, GL20.GL_LINK_STATUS) == 0) {
-            PZOLogger.warn("[TrailMap] shader didn't link: " + GL20.glGetProgramInfoLog(prog, 2048).trim());
-            GL20.glDeleteProgram(prog);
-            return 0;
-        }
-        return prog;
+        return PzoeShaders.program(vs, fs, "[TrailMap]");
     }
 
     // The grass box around player 0, split where it wraps over the texture's edge. Only A is written.

@@ -189,7 +189,7 @@ public final class VehicleMotionSmoother {
     public static void beforeRender() {
         restoreRenderState();
         if (!isEnabled() || !resolveHandles()) return;
-        // Viewpoint's 3D view builds its camera from the car and seat pose during render and smooths between its own
+        // A 3D camera mod's view builds its camera from the car and seat pose during render and smooths between its own
         // 30 Hz ticks. My in-between pose under its fixed tick lags by a random amount each tick, so the view bobs.
         if (ViewpointStanddownGovernor.isStanddownActive() && ViewpointStanddownGovernor.isOwnViewActive()) return;
 
@@ -309,8 +309,9 @@ public final class VehicleMotionSmoother {
     }
 
     private static void smoothCamera() throws Throwable {
-        // A 3D camera mod (Viewpoint) drives the view itself, recentring PlayerCamera here would fight it
-        if (IsoPlayer.numPlayers > 1 || ViewpointStanddownGovernor.isStanddownActive()) return;
+        // A 3D camera mod drives the view itself, recentring PlayerCamera here would fight it
+        if (IsoPlayer.numPlayers > 1
+            || (ViewpointStanddownGovernor.isStanddownActive() && ViewpointStanddownGovernor.isOwnViewActive())) return;
         IsoPlayer player = IsoPlayer.players[0];
         if (player == null || player.getVehicle() == null) return;
 

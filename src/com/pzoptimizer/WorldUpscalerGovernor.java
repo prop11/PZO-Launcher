@@ -192,7 +192,7 @@ public final class WorldUpscalerGovernor {
     public static void renderOffScreenBuffer(Object core) {
         try {
             if (WorldRenderScale.isInstalled()) {
-                // In its own 3D view Viewpoint 0.1.7 draws frames between its 30 Hz game steps only while every drawer
+                // In its own 3D view a 3D camera mod draws frames between its 30 Hz game steps only while every drawer
                 // in the frame is one of its own; with the FSR pass in there it drops to one frame per step (30 FPS).
                 // Its scene is also drawn by its own GL code, which my render-scale wrappers don't scale, and it has
                 // its own upscalers there. So in that view FSR goes back to native and I stop queuing the pass once

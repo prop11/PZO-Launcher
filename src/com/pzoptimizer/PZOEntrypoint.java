@@ -9,6 +9,11 @@ public class PZOEntrypoint {
     public static void main(String[] args) {
         // Before the agent: its premain already reads mod lists and settings from the Zomboid folder
         ZomboidDir.setArgs(args);
+        if (IncompatibleModGuard.isPzOptimizationInstalled()) {
+            IncompatibleModGuard.reportAndWarn();
+            launchGame(args);
+            return;
+        }
         // Windows: the agent isn't in the json any more, so load it before anything touches a game class
         AgentSelfLoader.loadIfNeeded();
 
@@ -45,11 +50,6 @@ public class PZOEntrypoint {
         }
         StartupTimer.step("crash check (and its window, if shown)");
 
-        if (IncompatibleModGuard.isPzOptimizationInstalled()) {
-            IncompatibleModGuard.reportAndWarn();
-            launchGame(args);
-            return;
-        }
         if (!StartupIntegrity.verify()) {
             StartupIntegrity.reportAndStandDown();
             launchGame(args);
@@ -85,6 +85,7 @@ public class PZOEntrypoint {
         try {
             ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
         } catch (Throwable ignored) {}
+        IncompatibleModGuard.noticePzOptPreloaderOnce();
 
         boolean isNative = false;
         double timerMs = 15.6;
@@ -148,6 +149,7 @@ public class PZOEntrypoint {
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
         AssetCachePrewarmer.startPrewarmingAsync();
+        ClassWarmup.start();
         // Pull the native libs into the page cache and turn off LWJGL's vertex array bounds checks
         NativeLibraryPreloader.startPreloadingAsync();
         SpriteBatchOptimizer.apply();

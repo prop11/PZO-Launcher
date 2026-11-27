@@ -29,11 +29,13 @@ public final class FireEvents {
         if (!spreading && !fire.smoke && fire.getSquare().getRoom() != null) origins.put(fire, Boolean.TRUE);
     }
 
-    public static void spread(IsoCell cell, IsoGridSquare square, boolean igniteOnAny, int energy) {
+    /** IsoFire.Spread's StartFire, with the fire it spreads from. Wind Fire (PZOE weather) may steer it. */
+    public static void spread(IsoCell cell, IsoGridSquare square, boolean igniteOnAny, int energy, IsoFire source) {
         boolean previous = spreading;
         spreading = true;
         try {
-            IsoFireManager.StartFire(cell, square, igniteOnAny, energy);
+            if (com.pzoptimizer.pzoe.weather.WindFire.allow(cell, source, square)) IsoFireManager.StartFire(cell, square, igniteOnAny, energy);
+            com.pzoptimizer.pzoe.weather.WindFire.carry(cell, source, square, energy);
         } finally {
             spreading = previous;
         }
@@ -65,7 +67,10 @@ public final class FireEvents {
             for (var instruction : method.instructions.toArray()) {
                 if (!(instruction instanceof MethodInsnNode call)) continue;
                 if (method.name.equals("Spread") && call.owner.equals(MANAGER) && call.name.equals("StartFire") && call.desc.equals(START)) {
-                    method.instructions.set(call, new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "spread", START, false));
+                    // The spreading fire goes on top of StartFire's own arguments
+                    method.instructions.insertBefore(call, new VarInsnNode(Opcodes.ALOAD, 0));
+                    method.instructions.set(call, new MethodInsnNode(Opcodes.INVOKESTATIC, HOOKS, "spread",
+                        "(Lzombie/iso/IsoCell;" + SQUARE + "ZI" + FIRE_ARG + ")V", false));
                     spread = true;
                 }
                 if (method.name.equals("updateFromTimer") && call.owner.equals("zombie/iso/IsoGridSquare")

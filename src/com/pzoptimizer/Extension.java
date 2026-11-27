@@ -34,6 +34,12 @@ public interface Extension {
     /** A PZOApi call from Lua that PZO doesn't handle itself, or UNHANDLED. */
     Object modApi(String op, Object a, Object b, Object c);
 
+    /** Whether to inspect a Lua source before compiling or looking it up in the cache. */
+    default boolean readsLuaSource(String path) { return false; }
+
+    /** Return the original source when the file is unsupported. */
+    default String rewriteLuaSource(String path, String source) { return source; }
+
     /** Lua shaderCommit: PZO committed its shader patches, commit whatever is staged here too. */
     void commit();
 

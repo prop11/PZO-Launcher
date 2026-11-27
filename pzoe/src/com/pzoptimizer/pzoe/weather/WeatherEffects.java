@@ -29,6 +29,9 @@ import com.pzoptimizer.shaded.asm.tree.VarInsnNode;
  * - Footing: running or sprinting outdoors on ice or packed snow can make you slip and fall (same fall as vanilla's
  *   drunk stumble).
  * - Body: wind chill bites harder when you're wet (ClimateManager.getAirTemperatureForCharacter with wind chill).
+ * - Mud: dirt, grass, sand and gravel soften after rain; cars slow, slide and bog, walkers slow (Mud).
+ * - Footsteps: fresh snow muffles them, ice and old crusted snow in a hard frost make them louder
+ *   (IsoGameCharacter.DoFootstepSound's noise for zombies, radius and volume).
  * - Hail stings without a hat. Thunder draws zombies and dry lightning can start fires (WeatherStorm).
  */
 public final class WeatherEffects {
@@ -90,7 +93,7 @@ public final class WeatherEffects {
             zombie.iso.weather.ClimateManager cm = cm();
             float snow = cm.getSnowFracNow();
             float wet = cm.getRainIntensity() > 0f ? 0f : zombie.iso.IsoPuddles.getInstance().getWetGroundFinalValue();
-            float loss = strength() * (0.3f * snow + 0.5f * WeatherEvents.groundIce() + 0.1f * wet);
+            float loss = strength() * (0.3f * snow + 0.5f * WeatherEvents.groundIce(sq) + 0.1f * wet) + Mud.gripLoss(sq);
             return Math.max(0.15f, frictionMul - loss);
         } catch (Throwable t) {
             return frictionMul;
@@ -110,6 +113,45 @@ public final class WeatherEffects {
         }
     }
 
+    // Footsteps
+
+    /**
+     * Replaces WorldSoundManager.addSound in IsoGameCharacter.DoFootstepSound: the footstep's noise radius and volume
+     * scaled by the ground underfoot (outdoors, ground level). Everything else goes through as vanilla had it.
+     */
+    public static zombie.WorldSoundManager.WorldSound footstep(zombie.WorldSoundManager wsm, Object source, int x, int y, int z,
+                                                               int radius, int volume, boolean stress, float ignore, float stressMod,
+                                                               boolean fromZombie, boolean send, boolean remote) {
+        try {
+            float m = footstepGround(x, y, z);
+            if (m != 1f) {
+                radius = Math.max(1, Math.round(radius * m));
+                volume = Math.max(1, Math.round(volume * m));
+            }
+        } catch (Throwable ignored) {
+        }
+        return wsm.addSound(source, x, y, z, radius, volume, stress, ignore, stressMod, fromZombie, send, remote);
+    }
+
+    static float footstepGround(int x, int y, int z) {
+        if (z != 0 || !on("PZOEWeather.FootstepGround", true)) return 1f;
+        zombie.iso.IsoCell cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
+        zombie.iso.IsoGridSquare sq = cell == null ? null : cell.getGridSquare(x, y, 0);
+        if (sq == null || !sq.isOutside()) return 1f;
+        float m = 1f;
+        float ice = WeatherEvents.groundIce(sq);
+        float cover = WeatherSnow.coverAt(x + 0.5f, y + 0.5f);
+        if (ice > 0.3f) {
+            m = 1.3f;
+        } else if (cover >= 0.5f) {
+            float fresh = com.pzoptimizer.pzoe.GroundSnow.freshNow();
+            // Powder swallows the sound; old snow in a hard frost crusts over and crunches
+            if (cm().getTemperature() < -5f && fresh < 0.3f) m = 1.15f;
+            else m = 0.75f - 0.15f * fresh * Math.min(1f, com.pzoptimizer.pzoe.GroundSnow.depthNow());
+        }
+        return m == 1f ? 1f : Math.max(0.3f, 1f + (m - 1f) * strength() * 1.5f);
+    }
+
     // Footing and hail, once a frame for this machine's own players
 
     static void localFrame() {
@@ -120,14 +162,17 @@ public final class WeatherEffects {
         boolean footing = on("PZOEWeather.Footing", true), hailHurts = on("PZOEWeather.HailHurts", true);
         if (!footing && !hailHurts) return;
         zombie.iso.weather.ClimateManager cm = cm();
-        float ice = WeatherEvents.groundIce(), hail = WeatherEvents.hail;
+        float hail = WeatherEvents.hail;
         float packed = cm.getTemperature() < -1f ? Math.max(0f, cm.getSnowFracNow() - 0.4f) : 0f;
         float s = strength();
         for (zombie.characters.IsoPlayer p : zombie.characters.IsoPlayer.players) {
             if (p == null || p.isDead() || !p.isLocalPlayer() || p.getVehicle() != null || !p.isOutside()) continue;
-            if (footing && (ice > 0.1f || packed > 0f) && (p.isRunning() || p.isSprinting())) {
-                float rate = s * (0.03f * ice + 0.01f * packed) * (p.isSprinting() ? 2f : 1f);
-                if (zombie.core.random.Rand.Next(1_000_000) < (1.0 - Math.exp(-rate * dt)) * 1_000_000) slip(p);
+            if (footing && (p.isRunning() || p.isSprinting())) {
+                float ice = WeatherEvents.groundIce(p.getCurrentSquare());
+                if (ice > 0.1f || packed > 0f) {
+                    float rate = s * (0.03f * ice + 0.01f * packed) * (p.isSprinting() ? 2f : 1f);
+                    if (zombie.core.random.Rand.Next(1_000_000) < (1.0 - Math.exp(-rate * dt)) * 1_000_000) slip(p);
+                }
             }
             if (hailHurts && hail > 0.2f && p.getWornItem(zombie.scripting.objects.ItemBodyLocation.HAT) == null
                 && p.getWornItem(zombie.scripting.objects.ItemBodyLocation.FULL_HAT) == null) {
@@ -163,6 +208,8 @@ public final class WeatherEffects {
 
     // Patches
 
+    private static final String FOOTSTEP_ADD = "(Ljava/lang/Object;IIIIIZFFZZZ)Lzombie/WorldSoundManager$WorldSound;";
+
     public static final String ZOMBIE = "zombie/characters/IsoZombie", VEHICLE = "zombie/vehicles/BaseVehicle",
         CHARACTER = "zombie/characters/IsoGameCharacter";
 
@@ -179,10 +226,25 @@ public final class WeatherEffects {
                 }
             }
         }
+        // Footsteps by ground: the one noise call in DoFootstepSound(F)
+        int steps = 0;
+        for (MethodNode m : node.methods) {
+            if (!m.name.equals("DoFootstepSound") || !m.desc.equals("(F)V")) continue;
+            for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn.getOpcode() == Opcodes.INVOKEVIRTUAL && insn instanceof MethodInsnNode mi && mi.owner.equals("zombie/WorldSoundManager")
+                    && mi.name.equals("addSound") && mi.desc.equals(FOOTSTEP_ADD)) {
+                    m.instructions.set(insn, new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/pzoe/weather/WeatherEffects", "footstep",
+                        "(Lzombie/WorldSoundManager;" + FOOTSTEP_ADD.substring(1), false));
+                    steps++;
+                    break;
+                }
+            }
+        }
+        if (steps != 1) com.pzoptimizer.PZOLogger.warn("[PZOE weather] footsteps: DoFootstepSound noise call not matched");
         // Deep snow wading (WeatherSnow) goes in the same pass over this class
         int snow = WeatherSnow.patchCharacter(node);
         if (snow < 3) com.pzoptimizer.PZOLogger.warn("[PZOE weather] deep snow: " + snow + " of 3 IsoGameCharacter hooks matched");
-        return hear > 0 || snow > 0;
+        return hear > 0 || snow > 0 || steps > 0;
     }
 
     /** IsoZombie.updateVisionRadius: its rain penalty's rain through sightRain(). */

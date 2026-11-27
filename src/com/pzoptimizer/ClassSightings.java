@@ -7,7 +7,7 @@ package com.pzoptimizer;
 public final class ClassSightings {
 
     public static volatile boolean viewpointLoaded;
-    // Loader of Viewpoint's own classes (ZombieBuddy's), so its View flag can be looked up by name
+    // Loader of the 3D camera mod's own classes (ZombieBuddy's), so its view flag can be looked up by name
     public static volatile ClassLoader viewpointLoader;
 
     private ClassSightings() {}

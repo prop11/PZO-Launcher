@@ -62,7 +62,7 @@ public final class AsmSupport {
                 }
             }
             if (hasDuplicateMembers(node)) {
-                // Another agent (ViewpointFPS+ via ZombieBuddy) redefined the class with bytes I'd already patched, so
+                // Another agent (a ZombieBuddy mod) redefined the class with bytes I'd already patched, so
                 // adding my members again would be a ClassFormatError
                 PZOLogger.warn("[AsmSupport] " + what + ": class already carries this patch, left as is");
                 return null;
@@ -76,6 +76,7 @@ public final class AsmSupport {
                 PZOLogger.warn("[AsmSupport] " + what + ": adds members, which a retransform cannot; class left unchanged");
                 return null;
             }
+            if (bodiesBefore != null) SharedPatchTakeover.noteInstalled(node.name, changedMethods(bodiesBefore, node));
             ClassWriter cw = new LoaderAwareClassWriter(loader);
             node.accept(cw);
             return cw.toByteArray();

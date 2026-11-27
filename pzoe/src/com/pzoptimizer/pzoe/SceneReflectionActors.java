@@ -15,7 +15,8 @@ import zombie.iso.IsoWorld;
 import zombie.vehicles.BaseVehicle;
 
 final class SceneReflectionActors {
-    private static final int SIZE = 80, RADIUS = SIZE / 4;
+    // 6 texels a square: at 2 a character reflected as a square block that jumped as they walked
+    private static final int PER = 6, RADIUS = 16, SIZE = 2 * RADIUS * PER;
     private static final int LEVELS = 4;
     private static final int UNIT = 12;
     private static final byte[] scratch = new byte[SIZE * SIZE * LEVELS];
@@ -48,7 +49,8 @@ final class SceneReflectionActors {
         for (var object : cell.getObjectList()) {
             if (!(object instanceof IsoGameCharacter character) || character.isDead()) continue;
             float h = character.isOnFloor() ? 0.13f : 0.57f;
-            stamped |= stamp(x, y, z, character.getX(), character.getY(), character.getZ(), 0f, 1f, 0.31f, 0.31f, h);
+            if (Math.abs(character.getX() - viewer.getX()) > RADIUS + 1 || Math.abs(character.getY() - viewer.getY()) > RADIUS + 1) continue;
+            stamped |= stamp(x, y, z, character.getX(), character.getY(), character.getZ(), 0f, 0f, 0.24f, 0.24f, h);
         }
         for (BaseVehicle vehicle : cell.getVehicles()) {
             var script = vehicle.getScript();
@@ -69,16 +71,19 @@ final class SceneReflectionActors {
         float dx, float dy, float halfWidth, float halfLength, float height) {
         int level = (int) Math.floor(wz) - z;
         if (level < 0 || level >= LEVELS) return false;
-        float ox = (wx - x) * 2f, oy = (wy - y) * 2f;
-        float radius = 2f * (Math.max(halfWidth, halfLength) + 0.5f);
+        float ox = (wx - x) * PER, oy = (wy - y) * PER;
+        float radius = PER * (Math.max(halfWidth, halfLength) + 0.5f);
+        // No direction means round (a character)
+        boolean round = dx == 0f && dy == 0f;
         int x0 = Math.max(0, (int) (ox - radius)), x1 = Math.min(SIZE - 1, (int) (ox + radius));
         int y0 = Math.max(0, (int) (oy - radius)), y1 = Math.min(SIZE - 1, (int) (oy + radius));
         int top = Math.min(255, Math.round((wz - (float) Math.floor(wz) + height) * 255f));
         boolean hit = false;
         for (int v = y0; v <= y1; v++) {
             for (int u = x0; u <= x1; u++) {
-                float px = (u + 0.5f - ox) * 0.5f, py = (v + 0.5f - oy) * 0.5f;
-                if (Math.abs(px * dy - py * dx) > halfWidth || Math.abs(px * dx + py * dy) > halfLength) continue;
+                float px = (u + 0.5f - ox) / PER, py = (v + 0.5f - oy) / PER;
+                if (round ? px * px + py * py > halfWidth * halfWidth
+                    : Math.abs(px * dy - py * dx) > halfWidth || Math.abs(px * dx + py * dy) > halfLength) continue;
                 int i = (level * SIZE + v) * SIZE + u;
                 scratch[i] = (byte) Math.max(scratch[i] & 255, top);
                 hit = true;
@@ -92,7 +97,7 @@ final class SceneReflectionActors {
         Field field = enabled ? active : null;
         GL20.glUniform1i(sampler, UNIT);
         GL20.glUniform4f(region, field == null ? 0 : field.x, field == null ? 0 : field.y,
-            field == null ? 0 : field.z, field == null ? 0 : SIZE * 0.5f);
+            field == null ? 0 : field.z, field == null ? 0 : (float) SIZE / PER);
         if (field == null) return;
         GL13.glActiveTexture(GL13.GL_TEXTURE0 + UNIT);
         try {

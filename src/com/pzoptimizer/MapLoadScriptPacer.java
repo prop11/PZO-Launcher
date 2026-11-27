@@ -174,6 +174,11 @@ public final class MapLoadScriptPacer {
 
     private MapLoadScriptPacer() {}
 
+    /** Whether mods' LoadGridsquare calls for this chunk are still held back. Game thread. */
+    static boolean holds(int wx, int wy) {
+        return !byKey.isEmpty() && byKey.containsKey(keyOf(wx, wy));
+    }
+
     private static long keyOf(int wx, int wy) {
         return ((long) wx << 32) | (wy & 0xFFFFFFFFL);
     }

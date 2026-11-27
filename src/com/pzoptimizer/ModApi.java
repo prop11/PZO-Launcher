@@ -87,7 +87,7 @@ public final class ModApi {
             // PZO Enhancements' engine (PZOE.jar): loaded, off, missing, api=<n>, error
             case "extension":
                 return Extensions.pzoeStatus();
-            // Viewpoint draws its 3D view itself, so shader effects on the game's own drawing don't show there
+            // A 3D camera mod draws its view itself, so shader effects on the game's own drawing don't show there
             // The online mod compatibility list, for the PZO System tab
             case "compatList":
                 return RemoteCompatList.status();

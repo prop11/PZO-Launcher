@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * Stands PZO's rendering changes down when a mod replaces the 3D projection, camera matrices or weather shaders
- * (Project Viewpoint: True Weathers & Lighting, IsoViewpoint, PZ3D). While it's active:
+ * (3D camera and weather mods). While it's active:
  * - RenderFrustumCuller skips 2D screen-space culling, which would hide 3D-projected objects
  * - RainAndWeatherOptimizer leaves weather masking and puddle settings alone
  */
@@ -70,17 +70,17 @@ public final class ViewpointStanddownGovernor {
         return Mode.AUTO;
     }
 
-    /** Whether Project Viewpoint or another 3D camera / weather mod is around. */
+    /** Whether a 3D camera / weather mod is around. */
     public static boolean checkDetection() {
         long now = System.currentTimeMillis();
-        // Negative results are throttled too, otherwise without Viewpoint every per-frame caller re-ran the whole class
+        // Negative results are throttled too, otherwise without such a mod every per-frame caller re-ran the whole class
         // and mod-list scan
         if (lastCheckTime != 0 && now - lastCheckTime < 3000L) {
             return modDetected;
         }
         lastCheckTime = now;
 
-        // Known Viewpoint / True Weathers / 3D mod classes. With the agent, the transformer reports them as they load
+        // Known 3D camera / weather mod classes. With the agent, the transformer reports them as they load
         // from any loader. Without it, probe the class path once only: each miss throws ClassNotFoundException, and
         // this runs every 3 s on the game thread while driving.
         boolean detected = ClassSightings.viewpointLoaded;
@@ -182,8 +182,8 @@ public final class ViewpointStanddownGovernor {
     private static volatile boolean viewLookupFailed;
 
     /**
-     * Whether Viewpoint is drawing its own 3D view (first or third person) rather than the game's isometric one. When
-     * I can't tell (class not seen yet, or another Viewpoint version without viewpoint.core.View.enabled) this says
+     * Whether the mod is drawing its own 3D view (first or third person) rather than the game's isometric one. When
+     * I can't tell (class not seen yet, or a version without the view flag) this says
      * true, so callers keep the full stand-down.
      */
     public static boolean isOwnViewActive() {
@@ -208,6 +208,38 @@ public final class ViewpointStanddownGovernor {
             return f.getBoolean(null);
         } catch (Throwable t) {
             viewLookupFailed = true;
+            return true;
+        }
+    }
+
+    private static volatile java.lang.invoke.MethodHandle fixedTickRunning;
+    private static volatile boolean fixedTickLookupFailed;
+
+    /**
+     * Whether the mod's fixed simulation tick runs right now (single player, its own view). While it does, it hands
+     * out its tick rate as the game's FPS lock. When I can't tell this says true, so callers keep the full stand-down.
+     */
+    public static boolean isFixedTickRunning() {
+        if (fixedTickLookupFailed) return true;
+        java.lang.invoke.MethodHandle h = fixedTickRunning;
+        if (h == null) {
+            ClassLoader loader = ClassSightings.viewpointLoader;
+            if (loader == null) return true;
+            try {
+                Class<?> c = Class.forName("viewpoint.game.FixedTick", false, loader);
+                h = java.lang.invoke.MethodHandles.publicLookup().findStatic(c, "running",
+                    java.lang.invoke.MethodType.methodType(boolean.class));
+                fixedTickRunning = h;
+            } catch (Throwable t) {
+                fixedTickLookupFailed = true;
+                PZOLogger.info("[ViewpointStanddownGovernor] fixed tick flag not found (" + t + "), frame pacer stays stood down");
+                return true;
+            }
+        }
+        try {
+            return (boolean) h.invokeExact();
+        } catch (Throwable t) {
+            fixedTickLookupFailed = true;
             return true;
         }
     }

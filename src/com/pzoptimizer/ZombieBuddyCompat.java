@@ -28,7 +28,7 @@ import java.util.zip.ZipFile;
  * every already-loaded target class in a single retransformClasses call. If PZO changed the members of one of those
  * classes, the JVM refuses ZombieBuddy's version and that mod's whole batch is lost.
  *
- * Only mods that load count. Before 2.2 every mod named in any save's mods.txt counted, so one old save with Viewpoint
+ * Only mods that load count. Before 2.2 every mod named in any save's mods.txt counted, so one old save with a 3D camera mod
  * switched PZO optimisations off in every session. Now a mod counts once it's on the main menu list (ZombieBuddy loads
  * those at startup) or once ZombieBuddy loads its patch classes (a save or server that has it), which the transformer
  * sees. ZombieBuddy loads them right before it retransforms, and my transformer runs again in that retransform, so a
@@ -70,7 +70,7 @@ public final class ZombieBuddyCompat {
     private static volatile boolean scanned;
     private static boolean zombieBuddy, unreadable;
 
-    /** True while a loaded ZombieBuddy mod hooks Lua Event.trigger (Viewpoint): event dispatch then stays stock. */
+    /** True while a loaded ZombieBuddy mod hooks Lua Event.trigger: event dispatch then stays stock. */
     public static volatile boolean eventTriggerShared;
 
     private ZombieBuddyCompat() {}
@@ -92,6 +92,7 @@ public final class ZombieBuddyCompat {
                 for (String id : meta.modIds) onMenu |= menu.contains(id) || menu.contains(id.toLowerCase());
                 if (onMenu) menuMods.add(mod);
                 scanJar(mod, jar);
+                SharedPatchTakeover.noteModJar(mod, meta.javaPkgName, jar);
             }
             for (String mod : menuMods) noteActive(mod);
         } catch (Throwable t) {
@@ -238,6 +239,8 @@ public final class ZombieBuddyCompat {
                 String mod = e.getKey();
                 if (OWN_MOD.equals(mod) || !isActive(mod)) continue;
                 if (adviceSafe && e.getValue()) continue;
+                // PZO keeps its own version here, see SharedPatchTakeover
+                if (SharedPatchTakeover.covers(mod, internalName, m)) continue;
                 mods.add(mod + " (" + internalName.substring(internalName.lastIndexOf('/') + 1) + "." + m + ")");
             }
         }
