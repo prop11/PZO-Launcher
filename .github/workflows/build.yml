@@ -75,7 +75,7 @@ jobs:
         with:
           name: pzo-packages
           path: |
-            dist/PZO-Optimizer-Windows.zip
+            dist/PZO-Setup.exe
             dist/PZO_Optimizer_macOS_Linux.zip
             dist/PZO-Downgrader.zip
             dist/PZO-Server-Windows.zip
