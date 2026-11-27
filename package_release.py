@@ -10,6 +10,8 @@ import sys
 import shutil
 import zipfile
 import hashlib
+import importlib.util
+import subprocess
 
 # The V1.9.7 release natives for macOS/Linux (Windows ships none: WinApi makes those calls from Java). A rebuilt native
 # must never ship by accident. When pzo_native.c really changes: rebuild in CI and take it with PZO_TAKE_CI_NATIVES=1,
@@ -61,6 +63,70 @@ def create_jar(bin_dir, manifest_file, out_jar):
                     zf.write(full_path, rel_path)
     print(f"[+] Built JAR: {os.path.basename(out_jar)} ({os.path.getsize(out_jar):,} bytes)")
 
+def add_file_to_archive(zf, fp, arcname):
+    zinfo = zipfile.ZipInfo.from_file(fp, arcname)
+    if arcname.endswith((".sh", ".command", ".so", ".dylib")):
+        zinfo.external_attr = 0o100755 << 16
+    else:
+        zinfo.external_attr = 0o100644 << 16
+    with open(fp, "rb") as f:
+        zf.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
+
+
+SETUP_SOURCES = ("pzo_setup.py", "pzo_install_core.py", "pzo_launcher_config.py")
+WINDOWS_SETUP = "PZO-Setup.exe"
+# Files pzo_setup.py reads next to itself
+SETUP_ASSETS = ("app.ico", "pzo_mascot.png")
+
+
+def build_windows_setup(root_dir, dist_dir):
+    if sys.platform != "win32":
+        sys.exit("Build the standalone Windows setup on Windows.")
+    work = os.path.join(root_dir, "build", "installer")
+    staging = os.path.join(work, "staging")
+    icon = os.path.join(root_dir, "app.ico")
+    data = [arg for name in SETUP_ASSETS for arg in ("--add-data", os.path.join(root_dir, name) + ":.")]
+    subprocess.run([
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed",
+        "--name", "PZO-Setup", "--icon", icon, *data,
+        "--distpath", staging, "--workpath", work, "--specpath", work,
+        os.path.join(root_dir, "pzo_setup.py"),
+    ], cwd=root_dir, check=True)
+    os.makedirs(dist_dir, exist_ok=True)
+    os.replace(os.path.join(staging, WINDOWS_SETUP), os.path.join(dist_dir, WINDOWS_SETUP))
+
+
+def package_client_installers(root_dir, dist_dir):
+    executable = os.path.join(dist_dir, WINDOWS_SETUP)
+    if sys.platform == "win32" and importlib.util.find_spec("PyInstaller"):
+        built = os.path.getmtime(executable) if os.path.isfile(executable) else 0
+        if any(os.path.getmtime(os.path.join(root_dir, name)) > built
+               for name in (*SETUP_SOURCES, "package_release.py", *SETUP_ASSETS)):
+            build_windows_setup(root_dir, dist_dir)
+    for name in (*SETUP_SOURCES, *SETUP_ASSETS, "pzo_optimizer.sh", "pzo_optimizer.command"):
+        shutil.copy2(os.path.join(root_dir, name), os.path.join(dist_dir, name))
+    archives = {
+        "PZO_Optimizer_macOS_Linux.zip": (
+            "pzo_optimizer.sh", "pzo_optimizer.command", "pzo_downgrade.sh",
+            "pzo_downgrade.command", *SETUP_SOURCES, *SETUP_ASSETS, "PZOptimEngine.jar",
+            "README.md", "README_DOWNGRADE.md", "libpzo_native64.so", "libpzo_native64.dylib",
+        ),
+    }
+    if os.path.isfile(executable):
+        archives["PZO-Optimizer-Windows.zip"] = (WINDOWS_SETUP, "README.md")
+    else:
+        print("[!] Skipping Windows ZIP. Build or stage PZO-Setup.exe in dist first.")
+    for archive, names in archives.items():
+        destination = os.path.join(dist_dir, archive)
+        with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in names:
+                roots = [dist_dir, root_dir] if name.endswith((".jar", ".exe")) else [root_dir, dist_dir]
+                source = find_file(name, [*roots, os.path.join(root_dir, "native")])
+                if source:
+                    add_file_to_archive(zf, source, name)
+        print(f"[+] Packaged: {archive} ({os.path.getsize(destination):,} bytes)")
+
+
 def main():
     root_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(root_dir, "dist")
@@ -104,11 +170,8 @@ def main():
     files_to_copy = [
         "libpzo_native64.so",
         "libpzo_native64.dylib",
-        "install.bat",
         "downgrade.bat",
-        "pzo_optimizer.sh",
         "pzo_downgrade.sh",
-        "pzo_optimizer.command",
         "pzo_downgrade.command",
         "README.md",
         "README_SERVER.md",
@@ -125,30 +188,7 @@ def main():
         else:
             print(f"[-] Optional asset not found (skipped): {fname}")
 
-    def add_file_to_archive(zf, fp, arcname):
-        zinfo = zipfile.ZipInfo.from_file(fp, arcname)
-        if arcname.endswith((".sh", ".command", ".so", ".dylib")):
-            zinfo.external_attr = 0o100755 << 16
-        else:
-            zinfo.external_attr = 0o100644 << 16
-        with open(fp, "rb") as f:
-            zf.writestr(zinfo, f.read(), compress_type=zipfile.ZIP_DEFLATED)
-
-    win_zip = os.path.join(dist_dir, "PZO-Optimizer-Windows.zip")
-    with zipfile.ZipFile(win_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["install.bat", "downgrade.bat", "PZOptimEngine.jar", "README.md", "README_DOWNGRADE.md"]:
-            fp = os.path.join(dist_dir, f)
-            if os.path.isfile(fp):
-                add_file_to_archive(zf, fp, f)
-    print(f"[+] Packaged: PZO-Optimizer-Windows.zip ({os.path.getsize(win_zip):,} bytes)")
-
-    mac_linux_zip = os.path.join(dist_dir, "PZO_Optimizer_macOS_Linux.zip")
-    with zipfile.ZipFile(mac_linux_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in ["pzo_optimizer.sh", "pzo_downgrade.sh", "pzo_optimizer.command", "pzo_downgrade.command", "PZOptimEngine.jar", "README.md", "README_DOWNGRADE.md", "libpzo_native64.so", "libpzo_native64.dylib"]:
-            fp = os.path.join(dist_dir, f)
-            if os.path.isfile(fp):
-                add_file_to_archive(zf, fp, f)
-    print(f"[+] Packaged: PZO_Optimizer_macOS_Linux.zip ({os.path.getsize(mac_linux_zip):,} bytes)")
+    package_client_installers(root_dir, dist_dir)
 
     downgrader_zip = os.path.join(dist_dir, "PZO-Downgrader.zip")
     with zipfile.ZipFile(downgrader_zip, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -186,4 +226,8 @@ def main():
     print("================================================================================")
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--build-windows-setup"]:
+        root = os.path.dirname(os.path.abspath(__file__))
+        build_windows_setup(root, os.path.join(root, "dist"))
+    else:
+        main()

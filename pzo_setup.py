@@ -15,17 +15,23 @@ import tempfile
 import threading
 import time
 import traceback
+import webbrowser
 
 import pzo_install_core as core
 
-BG = "#101513"
-PANEL = "#18201c"
-EDGE = "#34453d"
-TEXT = "#f3f6ed"
-MUTED = "#acbcb1"
-ACCENT = "#c9f36b"
-INK = "#1c2a13"
-WARN = "#ffb68c"
+# Colours come from the mascot art: SIDEBAR is its exact backdrop so the artwork blends in, the oranges are its fur
+SIDEBAR = "#313338"
+BG = "#232428"
+PANEL = "#2b2d31"
+EDGE = "#43464d"
+TEXT = "#f4efe7"
+MUTED = "#a8a39b"
+ACCENT = "#f5a742"
+ACCENT_HOVER = "#ffc17a"
+INK = "#3b230f"
+WARN = "#ff8170"
+WORKSHOP_URL = "https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250"
+GITHUB_URL = "https://github.com/prop11/PZO-Launcher"
 # Seconds without a progress message before the screen says it's still waiting, and before every thread's stack
 # goes into the log
 STALL_NOTICE, STALL_DUMP = 30, 60
@@ -100,20 +106,36 @@ def terminal(args):
     return 0
 
 
-def setup_icon(tk, root):
+def blend(base, top, amount):
+    a, b = (tuple(int(c[i:i + 2], 16) for i in (1, 3, 5)) for c in (base, top))
+    return "#" + "".join(f"{round(x + (y - x) * amount):02x}" for x, y in zip(a, b))
+
+
+def icon_image(tk, root, wanted):
     path = Path(__file__).with_name("app.ico")
     if not path.is_file():
         return None
-    # app.ico already contains PNG frames, including the 48 px artwork used in the sidebar.
+    # app.ico holds PNG frames up to 256 px, so the sidebar and finish screen art come from it too and no extra
+    # file has to ship with the exe or the zips. Width 0 in an icon entry means 256.
     data = path.read_bytes()
     count = struct.unpack_from("<H", data, 4)[0]
     frames = sorted(struct.iter_unpack("<BBBBHHII", data[6:6 + 16 * count]),
-                    key=lambda frame: abs(frame[0] - 48))
+                    key=lambda frame: abs((frame[0] or 256) - wanted))
     for _, _, _, _, _, _, size, offset in frames:
         frame = data[offset:offset + size]
         if frame.startswith(b"\x89PNG\r\n\x1a\n"):
             return tk.PhotoImage(master=root, data=base64.b64encode(frame), format="png")
     return None
+
+
+def finish_mascot(tk, root):
+    path = Path(__file__).with_name("pzo_mascot.png")
+    if not path.is_file():
+        return None
+    try:
+        return tk.PhotoImage(master=root, file=str(path))
+    except tk.TclError:
+        return None
 
 
 class Wizard:
@@ -124,7 +146,9 @@ class Wizard:
         root.minsize(850, 610)
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", self.close)
-        self.icon = setup_icon(tk, root)
+        self.icon = icon_image(tk, root, 48)
+        self.mascot = icon_image(tk, root, 96)
+        self.mascot_large = finish_mascot(tk, root) or icon_image(tk, root, 128)
         if self.icon is not None:
             root.iconphoto(True, self.icon)
         self.font = "Segoe UI" if sys.platform == "win32" else "Helvetica"
@@ -149,7 +173,7 @@ class Wizard:
         self.stall_dumped = False
         self.notice = ""
         self.styles()
-        self.sidebar = tk.Canvas(root, width=235, bg="#151d18", highlightthickness=0)
+        self.sidebar = tk.Canvas(root, width=235, bg=SIDEBAR, highlightthickness=0)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.bind("<Configure>", lambda event: self.draw_sidebar(event.height))
         self.shell = tk.Frame(root, bg=BG, padx=35, pady=24)
@@ -166,16 +190,19 @@ class Wizard:
         style = self.ttk.Style(self.root)
         style.theme_use("clam")
         style.configure("TCombobox", background=PANEL, fieldbackground=PANEL, foreground=TEXT,
-                        arrowcolor=ACCENT, bordercolor=EDGE, padding=8, font=(self.font, 11))
-        style.map("TCombobox", fieldbackground=[("readonly", PANEL)],
+                        arrowcolor=ACCENT, bordercolor=EDGE, lightcolor=PANEL, darkcolor=PANEL,
+                        padding=8, font=(self.font, 11))
+        style.map("TCombobox", fieldbackground=[("readonly", PANEL)], background=[("active", EDGE)],
+                  bordercolor=[("focus", ACCENT), ("hover", ACCENT)],
                   foreground=[("readonly", TEXT)], selectbackground=[("readonly", PANEL)],
                   selectforeground=[("readonly", TEXT)])
         self.root.option_add("*TCombobox*Listbox.background", PANEL)
         self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
-        self.root.option_add("*TCombobox*Listbox.selectBackground", EDGE)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", INK)
         style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=PANEL, bordercolor=PANEL,
                         arrowcolor=MUTED, lightcolor=EDGE, darkcolor=EDGE, arrowsize=12)
-        style.map("Vertical.TScrollbar", background=[("active", "#50655a")])
+        style.map("Vertical.TScrollbar", background=[("active", ACCENT)])
         style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor=PANEL,
                         bordercolor=BG, lightcolor=ACCENT, darkcolor=ACCENT)
 
@@ -187,7 +214,7 @@ class Wizard:
         fg, bg = (INK, ACCENT) if primary else (TEXT, PANEL)
         widget = self.tk.Button(parent, text=text, command=command, bd=0, relief="flat",
                                 fg=fg, bg=bg, activeforeground=fg,
-                                activebackground="#dcff9a" if primary else EDGE,
+                                activebackground=ACCENT_HOVER if primary else EDGE,
                                 disabledforeground=MUTED, cursor="hand2", padx=16, pady=8,
                                 highlightthickness=1, highlightbackground=bg, highlightcolor=ACCENT,
                                 font=(self.font, 10, "bold"))
@@ -196,34 +223,59 @@ class Wizard:
     def draw_sidebar(self, height):
         c = self.sidebar
         c.delete("all")
-        if self.icon is not None:
-            c.create_image(27, 29, anchor="nw", image=self.icon)
-        c.create_text(87, 46, text="PZO SETUP", fill=TEXT, font=(self.font, 15, "bold"), anchor="w")
-        c.create_text(88, 67, text="PROJECT ZOMBOID", fill=MUTED, font=("TkFixedFont", 8), anchor="w")
-        c.create_line(27, 104, 207, 104, fill=EDGE)
-        c.create_line(39, 151, 39, 355, fill=EDGE, width=2)
-        for i, (title, subtitle) in enumerate((("Detect", "Game installation"),
-                                                ("Configure", "Collector and heap"),
-                                                ("Review", "Planned changes"),
-                                                ("Apply", "Backup and install"))):
-            y = 151 + i * 68
-            active = i == self.stage
-            c.create_oval(26, y - 13, 52, y + 13, outline=ACCENT if active else EDGE,
-                          fill=ACCENT if active else "#151d18", width=2)
-            c.create_text(39, y, text=str(i + 1), fill=INK if active else MUTED,
-                          font=("TkFixedFont", 9, "bold"))
-            c.create_text(64, y - 6, text=title, fill=TEXT if i <= self.stage else MUTED,
-                          font=(self.font, 12, "bold"), anchor="w")
+        middle = 117
+        if self.mascot is not None:
+            c.create_image(middle, 22, anchor="n", image=self.mascot)
+        c.create_text(middle, 140, text="PZO", fill=ACCENT, font=(self.font, 26, "bold"))
+        c.create_text(middle, 170, text="PROJECT ZOMBOID OPTIMIZER", fill=MUTED, font=(self.font, 8, "bold"))
+        c.create_line(27, 194, 207, 194, fill=EDGE)
+        steps = (("Detect", "Game installation"), ("Configure", "Collector and heap"),
+                 ("Review", "Planned changes"), ("Apply", "Backup and install"))
+        top, gap = 232, 62
+        for i in range(len(steps) - 1):
+            c.create_line(39, top + i * gap + 15, 39, top + (i + 1) * gap - 15,
+                          fill=ACCENT if i < self.stage else EDGE, width=2)
+        for i, (title, subtitle) in enumerate(steps):
+            y = top + i * gap
+            if i < self.stage:
+                c.create_oval(26, y - 13, 52, y + 13, outline=ACCENT, fill=SIDEBAR, width=2)
+                c.create_line(33, y, 37, y + 5, 46, y - 5, fill=ACCENT, width=3, capstyle="round",
+                              joinstyle="round")
+            elif i == self.stage:
+                c.create_oval(24, y - 15, 54, y + 15, outline=ACCENT, fill=ACCENT, width=2)
+                c.create_text(39, y, text=str(i + 1), fill=INK, font=(self.font, 10, "bold"))
+            else:
+                c.create_oval(26, y - 13, 52, y + 13, outline=EDGE, fill=SIDEBAR, width=2)
+                c.create_text(39, y, text=str(i + 1), fill=MUTED, font=(self.font, 9, "bold"))
+            color = ACCENT if i == self.stage else TEXT if i < self.stage else MUTED
+            c.create_text(64, y - 6, text=title, fill=color, font=(self.font, 12, "bold"), anchor="w")
             c.create_text(64, y + 13, text=subtitle, fill=MUTED, font=(self.font, 9), anchor="w")
-        top = max(380, height - 200)
-        for row in range(9):
-            points = []
-            for x in range(0, 240, 5):
-                y = top + 13 * row + 11 * math.sin(x / 41 + row / 6) - 0.11 * x
-                points.extend((x, y))
-            c.create_line(points, fill="#465c36" if row == 3 else "#273b2c", width=1)
-        c.create_text(27, height - 27, text="BUILD 42  /  CLIENT", fill=MUTED,
-                      font=("TkFixedFont", 9), anchor="w")
+        self.draw_pixels(c, max(top + 3 * gap + 40, height - 150), height - 48)
+        version = self.shown_version()
+        c.create_text(27, height - 27, text="BUILD 42" + (f"  /  {version}" if version else ""),
+                      fill=MUTED, font=("TkFixedFont", 9), anchor="w")
+
+    def draw_pixels(self, c, top, bottom):
+        # Pixel blocks that thin out going up, a nod to the mascot's pixel art. Fixed hash so it never flickers.
+        size = 9
+        rows = int((bottom - top) // size)
+        for row in range(rows):
+            depth = (row + 1) / rows
+            for col in range(235 // size + 1):
+                noise = ((col * 73856093) ^ (row * 19349663)) % 1000 / 1000
+                if noise > depth * 0.8:
+                    continue
+                x, y = col * size, bottom - (rows - row) * size
+                c.create_rectangle(x + 1, y + 1, x + size - 1, y + size - 1, outline="",
+                                   fill=blend(SIDEBAR, ACCENT, 0.08 + 0.22 * depth * (1 - noise)))
+
+    # The version comes from the release picked at runtime, so a new release never needs a new setup exe
+    def shown_version(self):
+        if self.plan is not None:
+            return self.plan.version
+        if self.release is not None:
+            return self.release.tag
+        return None
 
     def screen(self, stage, title, description):
         self.stage = stage
@@ -232,8 +284,19 @@ class Wizard:
             for child in frame.winfo_children():
                 child.destroy()
         self.label(self.body, title, size=28, bold=True).pack(fill="x")
+        self.tk.Frame(self.body, bg=ACCENT, height=3, width=56).pack(anchor="w", pady=(2, 0))
         self.label(self.body, description, color=MUTED, justify="left", wraplength=530).pack(
-            fill="x", pady=(5, 18))
+            fill="x", pady=(10, 18))
+
+    def card(self, accent=False, pad=(17, 13), **pack):
+        # An orange left edge marks the card that matters most on a screen
+        outer = self.tk.Frame(self.body, bg=EDGE)
+        outer.pack(fill="x", **pack)
+        if accent:
+            self.tk.Frame(outer, bg=ACCENT, width=4).pack(side="left", fill="y")
+        inner = self.tk.Frame(outer, bg=PANEL, padx=pad[0], pady=pad[1])
+        inner.pack(fill="both", expand=True, padx=(0 if accent else 1, 1), pady=1)
+        return inner
 
     def detecting(self):
         self.screen(0, "Choose your game", "Looking for Project Zomboid in your Steam libraries.")
@@ -279,8 +342,7 @@ class Wizard:
 
     def detect(self):
         self.screen(0, "Choose your game", "Select an installation and what you want PZO Setup to do.")
-        card = self.tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE, highlightthickness=1, padx=17, pady=13)
-        card.pack(fill="x")
+        card = self.card(accent=True)
         line = self.tk.Frame(card, bg=PANEL)
         line.pack(fill="x")
         self.label(line, "Project Zomboid", 16, bg=PANEL, bold=True).pack(side="left")
@@ -360,9 +422,7 @@ class Wizard:
         self.screen(1, "Configure JVM", description)
         if self.action in ("install", "update"):
             self.show_release_picker()
-        card = self.tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE,
-                             highlightthickness=1, padx=17, pady=14)
-        card.pack(fill="x")
+        card = self.card(pad=(17, 14))
         self.label(card, "Garbage collector", bg=PANEL, bold=True).pack(fill="x")
         names = [core.COLLECTORS[key][0] for key in supported]
         self.selected_gc = self.ttk.Combobox(card, state="readonly", values=names)
@@ -384,8 +444,7 @@ class Wizard:
         self.button(self.footer, "Use recommended", self.reset_jvm).pack(side="right", padx=(0, 8))
 
     def show_release_picker(self):
-        card = self.tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE, highlightthickness=1, padx=17, pady=12)
-        card.pack(fill="x", pady=(0, 12))
+        card = self.card(accent=True, pad=(17, 12), pady=(0, 12))
         self.label(card, "PZO version", bg=PANEL, bold=True).pack(fill="x")
         picker = self.ttk.Combobox(card, state="readonly")
         picker.pack(fill="x", pady=(6, 0))
@@ -401,6 +460,7 @@ class Wizard:
 
     def select_release(self, index):
         self.release = self.releases[index - 1] if index > 0 else None
+        self.draw_sidebar(self.sidebar.winfo_height())
 
     def load_releases(self):
         if self.release_pending:
@@ -490,8 +550,7 @@ class Wizard:
     def review(self, plan):
         self.plan = plan
         self.screen(2, f"{plan.action.title()} PZO", f"{plan.game.platform}  |  {plan.game.root}")
-        card = self.tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE, highlightthickness=1, padx=15, pady=12)
-        card.pack(fill="x")
+        card = self.card(accent=True, pad=(15, 12))
         for i, (key, value) in enumerate((
             ("ENGINE", plan.version), ("COLLECTOR", plan.gc), ("MAX HEAP", plan.heap),
         )):
@@ -522,6 +581,7 @@ class Wizard:
     def details(self, lines):
         box = self.tk.Frame(self.body, bg=PANEL, highlightbackground=EDGE, highlightthickness=1)
         box.pack(fill="both", expand=True, pady=(12, 0))
+        self.box = box
         content = self.tk.Text(box, bg=PANEL, fg=MUTED, bd=0, padx=13, pady=9,
                                wrap="word", height=5, font=(self.font, 10), highlightthickness=0)
         scroll = self.ttk.Scrollbar(box, command=content.yview)
@@ -552,9 +612,22 @@ class Wizard:
             instruction = f"Start the game with {core.SCRIPT} in the game folder."
         else:
             instruction = "Start Project Zomboid from Steam or the game launcher."
-        self.label(self.body, instruction, size=13, bold=True, wraplength=530, justify="left").pack(fill="x")
+        # The panel uses the mascot's own backdrop colour so its square edge disappears
+        hero = self.tk.Frame(self.body, bg=SIDEBAR, padx=18, pady=14)
+        hero.pack(fill="x")
+        if self.mascot_large is not None:
+            self.tk.Label(hero, image=self.mascot_large, bg=SIDEBAR, bd=0).pack(side="left", padx=(0, 20))
+        words = self.tk.Frame(hero, bg=SIDEBAR)
+        words.pack(side="left", fill="x", expand=True)
+        headline = "PZO removed" if self.action == "uninstall" else "You're optimized"
+        self.label(words, headline, size=20, color=ACCENT, bg=SIDEBAR, bold=True).pack(fill="x")
+        self.label(words, instruction, size=12, bg=SIDEBAR, wraplength=380, justify="left").pack(
+            fill="x", pady=(6, 0))
         self.details([f"Backup folder\n{backups}"] if backups else ["The installation already matched the review."])
+        self.box.pack_configure(expand=False)
         self.button(self.footer, "Done", self.close, True).pack(side="right")
+        self.button(self.footer, "GitHub", lambda: webbrowser.open(GITHUB_URL)).pack(side="left", padx=(0, 8))
+        self.button(self.footer, "Steam Workshop", lambda: webbrowser.open(WORKSHOP_URL)).pack(side="left")
 
     def failure(self, error):
         if self.stage == 0:
