@@ -23,6 +23,27 @@ GC_TUNING = re.compile(
     r"InitiatingHeapOccupancyPercent)(?:=.*)?"
 )
 MAIN_KEYS = ("JVMMainClassName", "MainClass", "JVMEntrypoint")
+CLASS_PATH = "-Djava.class.path="
+# Build 42 Windows ProjectZomboid64.json as Steam ships it, for a broken file with no backup
+STOCK_WINDOWS = {
+    "mainClass": STOCK_ENTRY,
+    "classpath": [".", "projectzomboid.jar"],
+    "vmArgs": [
+        "-Djava.awt.headless=true",
+        "--enable-native-access=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "-Xmx3072m",
+        "-Dzomboid.steam=1",
+        "-Dzomboid.znetlog=1",
+        "-Djava.library.path=win64/;.",
+        "-XX:-CreateCoredumpOnCrash",
+        "-XX:-OmitStackTraceInFastThrow",
+    ],
+    "windows": {
+        "6.1": {"vmArgs": ["-XX:+UseG1GC"]},
+        "10.0.17134": {"vmArgs": ["-XX:+UseZGC"]},
+    },
+}
 
 
 def arguments(values):
@@ -81,6 +102,81 @@ def read_config(path, data=None):
     return result
 
 
+def launcher_shape(config):
+    return (isinstance(config, dict) and isinstance(config.get("mainClass"), str)
+            and isinstance(config.get("classpath"), list) and all(isinstance(e, str) for e in config["classpath"])
+            and isinstance(config.get("vmArgs"), list) and all(isinstance(a, str) for a in config["vmArgs"]))
+
+
+def close_json(text):
+    """Drops trailing commas, doubles stray backslashes and closes whatever a cut-off write left open.
+
+    None on mismatched brackets.
+    """
+    out, stack, in_string, escaped, opened = [], [], False, False, 0
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+                if ch not in '"\\/bfnrtu':
+                    # A hand-edited Windows path (C:\Program Files) has single backslashes
+                    out.append("\\")
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string, opened = True, len(out)
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack or stack.pop() != ch:
+                return None
+            while out and out[-1].isspace():
+                out.pop()
+            if out and out[-1] == ",":
+                out.pop()
+        out.append(ch)
+    # A string cut in half (such as "-Xm) would pass a broken argument on, so it goes
+    tail = "".join(out[:opened] if in_string else out).rstrip().rstrip(",")
+    return tail + "".join(reversed(stack))
+
+
+def repair_json(data):
+    """A launcher config recovered from a cut-off or comma-damaged ProjectZomboid64.json, or None.
+
+    When closing the brackets isn't enough (cut after a key), the last entry is dropped and it tries again.
+    """
+    try:
+        text = data.decode("utf-8-sig")
+    except (UnicodeDecodeError, AttributeError):
+        return None
+    for _ in range(64):
+        fixed = close_json(text)
+        if fixed is None:
+            return None
+        try:
+            config = json.loads(fixed)
+        except ValueError:
+            config = None
+        if launcher_shape(config):
+            return config
+        cut = text.rfind(",")
+        if cut <= 0:
+            return None
+        text = text[:cut]
+    return None
+
+
+def stock_windows():
+    return json.loads(json.dumps(STOCK_WINDOWS))
+
+
+def class_path_pins(config):
+    return [a for holder, _, _ in option_lists(config, {"vmArgs"}) for a in arguments(holder.get("vmArgs", []))
+            if a.startswith(CLASS_PATH)]
+
+
 def encode(path, config):
     if path.suffix == ".plist":
         return plistlib.dumps(config, sort_keys=False)
@@ -129,7 +225,9 @@ def windows_heap(values, default_max, compat):
     return start, maximum
 
 
-def patch_json(config, platform, gc, start_arg, heap_arg, java_major, native, compat, zombie_jar, zombie_agent):
+def patch_json(config, platform, gc, start_arg, heap_arg, java_major, native, compat, zombie_jar, zombie_agent,
+               root=None):
+    """Returns True when another mod's -Djava.class.path pin had to be rewritten."""
     windows = platform in ("Windows", "Proton")
     args = list(arguments(config.get("vmArgs", [])))
     additions = [*gc, *TECHNICAL, start_arg, heap_arg, "-Dzomboid.steam=1", "-Dzomboid.znetlog=1"]
@@ -162,6 +260,16 @@ def patch_json(config, platform, gc, start_arg, heap_arg, java_major, native, co
     config["mainClass"] = ENTRY
 
     config.setdefault("vmArgs", [])
+    # Some mods (PZOptPreloader for its AOT cache) add -Djava.class.path=...\projectzomboid.jar. It replaces the whole
+    # "classpath" list, so PZOptimEngine.jar never loads and the game can't find PZOEntrypoint. The pin stays (that mod
+    # wants one) but lists the real class path
+    pins = class_path_pins(config)
+    rewritten = False
+    if pins:
+        joined = (";" if windows else ":").join(
+            entry if root is None or platform == "Proton" else str(root / entry) for entry in cp)
+        additions.append(CLASS_PATH + joined)
+        rewritten = any(p != CLASS_PATH + joined for p in pins)
     managed = {name_of(a) for a in additions}
     managed.update(name_of(a) for a in (
         "-XX:+AlwaysPreTouch", "-XX:+UseNUMA", "-XX:+EnableDynamicAgentLoading",
@@ -186,6 +294,7 @@ def patch_json(config, platform, gc, start_arg, heap_arg, java_major, native, co
     )))
     config["vmArgs"].extend(additions)
     validate_gc(config, {"vmArgs"}, (config, "vmArgs"), gc[0])
+    return rewritten
 
 
 def plist_primary(config):

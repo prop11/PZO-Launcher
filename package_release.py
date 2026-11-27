@@ -112,10 +112,12 @@ def package_client_installers(root_dir, dist_dir):
             "README.md", "README_DOWNGRADE.md", "libpzo_native64.so", "libpzo_native64.dylib",
         ),
     }
-    if os.path.isfile(executable):
-        archives["PZO-Optimizer-Windows.zip"] = (WINDOWS_SETUP, "README.md")
-    else:
-        print("[!] Skipping Windows ZIP. Build or stage PZO-Setup.exe in dist first.")
+    # Windows ships PZO-Setup.exe as its own release asset, no zip.
+    stale = os.path.join(dist_dir, "PZO-Optimizer-Windows.zip")
+    if os.path.isfile(stale):
+        os.remove(stale)
+    if not os.path.isfile(executable):
+        print("[!] PZO-Setup.exe missing from dist. Build or stage it before release.")
     for archive, names in archives.items():
         destination = os.path.join(dist_dir, archive)
         with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as zf:

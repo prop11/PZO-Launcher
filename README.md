@@ -17,7 +17,7 @@ Instead of replacing game classes on disk or relying on decompiled class overrid
 |---|---|
 | **Steam Workshop** | [Project Zomboid Optimiser (Item 3787481250)](https://steamcommunity.com/sharedfiles/filedetails/?id=3787481250) |
 | **Wiki & Guides** | [Official PZO Wiki](https://github.com/prop11/PZO-Launcher/wiki) • [Manual Linux](https://github.com/prop11/PZO-Launcher/wiki/Manual-Linux-Installation) • [Zomdroid (Android)](https://github.com/prop11/PZO-Launcher/wiki/Zomdroid-Support-and-Installation) |
-| **Releases** | [github.com/prop11/PZO-Launcher/releases](https://github.com/prop11/PZO-Launcher/releases) (`Install.bat`, `pzo_optimizer.sh`, `pzo_optimizer.command`, `PZOptimEngine.jar`) |
+| **Releases** | [github.com/prop11/PZO-Launcher/releases](https://github.com/prop11/PZO-Launcher/releases) (`PZO-Setup.exe`, `pzo_optimizer.sh`, `pzo_optimizer.command`, `PZOptimEngine.jar`) |
 | **Supported Versions** | **Build 42 (all revisions) & Build 41.78+** on Windows 10/11, Linux (Proton & Native), Steam Deck, macOS, and Android (Zomdroid) |
 | **Multiplayer** | In-memory bytecode instrumentation; the game's own class files and `projectzomboid.jar` are never modified. Dedicated server engine included. |
 
@@ -75,13 +75,19 @@ Stock Project Zomboid does nearly all of its per-frame work on one game thread. 
 
 ## Installation
 
-### Windows (1-Click)
+### Windows
 1. Download **`PZO-Optimizer-Windows.zip`** from [GitHub Releases](https://github.com/prop11/PZO-Launcher/releases).
-2. Extract the archive and double-click **`Install.bat`**.
-3. Launch Project Zomboid normally through Steam.
-*(To update or uninstall, simply run `Install.bat` again).*
+2. Extract the full archive and double-click **`PZO-Setup.exe`**.
+3. Select your game. For Install or Update, keep **Latest** or select one of the five recent GitHub releases. Choose the collector and maximum heap, then review the changes. After applying, use the launch method shown by Setup.
+
+Install and Update download the selected engine JAR from GitHub. Setup writes `preserve_gc: true` in `Zomboid/Lua/pzo_config.json` so compatible engines keep the configured collector on startup.
+
+Run Setup again to update, repair the launcher configuration, or uninstall. If Java reports multiple garbage collectors, choose **Repair** to rebuild the launch settings using your installed engine.
 
 ### Linux & Steam Deck (SteamOS)
+
+Use Python 3.9 or newer. Setup opens the desktop wizard when Tk is available. Add `--cli` to use the terminal.
+
 1. Download **`PZO_Optimizer_macOS_Linux.zip`** from [GitHub Releases](https://github.com/prop11/PZO-Launcher/releases).
 2. Open a terminal in the extracted folder and run:
    ```bash
@@ -91,6 +97,9 @@ Stock Project Zomboid does nearly all of its per-frame work on one game thread. 
 *(Prefer manual setup? See the [Manual Linux Installation Guide](https://github.com/prop11/PZO-Launcher/wiki/Manual-Linux-Installation)).*
 
 ### macOS (Apple Silicon & Intel)
+
+Use Python 3.9 or newer. Setup opens the desktop wizard when Tk is available and uses the terminal otherwise.
+
 1. Download **`PZO_Optimizer_macOS_Linux.zip`** from [GitHub Releases](https://github.com/prop11/PZO-Launcher/releases).
 2. Double-click **`pzo_optimizer.command`** (or run `bash pzo_optimizer.sh` in Terminal).
 3. Launch Project Zomboid normally through Steam.

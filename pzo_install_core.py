@@ -552,11 +552,55 @@ def pristine(game, path, current):
     return None
 
 
+def load_config(game, path, current, stock, notes):
+    """The current launcher config, recovered when it is malformed (a cut-off write or stray commas)."""
+    try:
+        return launcher.read_config(path, current)
+    except (ValueError, TypeError) as error:
+        failure = error
+    if path.suffix == ".json":
+        repaired = launcher.repair_json(current) if current else None
+        if repaired is not None:
+            notes.append(f"Repaired malformed {path.name} (it was cut off or had broken formatting).")
+            return repaired
+    if stock:
+        notes.append(f"Rebuilding malformed {path.name} from its stock backup.")
+        return launcher.read_config(path, stock)
+    if path.suffix == ".json" and game.platform == "Windows" and path == game.configs[0]:
+        notes.append(f"Rebuilding malformed {path.name} from the game's default settings.")
+        return launcher.stock_windows()
+    raise ValueError(f"Invalid {path.name}. Verify game files in Steam, then retry.") from failure
+
+
+def check_class_path(config, game, path):
+    """The class path the JVM ends up with must hold the engine, or the game can't find PZOEntrypoint."""
+    if game.platform == "macOS" or config.get("mainClass") != launcher.ENTRY:
+        return
+    args = effective_args(config, game)
+    pins = [a[len(launcher.CLASS_PATH):] for a in args if a.startswith(launcher.CLASS_PATH)]
+    if pins:
+        entries = pins[-1].split(";" if game.platform in ("Windows", "Proton") else ":")
+    else:
+        entries = config.get("classpath", [])
+    names = {re.split(r"[\\/]", e.strip())[-1].lower() for e in entries}
+    for needed in (launcher.ENGINE, "projectzomboid.jar"):
+        if needed.lower() not in names:
+            raise ValueError(f"{path.name} would start the game without {needed} on its class path.")
+
+
 def uninstall_config(game, path, current):
     stock = pristine(game, path, current)
     if stock is not None:
         return stock
-    config = launcher.read_config(path, current)
+    config = load_config(game, path, current, None, [])
+    separator = ";" if game.platform in ("Windows", "Proton") else ":"
+    for holder, key, _ in launcher.option_lists(config, {"vmArgs"}):
+        holder[key] = [
+            launcher.CLASS_PATH + separator.join(e for e in a[len(launcher.CLASS_PATH):].split(separator)
+                                                 if launcher.ENGINE.lower() not in e.lower())
+            if a.startswith(launcher.CLASS_PATH) else a
+            for a in launcher.arguments(holder[key])
+        ]
     keys = {"JVMOptions", "VMOptions"} if game.platform == "macOS" else {"vmArgs"}
     compat_flags = ("-XX:+EnableDynamicAgentLoading", "-XX:+UseCompactObjectHeaders")
     managed = {launcher.name_of(a) for a in (*launcher.TECHNICAL, *compat_flags, "-Xms")}
@@ -590,7 +634,8 @@ def uninstall_config(game, path, current):
 def alt_launcher(config, game, file):
     if game.java is None:
         raise ValueError("The bundled Java executable is required for the alternative launcher.")
-    args = effective_args(config, game)
+    # -cp below sets the class path, so a pinned -Djava.class.path would only fight it
+    args = [a for a in effective_args(config, game) if not a.startswith(launcher.CLASS_PATH)]
     if sum(bool(launcher.SELECTOR.fullmatch(a)) for a in args) != 1:
         raise ValueError("The alternative launcher must use one collector.")
     # Store arguments in a Java argfile so cmd never interprets paths or JVM property values.
@@ -711,11 +756,13 @@ def probe_config(config, game):
                 for a in launcher.arguments(holder[key])]
     else:
         args = effective_args(config, game)
-    # Probe VM flags without loading agents, starting the game, or pre-touching the configured heap.
+    # Probe VM flags without loading agents, starting the game, or pre-touching the configured heap. AOT flags
+    # stay out: -XX:AOTCacheOutput would make the probe write another mod's AOT cache.
     safe = [a for a in args if a.startswith(("-XX:", "-Xm", "--add-exports=", "--enable-native-access="))
             and not a.startswith(("-XX:On", "-XX:+CrashOn", "-XX:LogFile", "-XX:HeapDumpPath",
                                   "-XX:ErrorFile", "-XX:ReplayDataFile", "-XX:VMOptionsFile",
-                                  "-XX:Flags")) and a != "-XX:+AlwaysPreTouch"]
+                                  "-XX:Flags")) and a != "-XX:+AlwaysPreTouch"
+            and not re.match(r"-XX:[+-]?AOT", a)]
     result = java_result(game, safe)
     if result and result.returncode:
         details = (result.stderr or result.stdout).strip()[:600]
@@ -813,15 +860,15 @@ def make_plan(game, action, mode, progress=lambda message: None, *,
         zombie_agent = external_zombie_agent
         if external_zombie_agent:
             notes.append("Steam launch options supply the ZombieBuddy agent.")
+        # Its name looks like PZO's, so a lot of people add it by mistake
+        if (HOME_DIR / ".zombie_buddy" / "PZOptPreloader").is_dir() or any(
+                b"pzoptpreloader" in (data or b"").lower() for data in current.values()):
+            notes.append("PZOptPreloader is installed. It is a separate Steam Workshop mod, not part of PZO, and PZO "
+                         "does not need it. If you added it thinking it was part of PZO, unsubscribe from it on the "
+                         "Workshop. If you use it on purpose, PZO keeps working alongside it.")
         for index, (p, existing) in enumerate(current.items()):
             stock = pristine(game, p, existing)
-            try:
-                config = launcher.read_config(p, existing)
-            except (ValueError, TypeError) as error:
-                if not stock:
-                    raise ValueError(f"Invalid {p.name}. Verify game files in Steam, then retry.") from error
-                config = launcher.read_config(p, stock)
-                notes.append(f"Rebuilding malformed {p.name} from its stock backup.")
+            config = load_config(game, p, existing, stock, notes)
             # Use the equivalent GiB spelling for a manually selected 3 GiB heap. Older
             # engines treat the stock spelling (-Xmx3072m) as an unset maximum.
             heap_arg = f"-Xmx{heap // 1024}g" if explicit_heap and heap == 3072 else f"-Xmx{heap}m"
@@ -842,8 +889,11 @@ def make_plan(game, action, mode, progress=lambda message: None, *,
                 )
                 has_zombie_agent = any((p.parent / suffix).is_file() for suffix in library)
                 zombie_agent |= has_zombie_agent
-                launcher.patch_json(config, game.platform, gc, start_arg, heap_arg, major, native, compat,
-                                    zombie_jar, has_zombie_agent and not external_zombie_agent)
+                if launcher.patch_json(config, game.platform, gc, start_arg, heap_arg, major, native, compat,
+                                       zombie_jar, has_zombie_agent and not external_zombie_agent, p.parent):
+                    notes.append(f"Another mod pinned the class path in {p.name} to the "
+                                 "game jar alone. Setup adds PZO's jars to it so the game can start, and PZO "
+                                 "checks it again each time the game closes.")
             progress(f"Validating {p.name}")
             output = launcher.encode(p, config)
             roundtrip = launcher.read_config(p, output)
@@ -852,6 +902,7 @@ def make_plan(game, action, mode, progress=lambda message: None, *,
                 launcher.validate_gc(roundtrip, {"JVMOptions", "VMOptions"}, primary, gc[0])
             else:
                 launcher.validate_gc(roundtrip, {"vmArgs"}, (roundtrip, "vmArgs"), gc[0])
+                check_class_path(roundtrip, game, p)
             probe_config(roundtrip, game)
             if stock and not backup_location(game, p).exists():
                 files[backup_location(game, p)] = stock
