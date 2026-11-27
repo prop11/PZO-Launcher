@@ -9,7 +9,7 @@ import com.pzoptimizer.shaded.asm.tree.MethodNode;
 /**
  * Progress bar in the bottom right corner while model shaders are made ahead, on the loading screen and in game if
  * the player clicks through first. "Building shader cache" when something had to be compiled, "Loading shader cache"
- * when it all came from disk. Bottom right because Viewpoint puts its own loading bar bottom left.
+ * when it all came from disk. Bottom right because a 3D camera mod puts its own loading bar bottom left.
  *
  * Drawn from GameLoadingState.render and IngameState.renderFrameUI, just before each EndFrameUI, which also drives
  * ModelShadersAhead.tick once a frame. Main thread.
@@ -25,12 +25,13 @@ public final class ShaderCacheBar {
 
     public static void draw() {
         try {
+            ShaderWarmup.tick();
             ModelShadersAhead.tick();
-            int total = ModelShadersAhead.total();
+            int total = ShaderWarmup.total() + ModelShadersAhead.total();
             if (total <= 0) return;
             long now = System.nanoTime();
             float alpha = 1.0f;
-            if (!ModelShadersAhead.busy()) {
+            if (!ShaderWarmup.busy() && !ModelShadersAhead.busy()) {
                 if (finishedAt == 0) finishedAt = now;
                 long since = now - finishedAt;
                 if (since >= FADE_NANOS) return;
@@ -38,8 +39,9 @@ public final class ShaderCacheBar {
             } else {
                 finishedAt = 0;
             }
-            int done = ModelShadersAhead.done();
-            String label = (ModelShadersAhead.allFromCache() ? loadingText() : buildingText()) + "  " + done + " / " + total;
+            int done = Math.min(total, ShaderWarmup.done() + ModelShadersAhead.done());
+            String head = ShaderWarmup.holding() ? preparingText() : ModelShadersAhead.allFromCache() ? loadingText() : buildingText();
+            String label = head + "  " + done + " / " + total;
 
             zombie.core.Core core = zombie.core.Core.getInstance();
             zombie.ui.TextManager tm = zombie.ui.TextManager.instance;
@@ -59,6 +61,13 @@ public final class ShaderCacheBar {
     private static String buildingText() {
         if (building == null) building = text("UI_MPOptim_ShaderCache_Building", "PZO: building shader cache");
         return building;
+    }
+
+    private static String preparing;
+
+    private static String preparingText() {
+        if (preparing == null) preparing = text("UI_MPOptim_ShaderCache_Preparing", "PZO: preparing shaders, the game starts when they are ready");
+        return preparing;
     }
 
     private static String loadingText() {

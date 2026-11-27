@@ -165,20 +165,7 @@ final class ChunkNormals {
 
     private static void build() {
         tried = true;
-        int vs = BakePass.compile(GL20.GL_VERTEX_SHADER, BakePass.VERTEX, "chunk normal vertex");
-        int fs = BakePass.compile(GL20.GL_FRAGMENT_SHADER, FRAGMENT, "chunk normal fragment");
-        if (vs != 0 && fs != 0) {
-            program = GL20.glCreateProgram();
-            GL20.glAttachShader(program, vs);
-            GL20.glAttachShader(program, fs);
-            GL20.glLinkProgram(program);
-            if (GL20.glGetProgrami(program, GL20.GL_LINK_STATUS) == 0) {
-                GL20.glDeleteProgram(program);
-                program = 0;
-            }
-        }
-        if (vs != 0) GL20.glDeleteShader(vs);
-        if (fs != 0) GL20.glDeleteShader(fs);
+        program = PzoeShaders.program(BakePass.VERTEX, FRAGMENT, "[ChunkNormals]");
         if (program == 0) return;
         fbo = GL30.glGenFramebuffers();
         vao = GL30.glGenVertexArrays();

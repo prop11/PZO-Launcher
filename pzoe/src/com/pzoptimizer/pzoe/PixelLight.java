@@ -55,12 +55,15 @@ import zombie.iso.fboRenderChunk.FBORenderLevels;
 public final class PixelLight {
 
     static final int BASE_LEVEL = -8, LEVELS = 24;
+    private static final int ALL_LEVELS = (1 << LEVELS) - 1;
     // The light texture is 2D: 2 * LEVELS slices tiled 8 across, 6 down. A sampler3D can't be used: the game runs
     // glValidateProgram right after linking, with every sampler still on unit 0, and a 3D sampler sharing unit 0 with
     // the 2D chunk texture fails it, so the game drops the chunk shader for the rest of the session.
     static final int TILE_COLS = 8, TILE_ROWS = (2 * LEVELS + TILE_COLS - 1) / TILE_COLS;
     static final int UPLOADS_PER_FRAME = 24, SNOW_ONLY_UPLOADS_PER_FRAME = 6, STALE_UPLOADS_PER_FRAME = 12;
     static final long DIRTY_LIGHTING = 32L, DIRTY_REDRAW = 1024L;
+    // A light change waiting this many frames goes ahead of nearer ones
+    static final int LIGHT_AGE_FRAMES = 12;
 
     public static final AtomicLong columnsUploaded = new AtomicLong();
     public static final AtomicLong lightChangesKept = new AtomicLong();
@@ -72,6 +75,13 @@ public final class PixelLight {
     private static boolean snowing, groundSnowWas;
     // Toward the sun in world squares, levels the ray climbs per square, visibility (0 = no sun)
     static volatile float sunX, sunY = 1f, sunRise = 1f, sunVis;
+    // Moonlight card: strength (0 = off). While the sun is down the moon takes its place in sunX..sunVis and moonLit
+    // says so; the shader gets a negative strength, so only the shadows use it (no warm sun in rooms, rays, motes)
+    static volatile float moonAmount;
+    static volatile boolean moonLit;
+    // Leaf Shadows card: how far the crowns' shadows sway (0 = off), sent with the wind each chunk draw
+    static volatile float leafSwayAmount;
+    private static int locSunLeaf = -1, locLeafSway = -1, maxTextureUnits = -1, locWear = -1, locWearInfo = -1;
     // Decided on the main thread; atmos = ground fog / light glow, which only reads the light map
     static volatile boolean deferred, sway, atmos;
     // The Per-Pixel Lighting card (Lua sends it). The lighting code stays in the chunk shader either way, behind
@@ -124,6 +134,10 @@ public final class PixelLight {
         boolean[] borderDirty;
         boolean bordersPending;
         final Set<IsoChunk> dirty = ConcurrentHashMap.newKeySet();
+        final ConcurrentHashMap<IsoChunk, Long> lightDirty = new ConcurrentHashMap<>();
+        // Frame each chunk's pending light change came in
+        final ConcurrentHashMap<IsoChunk, Integer> lightSince = new ConcurrentHashMap<>();
+        int[] lightMasks, squareLevelsBySlot;
         int roundRobin;
     }
 
@@ -135,9 +149,9 @@ public final class PixelLight {
     private static long locCheckedNs;
     private static int locA, locB, locC, locLit, locWind, locTex, locAtmos = -1, locFogWind = -1, locClouds = -1, locSnow = -1, locTrail = -1, locTrailInfo = -1, locGore = -1, locGoreInfo = -1, locWindows = -1,
         locHeight = -1, locSun = -1, locWet = -1, locIce = -1, locBend = -1, locTrailMarks = -1, locTrailSnow = -1, locBeams = -1, locBeamInfo = -1,
-        locFogField = -1, locFogInfo = -1, locGSnow = -1, locGSnow2 = -1, locGSnow3 = -1, locSnowHeat = -1, locSnowHeatInfo = -1, locSnowPile = -1, locSnowPileInfo = -1, locSky = -1, locSunCache = -1, locSunCacheInfo = -1, locSunRooms = -1, locScatter0 = -1, locScatter1 = -1, locScatterInfo = -1, locBurst = -1, locBurstInfo = -1, locSpec = -1, locFrost = -1, locRooms = -1, locWinRefl = -1,
+        locFogField = -1, locFogInfo = -1, locGSnow = -1, locGSnow2 = -1, locGSnow3 = -1, locSnowHeat = -1, locSnowHeatInfo = -1, locSnowPile = -1, locSnowPileInfo = -1, locSky = -1, locSunCache = -1, locSunCacheInfo = -1, locSunRooms = -1, locGodRays = -1, locScatter0 = -1, locScatter1 = -1, locScatterInfo = -1, locBurst = -1, locBurstInfo = -1, locSpec = -1, locFrost = -1, locRooms = -1, locWinRefl = -1,
         locCloudCache = -1, locCloudInfo = -1, locFogCache = -1, locFogCacheInfo = -1, locSnowCache = -1, locSnowCacheInfo = -1, locTune0 = -1, locTune1 = -1, locTune2 = -1,
-        locFlicker = -1, locFlickerInfo = -1, locGI = -1, locGIInfo = -1, locFlash = -1,
+        locFlicker = -1, locFlickerInfo = -1, locLightTint = -1, locLightTintInfo = -1, locImpact = -1, locImpactInfo = -1, locGI = -1, locGIInfo = -1, locFlash = -1,
         locRot = -1, locRotInfo = -1, locCharSh = -1, locCharShInfo = -1, locContact = -1;
 
     private PixelLight() {}
@@ -154,21 +168,37 @@ public final class PixelLight {
     }
 
     /** Replaces FBORenderLevels.invalidateLevel(z, flags) inside LightingJNI's per-square light update. */
-    public static void lightInvalidate(FBORenderLevels renderLevels, int z, long flags) {
-        // A chunk still waiting in the re-bake queue may hold a lit bake: let the game re-bake that level now, which
-        // also converts it
-        if (flags == DIRTY_LIGHTING && deferred && !RebakeQueue.contains(renderLevels.getChunk())) {
-            lightChangesKept.incrementAndGet();
+    public static void lightInvalidate(FBORenderLevels renderLevels, int z, long flags, IsoGridSquare square) {
+        if (flags == DIRTY_LIGHTING && (deferred || atmos || sway || draining)) {
+            IsoChunk chunk = renderLevels.getChunk();
             PlayerState ps = players[renderLevels.getPlayerIndex()];
-            if (ps != null) ps.dirty.add(renderLevels.getChunk());
-            return;
-        }
-        // Without per-pixel lighting the light map still feeds fog and window glow, so it follows light changes too
-        if (flags == DIRTY_LIGHTING && (atmos || deferred || draining)) {
-            PlayerState ps = players[renderLevels.getPlayerIndex()];
-            if (ps != null) ps.dirty.add(renderLevels.getChunk());
+            int level = z - BASE_LEVEL;
+            if (ps != null && level >= 0 && level < LEVELS) {
+                // Glow can read windows two squares away and the room across the window edge.
+                int neighbors = lightNeighbors(square.getX() & 7, square.getY() & 7, windowsWanted ? 3 : 1);
+                long change = ((long) neighbors << LEVELS) | (1L << level);
+                ps.lightDirty.merge(chunk, change, (pending, next) -> (pending & next) == next ? pending : pending | next);
+                ps.lightSince.putIfAbsent(chunk, lastFrame);
+            }
+            // A chunk waiting for conversion may still have a lit bake. Let the game re-bake it.
+            if (deferred && !RebakeQueue.contains(chunk)) {
+                lightChangesKept.incrementAndGet();
+                return;
+            }
         }
         renderLevels.invalidateLevel(z, flags);
+    }
+
+    static int lightNeighbors(int x, int y, int margin) {
+        int columns = 2 | (x < margin ? 1 : 0) | (x >= 8 - margin ? 4 : 0);
+        return (y < margin ? columns : 0) | (columns << 3) | (y >= 8 - margin ? columns << 6 : 0);
+    }
+
+    public static void geometryInvalidate(IsoGridSquare square, long flags) {
+        if ((flags & (FBORenderChunk.DIRTY_OBJECT_ADD | FBORenderChunk.DIRTY_OBJECT_REMOVE | FBORenderChunk.DIRTY_OBJECT_MODIFY)) != 0
+                && (deferred || atmos || sway || draining)) {
+            chunkChanged(square.chunk);
+        }
     }
 
     /**
@@ -267,10 +297,13 @@ public final class PixelLight {
         BakePass.frame();
         Scorch.frame();
         FlickerLights.frame(dayLight);
+        LightColours.frame(dayLight);
+        BulletImpacts.frame();
+        HordeTrails.frame();
         WeatherGround.frame(now);
         FlashLights.frame(dayLight);
         CorpseFlies.frame();
-        Frost.frame(dayLight, sunVis, cloudIntensity);
+        Frost.frame(dayLight, moonLit ? 0f : sunVis, cloudIntensity);
         BounceLight.frame(dayLight);
         leafDensity = MONTH_LEAF[Math.floorMod(zombie.GameTime.getInstance().getMonth(), 12)];
         if (GroundSnow.active() != groundSnowWas) {
@@ -335,6 +368,10 @@ public final class PixelLight {
             snowWind((float) dt, wx * windStrength, wy * windStrength);
             if (sunHeightsOn) {
                 sun(cm);
+                if (godRaysWanted) {
+                    godRaysWarmth = 1f - smooth(0.08f, 0.42f, sunRise);
+                    godRaysLight = moonLit ? 0f : sunVis * godRaysStrength * (0.35f + 0.65f * godRaysWarmth);
+                }
                 // A lightning flash lights the world from the strike for a moment (PZOE weather)
                 float[] fs = com.pzoptimizer.pzoe.weather.WeatherStorm.flashSun();
                 if (fs != null && fs[3] > sunVis) {
@@ -342,15 +379,19 @@ public final class PixelLight {
                     sunY = fs[1];
                     sunRise = fs[2];
                     sunVis = fs[3];
+                    moonLit = false;
+                    if (godRaysWanted) godRaysLight = 0f;
                 }
             } else {
                 sunVis = 0f;
+                moonLit = false;
+                if (godRaysWanted) godRaysLight = 0f;
             }
             // Fog drift as the chunk shader had it: screen wind back to the ground, carried with the clock
             float fwx = windY + 0.5f * windX, fwy = windY - 0.5f * windX, fk = clock * (0.15f + 0.6f * windStrength);
             float weather = Math.max(fogIntensity, rainIntensity * 0.5f) + 0.12f * (1f - dayLight);
             float fogWeather = Math.max(0f, Math.min(1f, Math.max(atmos ? fogIntensity : 0f, rainIntensity * 0.5f) + 0.12f * (1f - dayLight)));
-            SkyCache.scatterParams(tune[4] * fogWeather, tune[6] * (1f - 0.75f * dayLight), tune[5], (sunHeightsOn && atmos ? sunVis : 0f) * tune[4] * fogWeather * 0.9f);
+            SkyCache.scatterParams(tune[4] * fogWeather, tune[6] * (1f - 0.75f * dayLight), tune[5], (sunHeightsOn && atmos && !moonLit ? sunVis : 0f) * tune[4] * fogWeather * 0.9f);
             SkyCache.frame(sunHeightsOn && sunVis > 0f, sunX, sunY, sunRise, leafDensity, atmos ? cloudIntensity : 0f, cloudOffX, cloudOffY, clock,
                 atmos && weather > 0.001f, fwx * fk, fwy * fk, atmos && GroundSnow.active() && GroundSnow.depth > 0.001f);
             LightBeams.frame();
@@ -366,6 +407,9 @@ public final class PixelLight {
     private static boolean treesOn;
     // Sun through windows strength, from Lua (modApi sunRooms)
     static volatile float sunRoomsStrength = 0.6f;
+    static volatile float godRaysStrength = 1f;
+    private static volatile boolean godRaysWanted;
+    private static volatile float godRaysLight, godRaysWarmth;
     // Specular Highlights strength and dry gloss, from Lua (modApi specular)
     static volatile float specStrength = 1f, specDry;
     // Window Reflections strength, from Lua (modApi winRefl)
@@ -378,13 +422,54 @@ public final class PixelLight {
     private static void sun(zombie.iso.weather.ClimateManager cm) {
         float[] v = sunNow();
         if (v[3] <= 0f && v[2] <= 0f) {
+            if (moonAmount > 0f && moonNow(v)) {
+                sunX = v[0];
+                sunY = v[1];
+                sunRise = v[2];
+                sunVis = v[3];
+                moonLit = true;
+                return;
+            }
             sunVis = 0f;
+            moonLit = false;
             return;
         }
+        moonLit = false;
         sunX = v[0];
         sunY = v[1];
         sunRise = v[2];
         sunVis = v[3];
+    }
+
+    /**
+     * The moon while the sun is down, same layout as sunNow. It crosses the night sky on the sun's arc but lower, and
+     * its light follows the phase (vanilla's ClimateMoon, 0 new to 1 full); cloud and rain take it away like the sun.
+     */
+    private static boolean moonNow(float[] out) {
+        zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
+        if (cm == null || zombie.GameTime.getInstance() == null) return false;
+        float phase = zombie.iso.weather.ClimateMoon.getInstance().getMoonFloat();
+        if (phase <= 0.02f) return false;
+        float t = zombie.GameTime.getInstance().getTimeOfDay();
+        float dawn = 6f, dusk = 20f;
+        zombie.erosion.season.ErosionSeason season = cm.getSeason();
+        if (season != null) {
+            dawn = season.getDawn();
+            dusk = season.getDusk();
+        }
+        float night = Math.max(1f, 24f - dusk + dawn);
+        float f = ((t - dusk + 24f) % 24f) / night;
+        if (f <= 0f || f >= 1f) return false;
+        double elev = Math.toRadians(40.0) * Math.sin(Math.PI * f);
+        out[0] = (float) Math.cos(Math.PI * f);
+        out[1] = (float) Math.sin(Math.PI * f);
+        out[2] = (float) (Math.tan(Math.max(elev, Math.toRadians(4.0))) / 2.45);
+        float rise = (float) Math.max(0.0, Math.min(1.0, (Math.toDegrees(elev) - 2.0) / 10.0));
+        float clear = 1f - smooth(0.25f, 0.6f, WeatherLook.cloud());
+        float dry = 1f - smooth(0.02f, 0.15f, WeatherLook.precipitation());
+        // Up to 0.6: moon shadows are about half as deep as a clear day's
+        out[3] = rise * rise * (3f - 2f * rise) * clear * dry * phase * 0.6f * Math.min(2f, moonAmount);
+        return out[3] > 0.005f;
     }
 
     /** The sun right now whatever the cards: toward it on the ground x, y, levels its ray climbs a square, visibility. */
@@ -557,6 +642,10 @@ public final class PixelLight {
             ps.borderDirty = new boolean[g * g];
             ps.bordersPending = false;
             ps.dirty.clear();
+            ps.lightDirty.clear();
+            ps.lightSince.clear();
+            ps.lightMasks = new int[g * g];
+            ps.squareLevelsBySlot = new int[g * g * 64];
             SpriteRenderer().drawGeneric(new CreateTexture(p, ps.ring));
         }
         java.util.Arrays.fill(ps.readyChunks, null);
@@ -575,6 +664,10 @@ public final class PixelLight {
             if (previous != null && (current == null || oldKey != key(current.wx, current.wy))) {
                 refreshBorders(ps, (int) (oldKey >> 32), (int) oldKey);
             }
+            if (previous != null && previous != current) {
+                ps.lightDirty.remove(previous);
+                ps.lightSince.remove(previous);
+            }
             if (current != null) refreshBorders(ps, current.wx, current.wy);
             else {
                 ps.slotChunk[slot] = null;
@@ -592,14 +685,14 @@ public final class PixelLight {
             if (ps.readyChunks[slot] != c) continue;
             long k = key(c.wx, c.wy);
             if (ps.slotChunk[slot] != c || ps.slotKey[slot] != k) {
-                upload(p, ps, c, true);
+                upload(p, ps, c, true, 0);
                 ps.slotChunk[slot] = c;
                 ps.slotKey[slot] = k;
                 ps.stale[slot] = false;
                 ps.borderDirty[slot] = false;
                 ps.dirty.remove(c);
             } else if (ps.stale[slot] && catchUp > 0) {
-                upload(p, ps, c, true);
+                upload(p, ps, c, true, 0);
                 ps.stale[slot] = false;
                 ps.borderDirty[slot] = false;
                 ps.dirty.remove(c);
@@ -625,7 +718,7 @@ public final class PixelLight {
                     ps.bordersPending = true;
                     break;
                 }
-                upload(p, ps, c, false);
+                upload(p, ps, c, false, 0);
                 ps.borderDirty[slot] = false;
                 ps.dirty.remove(c);
                 budget--;
@@ -637,15 +730,70 @@ public final class PixelLight {
             it.remove();
             int slot = Math.floorMod(c.wy, g) * g + Math.floorMod(c.wx, g);
             if (ps.slotChunk[slot] != c || ps.slotKey[slot] != key(c.wx, c.wy)) continue;
-            upload(p, ps, c, false);
+            upload(p, ps, c, false, 0);
             budget--;
         }
-        // One column a frame refreshed anyway: catches foliage added or removed and anything a hook missed
-        if (budget > 0 && g > 0) {
+        if (budget > 0 && !ps.lightDirty.isEmpty()) budget = uploadLightChanges(p, ps, chunks, order, budget);
+        // One column a frame refreshed anyway: catches foliage added or removed and anything a hook missed. It runs
+        // even with the budget spent, so no column can be left behind for long.
+        if (!flashing && g > 0) {
             int i = ps.roundRobin = (ps.roundRobin + 1) % (g * g);
             IsoChunk c = chunks[i];
-            if (c != null && c.loaded && !c.lightingNeverDone[p]) upload(p, ps, c, false);
+            if (c != null) {
+                int slot = Math.floorMod(c.wy, g) * g + Math.floorMod(c.wx, g);
+                if (ps.readyChunks[slot] == c && ps.slotChunk[slot] == c) upload(p, ps, c, false, 0);
+            }
         }
+    }
+
+    // Nearest first starved the rest: a moving light (headlights, a flickering lamp, a fire) dirties the same chunks
+    // near the player every frame, they took the whole budget, and chunks further out kept old light for minutes,
+    // showing as chunk-shaped patches lighter or darker than the rest. Changes that have waited go first now, with up
+    // to half the budget; nearest first gets the rest.
+    private static int uploadLightChanges(int p, PlayerState ps, IsoChunk[] chunks, int[] order, int budget) {
+        budget = takeLightChanges(ps, chunks, order, budget, budget / 2, true);
+        if (budget > 0 && !ps.lightDirty.isEmpty()) budget = takeLightChanges(ps, chunks, order, budget, 0, false);
+        int[] masks = ps.lightMasks;
+        for (int slot = 0; slot < masks.length; slot++) {
+            int floors = masks[slot];
+            if (floors == 0) continue;
+            masks[slot] = 0;
+            upload(p, ps, ps.slotChunk[slot], false, floors);
+        }
+        return budget;
+    }
+
+    private static int takeLightChanges(PlayerState ps, IsoChunk[] chunks, int[] order, int budget, int floor, boolean waitedOnly) {
+        int g = ps.grid;
+        int[] masks = ps.lightMasks;
+        for (int idx : order) {
+            if (budget <= floor) break;
+            IsoChunk chunk = chunks[idx];
+            if (chunk == null) continue;
+            int center = Math.floorMod(chunk.wy, g) * g + Math.floorMod(chunk.wx, g);
+            if (ps.readyChunks[center] != chunk || ps.slotChunk[center] != chunk) continue;
+            if (waitedOnly) {
+                Integer since = ps.lightSince.get(chunk);
+                if (since == null || lastFrame - since < LIGHT_AGE_FRAMES) continue;
+            }
+            Long change = ps.lightDirty.remove(chunk);
+            ps.lightSince.remove(chunk);
+            if (change == null) continue;
+            int floors = change.intValue() & ALL_LEVELS;
+            int neighbors = (int) (change >>> LEVELS);
+            // Take the whole group even at the end of the budget so welded edges update together.
+            while (neighbors != 0) {
+                int edge = Integer.numberOfTrailingZeros(neighbors);
+                neighbors &= neighbors - 1;
+                int wx = chunk.wx + edge % 3 - 1, wy = chunk.wy + edge / 3 - 1;
+                int slot = Math.floorMod(wy, g) * g + Math.floorMod(wx, g);
+                IsoChunk target = ps.readyChunks[slot];
+                if (target == null || ps.slotChunk[slot] != target || target.wx != wx || target.wy != wy) continue;
+                if (masks[slot] == 0) budget--;
+                masks[slot] |= floors;
+            }
+        }
+        return budget;
     }
 
     private static void refreshBorders(PlayerState ps, int wx, int wy) {
@@ -750,11 +898,10 @@ public final class PixelLight {
     static final int FLAG_FOLIAGE = 128, FLAG_OUTDOORS = 64;
     private static final int[][] scratchFlags = new int[LEVELS][64];
 
-    // full = every slice (the slot held another chunk). Otherwise only the slices from one level below the chunk to
-    // three above its top: the composite reads no further (tree tops reach about two levels up), and most chunks have
-    // 1-3 of the 24 levels, so a light change costs a handful of uploads instead of 48.
-    private static void upload(int p, PlayerState ps, IsoChunk c, boolean full) {
-        boolean wantVeg = sway;
+    private static final IsoGridSquare[][] lightSquares = new IsoGridSquare[LEVELS][64];
+    private static final int[] squareLevels = new int[64];
+
+    private static void upload(int p, PlayerState ps, IsoChunk c, boolean full, int changedLights) {
         for (int y = -1; y <= 1; y++) {
             for (int x = -1; x <= 1; x++) {
                 int wx = c.wx + x, wy = c.wy + y;
@@ -762,67 +909,109 @@ public final class PixelLight {
                 weldChunks[(y + 1) * 3 + x + 1] = neighbor != null && neighbor.wx == wx && neighbor.wy == wy ? neighbor : null;
             }
         }
-        for (int li = 0; li < LEVELS; li++) {
-            int level = BASE_LEVEL + li;
+
+        int lowest = Math.max(0, c.minLevel - BASE_LEVEL), highest = Math.min(LEVELS - 1, c.maxLevel - BASE_LEVEL);
+        java.util.Arrays.fill(squareLevels, 0);
+        for (int li = lowest; li <= highest; li++) {
+            for (int i = 0; i < 64; i++) {
+                IsoGridSquare square = c.getGridSquare(i & 7, i >> 3, li + BASE_LEVEL);
+                if (square != null && square.lighting[p] == null) square = null;
+                lightSquares[li][i] = square;
+                if (square != null) squareLevels[i] |= 1 << li;
+            }
+        }
+        int slot = Math.floorMod(c.wy, ps.grid) * ps.grid + Math.floorMod(c.wx, ps.grid);
+        int squareOffset = slot * 64;
+        if (!java.util.Arrays.equals(squareLevels, 0, 64, ps.squareLevelsBySlot, squareOffset, squareOffset + 64)) {
+            // Adding or removing a square changes which native floor supplies the air above and below it.
+            System.arraycopy(squareLevels, 0, ps.squareLevelsBySlot, squareOffset, 64);
+            full = true;
+            changedLights = 0;
+        }
+        int levels = full || highest < lowest ? ALL_LEVELS : levelRange(Math.max(0, lowest - 1), Math.min(LEVELS - 1, highest + 3));
+        if (changedLights != 0) levels &= affectedLightLevels(changedLights, squareLevels);
+
+        int sources = 0;
+        for (int pending = levels; pending != 0; pending &= pending - 1) {
+            int li = Integer.numberOfTrailingZeros(pending);
+            for (int occupied : squareLevels) {
+                if (occupied != 0) sources |= 1 << lightSource(occupied, li);
+            }
+        }
+        for (int pending = sources; pending != 0; pending &= pending - 1) {
+            int li = Integer.numberOfTrailingZeros(pending);
             int[] vals = scratch[li];
+            for (int i = 0; i < 64; i++) {
+                IsoGridSquare square = lightSquares[li][i];
+                if (square == null) continue;
+                for (int v = 0; v < 8; v++) vals[i * 8 + v] = square.getVertLight(v, p);
+            }
+            weld(li + BASE_LEVEL, p, vals);
+        }
+        for (int pending = levels; pending != 0; pending &= pending - 1) {
+            int li = Integer.numberOfTrailingZeros(pending);
+            int[] vals = scratch[li], flags = scratchFlags[li];
             boolean[] set = scratchSet[li];
-            int[] flags = scratchFlags[li];
             for (int i = 0; i < 64; i++) {
-                IsoGridSquare sq = level < c.minLevel || level > c.maxLevel ? null : c.getGridSquare(i & 7, i >> 3, level);
-                if (sq != null && sq.lighting[p] != null) {
-                    for (int v = 0; v < 8; v++) vals[i * 8 + v] = sq.getVertLight(v, p);
-                    set[i] = true;
-                    flags[i] = (wantVeg && hasWindFoliage(sq) ? FLAG_FOLIAGE : 0) | (sq.isOutside() ? FLAG_OUTDOORS : 0);
-                } else if (li > 0 && scratchSet[li - 1][i]) {
-                    // Nothing on this level here (open air, above the roof): the ceiling light of the level below
-                    int[] below = scratch[li - 1];
-                    for (int v = 0; v < 4; v++) {
-                        vals[i * 8 + v] = below[i * 8 + 4 + v];
-                        vals[i * 8 + 4 + v] = below[i * 8 + 4 + v];
-                    }
-                    set[i] = true;
-                    flags[i] = FLAG_OUTDOORS;
+                int occupied = squareLevels[i];
+                set[i] = occupied != 0;
+                flags[i] = 0;
+                if (occupied == 0) continue;
+                int source = lightSource(occupied, li);
+                if (source == li) {
+                    IsoGridSquare square = lightSquares[li][i];
+                    flags[i] = (sway && hasWindFoliage(square) ? FLAG_FOLIAGE : 0) | (square.isOutside() ? FLAG_OUTDOORS : 0);
                 } else {
-                    set[i] = false;
-                    flags[i] = 0;
+                    // Empty air inherits the ceiling below or, under the lowest square, the floor above.
+                    int corner = source < li ? 4 : 0;
+                    for (int v = 0; v < 4; v++) {
+                        vals[i * 8 + v] = vals[i * 8 + v + 4] = scratch[source][i * 8 + corner + v];
+                    }
+                    if (source < li) flags[i] = FLAG_OUTDOORS;
                 }
             }
-            if (level >= c.minLevel && level <= c.maxLevel) weld(level, p, vals);
-            if (windowsWanted && level >= c.minLevel && level <= c.maxLevel) windowFlags(c, level, flags);
+            if (windowsWanted && li >= lowest && li <= highest) windowFlags(c, li + BASE_LEVEL, flags);
         }
-        // Below the lowest level that has anything: the floor light of the level above
-        for (int li = LEVELS - 2; li >= 0; li--) {
-            for (int i = 0; i < 64; i++) {
-                if (scratchSet[li][i] || !scratchSet[li + 1][i]) continue;
-                int[] vals = scratch[li], above = scratch[li + 1];
-                for (int v = 0; v < 4; v++) {
-                    vals[i * 8 + v] = above[i * 8 + v];
-                    vals[i * 8 + 4 + v] = above[i * 8 + v];
-                }
-                scratchSet[li][i] = true;
-            }
-        }
-        ByteBuffer hb = sunHeightsOn ? heights(c) : null;
+        for (int li = lowest; li <= highest; li++) java.util.Arrays.fill(lightSquares[li], null);
+        if (levels == 0) return;
+
+        ByteBuffer hb = changedLights == 0 && sunHeightsOn ? heights(c) : null;
         ByteBuffer rb = hb != null && roomsOn ? rooms() : null;
         ByteBuffer tb = hb != null && treesOn ? trees() : null;
         ByteBuffer buf = buffers.poll();
         if (buf == null) buf = ByteBuffer.allocateDirect(COLUMN_INTS * 4).order(ByteOrder.LITTLE_ENDIAN);
         buf.clear();
-        pack(scratch, scratchSet, scratchFlags, buf.asIntBuffer());
-        buf.position(0);
-        buf.limit(COLUMN_INTS * 4);
+        pack(scratch, scratchSet, scratchFlags, buf.asIntBuffer(), levels);
+        buf.limit(Integer.bitCount(levels) * 2 * SLICE_BYTES);
         int x0 = 2 * Math.floorMod(c.wx * 8, ps.ring), y0 = 2 * Math.floorMod(c.wy * 8, ps.ring);
-        int sFrom = 0, sTo = 2 * LEVELS - 1;
-        if (!full) {
-            sFrom = 2 * Math.max(0, c.minLevel - 1 - BASE_LEVEL);
-            sTo = Math.min(2 * LEVELS - 1, 2 * (c.maxLevel + 3 - BASE_LEVEL) + 1);
-            if (sTo < sFrom) {
-                sFrom = 0;
-                sTo = 2 * LEVELS - 1;
+        SpriteRenderer().drawGeneric(new Upload(p, ps.ring, x0, y0, buf, hb, rb, tb, levels));
+        columnsUploaded.incrementAndGet();
+    }
+
+    private static int levelRange(int from, int to) {
+        return ((1 << (to + 1)) - 1) & (-1 << from);
+    }
+
+    static int lightSource(int occupied, int level) {
+        int below = occupied & levelRange(0, level);
+        return below != 0 ? 31 - Integer.numberOfLeadingZeros(below) : Integer.numberOfTrailingZeros(occupied);
+    }
+
+    static int affectedLightLevels(int changed, int[] occupiedLevels) {
+        int result = changed;
+        for (int pending = changed; pending != 0; pending &= pending - 1) {
+            int level = Integer.numberOfTrailingZeros(pending);
+            int below = (1 << level) - 1, above = ALL_LEVELS & (-1 << (level + 1));
+            for (int occupied : occupiedLevels) {
+                if ((occupied & (1 << level)) == 0) continue;
+                // Include the empty levels that inherit this floor's corners.
+                int from = (occupied & below) == 0 ? 0 : level;
+                int upper = occupied & above;
+                int to = upper == 0 ? LEVELS - 1 : Integer.numberOfTrailingZeros(upper) - 1;
+                result |= levelRange(from, to);
             }
         }
-        SpriteRenderer().drawGeneric(new Upload(p, ps.ring, x0, y0, buf, hb, rb, tb, sFrom, sTo));
-        columnsUploaded.incrementAndGet();
+        return result;
     }
 
     // Main thread scratch for weld: the level's squares with a 1-square border (10x10), and the unwelded corners
@@ -1115,7 +1304,12 @@ public final class PixelLight {
      * the ceiling corners, each square a 2x2 block of its own corners.
      */
     static void pack(int[][] vals, boolean[][] set, int[][] flags, IntBuffer ib) {
-        for (int li = 0; li < LEVELS; li++) {
+        pack(vals, set, flags, ib, ALL_LEVELS);
+    }
+
+    static void pack(int[][] vals, boolean[][] set, int[][] flags, IntBuffer ib, int levels) {
+        for (int pending = levels; pending != 0; pending &= pending - 1) {
+            int li = Integer.numberOfTrailingZeros(pending);
             int[] v = vals[li], g = flags[li];
             boolean[] s = set[li];
             for (int half = 0; half < 2; half++) {
@@ -1255,14 +1449,13 @@ public final class PixelLight {
     }
 
     private static final class Upload extends TextureDraw.GenericDrawer {
-        final int player, ring, x0, y0, sFrom, sTo;
+        final int player, ring, x0, y0, levels;
         final ByteBuffer data, heights, rooms, trees;
 
-        Upload(int player, int ring, int x0, int y0, ByteBuffer data, ByteBuffer heights, ByteBuffer rooms, ByteBuffer trees, int sFrom, int sTo) {
+        Upload(int player, int ring, int x0, int y0, ByteBuffer data, ByteBuffer heights, ByteBuffer rooms, ByteBuffer trees, int levels) {
             this.rooms = rooms;
             this.trees = trees;
-            this.sFrom = sFrom;
-            this.sTo = sTo;
+            this.levels = levels;
             this.player = player;
             this.ring = ring;
             this.x0 = x0;
@@ -1277,7 +1470,7 @@ public final class PixelLight {
             GL13.glActiveTexture(GL13.GL_TEXTURE7);
             GL11.glBindTexture(GL11.GL_TEXTURE_2D, texId[player]);
             GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
-            uploadSlices(x0, y0, ring, data, sFrom, sTo);
+            uploadSlices(x0, y0, ring, data, levels);
             if (rooms != null && roomTex[player] != 0) {
                 GL13.glActiveTexture(GL13.GL_TEXTURE4);
                 GL11.glBindTexture(GL11.GL_TEXTURE_2D, roomTex[player]);
@@ -1316,18 +1509,24 @@ public final class PixelLight {
         }
     }
 
-    /** One packed column (see pack) into its 2 * LEVELS slices of the bound atlas; slice s is tile (s % 8, s / 8). */
+    private static final int SLICE_BYTES = 16 * 16 * 4;
+
+    /** Each packed level supplies two consecutive slices, even if the atlas levels are far apart. */
     static void uploadSlices(int x0, int y0, int ring, ByteBuffer data) {
-        uploadSlices(x0, y0, ring, data, 0, 2 * LEVELS - 1);
+        uploadSlices(x0, y0, ring, data, ALL_LEVELS);
     }
 
-    static void uploadSlices(int x0, int y0, int ring, ByteBuffer data, int sFrom, int sTo) {
-        int tile = 2 * ring, sliceBytes = 16 * 16 * 4;
-        for (int s = sFrom; s <= sTo; s++) {
-            data.limit((s + 1) * sliceBytes);
-            data.position(s * sliceBytes);
-            GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, (s % TILE_COLS) * tile + x0, (s / TILE_COLS) * tile + y0, 16, 16,
-                GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, data);
+    private static void uploadSlices(int x0, int y0, int ring, ByteBuffer data, int levels) {
+        int tile = 2 * ring, offset = 0;
+        for (int pending = levels; pending != 0; pending &= pending - 1) {
+            int first = 2 * Integer.numberOfTrailingZeros(pending);
+            for (int slice = first; slice < first + 2; slice++) {
+                data.limit(offset + SLICE_BYTES);
+                data.position(offset);
+                GL11.glTexSubImage2D(GL11.GL_TEXTURE_2D, 0, (slice % TILE_COLS) * tile + x0, (slice / TILE_COLS) * tile + y0,
+                    16, 16, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, data);
+                offset += SLICE_BYTES;
+            }
         }
         data.limit(data.capacity());
         data.position(0);
@@ -1472,11 +1671,22 @@ public final class PixelLight {
                 locCloudCache = GL20.glGetUniformLocation(prog, "PZOCloudCache");
                 locCloudInfo = GL20.glGetUniformLocation(prog, "PZOCloudInfo");
                 SkyCache.sunWanted = locSunCache >= 0 && locSunCacheInfo >= 0;
+                // Leaf Shadows reads the crowns' own shadow on unit 16; GL 3 only promises 16 units, so it needs more
+                if (maxTextureUnits < 0) maxTextureUnits = GlGet.integer(GL20.GL_MAX_TEXTURE_IMAGE_UNITS);
+                locSunLeaf = GL20.glGetUniformLocation(prog, "PZOSunLeaf");
+                locLeafSway = GL20.glGetUniformLocation(prog, "PZOLeafSway");
+                SkyCache.leafWanted = SkyCache.sunWanted && locSunLeaf >= 0 && locLeafSway >= 0 && maxTextureUnits > 16;
+                locWear = GL20.glGetUniformLocation(prog, "PZOWear");
+                locWearInfo = GL20.glGetUniformLocation(prog, "PZOWearInfo");
+                HordeTrails.wanted = locWear >= 0 && locWearInfo >= 0 && maxTextureUnits > HordeTrails.UNIT;
                 locSunRooms = GL20.glGetUniformLocation(prog, "PZOSunRooms");
+                locGodRays = GL20.glGetUniformLocation(prog, "PZOGodRays");
+                godRaysWanted = SkyCache.sunWanted && locGodRays >= 0;
+                SkyCache.coarseSun = godRaysWanted && locSun < 0;
                 locRooms = GL20.glGetUniformLocation(prog, "PZORooms");
                 locWinRefl = GL20.glGetUniformLocation(prog, "PZOWinRefl");
                 // The rooms map also says where the windows are, for Window Reflections
-                SkyCache.roomsWanted = (SkyCache.sunWanted && locSunRooms >= 0) || (locWinRefl >= 0 && locRooms >= 0);
+                SkyCache.roomsWanted = (SkyCache.sunWanted && (locSunRooms >= 0 || godRaysWanted)) || (locWinRefl >= 0 && locRooms >= 0);
                 SkyCache.cloudWanted = locCloudCache >= 0 && locCloudInfo >= 0;
                 locFogCache = GL20.glGetUniformLocation(prog, "PZOFogCache");
                 locFogCacheInfo = GL20.glGetUniformLocation(prog, "PZOFogCacheInfo");
@@ -1492,6 +1702,14 @@ public final class PixelLight {
                 locFlickerInfo = GL20.glGetUniformLocation(prog, "PZOFlickerInfo");
                 FlickerLights.wanted = locFlicker >= 0 && locFlickerInfo >= 0;
                 FlickerLights.invalidate();
+                locLightTint = GL20.glGetUniformLocation(prog, "PZOLightTint");
+                locLightTintInfo = GL20.glGetUniformLocation(prog, "PZOLightTintInfo");
+                LightColours.wanted = locLightTint >= 0 && locLightTintInfo >= 0;
+                LightColours.invalidate();
+                locImpact = GL20.glGetUniformLocation(prog, "PZOImpact");
+                locImpactInfo = GL20.glGetUniformLocation(prog, "PZOImpactInfo");
+                BulletImpacts.holesWanted = locImpact >= 0 && locImpactInfo >= 0;
+                BulletImpacts.invalidate();
                 locBurst = GL20.glGetUniformLocation(prog, "PZOBurst[0]");
                 locBurstInfo = GL20.glGetUniformLocation(prog, "PZOBurstInfo");
                 FlashLights.wanted = locBurst >= 0 && locBurstInfo >= 0;
@@ -1536,8 +1754,8 @@ public final class PixelLight {
                 // Fog, cloud shadows, snow and trails only read the light map (outdoors flag, light, chunk placement)
                 // The trail map counts for footprints and grass bending; ground snow's own use waits for snow like the rest of it
                 atmosShaderReady = locAtmos >= 0 || locClouds >= 0 || (locTrail >= 0 && (locTrailMarks >= 0 || locBend >= 0)) || locWindows >= 0 || locSun >= 0 || locWet >= 0
-                    || LightBeams.wanted || FlickerLights.wanted || FlashLights.wanted || GoreMap.wanted || locSpec >= 0 || locFrost >= 0 || locWinRefl >= 0
-                    || CorpseFlies.chunkWanted || locContact >= 0 || locShoreCaustics >= 0;
+                    || LightBeams.wanted || FlickerLights.wanted || LightColours.wanted || BulletImpacts.holesWanted || HordeTrails.wanted || FlashLights.wanted || GoreMap.wanted || locSpec >= 0 || locFrost >= 0 || locWinRefl >= 0
+                    || CorpseFlies.chunkWanted || locContact >= 0 || locShoreCaustics >= 0 || godRaysWanted;
                 snowShaderReady = locSnow >= 0;
                 iceShaderReady = locIce >= 0;
                 for (float[] s : sent) java.util.Arrays.fill(s, Float.NaN);
@@ -1590,6 +1808,8 @@ public final class PixelLight {
                 u4(S_GSNOW, locGSnow, 0f, 0f, 0f, 0f);
                 u4(S_SUN, locSun, 0f, 0f, 0f, 0f);
                 u4(S_SUNCACHE, locSunCacheInfo, 1f, 1f, 0f, SkyCache.LEVELS);
+                if (locLeafSway >= 0) GL20.glUniform4f(locLeafSway, 0f, 0f, 0f, 0f);
+                u4(S_GODRAYS, locGodRays, 0f, 0f, 0f, 0f);
                 if (locSunRooms >= 0) GL20.glUniform4f(locSunRooms, 0f, 0f, 0f, 0f);
                 u4(S_CLOUDCACHE, locCloudInfo, 1f, 1f, 0f, 0f);
                 u4(S_FOGCACHE, locFogCacheInfo, 1f, 1f, 0f, 0f);
@@ -1598,6 +1818,8 @@ public final class PixelLight {
                 u4(S_BEND, locBend, 0f, 0f, 0f, 0f);
                 LightBeams.upload(locBeams, locBeamInfo, false, 0f, 0f, 0f, 0f, 0f);
                 if (locFlickerInfo >= 0) GL20.glUniform4f(locFlickerInfo, 0f, 0f, 0f, 0f);
+                if (locImpactInfo >= 0) GL20.glUniform4f(locImpactInfo, 0f, 0f, 0f, 0f);
+                if (locWearInfo >= 0) GL20.glUniform4f(locWearInfo, 1f, 0f, 0f, 0f);
                 u4(S_BURST, locBurstInfo, 0f, 0f, 0f, 0f);
                 if (locRotInfo >= 0) GL20.glUniform4f(locRotInfo, 0f, 0f, 0f, 0f);
                 if (locContact >= 0) GL20.glUniform4f(locContact, 0f, 0f, 0f, 0f);
@@ -1630,7 +1852,8 @@ public final class PixelLight {
                 GL13.glActiveTexture(GL13.GL_TEXTURE0);
                 GL20.glUniform1i(locHeight, 4);
             }
-            if (locSun >= 0) u4(S_SUN, locSun, sunX, sunY, sunRise, hOk && atmos ? sunVis : 0f);
+            float sunW = hOk && atmos ? sunVis : 0f;
+            if (locSun >= 0) u4(S_SUN, locSun, sunX, sunY, sunRise, moonLit ? -sunW : sunW);
             if (locSunCacheInfo >= 0) {
                 int st = SkyCache.sunTexture(p);
                 GL13.glActiveTexture(GL13.GL_TEXTURE10);
@@ -1639,7 +1862,27 @@ public final class PixelLight {
                 if (locSunCache >= 0) GL20.glUniform1i(locSunCache, 10);
                 boolean sOk = st != 0 && SkyCache.sunRing(p) == (int) info[8];
                 u4(S_SUNCACHE, locSunCacheInfo, info[8], SkyCache.sunDetail(p), sOk ? 1f : 0f, SkyCache.LEVELS);
+                if (locGodRays >= 0) {
+                    float rays = sOk && hOk && atmos ? godRaysLight : 0f;
+                    if (rays > 0.001f) {
+                        u4(S_GODRAYS, locGodRays, rays, SkyCache.roomsReady(p) ? 1f : 0f, Math.min(1f, fogIntensity), godRaysWarmth);
+                    } else {
+                        u4(S_GODRAYS, locGodRays, 0f, 0f, 0f, 0f);
+                    }
+                }
                 if (locSunRooms >= 0) GL20.glUniform4f(locSunRooms, sOk && SkyCache.roomsReady(p) ? 1f : 0f, sunRoomsStrength, 0f, 0f);
+                if (locLeafSway >= 0) {
+                    int lt = SkyCache.leafWanted && sOk && hOk && atmos && sunVis > 0f ? SkyCache.leafTexture(p) : 0;
+                    if (lt != 0) {
+                        GL13.glActiveTexture(GL13.GL_TEXTURE16);
+                        GL11.glBindTexture(GL11.GL_TEXTURE_2D, lt);
+                        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+                        GL20.glUniform1i(locSunLeaf, 16);
+                    }
+                    // A breeze still moves the leaves a little; a gale throws them about
+                    float leafK = lt != 0 ? leafSwayAmount * (0.3f + windStrength) : 0f;
+                    GL20.glUniform4f(locLeafSway, worldWindX, worldWindY, leafK, clock);
+                }
             }
             if (locCloudInfo >= 0) {
                 int ct = SkyCache.cloudTexture(p);
@@ -1687,7 +1930,7 @@ public final class PixelLight {
                 if (locSnowHeatInfo >= 0) heat();
                 if (locSnowPileInfo >= 0) piles();
                 // zw: toward the sun on the ground, scaled by how much direct sun there is (0 overcast or at night)
-                float vis = sunHeightsOn ? sunVis : 0f;
+                float vis = sunHeightsOn && !moonLit ? sunVis : 0f;
                 u4(S_GSNOW2, locGSnow2, clock, dayLight, sunX * vis, sunY * vis);
             }
             u4(S_SKY, locSky, clock, leafDensity, GroundSnow.melt, dayLight);
@@ -1697,6 +1940,10 @@ public final class PixelLight {
             u4(S_BEND, locBend, sway ? 1f : 0f, 0f, 0f, 0f);
             LightBeams.upload(locBeams, locBeamInfo, atmos, info[4], info[5], fogIntensity, rainIntensity, 1f - 0.85f * dayLight);
             FlickerLights.upload(locFlicker, locFlickerInfo);
+            LightColours.upload(locLightTint, locLightTintInfo);
+            BulletImpacts.upload(locImpact, locImpactInfo);
+            // The wear map follows player 0's chunk map, like the trail map
+            HordeTrails.bind(locWear, locWearInfo, p == 0 && HordeTrails.wanted);
             WeatherGround.upload(locWeatherGround, locWeatherGroundLevel, (int) info[4], (int) info[5], p);
             if (locBurstInfo >= 0) {
                 FlashLights.viewReady(p);
@@ -1785,8 +2032,8 @@ public final class PixelLight {
     private static final int S_A = 0, S_B = 1, S_C = 2, S_LIT = 3, S_WIND = 4, S_ATMOS = 5, S_FOGWIND = 6, S_CLOUDS = 7, S_SNOW = 8,
         S_TRAIL = 9, S_WINDOWS = 10, S_SUN = 11, S_WET = 12, S_BEND = 13, S_MARKS = 14, S_FOG = 15, S_GSNOW = 16, S_GSNOW2 = 17,
         S_SKY = 18, S_SUNCACHE = 19, S_CLOUDCACHE = 20, S_FOGCACHE = 21, S_SNOWCACHE = 22, S_TUNE0 = 23, S_TUNE1 = 24, S_TUNE2 = 25, S_ICE = 26,
-        S_CHARSH = 27, S_BURST = 28;
-    private static final float[][] sent = new float[29][4];
+        S_CHARSH = 27, S_BURST = 28, S_GODRAYS = 29;
+    private static final float[][] sent = new float[30][4];
     private static final int[] shadowOffset = new int[2];
 
     // PZOLit is a float: only x goes to the GPU for it
@@ -1861,6 +2108,7 @@ public final class PixelLight {
             "[PZOE fx] fog %.2f rain %.2f daylight %.2f clouds %.2f sun %.2f -> fog weather %.2f; tune fog density %.2f height %.2f glow %.2f beams %.2f haze %.2f; %s; %s; %s; %s; %s; rebake %s; %s",
             fogIntensity, rainIntensity, dayLight, cloudIntensity, sunVis, weather, tune[4], tune[5], tune[6], tune[9], tune[10], FogField.stateText(),
             LightBeams.stateText(), RainRunoff.stateText(), SkyCache.stateText(), CharShadows.stateText(), RebakeQueue.stateText(), ScreenPass.worldImageState()));
+        PZOLogger.info("[PZOE fx2] " + BulletImpacts.stateText() + "; " + SmokePlumes.roomText() + "; " + LightColours.stateText());
     }
 
     // Bytecode
@@ -1905,6 +2153,17 @@ public final class PixelLight {
                 MethodNode effects = AsmSupport.findMethod(node, "getObjectRenderEffectsToApply", "()Lzombie/iso/objects/ObjectRenderEffects;");
                 if (effects != null && AsmSupport.redirectCalls(effects, "zombie/core/Core", "getOptionDoWindSpriteEffects", "()Z",
                         self, "windSkewOption", "(Lzombie/core/Core;)Z") > 0) {
+                    changes++;
+                }
+            }
+            case "zombie/iso/IsoGridSquare" -> {
+                MethodNode invalidation = AsmSupport.findMethod(node, "invalidateRenderChunkLevel", "(J)V");
+                if (invalidation != null) {
+                    InsnList pre = new InsnList();
+                    pre.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                    pre.add(new VarInsnNode(Opcodes.LLOAD, 1));
+                    pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, self, "geometryInvalidate", "(Lzombie/iso/IsoGridSquare;J)V", false));
+                    invalidation.instructions.insert(pre);
                     changes++;
                 }
             }
@@ -1971,10 +2230,20 @@ public final class PixelLight {
                 changes++;
             }
             case "zombie/iso/LightingJNI$JNILighting" -> {
+                String square = "Lzombie/iso/IsoGridSquare;";
+                MethodNode update = AsmSupport.findMethod(node, "updateFBORenderChunk", "()V");
+                if (update == null || node.fields.stream().noneMatch(field -> field.name.equals("square") && field.desc.equals(square))) return false;
                 int sites = 0;
-                for (MethodNode m : node.methods) {
-                    sites += AsmSupport.redirectCalls(m, "zombie/iso/fboRenderChunk/FBORenderLevels", "invalidateLevel", "(IJ)V",
-                        self, "lightInvalidate", "(Lzombie/iso/fboRenderChunk/FBORenderLevels;IJ)V");
+                for (AbstractInsnNode insn : update.instructions.toArray()) {
+                    if (!(insn instanceof MethodInsnNode call) || !call.owner.equals("zombie/iso/fboRenderChunk/FBORenderLevels")
+                            || !call.name.equals("invalidateLevel") || !call.desc.equals("(IJ)V")) continue;
+                    InsnList args = new InsnList();
+                    args.add(new VarInsnNode(Opcodes.ALOAD, 0));
+                    args.add(new FieldInsnNode(Opcodes.GETFIELD, node.name, "square", square));
+                    update.instructions.insertBefore(call, args);
+                    update.instructions.set(call, new MethodInsnNode(Opcodes.INVOKESTATIC, self, "lightInvalidate",
+                        "(Lzombie/iso/fboRenderChunk/FBORenderLevels;IJLzombie/iso/IsoGridSquare;)V", false));
+                    sites++;
                 }
                 if (sites == 0) return false;
                 changes++;

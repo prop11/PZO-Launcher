@@ -51,6 +51,65 @@ final class LightBeams {
     private static final float[] sentInfo = new float[4];
     private static final FloatBuffer buf = ByteBuffer.allocateDirect(MAX * FLOATS * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
 
+    // Torch and Headlight Beams rows: a torch shows its battery, a vehicle light its condition
+    static volatile boolean batteryWear = true, conditionWear = true;
+    private static final ArrayList<zombie.inventory.InventoryItem> lightItems = new ArrayList<>();
+    private static final java.util.HashMap<Short, zombie.vehicles.BaseVehicle> vehiclesById = new java.util.HashMap<>();
+    private static boolean vehiclesMapped;
+
+    // How worn the light behind a torch entry is, 0..1. The game's ids: 1..16 = local player light items
+    // (playerIndex * 4 + item + 1), 4096 + vehicleId * 10 + light index = vehicle lights.
+    private static float wear(IsoGameCharacter.TorchInfo t) {
+        try {
+            if (t.id >= 1 && t.id <= 16) {
+                if (!batteryWear) return 0f;
+                IsoPlayer p = IsoPlayer.players[(t.id - 1) / 4];
+                if (p == null) return 0f;
+                lightItems.clear();
+                p.getActiveLightItems(lightItems);
+                int at = (t.id - 1) % 4;
+                if (at >= lightItems.size()) return 0f;
+                zombie.inventory.InventoryItem item = lightItems.get(at);
+                if (item == null || item.getMaxUses() <= 1) return 0f;
+                float battery = item.getCurrentUsesFloat();
+                // Fine above a quarter, then it yellows and dims, and stutters in the last few percent
+                return Math.max(0f, Math.min(1f, (0.25f - battery) / 0.22f));
+            }
+            if (t.id >= 4096) {
+                if (!conditionWear) return 0f;
+                if (!vehiclesMapped) {
+                    vehiclesMapped = true;
+                    vehiclesById.clear();
+                    var cell = zombie.iso.IsoWorld.instance == null ? null : zombie.iso.IsoWorld.instance.currentCell;
+                    if (cell != null) for (zombie.vehicles.BaseVehicle v : cell.getVehicles()) vehiclesById.put(v.vehicleId, v);
+                }
+                int rest = t.id - 4096;
+                zombie.vehicles.BaseVehicle v = vehiclesById.get((short) (rest / 10));
+                if (v == null || rest % 10 >= v.getLightCount()) return 0f;
+                zombie.vehicles.VehiclePart part = v.getLightByIndex(rest % 10);
+                if (part == null) return 0f;
+                // The game already dims and shortens a damaged light; below 45 it also starts to fail
+                return Math.max(0f, Math.min(1f, (45f - part.getCondition()) / 40f));
+            }
+        } catch (Throwable ignored) {
+            // A light that can't be read just looks new
+        }
+        return 0f;
+    }
+
+    // A worn light's brightness this frame: steady with a little sag, and short dropouts once it's far gone
+    private static float stutter(int id, float wear) {
+        if (wear < 0.45f) return 1f - 0.2f * wear;
+        long slot = System.nanoTime() / 70_000_000L;
+        int h = (int) (slot * 0x9E3779B1L) ^ (id * 0x85EBCA6B);
+        h ^= h >>> 15;
+        h *= 0x2C1B3C6D;
+        h ^= h >>> 12;
+        float r = ((h >>> 8) & 0xFFFF) / 65535f;
+        float chance = (wear - 0.45f) * 0.5f;
+        return r < chance ? 0.15f + 0.3f * r / Math.max(0.01f, chance) : 1f - 0.2f * wear;
+    }
+
     private LightBeams() {}
 
     /** Main thread, once a frame (PixelLight's frame). */
@@ -61,6 +120,7 @@ final class LightBeams {
         }
         torches.clear();
         zombie.iso.LightingJNI.getTorches(torches);
+        vehiclesMapped = false;
         IsoPlayer[] players = IsoPlayer.players;
         int n = 0;
         for (int i = 0, size = torches.size(); i < size; i++) {
@@ -77,6 +137,9 @@ final class LightBeams {
             float k = Math.min(1.5f, t.strength);
             // Tail and brake lights are red and dim next to headlights
             if (!handheld && t.r > t.g * 1.6f) k *= 0.35f;
+            float wear = wear(t);
+            // A dying battery dims a torch too; a vehicle light is already dimmed by the game
+            if (wear > 0f) k *= stutter(t.id, wear) * (handheld ? 1f - 0.4f * wear : 1f);
             int at = slot(n, d);
             if (at < 0) continue;
             if (at == n) n++;
@@ -89,10 +152,11 @@ final class LightBeams {
             best[o + 5] = dy / dl;
             best[o + 6] = tilt / dl;
             best[o + 7] = Math.max(0.7f, Math.min(0.985f, t.dot));
+            // Worn lights go yellow, and the shader breaks the beam up (w)
             best[o + 8] = t.r * k;
-            best[o + 9] = t.g * k;
-            best[o + 10] = t.b * k;
-            best[o + 11] = 0f;
+            best[o + 9] = t.g * k * (1f - 0.15f * wear);
+            best[o + 10] = t.b * k * (1f - 0.45f * wear);
+            best[o + 11] = wear;
             best[o + FLOATS] = d;
         }
         // Torches move every frame while carried, but a parked car's lights don't: only a change goes out

@@ -178,6 +178,7 @@ final class Glare {
         float sh = IsoCamera.getScreenHeight(playerIndex);
         float tile = (IsoUtils.XToScreen(1f, 0f, 0f, 0) - IsoUtils.XToScreen(0f, 1f, 0f, 0)) / zoom;
         float[] out = new float[n * 8];
+        boolean depthWanted = SceneDepth.asked(System.nanoTime());
         for (int i = 0; i < n; i++) {
             int o = i * F;
             float sx = (cam.XToScreenExact(all[o], all[o + 1], all[o + 2], 0) + all[o + 8]) / zoom;
@@ -190,6 +191,8 @@ final class Glare {
             out[d + 4] = all[o + 3];
             out[d + 5] = all[o + 4];
             out[d + 6] = all[o + 5];
+            // Scene depth of the bulb: the shader hides the glare when a wall or roof stands in front of it
+            out[d + 7] = depthWanted ? SceneDepth.depthOf(playerIndex, all[o], all[o + 1], all[o + 2]) : -1f;
         }
         return out;
     }

@@ -207,7 +207,7 @@ public final class LuaEventPatches {
     // - Horse Mod drives riding animations per tick; pacing broke them.
     // - damnlib (KI5 cars) queues a seat Z lift from OnPlayerUpdate, applies it in OnTick and puts it back every tick
     //   from OnTickEvenPaused. Paced, the lift only lands on some frames, so the seated player hops up and down
-    //   (Viewpoint's first-person eye follows it).
+    //   (a first-person camera mod's eye follows it).
     // - Let Me Drive! replaces the Events tables and registers one dispatcher per event that runs every other mod's
     //   handlers. Pacing that dispatcher would pace all of them as one, the mods above included, and queueing its
     //   LoadGridsquare one would queue every square twice. It does its own spreading, so I leave its dispatchers alone.
@@ -287,7 +287,7 @@ public final class LuaEventPatches {
                             Object[] params) {
         String event = depth > 0 && depth <= eventStack.length ? eventStack[depth - 1] : "?";
 
-        // A loaded ZombieBuddy mod hooks Event.trigger too (Viewpoint; pacing broke its left click, #41): every
+        // A loaded ZombieBuddy mod hooks Event.trigger too (pacing broke a 3D camera mod's left click, #41): every
         // callback runs as stock, only the profiler still times it
         if (ZombieBuddyCompat.eventTriggerShared) {
             if (LiveProfiler.on) {

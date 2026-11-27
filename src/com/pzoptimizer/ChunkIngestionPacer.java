@@ -22,6 +22,11 @@ public final class ChunkIngestionPacer {
     public static final long FRAME_BUDGET_NANOS = 3_500_000L;
     public static final int MAX_CHUNKS_PER_FRAME = 3;
     private static volatile int chunkBudgetMs = 6;
+    // JVM_ChunkHeadingOrder: heading-first while driving, no chunk held long in multiplayer
+    public static volatile boolean headingOrder = true;
+    // In multiplayer the server's square updates for a chunk the client hasn't taken in yet are lost, so none waits
+    // past this
+    static final long MP_MAX_WAIT_NANOS = 150_000_000L;
 
     public static void setChunkBudgetMs(int ms) {
         chunkBudgetMs = Math.max(1, Math.min(32, ms));
@@ -289,6 +294,11 @@ public final class ChunkIngestionPacer {
 
         private final java.util.concurrent.atomic.AtomicInteger approximateSize = new java.util.concurrent.atomic.AtomicInteger(0);
         private boolean takeOldestNext;
+        // When each waiting chunk came in (multiplayer only)
+        private final java.util.concurrent.ConcurrentHashMap<Object, Long> arrived = new java.util.concurrent.ConcurrentHashMap<>();
+        // The car's heading, from where it was a moment ago
+        private static float headX, headY, lastX = Float.NaN, lastY = Float.NaN;
+        private static long lastHeadNanos;
 
         public PacedConcurrentQueue(ConcurrentLinkedQueue<Object> existing) {
             super();
@@ -301,20 +311,44 @@ public final class ChunkIngestionPacer {
         @Override
         public boolean add(Object e) {
             boolean added = super.add(e);
-            if (added) approximateSize.incrementAndGet();
+            if (added) {
+                approximateSize.incrementAndGet();
+                noteArrival(e);
+            }
             return added;
         }
 
         @Override
         public boolean offer(Object e) {
             boolean offered = super.offer(e);
-            if (offered) approximateSize.incrementAndGet();
+            if (offered) {
+                approximateSize.incrementAndGet();
+                noteArrival(e);
+            }
             return offered;
+        }
+
+        private void noteArrival(Object e) {
+            if (e != null && headingOrder && zombie.network.GameClient.client) arrived.putIfAbsent(e, System.nanoTime());
+        }
+
+        private Object taken(Object e) {
+            if (e != null && !arrived.isEmpty()) arrived.remove(e);
+            return e;
+        }
+
+        // The oldest chunk has waited too long for the server's updates to it to survive
+        private boolean oldestOverdue(long now) {
+            if (arrived.isEmpty() || !zombie.network.GameClient.client) return false;
+            Object head = super.peek();
+            Long at = head == null ? null : arrived.get(head);
+            return at != null && now - at > MP_MAX_WAIT_NANOS;
         }
 
         @Override
         public void clear() {
             super.clear();
+            arrived.clear();
             approximateSize.set(0);
         }
 
@@ -331,7 +365,10 @@ public final class ChunkIngestionPacer {
         @Override
         public boolean remove(Object o) {
             boolean removed = super.remove(o);
-            if (removed) approximateSize.decrementAndGet();
+            if (removed) {
+                approximateSize.decrementAndGet();
+                taken(o);
+            }
             return removed;
         }
 
@@ -392,14 +429,14 @@ public final class ChunkIngestionPacer {
             if (threadName != null && (threadName.contains("WorldStreamer") || threadName.contains("Reuser"))) {
                 Object chunk = super.poll();
                 if (chunk != null) approximateSize.decrementAndGet();
-                return chunk;
+                return taken(chunk);
             }
 
             // No limit while loading (boot, teleports, cell loads)
             if (isEngineLoading()) {
                 Object chunk = super.poll();
                 if (chunk != null) approximateSize.decrementAndGet();
-                return chunk;
+                return taken(chunk);
             }
 
             long now = System.nanoTime();
@@ -423,6 +460,14 @@ public final class ChunkIngestionPacer {
             }
 
             if (chunksThisFrame > 0 && (chunksThisFrame >= maxChunks || (now - ingestStartTime) >= budgetNanos)) {
+                if (oldestOverdue(now)) {
+                    Object late = super.poll();
+                    if (late != null) {
+                        approximateSize.decrementAndGet();
+                        chunksThisFrame++;
+                    }
+                    return taken(late);
+                }
                 // Out of budget, the rest goes next frame
                 return null;
             }
@@ -433,13 +478,17 @@ public final class ChunkIngestionPacer {
                 if (chunksThisFrame == 0) ingestStartTime = now;
                 chunksThisFrame++;
             }
-            return chunk;
+            return taken(chunk);
         }
 
         private Object pollForView(boolean driving, int backlog) {
             if (takeOldestNext) {
                 takeOldestNext = false;
                 return super.poll();
+            }
+            if (driving && headingOrder && backlog >= 2) {
+                Object ahead = pollAhead();
+                if (ahead != null) return ahead;
             }
             if (driving || backlog < 2 || IsoWorld.instance == null || IsoWorld.instance.currentCell == null) {
                 return super.poll();
@@ -471,6 +520,53 @@ public final class ChunkIngestionPacer {
                 }
             }
             return super.poll();
+        }
+
+        // Of the next chunks waiting, the nearest one in front of the car (within 60 degrees of its heading). Older work
+        // still gets every other turn through takeOldestNext.
+        private Object pollAhead() {
+            IsoPlayer p = IsoPlayer.getInstance();
+            long now = System.nanoTime();
+            if (p == null || p.getVehicle() == null || oldestOverdue(now)) return null;
+            float px = p.getX(), py = p.getY();
+            if (Float.isNaN(lastX) || now - lastHeadNanos > 1_000_000_000L) {
+                lastX = px;
+                lastY = py;
+                lastHeadNanos = now;
+                headX = headY = 0.0f;
+                return null;
+            }
+            float mx = px - lastX, my = py - lastY;
+            float moved = (float) Math.sqrt(mx * mx + my * my);
+            if (moved > 2.0f) {
+                headX = mx / moved;
+                headY = my / moved;
+                lastX = px;
+                lastY = py;
+                lastHeadNanos = now;
+            }
+            if (headX == 0.0f && headY == 0.0f) return null;
+            Object best = null;
+            float bestDist = Float.MAX_VALUE;
+            var it = super.iterator();
+            for (int i = 0; i < 32 && it.hasNext(); i++) {
+                Object e = it.next();
+                if (!(e instanceof IsoChunk c)) continue;
+                float dx = c.wx * 8 + 4 - px, dy = c.wy * 8 + 4 - py;
+                float d = (float) Math.sqrt(dx * dx + dy * dy);
+                if (d < 1.0f || (dx * headX + dy * headY) / d < 0.5f) continue;
+                // The oldest one is already ahead: plain order does the same
+                if (i == 0) return null;
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = e;
+                }
+            }
+            if (best != null && super.remove(best)) {
+                takeOldestNext = true;
+                return taken(best);
+            }
+            return null;
         }
 
         private static boolean visibleGround(IsoChunkMap map, int player, int x, int y) {

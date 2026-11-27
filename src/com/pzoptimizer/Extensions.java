@@ -10,19 +10,17 @@ import java.util.jar.Attributes;
 import java.util.jar.JarFile;
 
 /**
- * Loads engine extensions at premain. Right now that's one: PZO Enhancements' PZOE.jar, which carries the Java side of
- * its visuals (per-pixel lighting, splashes, trails, bake passes, screen pass, model snow). It only loads when the mod
- * is installed and on (default.txt, a save's mods.txt or a server's Mods=), so without it none of that code or its
- * class patches exist.
- *
- * Code only ever comes from the mod's own folders: Workshop item PZOE_WORKSHOP_ID, or a local copy under
- * Zomboid/mods or Zomboid/Workshop (where the author keeps what gets uploaded). Never from "any mod with a jar".
+ * Loads PZO's companion engines from their designated mod folders at premain.
+ * The Lua add-on enables its gameplay hooks in the current Lua state.
  */
 public final class Extensions {
     static final String PZOE_MOD_ID = "PZOEnhancements";
     static final String PZOE_WORKSHOP_ID = "3838675606";
     // Inside the mod folder, outside media/ so neither the game nor other Java mod loaders go looking there
     static final String PZOE_JAR = "42" + File.separator + "pzoe" + File.separator + "PZOE.jar";
+    private static final String ALIFE_MOD_ID = "PZOAmodOptim";
+    private static final String ALIFE_JAR = "42" + File.separator + "pzoalife" + File.separator + "PZOAmodOptim.jar";
+    private static final String ALIFE_CLASS = "com.pzoptimizer.alife.ALifeExtension";
     static final String ATTR_CLASS = "PZO-Extension-Class", ATTR_API = "PZO-Extension-Api";
 
     private static final List<Extension> loaded = new ArrayList<>();
@@ -34,48 +32,48 @@ public final class Extensions {
     private Extensions() {}
 
     static synchronized void load(Instrumentation inst) {
+        pzoeStatus = loadPzoe(inst);
+        File alife = findCompanionJar(ALIFE_MOD_ID, ALIFE_JAR, null, isEnabled(ALIFE_MOD_ID));
+        if (alife != null) loadJar(inst, alife, ALIFE_CLASS, ALIFE_MOD_ID);
+    }
+
+    private static String loadPzoe(Instrumentation inst) {
         File jar = findPzoeJar();
-        if (jar == null) {
-            pzoeStatus = "missing";
-            return;
-        }
+        if (jar == null) return "missing";
         if (!isEnabled(PZOE_MOD_ID)) {
-            pzoeStatus = "off";
             PZOLogger.info("[Extensions] PZO Enhancements installed but not enabled anywhere: its engine stays unloaded");
-            return;
+            return "off";
         }
+        return loadJar(inst, jar, null, "PZO Enhancements");
+    }
+
+    private static String loadJar(Instrumentation inst, File jar, String expectedClass, String name) {
         try (JarFile jf = new JarFile(jar)) {
             Attributes a = jf.getManifest() == null ? null : jf.getManifest().getMainAttributes();
             String cls = a == null ? null : a.getValue(ATTR_CLASS);
             String api = a == null ? null : a.getValue(ATTR_API);
-            if (cls == null || api == null) {
-                pzoeStatus = "error";
-                PZOLogger.warn("[Extensions] " + jar + " has no extension manifest, not loaded");
-                return;
+            if (cls == null || api == null || (expectedClass != null && !expectedClass.equals(cls))) {
+                PZOLogger.warn("[Extensions] " + jar + " has an unexpected extension manifest");
+                return "error";
             }
             // Checked before any of its classes load, so a jar for another PZO never runs
             if (!api.trim().equals(Integer.toString(Extension.API))) {
-                pzoeStatus = "api=" + api.trim();
-                PZOLogger.warn("[Extensions] " + jar + " is built for engine API " + api.trim() + ", this PZO has "
-                    + Extension.API + ": not loaded (update " + (Integer.parseInt(api.trim()) > Extension.API ? "PZO" : "PZO Enhancements") + ")");
-                return;
+                PZOLogger.warn("[Extensions] " + jar + " uses API " + api.trim() + ", PZO uses " + Extension.API);
+                return "api=" + api.trim();
             }
             inst.appendToSystemClassLoaderSearch(new JarFile(jar));
             Class<?> c = Class.forName(cls, true, ClassLoader.getSystemClassLoader());
             Extension e = (Extension) c.getDeclaredConstructor().newInstance();
-            if (e.apiVersion() != Extension.API) {
-                pzoeStatus = "api=" + e.apiVersion();
-                return;
-            }
+            if (e.apiVersion() != Extension.API) return "api=" + e.apiVersion();
             e.init();
             loaded.add(e);
             early.addAll(e.earlyTargets());
             active = loaded.toArray(new Extension[0]);
-            pzoeStatus = "loaded";
             PZOLogger.success("[Extensions] loaded " + e.name() + " from " + jar);
+            return "loaded";
         } catch (Throwable t) {
-            pzoeStatus = "error";
-            PZOLogger.warn("[Extensions] PZO Enhancements engine failed to load from " + jar + ": " + t);
+            PZOLogger.warn("[Extensions] " + name + " engine failed to load from " + jar + ": " + t);
+            return "error";
         }
     }
 
@@ -101,6 +99,13 @@ public final class Extensions {
             }
         }
         return out;
+    }
+
+    static Extension luaSourceReader(String path) {
+        for (Extension e : active) {
+            if (e.readsLuaSource(path)) return e;
+        }
+        return null;
     }
 
     static Object modApi(String op, Object a, Object b, Object c) {
@@ -147,19 +152,34 @@ public final class Extensions {
     static File findPzoeJar() {
         String forced = System.getProperty("pzo.pzoe.jar");
         if (forced != null && new File(forced).isFile()) return new File(forced);
+        return findCompanionJar(PZOE_MOD_ID, PZOE_JAR, PZOE_WORKSHOP_ID, true);
+    }
+
+    private static File findCompanionJar(String modId, String jarPath, String workshopId, boolean searchWorkshop) {
         File zomboid = ZomboidDir.get();
         File[] items = new File(zomboid, "Workshop").listFiles(File::isDirectory);
         if (items != null) {
             for (File item : items) {
-                File f = new File(item, "Contents" + File.separator + "mods" + File.separator + PZOE_MOD_ID + File.separator + PZOE_JAR);
+                File f = new File(item, "Contents" + File.separator + "mods" + File.separator + modId + File.separator + jarPath);
                 if (f.isFile()) return f;
             }
         }
-        File local = new File(zomboid, "mods" + File.separator + PZOE_MOD_ID + File.separator + PZOE_JAR);
+        File local = new File(zomboid, "mods" + File.separator + modId + File.separator + jarPath);
         if (local.isFile()) return local;
+        if (!searchWorkshop) return null;
+        String relativeJar = "mods" + File.separator + modId + File.separator + jarPath;
         for (File ws : LuaModGuard.workshopItemDirs()) {
-            File f = new File(ws, PZOE_WORKSHOP_ID + File.separator + "mods" + File.separator + PZOE_MOD_ID + File.separator + PZOE_JAR);
-            if (f.isFile()) return f;
+            if (workshopId != null) {
+                File jar = new File(new File(ws, workshopId), relativeJar);
+                if (jar.isFile()) return jar;
+                continue;
+            }
+            File[] workshopItems = ws.listFiles(f -> f.isDirectory() && f.getName().matches("[0-9]+"));
+            if (workshopItems == null) continue;
+            for (File item : workshopItems) {
+                File jar = new File(item, relativeJar);
+                if (jar.isFile()) return jar;
+            }
         }
         return null;
     }

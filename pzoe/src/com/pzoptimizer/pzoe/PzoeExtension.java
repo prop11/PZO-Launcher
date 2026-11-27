@@ -71,6 +71,7 @@ public final class PzoeExtension implements Extension {
         s.add(RoomAcoustics.EMITTER.replace('/', '.'));
         s.add(RoomAcoustics.OCCLUSION.replace('/', '.'));
         s.add(GeneratorLights.TARGET.replace('/', '.'));
+        s.add(WeatherGround.MASK.replace('/', '.'));
         for (String target : WeatherAudio.PARAMETERS) s.add(target.replace('/', '.'));
         s.add(com.pzoptimizer.pzoe.weather.WeatherEffects.VEHICLE.replace('/', '.'));
         s.add(com.pzoptimizer.pzoe.weather.WeatherSnow.CAR.replace('/', '.'));
@@ -124,6 +125,8 @@ public final class PzoeExtension implements Extension {
                 "FMODSoundEmitter: room-dependent early reflections");
             case RoomAcoustics.OCCLUSION -> logged(AsmSupport.transform(cur, loader, "Room audio openings", RoomAcoustics::patchOcclusion),
                 "ParameterOcclusion: sound transmission through room openings");
+            case WeatherGround.MASK -> logged(AsmSupport.transform(cur, loader, "Weather mask roof holes", WeatherGround::patchMask),
+                "WeatherFxMask.isInPlayerBuilding: rain through roof holes");
             case GeneratorLights.TARGET -> logged(AsmSupport.transform(cur, loader, "Generator lighting", GeneratorLights::patch),
                 "IsoGenerator: visual startup and low-fuel lighting");
             case WeatherAudio.AMBIENT -> logged(AsmSupport.transform(cur, loader, "Sheltered weather audio", WeatherAudio::patchAmbient),
@@ -239,8 +242,13 @@ public final class PzoeExtension implements Extension {
                 "ZombieEatBodyState.execute: PZOE gore feeding wounds");
             case GoreKillCam.TARGET -> logged(AsmSupport.transform(cur, loader, "PlayerCamera gore", GoreKillCam::patchCamera),
                 "PlayerCamera.center: PZOE X-ray kill cam");
-            case GoreCore.COMBAT -> logged(AsmSupport.transform(cur, loader, "CombatManager gore", GoreCore::patchCombat),
-                "CombatManager: resolved wound locations and close-range pooled giblets");
+            case GoreCore.COMBAT -> {
+                byte[] gore = logged(AsmSupport.transform(cur, loader, "CombatManager gore", GoreCore::patchCombat),
+                    "CombatManager: resolved wound locations and close-range pooled giblets");
+                byte[] impacts = logged(AsmSupport.transform(gore != null ? gore : cur, loader, "CombatManager bullet impacts", BulletImpacts::patch),
+                    "CombatManager.hitIsoGridSquare: PZOE bullet impacts");
+                yield impacts != null ? impacts : gore;
+            }
             case GoreCore.GIBLETS -> logged(AsmSupport.transform(cur, loader, "IsoZombieGiblets gore", GoreCore::patchGiblets),
                 "IsoZombieGiblets: PZOE gore draws its own gibs");
             case GoreCore.GAME_TIME -> logged(AsmSupport.transform(cur, loader, "GameTime gore", GoreCore::patchGameTime),
@@ -281,7 +289,7 @@ public final class PzoeExtension implements Extension {
             // Live state of the effects, shown on their settings cards in -debug
             case "chunkEffects":
                 return PixelLight.stateText() + ";" + PuddleSplash.stateText() + ";" + ScreenPass.stateText() + ";"
-                    + GpuTimer.stateText() + ";" + ModelSnow.stateText() + ";" + LightBeams.stateText() + ";" + RainRunoff.stateText() + ";" + FogField.stateText() + ";" + GroundSnow.stateText() + ";" + Precipitation.stateText() + ";" + NaturalGround.stateText() + ";" + SkyCache.stateText() + ";" + FlickerLights.stateText() + ";" + BounceLight.stateText() + ";" + GoreMap.stateText() + ";" + GoreFx.stateText() + ";" + GoreModel.stateText();
+                    + GpuTimer.stateText() + ";" + ModelSnow.stateText() + ";" + LightBeams.stateText() + ";" + RainRunoff.stateText() + ";" + FogField.stateText() + ";" + GroundSnow.stateText() + ";" + Precipitation.stateText() + ";" + NaturalGround.stateText() + ";" + SkyCache.stateText() + ";" + FlickerLights.stateText() + ";" + LightColours.stateText() + ";" + BounceLight.stateText() + ";" + GoreMap.stateText() + ";" + GoreFx.stateText() + ";" + GoreModel.stateText();
             // Per-Pixel Lighting card: the lighting code is always in the chunk shader, this says whether to use it
             case "pixelLight":
                 PixelLight.lightWanted = Boolean.TRUE.equals(a);
@@ -323,6 +331,24 @@ public final class PzoeExtension implements Extension {
                 WeatherGround.drainage = Boolean.TRUE.equals(b);
                 WeatherGround.debris = Boolean.TRUE.equals(c);
                 return Boolean.TRUE;
+            case "soilMoisture":
+                NaturalGround.soilWanted = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "generatorFumes":
+                SmokePlumes.fumes = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "hordeTrails":
+                HordeTrails.amount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
+                return Boolean.TRUE;
+            case "engineSmoke":
+                SmokePlumes.engineSmoke = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "gunSmoke":
+                SmokePlumes.gunSmoke = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
+            case "blackoutWave":
+                FlickerLights.blackoutWave = Boolean.TRUE.equals(a);
+                return Boolean.TRUE;
             case "generatorLights":
                 GeneratorLights.enabled = Boolean.TRUE.equals(a);
                 return Boolean.TRUE;
@@ -352,8 +378,18 @@ public final class PzoeExtension implements Extension {
             case "eyeShine":
                 EyeShine.amount = pct(a, 2.0, 1f);
                 return Boolean.TRUE;
+            // Light Colours: strength in percent (the shader itself says the card is on)
+            case "lightColours":
+                LightColours.amount = pct(a, 2.0, 1f);
+                return Boolean.TRUE;
+            // Torch and Headlight Beams: worn torches (battery) and worn vehicle lights (condition) on or off
+            case "beamWear":
+                LightBeams.batteryWear = !Boolean.FALSE.equals(a);
+                LightBeams.conditionWear = !Boolean.FALSE.equals(b);
+                return Boolean.TRUE;
             case "charShadows":
                 CharShadows.amount = pct(a, 2.0, 1f);
+                CharShadows.vehicles = !Boolean.FALSE.equals(b);
                 return Boolean.TRUE;
             case "contact":
                 PixelLight.contactStrength = pct(a, 2.0, 1f);
@@ -377,6 +413,22 @@ public final class PzoeExtension implements Extension {
                 DustTrails.amount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
                 return Boolean.TRUE;
             // Morning Frost: strength in percent (the shader itself says the card is on)
+            // Moonlight: card on and strength in percent
+            case "moonlight":
+                PixelLight.moonAmount = Boolean.TRUE.equals(a) && b instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 0f;
+                return Boolean.TRUE;
+            // Leaf Shadows: how far the crowns' shadows sway in percent (the shader itself says the card is on)
+            case "leafSway":
+                PixelLight.leafSwayAmount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
+                return Boolean.TRUE;
+            // Fire Glow: strength in percent (the shader itself says the card is on)
+            case "fireGlow":
+                FireGlow.amount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
+                return Boolean.TRUE;
+            // Bullet Impacts: size in percent (the shaders themselves say the card is on)
+            case "bulletImpacts":
+                BulletImpacts.amount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
+                return Boolean.TRUE;
             case "frost":
                 Frost.amount = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
                 return Boolean.TRUE;
@@ -422,6 +474,9 @@ public final class PzoeExtension implements Extension {
             // Sun through windows (Sun and Cloud Shadows): strength in percent (the shader itself says it's on)
             case "sunRooms":
                 PixelLight.sunRoomsStrength = a instanceof Number n ? (float) Math.max(0.0, Math.min(2.0, n.doubleValue() / 100.0)) : 0.6f;
+                return Boolean.TRUE;
+            case "godRays":
+                PixelLight.godRaysStrength = a instanceof Number n ? (float) Math.max(0.5, Math.min(2.0, n.doubleValue() / 100.0)) : 1f;
                 return Boolean.TRUE;
             // Texels a square for the world-space sun shadow cache
             case "skyDetail":

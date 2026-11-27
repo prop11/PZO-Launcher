@@ -44,6 +44,10 @@ public final class SpottedListGovernor {
 
     private SpottedListGovernor() {}
 
+    public static boolean isActive() {
+        return active;
+    }
+
     private static VarHandle lookupModCount() {
         try {
             Instrumentation inst = PZOptimAgent.getInstrumentation();

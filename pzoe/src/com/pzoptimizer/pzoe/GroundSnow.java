@@ -54,6 +54,11 @@ public final class GroundSnow {
         return shaderReady;
     }
 
+    /** How fresh the lying snow is, 0 old and crusted .. 1 just fallen. */
+    public static float freshNow() {
+        return fresh;
+    }
+
     /** How much snow lies, for PZOE weather's deep snow (also runs without the card, and on servers, for wading). */
     public static float depthNow() {
         return depth;

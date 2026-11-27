@@ -85,6 +85,7 @@ public class PZOEntrypoint {
         try {
             ZomboidConfigMigrator.checkAndMigrateCurrentInstallation(new File(".").getAbsoluteFile());
         } catch (Throwable ignored) {}
+        IncompatibleModGuard.noticePzOptPreloaderOnce();
 
         boolean isNative = false;
         double timerMs = 15.6;
@@ -148,6 +149,7 @@ public class PZOEntrypoint {
         ThreadPoolTuner.initialize();
         DriverOptimizer.initialize();
         AssetCachePrewarmer.startPrewarmingAsync();
+        ClassWarmup.start();
         // Pull the native libs into the page cache and turn off LWJGL's vertex array bounds checks
         NativeLibraryPreloader.startPreloadingAsync();
         SpriteBatchOptimizer.apply();

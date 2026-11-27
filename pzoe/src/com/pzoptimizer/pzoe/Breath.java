@@ -100,6 +100,7 @@ final class Breath {
         float sh = IsoCamera.getScreenHeight(playerIndex);
         float tile = (IsoUtils.XToScreen(1f, 0f, 0f, 0) - IsoUtils.XToScreen(0f, 1f, 0f, 0)) / zoom;
         float[] out = new float[count * 8];
+        boolean depthWanted = SceneDepth.asked(System.nanoTime());
         int n = 0;
         for (int i = 0; i < count; i++) {
             IsoMovingObject o = picked[i];
@@ -142,6 +143,8 @@ final class Breath {
             out[d + 4] = seed[i];
             out[d + 5] = period;
             out[d + 6] = strength * amount * (kind > 0.5f ? Math.min(1f, cold * 1.4f) : cold);
+            // Scene depth at the mouth or exhaust, so a puff behind a wall or a car stays behind it
+            out[d + 7] = depthWanted ? SceneDepth.depthOf(playerIndex, x, y, z) : -1f;
             n++;
         }
         if (n == 0) return null;

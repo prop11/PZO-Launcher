@@ -6,7 +6,7 @@ public class SpriteBatchOptimizer {
 
     public static void apply() {
         try {
-            // LWJGL reads this once when it loads. Viewpoint_ArcPatch probes GL from main() during loadMods, and with no
+            // LWJGL reads this once when it loads. One ZombieBuddy mod probes GL from main() during loadMods, and with no
             // checks a thread without a context aborts the JVM (#62)
             String probeMod = findGlProbeMod();
             if (probeMod == null) {

@@ -412,27 +412,7 @@ final class FogField {
         """;
 
     private static int compile(String vs, String fs) {
-        int p = GL20.glCreateProgram();
-        for (int k = 0; k < 2; k++) {
-            int s = GL20.glCreateShader(k == 0 ? GL20.GL_VERTEX_SHADER : GL20.GL_FRAGMENT_SHADER);
-            GL20.glShaderSource(s, k == 0 ? vs : fs);
-            GL20.glCompileShader(s);
-            if (GL20.glGetShaderi(s, GL20.GL_COMPILE_STATUS) == 0) {
-                PZOLogger.warn("[FogField] shader didn't compile: " + GL20.glGetShaderInfoLog(s, 4096).trim());
-                GL20.glDeleteShader(s);
-                GL20.glDeleteProgram(p);
-                return 0;
-            }
-            GL20.glAttachShader(p, s);
-            GL20.glDeleteShader(s);
-        }
-        GL20.glLinkProgram(p);
-        if (GL20.glGetProgrami(p, GL20.GL_LINK_STATUS) == 0) {
-            PZOLogger.warn("[FogField] shader didn't link: " + GL20.glGetProgramInfoLog(p, 4096).trim());
-            GL20.glDeleteProgram(p);
-            return 0;
-        }
-        return p;
+        return PzoeShaders.program(vs, fs, "[FogField]");
     }
 
     private static int stateTexture() {

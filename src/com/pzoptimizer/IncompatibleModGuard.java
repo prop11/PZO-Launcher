@@ -154,6 +154,31 @@ public final class IncompatibleModGuard {
         UpdateDialog.showIncompatibleModNotice(warningMessage());
     }
 
+    /**
+     * PZOptPreloader is a separate Workshop mod that a lot of people add thinking it's part of PZO. It works alongside
+     * PZO (ZomboidConfigMigrator keeps its class path pin pointing at PZO's jars), so this only says what it is, once.
+     */
+    public static void noticePzOptPreloaderOnce() {
+        try {
+            boolean found = System.getProperty("pzoptpreloader.aotManaged") != null
+                || new File(System.getProperty("user.home", ""), ".zombie_buddy/PZOptPreloader").isDirectory();
+            if (!found) return;
+            File seen = ZomboidDir.sub("PZO_notice_pzoptpreloader.txt");
+            if (seen.exists()) return;
+            PZOLogger.info("[PZO] PZOptPreloader detected. It is a separate Workshop mod, not part of PZO; showing a one-time notice.");
+            UpdateDialog.showWarningNotice("Project Zomboid Optimiser - Separate Mod Detected",
+                "PZOptPreloader is installed. It is a separate Steam Workshop mod and is not part of PZO "
+                    + "(Project Zomboid Optimiser).\n\n"
+                    + "PZO does not need it. If you added it thinking it was part of PZO, unsubscribe from it on the "
+                    + "Steam Workshop.\n\n"
+                    + "If you use it on purpose, you can keep it: PZO keeps its launch settings working alongside PZO.\n\n"
+                    + "This notice is shown once.");
+            Files.writeString(seen.toPath(), "PZOptPreloader notice shown for PZO " + UpdateChecker.CURRENT_VERSION + "\n");
+        } catch (Throwable t) {
+            PZOLogger.warn("[PZO] PZOptPreloader notice: " + t.getMessage());
+        }
+    }
+
     static String warningMessage() {
         return "PZ_Optimization (Steam Workshop " + PZ_OPTIMIZATION_WORKSHOP_ID + ") files or launch settings were detected.\n\n"
             + "PZO is disabled for this launch. Leftover PZ_Optimization files or launch options can still prevent "

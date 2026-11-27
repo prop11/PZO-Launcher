@@ -20,6 +20,8 @@ final class RoomSmoke {
         final IsoRoom room;
         IsoGridSquare anchor;
         float source, density, incoming;
+        // Gun smoke: its share of the density (paler, settles slower) and what flows in with it
+        float gun, incomingGun, gunSource;
 
         Room(IsoGridSquare anchor) {
             this.anchor = anchor;
@@ -38,6 +40,8 @@ final class RoomSmoke {
             Room room = active.get(i);
             room.source = 0f;
             room.incoming = 0f;
+            room.incomingGun = 0f;
+            room.gunSource = 0f;
         }
     }
 
@@ -50,6 +54,28 @@ final class RoomSmoke {
         if (room == null) return;
         if (room.source == 0f) room.anchor = square;
         room.source += intensity;
+    }
+
+    /** A shot fired in this room: k is 1 for a pistol, more for long guns and shotguns. */
+    void addShot(IsoGridSquare square, float k) {
+        Room room = getOrAdd(square);
+        if (room == null) return;
+        float volume = 1.25f + 0.015f * room.room.getSquares().size();
+        float add = 0.05f * k / volume;
+        float old = room.density, now = Math.min(1f, old + add);
+        if (now <= 0f) return;
+        room.gun = Math.min(1f, (room.gun * old + (now - old)) / now);
+        room.density = now;
+        if (room.source == 0f && old < MIN_DENSITY) room.anchor = square;
+    }
+
+    /** A running generator in this room: a steady source of pale exhaust, coloured like gun smoke. */
+    void addFume(IsoGridSquare square, float k) {
+        Room room = getOrAdd(square);
+        if (room == null) return;
+        if (room.source == 0f) room.anchor = square;
+        room.source += k;
+        room.gunSource += k;
     }
 
     private Room getOrAdd(IsoGridSquare square) {
@@ -94,17 +120,24 @@ final class RoomSmoke {
                         Room destination = getOrAdd(portal.to());
                         if (destination == null) continue;
                         destination.incoming += flow;
+                        destination.incomingGun += flow * room.gun;
                     }
                     outflow += flow;
                 }
             }
             float volume = 1.25f + 0.015f * room.room.getSquares().size();
             float source = room.source / (room.source + volume);
-            room.incoming += dt * (source * 0.62f * (1f - old) - old * 0.13f) - outflow;
+            // Fire smoke settles out in a few seconds; gun smoke hangs about four times as long
+            float settle = 0.13f - 0.1f * room.gun;
+            room.incoming += dt * (source * 0.62f * (1f - old) - old * settle) - outflow;
+            room.incomingGun -= outflow * room.gun + dt * old * room.gun * 0.03f;
+            if (room.gunSource > 0f) room.incomingGun += dt * source * 0.62f * (1f - old) * (room.gunSource / room.source);
         }
         for (int i = active.size() - 1; i >= 0; i--) {
             Room room = active.get(i);
+            float gunAmount = Math.max(0f, room.density * room.gun + room.incomingGun);
             room.density = Math.max(0f, Math.min(1f, room.density + room.incoming));
+            room.gun = room.density > 1e-4f ? Math.min(1f, gunAmount / room.density) : 0f;
             if (room.source == 0f && room.density < MIN_DENSITY) {
                 active.remove(i);
                 byRoom.remove(room.room);

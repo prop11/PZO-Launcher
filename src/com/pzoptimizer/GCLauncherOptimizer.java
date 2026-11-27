@@ -139,7 +139,7 @@ public final class GCLauncherOptimizer {
                 }
                 root.put("vmArgs", vmArgs);
                 String formatted = ZomboidConfigMigrator.JsonMini.format(root);
-                Files.writeString(jsonFile.toPath(), formatted, StandardCharsets.UTF_8);
+                ZomboidConfigMigrator.writeAtomic(jsonFile, formatted);
                 tunedApplied = true;
                 PZOLogger.success("[GCLauncherOptimizer] Cleaned up launcher JVM args");
             }

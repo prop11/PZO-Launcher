@@ -41,8 +41,9 @@ final class Frost {
             if (precip > 0.05f || t > 3f) f = Math.max(0f, f - dh * 0.8f);
             m = 0f;
         } else {
-            // Day: the sun melts it in a couple of hours, warmth faster, and it never forms
-            m = Math.min(1f, m + dh * (0.25f + 0.6f * sunVis + Math.max(0f, t) * 0.12f) / 2f);
+            // Day: the sun melts it in a couple of hours, warmth faster, and it never forms. The base rate clears it
+            // by late morning on a cold overcast day (it was lingering into the afternoon)
+            m = Math.min(1f, m + dh * (0.5f + 0.6f * sunVis + Math.max(0f, t) * 0.12f) / 2f);
             if (m >= 1f || precip > 0.05f) f = Math.max(0f, f - dh * 2f);
         }
         frost = f;

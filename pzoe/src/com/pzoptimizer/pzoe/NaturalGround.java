@@ -59,8 +59,14 @@ public final class NaturalGround {
     static volatile boolean live;
     private static String signature = "";
 
-    // Season and heat dryness 0..1, set once a game day
+    // Season and heat dryness, set once a game day; with Drought and Rain the soil moisture moves it, from -0.3 (lush
+    // after a wet spell) to 1 (parched)
     static volatile float dryness;
+    // Drought and Rain (card option): soil moisture 0..1 from the rain history, saved with the world
+    static volatile boolean soilWanted = true;
+    private static final String SOIL_KEY = "PZOE_SoilMoisture";
+    private static float moisture = -1f;
+    private static double soilHours = -1.0, soilSaved = -1.0;
     private static int lastDay = Integer.MIN_VALUE;
     private static long lastMeasureRebake;
 
@@ -118,10 +124,22 @@ public final class NaturalGround {
         zombie.iso.weather.ClimateManager cm = zombie.iso.weather.ClimateManager.getInstance();
         if (gt != null && cm != null) {
             int day = gt.getNightsSurvived();
-            if (day != lastDay) {
-                boolean first = lastDay == Integer.MIN_VALUE;
+            boolean newDay = day != lastDay;
+            boolean first = lastDay == Integer.MIN_VALUE;
+            if (newDay) {
                 lastDay = day;
-                float d = seasonDryness(gt.getMonth(), cm.getTemperature());
+                seasonBase = seasonDryness(gt.getMonth(), cm.getTemperature());
+            }
+            boolean soilMoved = soilWanted && soil(gt, cm);
+            boolean toggled = soilWanted != soilWas;
+            soilWas = soilWanted;
+            if (newDay || soilMoved || toggled) {
+                float d = seasonBase;
+                if (soilWanted && moisture >= 0f) {
+                    // Weeks without rain parch it past the season; a wet spell greens it beyond
+                    d += 0.35f * smooth(0.35f, 0.05f, moisture) - 0.3f * smooth(0.65f, 0.95f, moisture);
+                }
+                d = Math.round(Math.max(-0.3f, Math.min(1f, d)) * 20f) / 20f;
                 if (Math.abs(d - dryness) > 0.04f) {
                     dryness = d;
                     if (!first) BakePass.rebakeSoon = true;
@@ -136,6 +154,53 @@ public final class NaturalGround {
                 BakePass.rebakeSoon = true;
             }
         }
+    }
+
+    private static float seasonBase;
+    private static boolean soilWas;
+
+    // Rain soaks the soil (an hour of downpour about 0.05, a wet day 0.2 to 0.8); sun, heat and the hours dry it
+    // slowly, about 0.05 a hot sunny day, so a drought takes two or three dry weeks. Worked out each quarter hour.
+    // True when it moved enough to change the grass.
+    private static boolean soil(zombie.GameTime gt, zombie.iso.weather.ClimateManager cm) {
+        double hours = gt.getWorldAgeHours();
+        if (moisture < 0f) {
+            moisture = 0.5f;
+            try {
+                Object v = gt.getModData().rawget(SOIL_KEY);
+                if (v instanceof Double dv) moisture = Math.max(0f, Math.min(1f, dv.floatValue()));
+            } catch (Throwable ignored) {
+            }
+            soilHours = hours;
+            soilSaved = hours;
+            return true;
+        }
+        double dh = hours - soilHours;
+        if (dh < 0.25) {
+            if (dh < 0) soilHours = hours;
+            return false;
+        }
+        soilHours = hours;
+        float h = (float) Math.min(dh, 48.0);
+        float p = cm.getPrecipitationIntensity();
+        float rain = cm.getPrecipitationIsSnow() ? 0.25f * p : p;
+        float sun = cm.getDayLightStrength() * (1f - cm.getCloudIntensity());
+        float dry = 0.0006f + 0.0018f * sun + Math.max(0f, cm.getTemperature() - 18f) * 0.0001f;
+        float before = moisture;
+        moisture = Math.max(0f, Math.min(1f, moisture + h * (rain * 0.05f * (1f - moisture * 0.5f) - (rain > 0.02f ? 0f : dry))));
+        if (hours - soilSaved > 1.0) {
+            soilSaved = hours;
+            try {
+                gt.getModData().rawset(SOIL_KEY, Double.valueOf(moisture));
+            } catch (Throwable ignored) {
+            }
+        }
+        return Math.abs(moisture - before) > 0f;
+    }
+
+    private static float smooth(float a, float b, float x) {
+        float t = Math.max(0f, Math.min(1f, (x - a) / (b - a)));
+        return t * t * (3f - 2f * t);
     }
 
     // Kentucky: brown dead grass in winter, green spring, drying through a hot summer into autumn
@@ -418,6 +483,6 @@ public final class NaturalGround {
 
     static String stateText() {
         return "naturalGround=" + (live ? 1 : 0) + ";ngDraws=" + naturalDraws + "/" + draws + ";ngTextures=" + stats.size()
-            + ";ngDry=" + Math.round(dryness * 100);
+            + ";ngDry=" + Math.round(dryness * 100) + ";soil=" + Math.round(moisture * 100);
     }
 }

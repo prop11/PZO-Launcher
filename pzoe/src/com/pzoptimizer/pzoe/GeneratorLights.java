@@ -26,6 +26,7 @@ public final class GeneratorLights {
     private GeneratorLights() {}
 
     public static void observe(IsoGenerator generator) {
+        SmokePlumes.generator(generator);
         if (GameServer.server || !enabled || !FlickerLights.wanted || generator.getSquare() == null) return;
         boolean active = generator.isActivated();
         var state = sources.get(generator);

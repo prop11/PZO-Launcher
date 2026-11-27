@@ -13,7 +13,7 @@ import java.util.Locale;
  *  - an x86-64 CPU without AVX2 (the native library falls back to its plain loops)
  *  - 4 or fewer hardware threads
  *  - less than LOW_RAM_GB of RAM
- * It lowers the starting heap to PZO's default when necessary, uses G1, and skips native MMCSS and priority tuning.
+ * It lowers the starting heap when necessary and skips native MMCSS and priority tuning. Automatic GC uses G1.
  *
  * Can be forced on or off from the settings screen (pzo_config.json "compat_mode": auto / on / off), with
  * -Dpzo.compat=on|off, or with the launch option -pzo_compat / -pzo_compat=off.
@@ -81,7 +81,8 @@ public final class CompatMode {
         decided = nativeAvx2Known || !deciding;
         if (decided) {
             if (active) {
-                PZOLogger.warn("[CompatMode] Compatibility mode ON (" + reasons + "): small starting heap, G1");
+                String gc = PZOConfig.isPreserveGc() ? ", configured collector preserved" : ", automatic G1";
+                PZOLogger.warn("[CompatMode] Compatibility mode ON (" + reasons + "): small starting heap" + gc);
             } else if ("off".equals(override)) {
                 PZOLogger.info("[CompatMode] Compatibility mode forced off");
             }

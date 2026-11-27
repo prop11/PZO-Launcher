@@ -14,8 +14,8 @@ public final class RenderFrustumCuller {
     private static volatile long lastDimensionCheck = 0;
 
     public static boolean shouldRender(float x, float y, float width, float height) {
-        if (ViewpointStanddownGovernor.isStanddownActive()) {
-            return true; // 3D camera mods change the coordinate space, so screen-space culling has to stand down
+        if (ViewpointStanddownGovernor.isStanddownActive() && ViewpointStanddownGovernor.isOwnViewActive()) {
+            return true; // a 3D camera mod's own view changes the coordinate space, so screen-space culling stands down
         }
 
         if (!UnstableChannelGuard.isUnstableBuild()) {

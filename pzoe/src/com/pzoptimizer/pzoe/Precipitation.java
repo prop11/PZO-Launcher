@@ -220,20 +220,8 @@ public final class Precipitation {
     }
 
     private static boolean build() {
-        int vs = compile(GL20.GL_VERTEX_SHADER, VERTEX, "vertex"), fs = compile(GL20.GL_FRAGMENT_SHADER, FRAGMENT, "fragment");
-        if (vs == 0 || fs == 0) {
-            failed = true;
-            return false;
-        }
-        int prog = GL20.glCreateProgram();
-        GL20.glAttachShader(prog, vs);
-        GL20.glAttachShader(prog, fs);
-        GL20.glLinkProgram(prog);
-        GL20.glDeleteShader(vs);
-        GL20.glDeleteShader(fs);
-        if (GL20.glGetProgrami(prog, GL20.GL_LINK_STATUS) == 0) {
-            PZOLogger.warn("[Precipitation] didn't link: " + GL20.glGetProgramInfoLog(prog, 4096).trim());
-            GL20.glDeleteProgram(prog);
+        int prog = PzoeShaders.program(VERTEX, FRAGMENT, "[Precipitation]");
+        if (prog == 0) {
             failed = true;
             return false;
         }
@@ -331,7 +319,9 @@ public final class Precipitation {
 
         float pzoPHash(vec2 p)
         {
-            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            vec3 q = fract(vec3(p.xyx) * 0.1031);
+            q += dot(q, q.yzx + 33.33);
+            return fract((q.x + q.y) * q.z);
         }
 
         float pzoPNoise(vec2 p)

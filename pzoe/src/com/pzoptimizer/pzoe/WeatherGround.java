@@ -15,7 +15,7 @@ import zombie.iso.IsoDirections;
 import zombie.iso.IsoGridSquare;
 import zombie.iso.IsoWorld;
 
-final class WeatherGround {
+public final class WeatherGround {
     private static final int SIDE = 33, MAX_MARKS = 4096, MARKS_PER_CHUNK = 64;
     private static final IsoDirections[] CARDINAL = {IsoDirections.N, IsoDirections.W, IsoDirections.S, IsoDirections.E};
     private static final Map<Long, Mark> marks = new HashMap<>();
@@ -45,6 +45,51 @@ final class WeatherGround {
     }
 
     private WeatherGround() {}
+
+    // Rain through roof holes: the game's weather mask leaves out every square of the building you're in, so rain
+    // never fell through a missing roof. Squares open to the sky are let back in. Cached for 2 s a square, since the
+    // mask asks about the same squares several times a frame.
+    static final String MASK = "zombie/iso/weather/fx/WeatherFxMask";
+    private static final String OWNER = "com/pzoptimizer/pzoe/WeatherGround";
+    private static final HashMap<Long, Long> skyCache = new HashMap<>();
+    private static long skyFrame;
+
+    /** Hook: head of WeatherFxMask.isInPlayerBuilding (main thread). True = treat the square as outside. */
+    public static boolean openSky(IsoGridSquare square) {
+        // Not gated on rain: the game keeps the mask until you move, so it has to be right before the rain starts
+        if (!wanted || !leaks || square == null || !square.isInARoom() || square.z < 0) return false;
+        try {
+            long now = System.nanoTime();
+            if (now - skyFrame > 2_000_000_000L) {
+                skyFrame = now;
+                if (skyCache.size() > 20000) skyCache.clear();
+            }
+            long key = key(square.x, square.y, square.z);
+            Long cached = skyCache.get(key);
+            if (cached != null && now - (cached >>> 1) < 2_000_000_000L) return (cached & 1L) != 0;
+            boolean open = IsoWorld.instance != null && RainRunoff.exposedFloor(IsoWorld.instance.currentCell, square);
+            skyCache.put(key, (now << 1) | (open ? 1L : 0L));
+            return open;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    static boolean patchMask(com.pzoptimizer.shaded.asm.tree.ClassNode node) {
+        var method = com.pzoptimizer.AsmSupport.findMethod(node, "isInPlayerBuilding", "(Lzombie/iso/IsoGridSquare;III)Z");
+        if (method == null) return false;
+        var hook = new com.pzoptimizer.shaded.asm.tree.InsnList();
+        var go = new com.pzoptimizer.shaded.asm.tree.LabelNode();
+        hook.add(new com.pzoptimizer.shaded.asm.tree.VarInsnNode(com.pzoptimizer.shaded.asm.Opcodes.ALOAD, 0));
+        hook.add(new com.pzoptimizer.shaded.asm.tree.MethodInsnNode(com.pzoptimizer.shaded.asm.Opcodes.INVOKESTATIC, OWNER,
+            "openSky", "(Lzombie/iso/IsoGridSquare;)Z", false));
+        hook.add(new com.pzoptimizer.shaded.asm.tree.JumpInsnNode(com.pzoptimizer.shaded.asm.Opcodes.IFEQ, go));
+        hook.add(new com.pzoptimizer.shaded.asm.tree.InsnNode(com.pzoptimizer.shaded.asm.Opcodes.ICONST_0));
+        hook.add(new com.pzoptimizer.shaded.asm.tree.InsnNode(com.pzoptimizer.shaded.asm.Opcodes.IRETURN));
+        hook.add(go);
+        method.instructions.insert(hook);
+        return true;
+    }
 
     private static long key(int x, int y, int z) {
         return ((long) (z + 32) << 52) | ((long) (x & 0x3ffffff) << 26) | (y & 0x3ffffffL);

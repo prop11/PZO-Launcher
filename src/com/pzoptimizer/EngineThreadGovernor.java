@@ -219,9 +219,10 @@ public class EngineThreadGovernor {
 
         private static void paceToNextFrame() {
             if (pacerReflectionFailed || zombie.core.PerformanceSettings.instance.isFramerateUncapped()) return;
-            // Viewpoint 0.1.7 nightly users get a 30 FPS lock with PZO. Likely Viewpoint draws its own frames between
-            // game updates and sleeping to lockFPS here blocks them. Stock just spins, so with Viewpoint I leave it be.
-            if (ViewpointStanddownGovernor.isStanddownActive()) {
+            // A 3D camera mod with its own fixed tick hands out its tick rate as lockFPS and draws frames between game
+            // updates, so sleeping to lockFPS here locked it to 30 FPS. Stock just spins, so while that tick runs I
+            // leave it be.
+            if (ViewpointStanddownGovernor.isStanddownActive() && ViewpointStanddownGovernor.isFixedTickRunning()) {
                 if (!viewpointLogged) {
                     viewpointLogged = true;
                     PZOLogger.info("[EngineThreadGovernor] Viewpoint detected: frame pacer stood down, the game's own loop keeps frame timing");

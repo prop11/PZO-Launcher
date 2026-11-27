@@ -647,7 +647,15 @@ public final class WeatherSnow {
     /** End of IsoGameCharacter.getDeferredMovement(result, reset): packs the snow it walks on, and the step shrinks. */
     public static void slow(zombie.characters.IsoGameCharacter c, zombie.iso.Vector2 v) {
         try {
-            if (v == null || c == null || !onNow || com.pzoptimizer.pzoe.GroundSnow.depthNow() <= 0.001f) return;
+            if (v == null || c == null) return;
+            if (v.x != 0f || v.y != 0f) {
+                float mud = Mud.walk(c);
+                if (mud < 1f) {
+                    v.x *= mud;
+                    v.y *= mud;
+                }
+            }
+            if (!onNow || com.pzoptimizer.pzoe.GroundSnow.depthNow() <= 0.001f) return;
             Slot s = slot(c);
             float x = c.getX(), y = c.getY(), z = c.getZ();
             // Trodden snow follows the distance really walked, however often the movement is read in a frame
@@ -846,6 +854,7 @@ public final class WeatherSnow {
     /** CarController.checkTire: engine force through the snow. */
     public static float engine(float force, zombie.vehicles.BaseVehicle v) {
         try {
+            force = Mud.engine(force, v);
             if (!onNow) return force;
             float h = vehicleDepth(v);
             return h <= 0.005f ? force : force * vehicleFactor(h);
@@ -857,6 +866,7 @@ public final class WeatherSnow {
     /** CarController.checkTire: deep snow drags on a moving vehicle like a light brake. */
     public static float brake(float force, zombie.vehicles.BaseVehicle v) {
         try {
+            force = Mud.brake(force, v);
             if (!onNow || v == null) return force;
             float h = vehicleDepth(v);
             if (h <= 0.005f) return force;
@@ -870,6 +880,7 @@ public final class WeatherSnow {
     /** Return of BaseVehicle.getMaxSpeed. */
     public static float maxSpeed(float speed, zombie.vehicles.BaseVehicle v) {
         try {
+            speed = Mud.maxSpeed(speed, v);
             if (!onNow) return speed;
             float h = vehicleDepth(v);
             return h <= 0.005f ? speed : speed * vehicleFactor(h);

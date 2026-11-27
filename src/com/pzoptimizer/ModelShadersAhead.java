@@ -32,6 +32,8 @@ public final class ModelShadersAhead {
     public static volatile boolean active = true;
 
     private static final long BATCH_NANOS = 8_000_000L;
+    // While the loading screen waits for shaders nothing else needs the frame
+    private static final long HOLD_BATCH_NANOS = 40_000_000L;
     private static final java.util.Set<String> REFLECTING = java.util.Set.of("vehicle", "vehicle_multiuv", "vehicle_norandom_multiuv");
 
     // "name|static" or "name" -> the game's shader
@@ -79,6 +81,9 @@ public final class ModelShadersAhead {
 
     /** GameLoadingState.SendDone (single player, host) or Done (client): the scripts are loaded, list what to make. */
     public static void worldLoaded() {
+        AnimSetsAhead.worldLoaded();
+        SoundFilesAhead.worldLoaded();
+        ShaderWarmup.worldLoaded();
         if (!active || zombie.core.skinnedmodel.ModelManager.noOpenGL || busy()) return;
         // Model tends to load while another class is being patched, which leaves it stock
         if (!modelHooked && !retransformTried) {
@@ -136,7 +141,8 @@ public final class ModelShadersAhead {
 
     /** Main thread, once a frame (from the bar): queues one batch for the render thread when none is waiting. */
     public static void tick() {
-        if (!busy() || batchQueued) return;
+        // After the warm-up, so whatever it compiled comes from the cache here
+        if (!busy() || batchQueued || ShaderWarmup.busy()) return;
         batchQueued = true;
         try {
             zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(ModelShadersAhead::batch);
@@ -150,7 +156,7 @@ public final class ModelShadersAhead {
     // Render thread
     private static void batch() {
         try {
-            long end = System.nanoTime() + BATCH_NANOS;
+            long end = System.nanoTime() + (ShaderWarmup.holding() ? HOLD_BATCH_NANOS : BATCH_NANOS);
             List<Object[]> list = wanted;
             while (next < list.size()) {
                 Object[] w = list.get(next);
@@ -202,6 +208,34 @@ public final class ModelShadersAhead {
         m.instructions.insert(pre);
         modelHooked = true;
         return true;
+    }
+
+    // GameLoadingState.update: "if (ShaderWarmup.holdStart()) return StateAction.Remain;" just before it reads the
+    // click to start (Mouse.isButtonDown(0)), so the asset waits above it and the error path still run
+    static boolean patchLoadingHold(ClassNode node) {
+        MethodNode m = AsmSupport.findMethod(node, "update", "()Lzombie/gameStates/GameStateMachine$StateAction;");
+        if (m == null) return false;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode mi && "com/pzoptimizer/ShaderWarmup".equals(mi.owner)) return false;
+        }
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof MethodInsnNode mi && mi.getOpcode() == Opcodes.INVOKESTATIC && "zombie/input/Mouse".equals(mi.owner)
+                    && "isButtonDown".equals(mi.name) && "(I)Z".equals(mi.desc)) {
+                AbstractInsnNode arg = mi.getPrevious();
+                if (arg == null || arg.getOpcode() != Opcodes.ICONST_0) return false;
+                InsnList pre = new InsnList();
+                LabelNode go = new LabelNode();
+                pre.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "com/pzoptimizer/ShaderWarmup", "holdStart", "()Z", false));
+                pre.add(new JumpInsnNode(Opcodes.IFEQ, go));
+                pre.add(new com.pzoptimizer.shaded.asm.tree.FieldInsnNode(Opcodes.GETSTATIC, "zombie/gameStates/GameStateMachine$StateAction",
+                    "Remain", "Lzombie/gameStates/GameStateMachine$StateAction;"));
+                pre.add(new InsnNode(Opcodes.ARETURN));
+                pre.add(go);
+                m.instructions.insertBefore(arg, pre);
+                return true;
+            }
+        }
+        return false;
     }
 
     // GameLoadingState.SendDone() and Done(): worldLoaded() first. Single player only ever calls SendDone, a client

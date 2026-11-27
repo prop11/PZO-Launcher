@@ -128,7 +128,6 @@ public final class BakePass {
 
     private static void build(List<String[]> passes) {
         for (int p : programs) if (p != 0) GL20.glDeleteProgram(p);
-        if (vertexShader == 0) vertexShader = compile(GL20.GL_VERTEX_SHADER, VERTEX, "vertex");
         if (emptyVao == 0) emptyVao = GL30.glGenVertexArrays();
         int n = passes.size();
         programs = new int[n];
@@ -139,19 +138,8 @@ public final class BakePass {
         locScorch = new int[n];
         for (int i = 0; i < n; i++) {
             String id = passes.get(i)[0];
-            int fs = compile(GL20.GL_FRAGMENT_SHADER, passes.get(i)[1], id);
-            if (fs == 0 || vertexShader == 0) {
-                status.put(id, ShaderPatchHost.COMPILE_FAILED);
-                continue;
-            }
-            int prog = GL20.glCreateProgram();
-            GL20.glAttachShader(prog, vertexShader);
-            GL20.glAttachShader(prog, fs);
-            GL20.glLinkProgram(prog);
-            GL20.glDeleteShader(fs);
-            if (GL20.glGetProgrami(prog, GL20.GL_LINK_STATUS) == 0) {
-                PZOLogger.warn("[BakePass] " + id + " didn't link: " + GL20.glGetProgramInfoLog(prog, 4096).trim());
-                GL20.glDeleteProgram(prog);
+            int prog = PzoeShaders.program(VERTEX, passes.get(i)[1], "[BakePass] " + id);
+            if (prog == 0) {
                 status.put(id, ShaderPatchHost.COMPILE_FAILED);
                 continue;
             }

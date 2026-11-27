@@ -105,6 +105,7 @@ public final class FlashLights {
     }
 
     public static void audio(IsoGameCharacter shooter) {
+        SmokePlumes.shot(shooter);
         if (!active() || shooter == null) return;
         try {
             pulse(shooter, AUDIO);
@@ -114,6 +115,7 @@ public final class FlashLights {
 
     public static void remoteAudio(short playerId) {
         if (active()) audio(GameClient.IDToPlayerMap.get(playerId));
+        else SmokePlumes.shot(GameClient.IDToPlayerMap.get(playerId));
     }
 
     private static boolean active() {

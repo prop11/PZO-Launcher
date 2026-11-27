@@ -9,8 +9,25 @@ on:
       - zomdroid
 
 jobs:
+  build-windows-setup:
+    name: Build Windows Setup
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install pyinstaller==6.17.0
+      - run: python package_release.py --build-windows-setup
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pzo-windows-setup
+          path: dist/PZO-Setup.exe
+          if-no-files-found: error
+
   build-jars:
     name: Build JARs & Release Packages
+    needs: build-windows-setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -34,6 +51,11 @@ jobs:
             src/com/pzoptimizer/*.java \
             src/com/pzoptimizer/multicore/*.java \
             src/com/pzoptimizer/server/*.java || true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pzo-windows-setup
+          path: dist
 
       - name: Package JARs and Release Archives
         run: |

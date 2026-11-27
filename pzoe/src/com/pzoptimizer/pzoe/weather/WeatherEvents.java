@@ -236,9 +236,11 @@ public final class WeatherEvents {
         freezing = frz ? 1f : 0f;
         float i = ice;
         if (frz) i += h * Math.max(p, forcedFrz ? 0.5f : 0f) * 1.2f;
-        // Melts in warmth and sun, slowly sublimates otherwise (not while it's being forced)
-        float sun = cm.getDayLightStrength() * (1f - cm.getCloudIntensity());
-        if (!forcedFrz) i -= h * (Math.max(0f, t) * 0.12f + sun * 0.08f + 0.01f);
+        // Melts in warmth and sun, daylight wears it under cloud too, and it sublimates at night (not while forced).
+        // At 0.01/h alone a cold overcast spell kept the whole map glazed for about four game days.
+        float day = cm.getDayLightStrength();
+        float sun = day * (1f - cm.getCloudIntensity());
+        if (!forcedFrz) i -= h * (Math.max(0f, t) * 0.12f + sun * 0.08f + day * 0.03f + 0.02f);
         ice = WeatherFronts.clamp(i, 0f, 1f);
 
         // Hail: decided once per heavy stage, the first 12 minutes of it
@@ -372,20 +374,24 @@ public final class WeatherEvents {
     }
 
     /**
-     * Once a frame: puddles freeze over below -1 C (an hour or two, faster the colder) and thaw above 1 C (faster in
-     * warmth and sun). In between they stay as they are.
+     * Standing water freezes below -1 C and thaws above 1 C. Wet ground alone cannot build up puddle ice.
      */
     static void freezePuddles(float temp, float sun, float dtHours) {
+        if (zombie.iso.IsoPuddles.getInstance().getPuddlesSizeFinalValue() <= 0f) {
+            puddleFreeze = 0f;
+            return;
+        }
         float f = puddleFreeze;
         if (temp < -1f) f += dtHours * (0.5f + 0.15f * Math.min(10f, -1f - temp));
         else if (temp > 1f) f -= dtHours * (0.6f + 0.2f * Math.min(10f, temp - 1f) + 0.5f * sun);
         puddleFreeze = WeatherFronts.clamp(f, 0f, 1f);
     }
 
-    /** Ice underfoot for gameplay: freezing rain's glaze, or frozen puddles where the ground is wet. */
-    static float groundIce() {
-        float wet = zombie.iso.IsoPuddles.getInstance() == null ? 0f : zombie.iso.IsoPuddles.getInstance().getPuddlesSizeFinalValue();
-        return Math.max(ice, puddleFreeze * Math.min(1f, wet * 1.5f));
+    /** Ice underfoot for gameplay: freezing rain's glaze, or standing water that froze on this square. */
+    static float groundIce(zombie.iso.IsoGridSquare square) {
+        if (puddleFreeze <= ice || square == null || square.getPuddlesInGround() <= 0.01f) return ice;
+        float size = zombie.iso.IsoPuddles.getInstance().getPuddlesSizeFinalValue();
+        return Math.max(ice, puddleFreeze * Math.min(1f, size * 1.5f));
     }
 
     public static float ice() {

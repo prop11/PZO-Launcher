@@ -69,7 +69,7 @@ public final class ScreenPass {
     static final int SEQ_VAR = 24;
 
     private record Filed(int seq, float zoom, float[] data, int worldTex, int frame, int player, float[] rect, SmokePlumes.Projection smoke, float[] ref, float[] breath, float[] moodle, float[] glass, float[] dust, float[] glare, float[] lightTrails,
-        float[] fireflies, float[] flies, float[] eyes, float[] basis, float submerged, boolean singlePlayerView) {}
+        float[] fireflies, float[] flies, float[] eyes, float[] basis, float submerged, boolean singlePlayerView, float[] fireGlow, float[] impacts) {}
 
     // Main thread
     private static int lastFrame = Integer.MIN_VALUE;
@@ -94,9 +94,11 @@ public final class ScreenPass {
     private static volatile float[] grade = new float[8];
 
     // Render thread
-    private static final int[] locations = new int[45];
+    private static final int[] locations = new int[51];
     private static final FloatBuffer spriteBuf = ByteBuffer.allocateDirect(16 * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     private static final FloatBuffer trailBuf = ByteBuffer.allocateDirect(VehicleLightTrails.MAX * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private static final FloatBuffer impactBuf = ByteBuffer.allocateDirect(BulletImpacts.FX_MAX * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private static final FloatBuffer fireGlowBuf = ByteBuffer.allocateDirect(FireGlow.MAX * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     private static final FloatBuffer glareBuf = ByteBuffer.allocateDirect(Glare.MAX * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     private static final FloatBuffer dustBuf = ByteBuffer.allocateDirect(DustTrails.MAX * 4 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     private static final FloatBuffer breathBuf = ByteBuffer.allocateDirect(Breath.MAX * 8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -188,11 +190,18 @@ public final class ScreenPass {
                 eyes = EyeShine.project(playerIndex, zoom, texd.col2, texd.col3);
             }
             float[] basis = fireflies != null || flies != null ? basis(playerIndex, zoom, texd.col2, texd.col3) : null;
+            float[] fireGlow = null;
+            if (now - FireGlow.askedNanos < 1_000_000_000L) {
+                if (playerIndex == 0) FireGlow.frame();
+                fireGlow = FireGlow.project(playerIndex, zoom, texd.col2, texd.col3);
+            }
+            float[] impacts = now - BulletImpacts.fxAskedNanos < 1_000_000_000L
+                ? BulletImpacts.projectFx(playerIndex, zoom, texd.col2, texd.col3) : null;
             filed.set(s & 7, new Filed(s, zoom, sourceCount == 0 ? null : project(playerIndex, zoom, texd.col2, texd.col3),
                 worldTex, f, playerIndex, rect, smoke, ref, breath, moodle,
                 now - Windscreen.askedNanos < 1_000_000_000L ? Windscreen.sample(playerIndex) : null, dust, glare, lightTrails,
                 fireflies, flies, eyes, basis, com.pzoptimizer.pzoe.water.UnderwaterView.sample(playerIndex, now),
-                IsoPlayer.numPlayers == 1));
+                IsoPlayer.numPlayers == 1, fireGlow, impacts));
         } catch (Throwable t) {
             // Worst case no haze this frame
         }
@@ -474,8 +483,32 @@ public final class ScreenPass {
                 loc[42] = GL20.glGetUniformLocation(prog, "PZORoomSmoke[0]");
                 loc[43] = GL20.glGetUniformLocation(prog, "PZORoomSmokeInfo");
                 loc[44] = GL20.glGetUniformLocation(prog, "PZORoomSmokeBounds");
+                loc[45] = GL20.glGetUniformLocation(prog, "PZOFireGlow[0]");
+                loc[46] = GL20.glGetUniformLocation(prog, "PZOFireGlowInfo");
+                loc[47] = GL20.glGetUniformLocation(prog, "PZOImpactFx[0]");
+                loc[48] = GL20.glGetUniformLocation(prog, "PZOImpactFxInfo");
+                loc[49] = GL20.glGetUniformLocation(prog, "PZOSceneDepthInfo");
+                loc[50] = GL20.glGetUniformLocation(prog, "PZOSceneDepth");
+                BulletImpacts.fxWanted = loc[48] >= 0;
                 if (loc[36] >= 0) GL20.glUniform1i(loc[36], FireAtlas.UNIT);
-                if (loc[38] >= 0) GL20.glUniform1i(loc[38], SmokeSceneDepth.UNIT);
+                if (loc[38] >= 0) GL20.glUniform1i(loc[38], SceneDepth.UNIT);
+                if (loc[50] >= 0) GL20.glUniform1i(loc[50], SceneDepth.UNIT);
+            }
+            if (loc[49] >= 0) {
+                SceneDepth.askedNanos = nowNs;
+                float[] v = texd.vars;
+                int seq = v != null && v.length > SEQ_VAR ? (int) v[SEQ_VAR] : -1;
+                Filed fl = seq >= 0 ? filed.get(seq & 7) : null;
+                boolean live = false;
+                float scale = com.pzoptimizer.WorldRenderScale.getRenderThreadScale();
+                if (fl != null && fl.seq == seq && fl.player == 0 && fl.singlePlayerView && zombie.core.PerformanceSettings.fboRenderChunk) {
+                    var scene = Core.getInstance().getOffscreenBuffer(0);
+                    if (scene != null && scene.getTexture() != null && scene.getTexture().getWidthHW() == texd.col2
+                        && scene.getTexture().getHeightHW() == texd.col3) {
+                        live = SceneDepth.capture(scene, texd.col2, texd.col3, scale, fl.frame);
+                    }
+                }
+                GL20.glUniform4f(loc[49], live ? 1f : 0f, scale, 0f, 0f);
             }
             if (loc[32] >= 0) {
                 com.pzoptimizer.pzoe.water.UnderwaterView.shaderAskedNanos = nowNs;
@@ -499,6 +532,34 @@ public final class ScreenPass {
                     GL20.glUniform4fv(loc[33], trailBuf);
                 }
                 GL20.glUniform1i(loc[34], data == null ? 0 : data.length / 8);
+            }
+            if (loc[48] >= 0) {
+                BulletImpacts.fxAskedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] g = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.impacts : null;
+                int n = g == null ? 0 : Math.min(BulletImpacts.FX_MAX, g.length / 4);
+                if (n > 0 && loc[47] >= 0) {
+                    impactBuf.clear();
+                    impactBuf.put(g, 0, n * 4);
+                    impactBuf.flip();
+                    GL20.glUniform4fv(loc[47], impactBuf);
+                }
+                GL20.glUniform4f(loc[48], n, effectClock(), 0f, n > 0 ? 1f : 0f);
+            }
+            if (loc[46] >= 0) {
+                FireGlow.askedNanos = nowNs;
+                float[] v = texd.vars;
+                Filed fl = v != null && v.length > SEQ_VAR ? filed.get(((int) v[SEQ_VAR]) & 7) : null;
+                float[] g = fl != null && fl.seq == (int) v[SEQ_VAR] && fl.zoom == v[14] ? fl.fireGlow : null;
+                int n = g == null ? 0 : Math.min(FireGlow.MAX, g.length / 4);
+                if (n > 0 && loc[45] >= 0) {
+                    fireGlowBuf.clear();
+                    fireGlowBuf.put(g, 0, n * 4);
+                    fireGlowBuf.flip();
+                    GL20.glUniform4fv(loc[45], fireGlowBuf);
+                }
+                GL20.glUniform4f(loc[46], n, effectClock(), FireGlow.haze, FireGlow.night);
             }
             if (loc[22] >= 0) {
                 Glare.askedNanos = nowNs;
@@ -627,7 +688,7 @@ public final class ScreenPass {
                         GL20.glUniform4f(loc[44], bounds.minX(), bounds.minY(), bounds.maxX(), bounds.maxY());
                     }
                 }
-                if (sm != null) uploadSmokeDepth(loc, sm, texd.col2, texd.col3, depthScale);
+                if (sm != null) uploadSmokeDepth(loc, sm, texd.col2, texd.col3, depthScale, fl.frame);
                 else if (loc[41] >= 0) GL20.glUniform1f(loc[41], 0f);
                 GL20.glUniform4f(loc[11], n, published, SmokePlumes.windScreen, SmokePlumes.night);
             }
@@ -738,7 +799,7 @@ public final class ScreenPass {
     }
 
     /** Mipmaps of the world texture, once a frame; the texture is bound on the active unit. Render thread. */
-    private static void uploadSmokeDepth(int[] locations, SmokePlumes.Projection smoke, int w, int h, float depthScale) {
+    private static void uploadSmokeDepth(int[] locations, SmokePlumes.Projection smoke, int w, int h, float depthScale, int frame) {
         if (locations[41] < 0) return;
         GL20.glUniform1f(locations[41], 0f);
         if (smoke.scene() == null) return;
@@ -750,8 +811,8 @@ public final class ScreenPass {
         }
         int x0 = (int)Math.floor(b.minX() * w), y0 = (int)Math.floor(b.minY() * h);
         int x1 = (int)Math.ceil(b.maxX() * w), y1 = (int)Math.ceil(b.maxY() * h);
-        if (!SmokeSceneDepth.bind(smoke.scene(), w, h, (int)Math.floor(x0 * depthScale), (int)Math.floor(y0 * depthScale),
-            (int)Math.ceil(x1 * depthScale), (int)Math.ceil(y1 * depthScale))) return;
+        // The whole frame's depth, shared with every other depth-tested effect this frame
+        if (!SceneDepth.capture(smoke.scene(), w, h, depthScale, frame)) return;
         if (smoke.depth() != null) {
             buf.clear();
             buf.put(smoke.depth(), 0, smoke.count()).flip();
@@ -783,7 +844,7 @@ public final class ScreenPass {
         return "hazeShader=" + (asked ? 1 : 0) + ";hazeSources=" + sourceCount + ";hazeDraws=" + draws
             + ";hazeDrawsWithPoints=" + drawsWithPoints + ";locHaze=" + locations[0] + ";locGrade=" + locations[3]
             + ";locEye=" + locations[9] + ";" + EyeAdapt.stateText() + ";" + SmokePlumes.stateText() + ";" + Breath.stateText() + ";" + TemporalPass.stateText()
-            + ";" + Fireflies.stateText() + ";" + CorpseFlies.stateText() + ";" + EyeShine.stateText() + ";" + CharShadows.stateText();
+            + ";" + Fireflies.stateText() + ";" + CorpseFlies.stateText() + ";" + EyeShine.stateText() + ";" + CharShadows.stateText() + ";" + FireGlow.stateText() + ";" + SceneDepth.stateText();
     }
 
     static boolean patchShader(ClassNode node) {

@@ -146,12 +146,14 @@ public final class LiveProfiler {
         if (!on) {
             map.update();
             MapLoadScriptPacer.drain();
+            LootRollPacer.drain();
             return;
         }
         chunkBegin();
         try {
             map.update();
             MapLoadScriptPacer.drain();
+            LootRollPacer.drain();
         } finally {
             chunkEnd();
         }
@@ -820,7 +822,7 @@ public final class LiveProfiler {
     // Patches
 
     // The timing sits inside logic() and renderInternal(), not round the calls in frameStep: a mod that drives the frame
-    // itself (Viewpoint's fixed tick calls them from its own loop) left update and render at 0.00 in the report.
+    // itself (a mod's fixed tick calls them from its own loop) left update and render at 0.00 in the report.
     private static boolean wrapMethod(ClassNode node, String name, String kind) {
         MethodNode m = AsmSupport.findMethod(node, name, "()V");
         if (m == null || (m.access & Opcodes.ACC_STATIC) == 0) return false;

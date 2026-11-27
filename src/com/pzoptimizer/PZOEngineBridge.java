@@ -462,6 +462,21 @@ public class PZOEngineBridge {
                 CullScoreMemo.active = value;
             } else if ("JVM_HotPathTrims".equals(key)) {
                 HotPathTrims.active = value;
+            } else if ("JVM_ShaderWarmup".equals(key)) {
+                ShaderWarmup.active = value;
+            } else if ("JVM_SoundFilesAhead".equals(key)) {
+                SoundFilesAhead.active = value;
+            } else if ("JVM_LootRollPacer".equals(key)) {
+                LootRollPacer.active = value;
+            } else if ("JVM_ChunkHeadingOrder".equals(key)) {
+                ChunkIngestionPacer.headingOrder = value;
+            } else if ("JVM_AnimSetsAhead".equals(key)) {
+                AnimSetsAhead.active = value;
+            } else if ("JVM_ClassWarmup".equals(key)) {
+                ClassWarmup.active = value;
+                PZOConfig.setClassWarmupEnabled(value);
+            } else if ("JVM_ModPatchTakeover".equals(key)) {
+                SharedPatchTakeover.setActive(value);
             }
             logOptionIfChanged("setJvmOption", key, value);
         } catch (Throwable ignored) {}
@@ -1395,6 +1410,24 @@ public class PZOEngineBridge {
                                 bindFailed("getCompatStandDowns", bindError);
                             }
 
+                            // getTakeoverStatus: key=value lines, "own=<feature>" for each one PZO runs itself next to the 3D camera mod
+                            try {
+                                Object takeoverFunc = newLuaFunction(
+                                    javaFuncClass.getClassLoader(),
+                                    new Class<?>[]{javaFuncClass},
+                                    (proxy, m, mArgs) -> {
+                                        if ("call".equals(m.getName())) {
+                                            pushObj.invoke(mArgs[0], SharedPatchTakeover.statusLines());
+                                            return 1;
+                                        }
+                                        return null;
+                                    }
+                                );
+                                tableRawset.invoke(pzoTable, "getTakeoverStatus", takeoverFunc);
+                            } catch (Throwable bindError) {
+                                bindFailed("getTakeoverStatus", bindError);
+                            }
+
                             // getViewpointStanddownMode
                             try {
                                 Object getViewpointModeFunc = newLuaFunction(
@@ -1606,7 +1639,7 @@ public class PZOEngineBridge {
                                 "    local modalH = math.min(540, scrH - 60)\n" +
                                 "    local modalX = (scrW - modalW) / 2\n" +
                                 "    local modalY = (scrH - modalH) / 2\n" +
-                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"2.4.1\"\n" +
+                                "    local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or \"3.0\"\n" +
                                 "    local fsrActive = (PZOEngine and PZOEngine.isWorldUpscalerActive and PZOEngine.isWorldUpscalerActive()) or false\n" +
                                 "    if MPOptim and MPOptim.MainMenu and MPOptim.MainMenu.ShowEngineNotice then\n" +
                                 "        MPOptim.MainMenu.ShowEngineNotice(ver, fsrActive, function()\n" +
@@ -1875,7 +1908,7 @@ public class PZOEngineBridge {
                                 "            local btnH = hS + 10\n" +
                                 "            local x0 = 24\n" +
                                 "            local maxW = math.max(320, self:getWidth() - x0 - 32)\n" +
-                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '2.4.1'\n" +
+                                "            local ver = (PZOEngine and PZOEngine.getVersion and PZOEngine.getVersion()) or '3.0'\n" +
                                 "            local standdownActive, viewpointDetected, standdownMode = false, false, 'AUTO'\n" +
                                 "            local fsrActive, fsrScale, fsrSharp = false, 0.75, 0.8\n" +
                                 "            if PZOEngine then\n" +

@@ -21,6 +21,9 @@ import zombie.iso.objects.IsoFireManager;
  * Kind 0: fires (IsoFireManager's fires, and lit fireplaces, stoves and campfires through the cell's heat sources).
  * Kind 1: mains-powered lights in the last 3 days before the power goes off (sandbox ElecShutModifier): more of them
  * fail the nearer the day, each one picked by its position so the same lamps stay bad.
+ * Kind 4: the blackout wave. In the last 2 game hours before the shutoff the grid goes down district by district
+ * (50 x 50 squares, each with its own moment, the same every time): a district's lights stutter for a moment, then
+ * go dark in the picture. Vanilla turns every light off at the shutoff itself, so by then the picture agrees again.
  *
  * Main thread, 4 times a second while the shader asks: the 16 nearest to player 0 within 30 squares. Render thread:
  * one upload per chunk draw, from the last array published.
@@ -28,6 +31,9 @@ import zombie.iso.objects.IsoFireManager;
 final class FlickerLights {
 
     static final int MAX = 16;
+    // Blackout wave sub-option of the card (Lua sends it)
+    static volatile boolean blackoutWave = true;
+    private static final double WAVE_HOURS = 2.0, STUTTER = 0.05;
     private static final float RANGE_SQ = 30f * 30f;
 
     // Render thread sets it from the uniform lookup
@@ -88,6 +94,8 @@ final class FlickerLights {
         }
         GeneratorLights.gather(px, py, cell);
         float failing = failing();
+        double wave = blackoutWave ? wave() : -1.0;
+        int shut = zombie.SandboxOptions.instance.getElecShutModifier();
         if (failing > 0f) {
             java.util.Stack<IsoLightSource> lights = cell.getLamppostPositions();
             for (int i = 0, n = lights.size(); i < n; i++) {
@@ -97,9 +105,48 @@ final class FlickerLights {
                 int hsh = (l.getX() * 73856093) ^ (l.getY() * 19349663) ^ (l.getZ() * 83492791);
                 float pick = ((hsh >>> 8) & 0xFFFF) / 65535f;
                 if (pick > 0.1f + 0.5f * failing) continue;
+                // Once the wave reaches it, the wave decides
+                if (wave >= 0.0 && blackout(wave, l.getX(), l.getY(), shut) > 0f) continue;
                 offer(px, py, l.getX(), l.getY(), l.getZ(), Math.max(2, l.getRadius()), 1f, 0.55f + 0.35f * failing);
             }
         }
+        if (wave >= 0.0) {
+            for (IsoLightSource l : cell.getLamppostPositions()) {
+                if (l == null || !l.isActive() || !l.isHydroPowered()) continue;
+                float stage = blackout(wave, l.getX(), l.getY(), shut);
+                if (stage > 0f) offer(px, py, l.getX(), l.getY(), l.getZ(), Math.max(2, l.getRadius()), 4f, stage);
+            }
+            for (var light : cell.roomLights) {
+                if (light == null || !light.active || !light.hydroPowered) continue;
+                int lx = light.x + light.width / 2, ly = light.y + light.height / 2;
+                float stage = blackout(wave, lx, ly, shut);
+                if (stage > 0f) offer(px, py, lx, ly, light.z, Math.max(2, Math.min(10, Math.max(light.width, light.height))), 4f, stage);
+            }
+        }
+    }
+
+    // How far through its last 2 hours the grid is, 0..1, or -1 outside them
+    private static double wave() {
+        int shut = zombie.SandboxOptions.instance.getElecShutModifier();
+        if (shut < 0) return -1.0;
+        double leftHours = (shut - zombie.GameTime.getInstance().getWorldAgeDaysSinceBegin()) * 24.0;
+        if (leftHours < 0.0 || leftHours > WAVE_HOURS) return -1.0;
+        return 1.0 - leftHours / WAVE_HOURS;
+    }
+
+    // A light's state in the wave: 0 untouched, up to 1 while it stutters, 1 gone. Its district picks the moment.
+    private static float blackout(double wave, int x, int y, int shut) {
+        int dx = Math.floorDiv(x, 50), dy = Math.floorDiv(y, 50);
+        int h = (dx * 73856093) ^ (dy * 19349663) ^ (shut * 83492791);
+        h ^= h >>> 13;
+        h *= 0x5bd1e995;
+        h ^= h >>> 15;
+        // A little spread inside the district so its lights don't drop on the same frame
+        int j = (x * 374761393) ^ (y * 668265263);
+        double at = 0.06 + 0.88 * ((h >>> 8) & 0xFFFF) / 65535.0 + 0.012 * (((j >>> 8) & 0xFF) / 255.0);
+        if (wave < at - STUTTER) return 0f;
+        if (wave >= at) return 1f;
+        return (float) Math.max(0.01, (wave - (at - STUTTER)) / STUTTER);
     }
 
     // 0 until 3 days before the power goes off, 1 on its last day; 0 again once it's off (the lights are dark)
