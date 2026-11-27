@@ -76,8 +76,8 @@ Stock Project Zomboid does nearly all of its per-frame work on one game thread. 
 ## Installation
 
 ### Windows
-1. Download **`PZO-Optimizer-Windows.zip`** from [GitHub Releases](https://github.com/prop11/PZO-Launcher/releases).
-2. Extract the full archive and double-click **`PZO-Setup.exe`**.
+1. Download **`PZO-Setup.exe`** from [GitHub Releases](https://github.com/prop11/PZO-Launcher/releases).
+2. Double-click **`PZO-Setup.exe`**.
 3. Select your game. For Install or Update, keep **Latest** or select one of the five recent GitHub releases. Choose the collector and maximum heap, then review the changes. After applying, use the launch method shown by Setup.
 
 Install and Update download the selected engine JAR from GitHub. Setup writes `preserve_gc: true` in `Zomboid/Lua/pzo_config.json` so compatible engines keep the configured collector on startup.
